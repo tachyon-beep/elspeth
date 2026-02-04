@@ -13,8 +13,8 @@ Mutant gaps addressed:
 
 from typing import Any
 
-from elspeth.contracts import Determinism, NodeType, RoutingMode, SourceRow, TriggerType
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, SourceRow, TriggerType
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -82,7 +82,7 @@ class PassthroughTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
         self.node_id = node_id
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
 
 
@@ -100,7 +100,7 @@ class BatchTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
         self.node_id = node_id
 
-    def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow | list[PipelineRow], ctx: PluginContext) -> TransformResult:
         if isinstance(row, list):
             total = sum(r.get("value", 0) for r in row)
             output_row = {"id": "batch", "value": total, "count": len(row)}

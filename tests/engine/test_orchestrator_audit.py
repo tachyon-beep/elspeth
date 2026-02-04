@@ -1102,7 +1102,7 @@ class TestNodeMetadataFromPlugin:
 
             def process(
                 self,
-                row: dict[str, Any] | list[dict[str, Any]],
+                row: PipelineRow | list[dict[str, Any]],
                 ctx: Any,
             ) -> TransformResult:
                 # Batch-aware: handles list or single row

@@ -25,6 +25,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.engine.tokens import TokenManager
 from tests.property.conftest import (
     deeply_nested_data,
@@ -32,6 +33,16 @@ from tests.property.conftest import (
     mutable_nested_data,
     row_data,
 )
+
+
+def _make_observed_contract() -> SchemaContract:
+    """Create an OBSERVED schema contract for property tests."""
+    return SchemaContract(mode="OBSERVED", fields=())
+
+
+def _wrap_dict_as_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Wrap dict as PipelineRow with OBSERVED contract for property tests."""
+    return PipelineRow(data, _make_observed_contract())
 
 
 def _create_mock_recorder(branches: list[str]) -> MagicMock:
@@ -65,7 +76,7 @@ class TestForkIsolationProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=row_data,
+            row_data=_wrap_dict_as_pipeline_row(row_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -122,7 +133,7 @@ class TestForkIsolationProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=row_data,
+            row_data=_wrap_dict_as_pipeline_row(row_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -184,7 +195,7 @@ class TestForkParentPreservationProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=row_data,
+            row_data=_wrap_dict_as_pipeline_row(row_data),
         )
 
         # Deep copy parent data for comparison
@@ -226,7 +237,7 @@ class TestForkParentPreservationProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=row_data,
+            row_data=_wrap_dict_as_pipeline_row(row_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -278,7 +289,7 @@ class TestForkRowDataOverrideProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=original_data,
+            row_data=_wrap_dict_as_pipeline_row(original_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -286,7 +297,7 @@ class TestForkRowDataOverrideProperties:
             branches=branches,
             step_in_pipeline=1,
             run_id="test_run_1",
-            row_data=override_data,  # Explicit override
+            row_data=_wrap_dict_as_pipeline_row(override_data),  # Explicit override
         )
 
         # Children should have override data, not parent data
@@ -315,7 +326,7 @@ class TestForkRowDataOverrideProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=original_data,
+            row_data=_wrap_dict_as_pipeline_row(original_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -328,4 +339,4 @@ class TestForkRowDataOverrideProperties:
 
         # Children should have parent's data structure
         for child in children:
-            assert child.row_data == original_data, "Child data doesn't match parent when no override provided"
+            assert child.row_data.to_dict() == original_data, "Child data doesn't match parent when no override provided"

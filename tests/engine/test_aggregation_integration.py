@@ -19,6 +19,7 @@ import pytest
 
 from elspeth.contracts import (
     ArtifactDescriptor,
+    PipelineRow,
     RunStatus,
     SourceRow,
 )
@@ -112,7 +113,7 @@ class TestAggregationTimeoutIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 """Process single row or batch.
 
                 Batch-aware transforms must check if input is a list (batch mode)
@@ -129,7 +130,7 @@ class TestAggregationTimeoutIntegration:
                     )
                 else:
                     # Single row mode - passthrough
-                    return TransformResult.success(dict(row), success_reason={"action": "test"})
+                    return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectingSink(_TestSinkBase):
             """Sink that collects rows for verification."""
@@ -202,7 +203,7 @@ class TestAggregationTimeoutIntegration:
             aggregation_settings={
                 transform_node_id: agg_settings,  # Use graph-assigned node_id
             },
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -314,14 +315,14 @@ class TestAggregationTimeoutIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
                     return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects all rows."""
@@ -377,7 +378,7 @@ class TestAggregationTimeoutIntegration:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -471,7 +472,7 @@ class TestAggregationTimeoutIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 nonlocal flush_count
                 if isinstance(row, list):
                     flush_count += 1
@@ -538,7 +539,7 @@ class TestAggregationTimeoutIntegration:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -638,7 +639,7 @@ class TestEndOfSourceFlush:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     batch_data.append({"rows": len(row), "total": sum(r.get("value", 0) for r in row)})
                     total = sum(r.get("value", 0) for r in row)
@@ -700,7 +701,7 @@ class TestEndOfSourceFlush:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -779,7 +780,7 @@ class TestEndOfSourceFlush:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     batch_sizes.append(len(row))
                     # Passthrough: return same number of rows, enriched
@@ -842,7 +843,7 @@ class TestEndOfSourceFlush:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -921,7 +922,7 @@ class TestEndOfSourceFlush:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
@@ -991,7 +992,7 @@ class TestEndOfSourceFlush:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -1067,7 +1068,7 @@ class TestEndOfSourceFlush:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Passthrough: enrich with batch_total
                     batch_total = sum(r.get("value", 0) for r in row)
@@ -1087,7 +1088,7 @@ class TestEndOfSourceFlush:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({**row, "processed": True}, success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
@@ -1145,7 +1146,7 @@ class TestEndOfSourceFlush:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={agg_node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -1217,7 +1218,7 @@ class TestEndOfSourceFlush:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
@@ -1236,7 +1237,7 @@ class TestEndOfSourceFlush:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
                     {**row, "processed": True, "doubled_total": row.get("total", 0) * 2}, success_reason={"action": "test"}
                 )
@@ -1296,7 +1297,7 @@ class TestEndOfSourceFlush:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={agg_node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -1368,7 +1369,7 @@ class TestTimeoutFlushErrorHandling:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Batch flush - FAIL
                     flush_calls.append("flush_failed")
@@ -1450,7 +1451,7 @@ class TestTimeoutFlushErrorHandling:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={transform_node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -1517,7 +1518,7 @@ class TestTimeoutFlushErrorHandling:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Batch mode - combine rows
                     total = sum(r.get("value", 0) for r in row)
@@ -1603,7 +1604,7 @@ class TestTimeoutFlushErrorHandling:
             sinks={"output": default_sink, "routed_sink": routed_sink},
             gates=[gate_settings],
             aggregation_settings={},  # Will be set after graph build
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         from tests.engine.orchestrator_test_helpers import build_production_graph
@@ -1631,7 +1632,7 @@ class TestTimeoutFlushErrorHandling:
             sinks={"output": default_sink, "routed_sink": routed_sink},
             gates=[gate_settings],
             aggregation_settings={agg_node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -1706,7 +1707,7 @@ class TestTimeoutFlushErrorHandling:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
@@ -1795,7 +1796,7 @@ class TestTimeoutFlushErrorHandling:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={transform_node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -1878,7 +1879,7 @@ class TestTimeoutFlushErrorHandling:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "eos_failure"})
@@ -1963,7 +1964,7 @@ class TestTimeoutFlushErrorHandling:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={transform_node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -2053,7 +2054,7 @@ class TestTimeoutFlushErrorHandling:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
@@ -2143,7 +2144,7 @@ class TestTimeoutFlushErrorHandling:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={transform_node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -2215,7 +2216,7 @@ class TestTimeoutFlushErrorHandling:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Batch flush - FAIL
                     flush_calls.append("flush_failed")
@@ -2301,7 +2302,7 @@ class TestTimeoutFlushErrorHandling:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={transform_node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -2397,7 +2398,7 @@ class TestTimeoutFlushStepIndexing:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
@@ -2458,7 +2459,7 @@ class TestTimeoutFlushStepIndexing:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -2547,7 +2548,7 @@ class TestTimeoutFlushStepIndexing:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
@@ -2608,7 +2609,7 @@ class TestTimeoutFlushStepIndexing:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -2698,7 +2699,7 @@ class TestExpectedOutputCountEnforcement:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
@@ -2761,7 +2762,7 @@ class TestExpectedOutputCountEnforcement:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -2827,7 +2828,7 @@ class TestExpectedOutputCountEnforcement:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return 2 rows instead of 1 - this violates expected_output_count=1
                     output_rows = [{"part": 1, "total": sum(r.get("value", 0) for r in row)}, {"part": 2, "count": len(row)}]
@@ -2894,7 +2895,7 @@ class TestExpectedOutputCountEnforcement:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -2955,7 +2956,7 @@ class TestExpectedOutputCountEnforcement:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return 2 rows - violates expected_output_count=1
                     output_rows = [{"part": 1}, {"part": 2}]
@@ -3022,7 +3023,7 @@ class TestExpectedOutputCountEnforcement:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(
@@ -3091,7 +3092,7 @@ class TestExpectedOutputCountEnforcement:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return N rows where N = len(input) - could be any number
                     output_rows = [{"idx": i, "value": r.get("value", 0)} for i, r in enumerate(row)]
@@ -3158,7 +3159,7 @@ class TestExpectedOutputCountEnforcement:
             sinks={"output": sink},
             gates=[],
             aggregation_settings={node_id: agg_settings},
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         settings = ElspethSettings(

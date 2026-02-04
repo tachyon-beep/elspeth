@@ -4,7 +4,24 @@
 from collections.abc import Iterator
 from typing import Any, ClassVar
 
-from elspeth.contracts import SourceRow
+from elspeth.contracts import PipelineRow, SourceRow
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with observed schema contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data=data, contract=contract)
 
 
 class TestSourceProtocol:
@@ -194,7 +211,7 @@ class TestTransformProtocol:
 
         ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
 
-        result = transform.process({"value": 21}, ctx)
+        result = transform.process(_make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
         assert result.row == {"value": 21, "doubled": 42}
 
@@ -219,12 +236,12 @@ class TestTransformBatchSupport:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"processed": row["value"]}, success_reason={"action": "test"})
 
         transform = SingleTransform({})
         ctx = PluginContext(run_id="test", config={})
-        result = transform.process({"value": 1}, ctx)
+        result = transform.process(_make_pipeline_row({"value": 1}), ctx)
         assert result.row == {"processed": 1}
 
     def test_transform_process_batch_rows(self) -> None:
@@ -245,7 +262,7 @@ class TestTransformBatchSupport:
             plugin_version = "1.0.0"
             is_batch_aware = True  # Declares batch support
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: PluginContext) -> TransformResult:
                 # When given a list, process as batch
                 if isinstance(row, list):
                     total = sum(r["value"] for r in row)
@@ -257,7 +274,7 @@ class TestTransformBatchSupport:
         ctx = PluginContext(run_id="test", config={})
 
         # Batch mode
-        result = transform.process([{"value": 1}, {"value": 2}, {"value": 3}], ctx)
+        result = transform.process([_make_pipeline_row({"value": 1}), _make_pipeline_row({"value": 2}), _make_pipeline_row({"value": 3})], ctx)
         assert result.row == {"total": 6, "count": 3}
 
     def test_transform_is_batch_aware_default_false(self) -> None:
@@ -277,8 +294,8 @@ class TestTransformBatchSupport:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         regular = RegularTransform({})
         assert regular.is_batch_aware is False
@@ -301,10 +318,10 @@ class TestTransformBatchSupport:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: PluginContext) -> TransformResult:
                 if isinstance(row, list):
                     return TransformResult.success({"count": len(row)}, success_reason={"action": "test"})
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         batch = BatchAwareTransform({})
         assert batch.is_batch_aware is True
@@ -627,8 +644,8 @@ class TestProtocolMetadata:
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         t = MyTransform()
         assert t.determinism == Determinism.DETERMINISTIC
@@ -643,8 +660,8 @@ class TestProtocolMetadata:
             determinism = Determinism.EXTERNAL_CALL
             plugin_version = "0.1.0"
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         t = LLMTransform()
         assert t.determinism == Determinism.EXTERNAL_CALL

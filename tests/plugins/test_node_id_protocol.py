@@ -58,7 +58,7 @@ class TestNodeIdProtocol:
         """BaseTransform has node_id attribute with default None."""
         from typing import Any
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import PipelineRow, PluginSchema
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.context import PluginContext
         from elspeth.plugins.results import TransformResult
@@ -71,7 +71,7 @@ class TestNodeIdProtocol:
             input_schema = TestSchema
             output_schema = TestSchema
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "test"})
 
         transform = TestTransform({})
@@ -92,7 +92,7 @@ class TestNodeIdProtocol:
         """BaseGate has node_id attribute with default None."""
         from typing import Any
 
-        from elspeth.contracts import PluginSchema, RoutingAction
+        from elspeth.contracts import PipelineRow, PluginSchema, RoutingAction
         from elspeth.plugins.base import BaseGate
         from elspeth.plugins.context import PluginContext
         from elspeth.plugins.results import GateResult
@@ -105,7 +105,7 @@ class TestNodeIdProtocol:
             input_schema = TestSchema
             output_schema = TestSchema
 
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                 return GateResult(row=row, action=RoutingAction.continue_())
 
         gate = TestGate({"routes": {"default": "continue"}})

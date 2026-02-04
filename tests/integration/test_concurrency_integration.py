@@ -203,7 +203,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
                     original_name="id",
                     python_type=object,
                     required=False,
-                    source="observed",
+                    source="inferred",
                 ),
             ),
             locked=True,

@@ -144,7 +144,7 @@ class TestOpenRouterMultiQueryLLMTransformInit:
         ctx = make_plugin_context()
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
-            transform.process({"text": "hello"}, ctx)
+            transform.process(_make_pipeline_row({"text": "hello"}), ctx)
 
 
 class TestSingleQueryProcessing:

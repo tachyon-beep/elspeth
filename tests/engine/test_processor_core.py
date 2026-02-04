@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from elspeth.contracts import SourceRow
 
+from elspeth.contracts import PipelineRow
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
@@ -97,7 +98,7 @@ class TestRowProcessor:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         class AddOneTransform(BaseTransform):
@@ -109,7 +110,7 @@ class TestRowProcessor:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -191,7 +192,7 @@ class TestRowProcessor:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -275,7 +276,7 @@ class TestRowProcessor:
                 if on_err is not None:
                     self._on_error = on_err
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 if row.get("value", 0) < 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "negative values not allowed"})
                 return TransformResult.success(row.to_dict(), success_reason={"action": "validate"})
@@ -474,7 +475,7 @@ class TestRowProcessorTokenIdentity:
                 self.name = name  # type: ignore[misc]
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         ctx = PluginContext(run_id=run.run_id, config={})

@@ -510,7 +510,7 @@ class TestCoalesceSuccessMetrics:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.processed_count = 0
 
-            def process(self, row: dict, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 self.processed_count += 1
                 # PipelineRow is immutable - must convert to dict, modify, and return
                 row_dict = row.to_dict() if hasattr(row, "to_dict") else row
@@ -1050,7 +1050,7 @@ class TestForkAggregationCoalesce:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Batch mode: sum all values
                     total = sum(r.get("value", 0) for r in row)

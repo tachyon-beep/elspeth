@@ -43,6 +43,7 @@ import pytest
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching import OutputPort
 from elspeth.plugins.batching.mixin import BatchTransformMixin
 from elspeth.plugins.context import PluginContext
@@ -65,7 +66,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             original_name=key,
             python_type=object,  # OBSERVED mode - accept any type
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key, value in data.items()
     )
@@ -82,10 +83,10 @@ class CollectingOutputPort(OutputPort):
         self._lock = threading.Lock()
         self._emit_event = threading.Event()
 
-    def emit(self, token: TokenInfo, result: TransformResult, state_id: str | None) -> None:
+    def emit(self, token: TokenInfo, result: TransformResult | ExceptionResult, state_id: str | None) -> None:
         """Collect the emitted result."""
         with self._lock:
-            self.results.append((token, result, state_id))
+            self.results.append((token, result, state_id))  # type: ignore[arg-type]
             self.emit_count += 1
             self._emit_event.set()
 
@@ -152,10 +153,11 @@ class BatchTransformContractTestBase(ABC):
             ctx.landscape = Mock()
             ctx.landscape.record_call = Mock()
             ctx.landscape.allocate_call_index = Mock(return_value=0)
+            contract = SchemaContract(mode="FLEXIBLE", fields=(), locked=True)
             ctx.token = TokenInfo(
                 token_id=f"token-{counter:03d}",
                 row_id=f"row-{counter:03d}",
-                row_data=valid_input.copy(),
+                row_data=PipelineRow(valid_input.copy(), contract),
             )
             return ctx
 

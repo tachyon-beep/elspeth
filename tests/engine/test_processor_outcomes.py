@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeType, RoutingMode, RowOutcome, RunStatus, SourceRow
+from elspeth.contracts import NodeType, PipelineRow, RoutingMode, RowOutcome, RunStatus, SourceRow
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import GateName, NodeID
 
@@ -466,7 +466,7 @@ class TestEngineIntegrationOutcomes:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         processor = RowProcessor(
@@ -548,7 +548,7 @@ class TestEngineIntegrationOutcomes:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 if row["value"] < 0:
                     return TransformResult.error({"reason": "validation_failed", "error": "negative_value"})
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})

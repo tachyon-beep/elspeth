@@ -39,7 +39,7 @@ def _make_contract(data: dict[str, Any]) -> SchemaContract:
             original_name=k,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for k in data
     )
@@ -63,7 +63,7 @@ class FlakyTransform(BaseTransform):
         self.fail_count = 0
         self.max_fails = config.get("max_fails", 2)
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Fail max_fails times, then succeed."""
         self.fail_count += 1
         if self.fail_count <= self.max_fails:
@@ -86,7 +86,7 @@ class AlwaysFailTransform(BaseTransform):
         super().__init__(config)
         self.fail_count = 0
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Always fail with retryable error."""
         self.fail_count += 1
         raise ConnectionError(f"Permanent failure attempt {self.fail_count}")

@@ -9,7 +9,7 @@ GateSettings.
 
 from typing import Any
 
-from elspeth.contracts import FieldContract, NodeType, RoutingMode, SchemaContract, SourceRow
+from elspeth.contracts import FieldContract, NodeType, PipelineRow, RoutingMode, SchemaContract, SourceRow
 from elspeth.contracts.types import GateName, NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
@@ -88,7 +88,7 @@ class TestRowProcessorGates:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "final": True}, success_reason={"action": "test"})
 
         # Config-driven gate: always continues
@@ -436,7 +436,7 @@ class TestRowProcessorNestedForks:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 # Note: .get() is allowed here - this is row data (their data, Tier 2)
                 return TransformResult.success({**row, "count": row.get("count", 0) + 1}, success_reason={"action": "count"})
 

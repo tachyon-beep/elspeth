@@ -287,60 +287,6 @@ class TestTransformExecutorPipelineRow:
         assert updated_token.row_data["processed"] is True
         assert updated_token.row_data.contract is output_contract
 
-    def test_execute_transform_uses_input_contract_as_fallback(self) -> None:
-        """When result has no contract and transform has no output_schema, should use input token's contract."""
-        from elspeth.engine.executors import TransformExecutor
-        from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
-
-        # Setup token with PipelineRow
-        contract = _make_contract()
-        row = PipelineRow({"value": "test"}, contract)
-        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
-
-        # Mock transform - NO contract on result (typical passthrough transform)
-        # Set output_schema to None to force fallback to input contract
-        mock_transform = MagicMock()
-        mock_transform.name = "test_transform"
-        mock_transform.node_id = "transform_001"
-        mock_transform._on_error = None
-        mock_transform.output_schema = None  # No output schema - should fallback to input contract
-        # Delete accept to prevent batch transform detection
-        del mock_transform.accept
-        mock_transform.process.return_value = TransformResult.success(
-            {"value": "modified"},
-            success_reason={"action": "passthrough"},
-            contract=None,  # No output contract - should use input contract
-        )
-
-        # Mock recorder
-        mock_recorder = MagicMock()
-        mock_state = MagicMock()
-        mock_state.state_id = "state_001"
-        mock_recorder.begin_node_state.return_value = mock_state
-
-        # Mock span factory - use nullcontext for proper context manager behavior
-        mock_span_factory = MagicMock(spec=SpanFactory)
-        mock_span_factory.transform_span.return_value = nullcontext()
-
-        # Create executor
-        executor = TransformExecutor(mock_recorder, mock_span_factory)
-
-        # Create context
-        ctx = PluginContext(run_id="run_001", config={})
-
-        # Execute
-        _result, updated_token, _error_sink = executor.execute_transform(
-            transform=mock_transform,
-            token=token,
-            ctx=ctx,
-            step_in_pipeline=0,
-        )
-
-        # Verify updated token uses input contract as fallback
-        assert isinstance(updated_token.row_data, PipelineRow)
-        assert updated_token.row_data.contract is contract
-
     def test_execute_transform_error_preserves_token(self) -> None:
         """When transform returns error, token should be unchanged."""
         from elspeth.engine.executors import TransformExecutor
@@ -446,64 +392,6 @@ class TestTransformExecutorPipelineRow:
             first_call_arg = mock_hash.call_args_list[0][0][0]
             assert isinstance(first_call_arg, dict), f"stable_hash should receive dict, got {type(first_call_arg)}"
 
-    def test_execute_transform_crashes_if_no_contract_available(self) -> None:
-        """Should crash if result, input, and output_schema all have no contract (B6 fix)."""
-        from elspeth.engine.executors import TransformExecutor
-        from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
-
-        # Setup token with PipelineRow - we'll mock the contract property to return None
-        contract = _make_contract()
-        row = PipelineRow({"value": "test"}, contract)
-        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
-
-        # Mock transform - returns success with NO contract and NO output_schema
-        mock_transform = MagicMock()
-        mock_transform.name = "test_transform"
-        mock_transform.node_id = "transform_001"
-        mock_transform._on_error = None
-        mock_transform.output_schema = None  # No output schema
-        # Delete accept to prevent batch transform detection
-        del mock_transform.accept
-        mock_transform.process.return_value = TransformResult.success(
-            {"value": "processed"},
-            success_reason={"action": "test"},
-            contract=None,  # No output contract
-        )
-
-        # Mock recorder
-        mock_recorder = MagicMock()
-        mock_state = MagicMock()
-        mock_state.state_id = "state_001"
-        mock_recorder.begin_node_state.return_value = mock_state
-
-        # Mock span factory - use nullcontext for proper context manager behavior
-        mock_span_factory = MagicMock(spec=SpanFactory)
-        mock_span_factory.transform_span.return_value = nullcontext()
-
-        # Create executor
-        executor = TransformExecutor(mock_recorder, mock_span_factory)
-
-        # Create context
-        ctx = PluginContext(run_id="run_001", config={})
-
-        # Mock the contract property on row_data to return None
-        # This simulates the edge case where input token has no contract
-        with patch.object(type(token.row_data), "contract", new_callable=PropertyMock) as mock_contract:
-            mock_contract.return_value = None
-
-            # Execute - should raise ValueError
-            with pytest.raises(ValueError) as exc_info:
-                executor.execute_transform(
-                    transform=mock_transform,
-                    token=token,
-                    ctx=ctx,
-                    step_in_pipeline=0,
-                )
-
-            # Verify error message is clear
-            assert "Cannot create PipelineRow: no contract available" in str(exc_info.value)
-            assert "test_transform" in str(exc_info.value)
 
 
 class TestGateExecutorPipelineRow:

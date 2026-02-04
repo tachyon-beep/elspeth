@@ -5,6 +5,25 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with observed schema contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data=data, contract=contract)
+
 
 class TestBaseTransform:
     """Base class for transforms."""
@@ -20,8 +39,8 @@ class TestBaseTransform:
             input_schema = None  # type: ignore[assignment]  # Not needed for this test
             output_schema = None  # type: ignore[assignment]
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         transform = SimpleTransform({})
         assert transform.creates_tokens is False
@@ -38,8 +57,9 @@ class TestBaseTransform:
             input_schema = None  # type: ignore[assignment]
             output_schema = None  # type: ignore[assignment]
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success_multi([row, row])
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                row_dict = row.to_dict()
+                return TransformResult.success_multi([row_dict, row_dict])
 
         transform = ExpandingTransform({})
         assert transform.creates_tokens is True
@@ -69,7 +89,7 @@ class TestBaseTransform:
             input_schema = InputSchema
             output_schema = OutputSchema
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
                     {
                         "x": row["x"],
@@ -81,7 +101,7 @@ class TestBaseTransform:
         transform = DoubleTransform({"some": "config"})
         ctx = PluginContext(run_id="test", config={})
 
-        result = transform.process({"x": 21}, ctx)
+        result = transform.process(_make_pipeline_row({"x": 21}), ctx)
         assert result.row == {"x": 21, "doubled": 42}
 
     def test_lifecycle_hooks_exist(self) -> None:
@@ -304,8 +324,8 @@ class TestNoValidationEnforcement:
                 super().__init__(config)
                 # NOT calling self._validate_self_consistency()
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         # Should instantiate without RuntimeError
         plugin = NoValidationTransform({})

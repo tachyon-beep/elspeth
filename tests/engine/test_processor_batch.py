@@ -13,7 +13,7 @@ because the processor uses isinstance() for type-safe plugin detection.
 
 from typing import Any
 
-from elspeth.contracts import NodeType, SourceRow
+from elspeth.contracts import NodeType, PipelineRow, SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
@@ -73,7 +73,7 @@ class TestProcessorBatchTransforms:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
                     output_row = {"total": total}
@@ -181,7 +181,7 @@ class TestProcessorBatchTransforms:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Batch mode - sum all values
                     return TransformResult.success({"value": sum(r["value"] for r in rows)}, success_reason={"action": "test"})
@@ -258,7 +258,7 @@ class TestProcessorBatchTransforms:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
                     output_row = {"total": total}
@@ -442,7 +442,7 @@ class TestProcessorDeaggregation:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
                 # Expand each row into 2 rows
@@ -547,7 +547,7 @@ class TestProcessorDeaggregation:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 # Return multi-row output (but creates_tokens=False, so should raise)
                 # Convert row to dict to avoid PipelineRow canonicalization issues
                 return TransformResult.success_multi([{**row}, {**row}], success_reason={"action": "test"})
@@ -625,7 +625,7 @@ class TestProcessorDeaggregation:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 # Bug in plugin: creates TransformResult with row=None (contract violation)
                 # This should NOT be masked by defensive {} substitution
                 result = TransformResult(
@@ -729,7 +729,7 @@ class TestProcessorDeaggregation:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 # Bug in plugin: creates TransformResult with row=None (contract violation)
                 result = TransformResult(
                     status="success",

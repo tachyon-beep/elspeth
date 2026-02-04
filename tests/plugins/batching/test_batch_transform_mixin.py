@@ -32,7 +32,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in data
     )
@@ -74,13 +74,13 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
             raise RuntimeError("connect_output() must be called before accept()")
         self.accept_row(row, ctx, self._process_row)
 
-    def _process_row(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         # Simple passthrough - just add a marker
         output = dict(row)
         output["processed"] = True
         return TransformResult.success(output, success_reason={"action": "test"})
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
 
     def close(self) -> None:
@@ -357,7 +357,7 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
         """Wait until at least one worker has started processing."""
         return self._processing_started.wait(timeout=timeout)
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
 
     def close(self) -> None:

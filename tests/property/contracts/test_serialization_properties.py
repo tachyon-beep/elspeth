@@ -29,7 +29,23 @@ from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.routing import RoutingAction
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from tests.property.conftest import id_strings, row_data
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def _make_observed_contract() -> SchemaContract:
+    """Create an OBSERVED schema contract for property tests."""
+    return SchemaContract(mode="OBSERVED", fields=())
+
+
+def _wrap_dict_as_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Wrap dict as PipelineRow with OBSERVED contract for property tests."""
+    return PipelineRow(data, _make_observed_contract())
+
 
 # =============================================================================
 # Strategies for serialization testing
@@ -141,7 +157,7 @@ class TestTokenInfoConstructionProperties:
         data: dict[str, Any],
     ) -> None:
         """Property: TokenInfo preserves row_id through construction."""
-        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=data)
+        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=_wrap_dict_as_pipeline_row(data))
         assert token.row_id == row_id
 
     @given(
@@ -157,7 +173,7 @@ class TestTokenInfoConstructionProperties:
         data: dict[str, Any],
     ) -> None:
         """Property: TokenInfo preserves token_id through construction."""
-        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=data)
+        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=_wrap_dict_as_pipeline_row(data))
         assert token.token_id == token_id
 
     @given(
@@ -173,8 +189,8 @@ class TestTokenInfoConstructionProperties:
         data: dict[str, Any],
     ) -> None:
         """Property: TokenInfo preserves row_data through construction."""
-        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=data)
-        assert token.row_data == data
+        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=_wrap_dict_as_pipeline_row(data))
+        assert token.row_data.to_dict() == data
 
     @given(
         row_id=non_empty_ids,
@@ -200,7 +216,7 @@ class TestTokenInfoConstructionProperties:
         token = TokenInfo(
             row_id=row_id,
             token_id=token_id,
-            row_data=data,
+            row_data=_wrap_dict_as_pipeline_row(data),
             branch_name=branch_name,
             fork_group_id=fork_group_id,
             join_group_id=join_group_id,
@@ -228,7 +244,7 @@ class TestTokenInfoJsonSerializationProperties:
         data: dict[str, Any],
     ) -> None:
         """Property: TokenInfo serializes to valid JSON."""
-        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=data)
+        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=_wrap_dict_as_pipeline_row(data))
 
         # asdict + json.dumps should not raise
         serialized = json.dumps(asdict(token))
@@ -250,7 +266,7 @@ class TestTokenInfoJsonSerializationProperties:
         data: dict[str, Any],
     ) -> None:
         """Property: TokenInfo JSON round-trip preserves identity fields."""
-        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=data)
+        token = TokenInfo(row_id=row_id, token_id=token_id, row_data=_wrap_dict_as_pipeline_row(data))
 
         serialized = json.dumps(asdict(token))
         parsed = json.loads(serialized)
@@ -283,7 +299,7 @@ class TestTokenInfoJsonSerializationProperties:
         token = TokenInfo(
             row_id=row_id,
             token_id=token_id,
-            row_data=data,
+            row_data=_wrap_dict_as_pipeline_row(data),
             branch_name=branch_name,
             fork_group_id=fork_group_id,
             join_group_id=join_group_id,

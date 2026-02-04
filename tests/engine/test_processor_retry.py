@@ -12,7 +12,7 @@ uses isinstance() for type-safe plugin detection.
 
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import FieldContract, NodeType, RoutingMode, SchemaContract, SourceRow
+from elspeth.contracts import FieldContract, NodeType, PipelineRow, RoutingMode, SchemaContract, SourceRow
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -174,7 +174,7 @@ class TestRowProcessorWorkQueue:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "processed": True}, success_reason={"action": "processed"})
 
         # Config-driven fork gate
@@ -486,7 +486,7 @@ class TestRowProcessorRetry:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise ConnectionError("Network always down")
 
         # Create processor with retry (max 2 attempts, fast delays for test)
@@ -617,7 +617,7 @@ class TestNoRetryAuditCompleteness:
                 # Explicitly set _on_error (normally done by config mixins)
                 self._on_error = "error_sink"
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise LLMClientError("Rate limit exceeded", retryable=True)
 
         # No retry manager - single attempt
@@ -713,7 +713,7 @@ class TestNoRetryAuditCompleteness:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise ConnectionError("Network unreachable")
 
         # No retry manager - single attempt

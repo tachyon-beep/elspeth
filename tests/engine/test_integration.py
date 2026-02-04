@@ -73,7 +73,7 @@ def _make_source_row(data: dict[str, Any]) -> SourceRow:
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in data
     )
@@ -2412,10 +2412,11 @@ class TestComplexDAGIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                if row["value"] % 3 == 0:
-                    return TransformResult.error({"reason": "validation_failed", "error": "divisible_by_3", "value": row["value"]})
-                return TransformResult.success({"value": row["value"], "processed": True}, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                row_dict = row.to_dict()
+                if row_dict["value"] % 3 == 0:
+                    return TransformResult.error({"reason": "validation_failed", "error": "divisible_by_3", "value": row_dict["value"]})
+                return TransformResult.success({"value": row_dict["value"], "processed": True}, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             """Sink that collects written rows."""
@@ -2644,7 +2645,7 @@ class TestRetryIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 row_value = row["value"]
                 attempt_counts[row_value] += 1
 
@@ -2801,7 +2802,7 @@ class TestRetryIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 row_value = row["value"]
                 attempt_counts[row_value] += 1
 
@@ -3450,7 +3451,7 @@ class TestErrorRecovery:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
@@ -3566,7 +3567,7 @@ class TestErrorRecovery:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})

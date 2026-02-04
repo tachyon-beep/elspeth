@@ -829,7 +829,7 @@ def create_observed_contract(row: dict[str, Any]) -> "SchemaContract":
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in row
     )

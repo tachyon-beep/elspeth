@@ -13,7 +13,7 @@ Extracted from test_processor.py to improve test organization.
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from elspeth.contracts import SourceRow
+    from elspeth.contracts import PipelineRow, SourceRow
 
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
@@ -72,7 +72,7 @@ class TestProcessorPassthroughMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Batch mode: enrich each row with batch_size
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -214,7 +214,7 @@ class TestProcessorPassthroughMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Wrong: returns fewer rows than input
                     return TransformResult.success_multi([rows[0]], success_reason={"action": "test"})
@@ -297,7 +297,7 @@ class TestProcessorPassthroughMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -335,7 +335,7 @@ class TestProcessorPassthroughMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: "PipelineRow", ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "value": row["value"] * 2}, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -447,7 +447,7 @@ class TestProcessorTransformMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -596,7 +596,7 @@ class TestProcessorTransformMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -715,7 +715,7 @@ class TestProcessorTransformMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -760,7 +760,7 @@ class TestProcessorTransformMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: "PipelineRow", ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "count": row["count"] * 2, "doubled": True}, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -893,7 +893,7 @@ class TestProcessorSingleMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -929,7 +929,7 @@ class TestProcessorSingleMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: "PipelineRow", ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "marker": "DOWNSTREAM_EXECUTED"}, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -1039,7 +1039,7 @@ class TestProcessorSingleMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 

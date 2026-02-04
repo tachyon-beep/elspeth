@@ -25,7 +25,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in data
     )
@@ -35,10 +35,11 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     """Create a TokenInfo for testing."""
+    contract = SchemaContract(mode="FLEXIBLE", fields=(), locked=True)
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},
+        row_data=PipelineRow({}, contract),
     )
 
 

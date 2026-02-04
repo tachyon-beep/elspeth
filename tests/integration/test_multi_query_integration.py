@@ -44,7 +44,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             original_name=k,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for k in data
     )

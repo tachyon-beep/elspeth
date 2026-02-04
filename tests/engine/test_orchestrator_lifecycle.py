@@ -41,7 +41,7 @@ def _make_test_source_row(data: dict) -> SourceRow:
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in data
     )

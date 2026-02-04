@@ -474,7 +474,7 @@ class TestTokenField:
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
             mode="OBSERVED",
-            fields=(FieldContract(normalized_name="x", original_name="x", python_type=int, required=False, source="observed"),),
+            fields=(FieldContract(normalized_name="x", original_name="x", python_type=int, required=False, source="inferred"),),
             locked=True,
         )
         row_data = PipelineRow({"x": 1}, contract)
@@ -497,7 +497,7 @@ class TestTokenField:
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
             mode="OBSERVED",
-            fields=(FieldContract(normalized_name="value", original_name="value", python_type=int, required=False, source="observed"),),
+            fields=(FieldContract(normalized_name="value", original_name="value", python_type=int, required=False, source="inferred"),),
             locked=True,
         )
         row_data = PipelineRow({"value": 100}, contract)
@@ -523,7 +523,7 @@ class TestTokenField:
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
             mode="OBSERVED",
-            fields=(FieldContract(normalized_name="data", original_name="data", python_type=str, required=False, source="observed"),),
+            fields=(FieldContract(normalized_name="data", original_name="data", python_type=str, required=False, source="inferred"),),
             locked=True,
         )
         row_data = PipelineRow({"data": "test"}, contract)
@@ -555,7 +555,8 @@ class TestRecordCallTelemetryResponseHash:
         from elspeth.plugins.context import PluginContext
 
         # Set up telemetry callback to capture emitted events
-        emitted_events: list = []
+        from typing import Any
+        emitted_events: list[Any] = []
 
         def capture_telemetry(event):
             emitted_events.append(event)
@@ -597,7 +598,8 @@ class TestRecordCallTelemetryResponseHash:
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        emitted_events: list = []
+        from typing import Any
+        emitted_events: list[Any] = []
 
         def capture_telemetry(event):
             emitted_events.append(event)
@@ -613,12 +615,12 @@ class TestRecordCallTelemetryResponseHash:
             telemetry_emit=capture_telemetry,
         )
 
-        # Empty list response
+        # Empty results in dict - type-correct representation of no SQL rows
         ctx.record_call(
             call_type=CallType.SQL,
             provider="database",
             request_data={"query": "SELECT * FROM empty_table"},
-            response_data=[],  # Empty list - no results
+            response_data={"rows": []},  # Empty results in dict structure (type-correct)
             latency_ms=10.0,
             status=CallStatus.SUCCESS,
         )
@@ -628,12 +630,13 @@ class TestRecordCallTelemetryResponseHash:
 
     def test_empty_string_response_gets_hashed(self) -> None:
         """Empty string '' response should emit response_hash in telemetry."""
+        from typing import Any
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        emitted_events: list = []
+        emitted_events: list[Any] = []
 
         def capture_telemetry(event):
             emitted_events.append(event)
@@ -649,12 +652,12 @@ class TestRecordCallTelemetryResponseHash:
             telemetry_emit=capture_telemetry,
         )
 
-        # Empty string response (e.g., HTTP 204 No Content)
+        # Empty body in dict (e.g., HTTP 204 No Content as dict structure)
         ctx.record_call(
             call_type=CallType.HTTP,
             provider="api.example.com",
             request_data={"method": "DELETE"},
-            response_data="",  # Empty string - valid 204 response
+            response_data={"body": ""},  # Empty body in dict structure (type-correct)
             latency_ms=25.0,
             status=CallStatus.SUCCESS,
         )
@@ -664,12 +667,13 @@ class TestRecordCallTelemetryResponseHash:
 
     def test_none_response_does_not_get_hashed(self) -> None:
         """None response should emit response_hash=None (no response data)."""
+        from typing import Any
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        emitted_events: list = []
+        emitted_events: list[Any] = []
 
         def capture_telemetry(event):
             emitted_events.append(event)

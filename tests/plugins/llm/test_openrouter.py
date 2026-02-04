@@ -12,7 +12,6 @@ import pytest
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
@@ -36,7 +35,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in data
     )
@@ -92,10 +91,11 @@ def mock_httpx_client(
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     """Create a TokenInfo for testing."""
+    contract = SchemaContract(mode="FLEXIBLE", fields=(), locked=True)
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},  # Not used in these tests
+        row_data=PipelineRow({}, contract),  # Not used in these tests
     )
 
 
@@ -274,7 +274,7 @@ class TestOpenRouterLLMTransformInit:
         ctx = PluginContext(run_id="test-run", config={})
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
-            transform.process({"text": "hello"}, ctx)
+            transform.process(_make_pipeline_row({"text": "hello"}), ctx)
 
 
 class TestOpenRouterLLMTransformPipelining:

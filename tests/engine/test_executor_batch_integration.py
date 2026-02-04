@@ -153,7 +153,7 @@ def create_token_in_recorder(
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in row_data
     )

@@ -264,7 +264,7 @@ class TestPhase5CheckpointSchema:
             token_id="tok-001",
             node_id="node-001",
             sequence_number=42,
-            created_at=None,
+            created_at=datetime.now(UTC),
             upstream_topology_hash="a" * 64,
             checkpoint_node_config_hash="b" * 64,
         )
@@ -280,7 +280,7 @@ class TestPhase5CheckpointSchema:
             token_id="tok-001",
             node_id="node-001",
             sequence_number=100,
-            created_at=None,
+            created_at=datetime.now(UTC),
             upstream_topology_hash="a" * 64,
             checkpoint_node_config_hash="b" * 64,
             aggregation_state_json='{"buffer": [1, 2, 3]}',

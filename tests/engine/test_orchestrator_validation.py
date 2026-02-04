@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import FieldContract, PluginSchema, SchemaContract, SourceRow
+from elspeth.contracts import FieldContract, PipelineRow, PluginSchema, SchemaContract, SourceRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
@@ -95,7 +95,7 @@ class TestTransformErrorSinkValidation:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
@@ -170,7 +170,7 @@ class TestTransformErrorSinkValidation:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
@@ -249,7 +249,7 @@ class TestTransformErrorSinkValidation:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
@@ -317,7 +317,7 @@ class TestTransformErrorSinkValidation:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
@@ -385,7 +385,7 @@ class TestTransformErrorSinkValidation:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
@@ -470,7 +470,7 @@ class TestTransformErrorSinkValidation:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 call_tracking["transform_process_called"] = True
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 

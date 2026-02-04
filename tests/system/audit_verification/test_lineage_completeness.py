@@ -73,10 +73,11 @@ class _EnrichingTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
-        enriched = {**row, "enriched": True, "processed_by": self.name}
+        row_dict = row.to_dict()
+        enriched = {**row_dict, "enriched": True, "processed_by": self.name}
         return TransformResult.success(enriched, success_reason={"action": "enrich"})
 
 

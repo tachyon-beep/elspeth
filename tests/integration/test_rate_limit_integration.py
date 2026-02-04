@@ -9,12 +9,29 @@ from typing import Any
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.config import RateLimitSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.rate_limit import RateLimitRegistry
 from elspeth.engine import Orchestrator
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with observed schema contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data=data, contract=contract)
 
 
 class RateLimitAwareTransform(BaseTransform):
@@ -27,7 +44,7 @@ class RateLimitAwareTransform(BaseTransform):
         self._service_name = config.get("service_name", "test_service")
         self._call_times: list[float] = []
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Process row, using rate limiter if available."""
         if ctx.rate_limit_registry is not None:
             limiter = ctx.rate_limit_registry.get_limiter(self._service_name)
@@ -130,7 +147,7 @@ class TestRateLimitThrottling:
             # Make 11 calls - first 10 should be instant (bucket holds 10)
             # The 11th should block waiting for a leak
             for i in range(11):
-                transform.process({"id": i}, ctx)
+                transform.process(_make_pipeline_row({"id": i}), ctx)
 
             call_times = transform.call_times
             assert len(call_times) == 11
@@ -165,7 +182,7 @@ class TestRateLimitThrottling:
 
             # Make 5 calls rapidly
             for i in range(5):
-                transform.process({"id": i}, ctx)
+                transform.process(_make_pipeline_row({"id": i}), ctx)
 
             call_times = transform.call_times
             assert len(call_times) == 5

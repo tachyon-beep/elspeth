@@ -76,7 +76,7 @@ def make_token(
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in row_data
     )

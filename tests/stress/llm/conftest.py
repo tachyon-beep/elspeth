@@ -15,7 +15,9 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts import PipelineRow
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.context import PluginContext
@@ -42,10 +44,11 @@ class StressTestContext:
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     """Create a TokenInfo for testing."""
+    contract = SchemaContract(mode="FLEXIBLE", fields=(), locked=True)
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},  # Not used in these tests
+        row_data=PipelineRow({}, contract),  # Not used in these tests
     )
 
 

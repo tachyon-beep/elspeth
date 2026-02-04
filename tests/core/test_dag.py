@@ -3,6 +3,8 @@
 
 import pytest
 
+from elspeth.contracts.schema_contract import PipelineRow
+
 
 class TestDAGBuilder:
     """Building execution graphs from configuration."""
@@ -1449,8 +1451,8 @@ class TestCoalesceNodes:
             input_schema = DummySchema
             output_schema = DummySchema
 
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                return GateResult(row=row, action=RoutingAction.continue_())
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
+                return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
 
         source = DummySource()
         sinks = {

@@ -46,7 +46,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in data
     )
@@ -69,7 +69,7 @@ class SumTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
         self.node_id = node_id
 
-    def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, rows: list[dict[str, Any]] | PipelineRow, ctx: PluginContext) -> TransformResult:
         if isinstance(rows, list):
             total = sum(r.get("value", 0) for r in rows)
             output_row = {"total": total}
@@ -80,13 +80,13 @@ class SumTransform(BaseTransform):
                     original_name=key,
                     python_type=object,
                     required=False,
-                    source="observed",
+                    source="inferred",
                 )
                 for key in output_row
             )
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
             return TransformResult.success(output_row, success_reason={"action": "sum"}, contract=contract)
-        return TransformResult.success(rows, success_reason={"action": "passthrough"})
+        return TransformResult.success(rows.to_dict(), success_reason={"action": "passthrough"})
 
 
 class TestBatchTokenIdentity:

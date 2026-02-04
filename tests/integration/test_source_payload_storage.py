@@ -31,7 +31,7 @@ def _make_contract(data: dict[str, Any]) -> SchemaContract:
             original_name=k,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for k in data
     )

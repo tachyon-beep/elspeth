@@ -4,6 +4,8 @@
 from collections.abc import Iterator
 from typing import Any, ClassVar
 
+from elspeth.contracts.schema_contract import PipelineRow
+
 
 class TestPluginSystemIntegration:
     """End-to-end plugin system tests."""
@@ -47,11 +49,12 @@ class TestPluginSystemIntegration:
             input_schema = InputSchema
             output_schema = EnrichedSchema
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                row_dict = row.to_dict()
                 return TransformResult.success(
                     {
-                        "value": row["value"],
-                        "doubled": row["value"] * 2,
+                        "value": row_dict["value"],
+                        "doubled": row_dict["value"] * 2,
                     },
                     success_reason={"action": "double"},
                 )

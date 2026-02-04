@@ -190,48 +190,48 @@ class TestFromPolicyTypeValidation:
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
         with pytest.raises(ValueError, match=r"max_attempts.*numeric.*None"):
-            RuntimeRetryConfig.from_policy({"max_attempts": None})
+            RuntimeRetryConfig.from_policy({"max_attempts": None})  # type: ignore[arg-type]  # Intentional: testing validation
 
     def test_from_policy_rejects_none_base_delay(self) -> None:
         """None value for base_delay should raise ValueError with clear message."""
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
         with pytest.raises(ValueError, match=r"base_delay.*numeric.*None"):
-            RuntimeRetryConfig.from_policy({"base_delay": None})
+            RuntimeRetryConfig.from_policy({"base_delay": None})  # type: ignore[arg-type]  # Intentional: testing validation
 
     def test_from_policy_rejects_non_numeric_string(self) -> None:
         """Non-numeric string should raise ValueError with clear message."""
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
         with pytest.raises(ValueError, match=r"max_attempts.*numeric.*'abc'"):
-            RuntimeRetryConfig.from_policy({"max_attempts": "abc"})
+            RuntimeRetryConfig.from_policy({"max_attempts": "abc"})  # type: ignore[arg-type]  # Intentional: testing validation
 
     def test_from_policy_rejects_list_value(self) -> None:
         """List value should raise ValueError with clear message."""
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
         with pytest.raises(ValueError, match=r"max_attempts.*numeric.*list"):
-            RuntimeRetryConfig.from_policy({"max_attempts": [1, 2, 3]})
+            RuntimeRetryConfig.from_policy({"max_attempts": [1, 2, 3]})  # type: ignore[arg-type]  # Intentional: testing validation
 
     def test_from_policy_rejects_dict_value(self) -> None:
         """Dict value should raise ValueError with clear message."""
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
         with pytest.raises(ValueError, match=r"base_delay.*numeric.*dict"):
-            RuntimeRetryConfig.from_policy({"base_delay": {"value": 1.0}})
+            RuntimeRetryConfig.from_policy({"base_delay": {"value": 1.0}})  # type: ignore[arg-type]  # Intentional: testing validation
 
     def test_from_policy_accepts_numeric_string(self) -> None:
         """Numeric string like '3' should be coerced to int."""
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
-        config = RuntimeRetryConfig.from_policy({"max_attempts": "3"})
+        config = RuntimeRetryConfig.from_policy({"max_attempts": "3"})  # type: ignore[arg-type]  # Intentional: testing validation
         assert config.max_attempts == 3
 
     def test_from_policy_accepts_float_string(self) -> None:
         """Float string like '2.5' should be coerced to float."""
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
-        config = RuntimeRetryConfig.from_policy({"base_delay": "2.5"})
+        config = RuntimeRetryConfig.from_policy({"base_delay": "2.5"})  # type: ignore[arg-type]  # Intentional: testing validation
         assert config.base_delay == 2.5
 
     def test_from_policy_multiple_invalid_fields_reports_first(self) -> None:
@@ -241,7 +241,7 @@ class TestFromPolicyTypeValidation:
         # Either field error is acceptable - just ensure we get a clear message
         with pytest.raises(ValueError, match=r"(max_attempts|base_delay).*numeric"):
             RuntimeRetryConfig.from_policy(
-                {
+                {  # type: ignore[arg-type]  # Intentional: testing validation
                     "max_attempts": None,
                     "base_delay": "not-a-number",
                 }

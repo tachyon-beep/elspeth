@@ -19,6 +19,7 @@ import pytest
 from elspeth.contracts import (
     ArtifactDescriptor,
     FieldContract,
+    PipelineRow,
     RunStatus,
     SchemaContract,
 )
@@ -55,7 +56,7 @@ class BatchCollectorTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
         if isinstance(row, list):
             # Batch mode - aggregate
             total = sum(r.get("value", 0) for r in row)
@@ -189,7 +190,7 @@ class TestAggregationCheckpointFixVerification:
             aggregation_settings={
                 transform_node_id: agg_settings,
             },
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         # Enable checkpoint every row

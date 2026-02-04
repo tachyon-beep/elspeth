@@ -41,7 +41,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
         for key in data
     )
@@ -228,9 +228,9 @@ class TestProcessorGuards:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> PluginTransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> PluginTransformResult:
                 # Passthrough - return dict copy of row data
-                return PluginTransformResult.success(dict(row), success_reason={"action": "passthrough"})
+                return PluginTransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         transform = PassthroughTransform(transform_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})

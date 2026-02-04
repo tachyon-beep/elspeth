@@ -8,7 +8,7 @@ Tests the full quarantine flow including:
 
 from typing import Any
 
-from elspeth.contracts import FieldContract, NodeType, SchemaContract, SourceRow
+from elspeth.contracts import FieldContract, NodeType, PipelineRow, SchemaContract, SourceRow
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -87,7 +87,7 @@ class TestQuarantineIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 if row["value"] < 0:
                     return TransformResult.error(
                         {
@@ -184,7 +184,7 @@ class TestQuarantineIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 # row.get() is allowed here - this is row data (their data, Tier 2)
                 if "required_field" not in row:
                     return TransformResult.error(
