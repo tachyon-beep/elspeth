@@ -17,6 +17,29 @@ from elspeth.contracts.types import NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
+
+
 class TestProcessorPassthroughMode:
     """Tests for passthrough output_mode in aggregation."""
 
@@ -49,9 +72,28 @@ class TestProcessorPassthroughMode:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Batch mode: enrich each row with batch_size
+                    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                     batch_size = len(rows)
                     enriched = [{**row, "batch_size": batch_size, "enriched": True} for row in rows]
-                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+
+                    # PIPELINEROW MIGRATION: Provide contract for passthrough mode aggregation
+                    if enriched:
+                        fields = tuple(
+                            FieldContract(
+                                normalized_name=key,
+                                original_name=key,
+                                python_type=object,
+                                required=False,
+                                source="inferred",
+                            )
+                            for key in enriched[0]
+                        )
+                    else:
+                        fields = ()
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"}, contract=contract)
                 # Single row mode
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
@@ -105,7 +147,7 @@ class TestProcessorPassthroughMode:
         for i in range(3):
             result_list = processor.process_row(
                 row_index=i,
-                row_data={"value": i + 1},  # 1, 2, 3
+                source_row=make_source_row({"value": i + 1}),  # 1, 2, 3
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -219,12 +261,12 @@ class TestProcessorPassthroughMode:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process first 2 rows (buffered)
-        processor.process_row(row_index=0, row_data={"value": 1}, transforms=[transform], ctx=ctx)
-        processor.process_row(row_index=1, row_data={"value": 2}, transforms=[transform], ctx=ctx)
+        processor.process_row(row_index=0, source_row=make_source_row({"value": 1}), transforms=[transform], ctx=ctx)
+        processor.process_row(row_index=1, source_row=make_source_row({"value": 2}), transforms=[transform], ctx=ctx)
 
         # 3rd row triggers flush - should fail because transform returns 1 row instead of 3
         with pytest.raises(ValueError, match="same number of output rows"):
-            processor.process_row(row_index=2, row_data={"value": 3}, transforms=[transform], ctx=ctx)
+            processor.process_row(row_index=2, source_row=make_source_row({"value": 3}), transforms=[transform], ctx=ctx)
 
     def test_aggregation_passthrough_continues_to_next_transform(self) -> None:
         """Passthrough mode rows continue through remaining transforms after flush."""
@@ -254,8 +296,27 @@ class TestProcessorPassthroughMode:
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
+                    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                     enriched = [{**row, "batch_enriched": True} for row in rows]
-                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+
+                    # PIPELINEROW MIGRATION: Provide contract for passthrough mode aggregation
+                    if enriched:
+                        fields = tuple(
+                            FieldContract(
+                                normalized_name=key,
+                                original_name=key,
+                                python_type=object,
+                                required=False,
+                                source="inferred",
+                            )
+                            for key in enriched[0]
+                        )
+                    else:
+                        fields = ()
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         class DoubleTransform(BaseTransform):
@@ -331,7 +392,7 @@ class TestProcessorPassthroughMode:
         for i in range(2):
             result_list = processor.process_row(
                 row_index=i,
-                row_data={"value": i + 1},  # 1, 2
+                source_row=make_source_row({"value": i + 1}),  # 1, 2
                 transforms=[enricher, doubler],
                 ctx=ctx,
             )
@@ -385,6 +446,8 @@ class TestProcessorTransformMode:
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
+                    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                     # Group by 'category' and output one row per group
                     groups: dict[str, dict[str, Any]] = {}
                     for row in rows:
@@ -393,7 +456,26 @@ class TestProcessorTransformMode:
                             groups[cat] = {"category": cat, "count": 0, "total": 0}
                         groups[cat]["count"] += 1
                         groups[cat]["total"] += row.get("value", 0)
-                    return TransformResult.success_multi(list(groups.values()), success_reason={"action": "test"})
+
+                    output_rows = list(groups.values())
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    if output_rows:
+                        fields = tuple(
+                            FieldContract(
+                                normalized_name=key,
+                                original_name=key,
+                                python_type=object,
+                                required=False,
+                                source="inferred",
+                            )
+                            for key in output_rows[0]
+                        )
+                    else:
+                        fields = ()
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success_multi(output_rows, success_reason={"action": "test"}, contract=contract)
                 # Single row mode - not used in this test
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
@@ -453,7 +535,7 @@ class TestProcessorTransformMode:
         for i, row_data in enumerate(test_rows):
             results = processor.process_row(
                 row_index=i,
-                row_data=row_data,
+                source_row=make_source_row(row_data),
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -513,9 +595,26 @@ class TestProcessorTransformMode:
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
+                    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                     # Single aggregated output
                     total = sum(r.get("value", 0) for r in rows)
-                    return TransformResult.success({"total": total, "count": len(rows)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(rows)}
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -566,7 +665,7 @@ class TestProcessorTransformMode:
         for i in range(3):
             results = processor.process_row(
                 row_index=i,
-                row_data={"value": (i + 1) * 10},  # 10, 20, 30
+                source_row=make_source_row({"value": (i + 1) * 10}),  # 10, 20, 30
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -615,13 +714,34 @@ class TestProcessorTransformMode:
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
+                    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                     groups: dict[str, dict[str, Any]] = {}
                     for row in rows:
                         cat = row.get("category", "default")
                         if cat not in groups:
                             groups[cat] = {"category": cat, "count": 0}
                         groups[cat]["count"] += 1
-                    return TransformResult.success_multi(list(groups.values()), success_reason={"action": "test"})
+
+                    output_rows = list(groups.values())
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    if output_rows:
+                        fields = tuple(
+                            FieldContract(
+                                normalized_name=key,
+                                original_name=key,
+                                python_type=object,
+                                required=False,
+                                source="inferred",
+                            )
+                            for key in output_rows[0]
+                        )
+                    else:
+                        fields = ()
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success_multi(output_rows, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         class DoubleCount(BaseTransform):
@@ -703,7 +823,7 @@ class TestProcessorTransformMode:
         for i, row_data in enumerate(test_rows):
             results = processor.process_row(
                 row_index=i,
-                row_data=row_data,
+                source_row=make_source_row(row_data),
                 transforms=[splitter, doubler],
                 ctx=ctx,
             )
@@ -772,8 +892,25 @@ class TestProcessorSingleMode:
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
+                    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                     total = sum(r.get("value", 0) for r in rows)
-                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                    output_row = {"total": total}
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         class AddMarker(BaseTransform):
@@ -849,7 +986,7 @@ class TestProcessorSingleMode:
         for i in range(2):
             results = processor.process_row(
                 row_index=i,
-                row_data={"value": (i + 1) * 10},  # 10, 20
+                source_row=make_source_row({"value": (i + 1) * 10}),  # 10, 20
                 transforms=[summer, marker],
                 ctx=ctx,
             )
@@ -866,11 +1003,12 @@ class TestProcessorSingleMode:
         assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
 
         # CRITICAL: The aggregated row must have passed through AddMarker
-        assert completed[0].final_data["total"] == 30, "Sum should be 10 + 20 = 30"
-        assert "marker" in completed[0].final_data, (
-            f"BUG: Aggregated row did not pass through downstream transform! Expected 'marker' field, got: {completed[0].final_data}"
+        final_dict = completed[0].final_data.to_dict()
+        assert final_dict["total"] == 30, "Sum should be 10 + 20 = 30"
+        assert "marker" in final_dict, (
+            f"BUG: Aggregated row did not pass through downstream transform! Expected 'marker' field, got: {final_dict}"
         )
-        assert completed[0].final_data["marker"] == "DOWNSTREAM_EXECUTED"
+        assert final_dict["marker"] == "DOWNSTREAM_EXECUTED"
 
     def test_aggregation_transform_mode_no_downstream_completes_immediately(self) -> None:
         """Transform mode with no downstream transforms returns COMPLETED correctly."""
@@ -900,8 +1038,25 @@ class TestProcessorSingleMode:
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
+                    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                     total = sum(r.get("value", 0) for r in rows)
-                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                    output_row = {"total": total}
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -952,7 +1107,7 @@ class TestProcessorSingleMode:
         for i in range(2):
             results = processor.process_row(
                 row_index=i,
-                row_data={"value": (i + 1) * 10},
+                source_row=make_source_row({"value": (i + 1) * 10}),
                 transforms=[summer],  # Only the aggregation, no downstream
                 ctx=ctx,
             )
