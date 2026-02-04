@@ -20,6 +20,7 @@ from pydantic import ConfigDict
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
@@ -36,6 +37,21 @@ if TYPE_CHECKING:
 # =============================================================================
 # Test Helpers
 # =============================================================================
+
+
+def _make_contract(data: dict[str, Any]) -> SchemaContract:
+    """Create a simple schema contract for test data."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for k in data.keys()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class DynamicSchema(PluginSchema):
@@ -56,7 +72,7 @@ class SimpleSource(_TestSourceBase):
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         for row in self._rows:
-            yield SourceRow.valid(row)
+            yield SourceRow.valid(row, contract=_make_contract(row))
 
 
 class SimpleTransform:
@@ -74,7 +90,14 @@ class SimpleTransform:
     _on_error: str | None = None
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row, success_reason="passthrough")
+        # Extract data dict from PipelineRow if needed
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        if isinstance(row, PipelineRow):
+            row_data = row.to_dict()
+        else:
+            row_data = row
+        return TransformResult.success(row_data, success_reason="passthrough")
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -185,6 +208,16 @@ class TestOrchestratorWiresTelemetryToContext:
             """Transform that captures the telemetry_emit callback."""
 
             name = "callback_capturing"
+
+            def process(self, row: Any, ctx: Any) -> TransformResult:
+                # Extract data dict from PipelineRow
+                from elspeth.contracts.schema_contract import PipelineRow
+
+                if isinstance(row, PipelineRow):
+                    row_data = row.to_dict()
+                else:
+                    row_data = row
+                return TransformResult.success(row_data, success_reason="passthrough")
 
             def on_start(self, ctx: Any) -> None:
                 nonlocal captured_callback

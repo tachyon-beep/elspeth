@@ -101,13 +101,21 @@ class TestLLMTransformContract:
         user_message = next(m for m in messages if m["role"] == "user")
         assert "Analyze: Widget" in user_message["content"]
 
-    def test_process_with_dict_no_contract(
+    def test_process_with_minimal_contract(
         self,
         data: dict[str, object],
         mock_context: MagicMock,
     ) -> None:
-        """Process with plain dict works (backwards compatible)."""
-        # Template uses NORMALIZED name (plain dict has normalized keys)
+        """Process with minimal FLEXIBLE contract allows any fields."""
+        # Create minimal contract (FLEXIBLE mode, no declared fields)
+        minimal_contract = SchemaContract(
+            fields=(),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        pipeline_row = PipelineRow(data, minimal_contract)
+
+        # Template uses NORMALIZED name
         transform = MockLLMTransform(
             {
                 "model": "test-model",
@@ -117,7 +125,7 @@ class TestLLMTransformContract:
             }
         )
 
-        result = transform.process(data, mock_context)
+        result = transform.process(pipeline_row, mock_context)
 
         assert result.status == "success"
 
@@ -147,12 +155,20 @@ class TestLLMTransformContract:
         # Contract should include the new llm_result field
         assert result.contract.get_field("llm_result") is not None
 
-    def test_result_no_contract_when_input_is_dict(
+    def test_result_has_contract_even_with_minimal_input_contract(
         self,
         data: dict[str, object],
         mock_context: MagicMock,
     ) -> None:
-        """TransformResult has no contract when input is plain dict."""
+        """TransformResult has contract even when input has minimal FLEXIBLE contract."""
+        # Create minimal contract
+        minimal_contract = SchemaContract(
+            fields=(),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        pipeline_row = PipelineRow(data, minimal_contract)
+
         transform = MockLLMTransform(
             {
                 "model": "test-model",
@@ -162,18 +178,26 @@ class TestLLMTransformContract:
             }
         )
 
-        result = transform.process(data, mock_context)
+        result = transform.process(pipeline_row, mock_context)
 
         assert result.status == "success"
-        assert result.contract is None  # No input contract = no output contract
+        assert result.contract is not None  # Contract is propagated
 
-    def test_template_error_with_original_name_no_contract(
+    def test_template_error_with_original_name_minimal_contract(
         self,
         data: dict[str, object],
         mock_context: MagicMock,
     ) -> None:
-        """Template using original name fails without contract (expected behavior)."""
-        # Template uses original name but no contract to resolve it
+        """Template using original name fails with minimal contract (no name mappings)."""
+        # Create minimal FLEXIBLE contract (no field mappings for original names)
+        minimal_contract = SchemaContract(
+            fields=(),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        pipeline_row = PipelineRow(data, minimal_contract)
+
+        # Template uses original name but contract has no mapping for it
         transform = MockLLMTransform(
             {
                 "model": "test-model",
@@ -183,9 +207,9 @@ class TestLLMTransformContract:
             }
         )
 
-        result = transform.process(data, mock_context)
+        result = transform.process(pipeline_row, mock_context)
 
-        # Should fail because "Product Name" is not a key in plain dict
+        # Should fail because "Product Name" is not in data and minimal contract has no mappings
         assert result.status == "error"
         assert result.reason is not None
         assert "template" in str(result.reason.get("reason", "")).lower()

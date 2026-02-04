@@ -522,9 +522,9 @@ class _TestSourceBase:
                     original_name=key,
                     python_type=object,
                     required=False,
-                    source="observed",
+                    source="inferred",
                 )
-                for key in row.keys()
+                for key in row
             )
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
             yield SourceRow.valid(row, contract=contract)
@@ -623,8 +623,22 @@ class CallbackSource(_TestSourceBase):
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         """Yield rows with callbacks between them for clock advancement."""
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
         for i, row in enumerate(self._rows):
-            yield SourceRow.valid(row)
+            # Create contract for this row
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in row
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+            yield SourceRow.valid(row, contract=contract)
             # Called when generator resumes (after row i processed, before row i+1 yields)
             if self._after_yield_callback is not None:
                 self._after_yield_callback(i)
@@ -789,6 +803,36 @@ def as_sink(sink: Any) -> "SinkProtocol":
 def as_gate(gate: Any) -> "GateProtocol":
     """Cast a test gate to GateProtocol."""
     return cast("GateProtocol", gate)
+
+
+def create_observed_contract(row: dict[str, Any]) -> "SchemaContract":
+    """Create an OBSERVED schema contract from a row for test aggregations.
+
+    Args:
+        row: Output row from aggregation
+
+    Returns:
+        SchemaContract with all fields marked as observed, object type, optional
+
+    Usage:
+        # In aggregation transform
+        rows = [{"total": 100, "count": 3}]
+        contract = create_observed_contract(rows[0])
+        return TransformResult.success_multi(rows, contract=contract, success_reason={...})
+    """
+    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in row.keys()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 def as_transform_result(result: Any) -> "TransformResult":

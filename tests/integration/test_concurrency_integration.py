@@ -176,6 +176,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         from unittest.mock import MagicMock, patch
 
         from elspeth.contracts import ArtifactDescriptor, Determinism, NodeType, RoutingMode, SinkName, SourceRow
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.core.dag import ExecutionGraph
 
         db = LandscapeDB.in_memory()
@@ -192,6 +193,22 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         graph._default_sink = "output"
         graph._transform_id_map = {}
 
+        # Create contract for test data
+        test_data = {"id": 1}
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=object,
+                    required=False,
+                    source="observed",
+                ),
+            ),
+            locked=True,
+        )
+
         # Create mock source
         mock_source = MagicMock()
         mock_source.name = "test_source"
@@ -201,7 +218,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         schema_mock = MagicMock()
         schema_mock.model_json_schema.return_value = {"type": "object"}
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
+        mock_source.load.return_value = iter([SourceRow.valid(test_data, contract=contract)])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None  # Prevent MagicMock nesting
 

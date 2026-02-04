@@ -26,6 +26,7 @@ import pytest
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, NodeType
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
@@ -41,6 +42,29 @@ from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform
 
 # Dynamic schema for tests
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with observed schema contract for testing.
+
+    Args:
+        data: Row data as plain dict
+
+    Returns:
+        PipelineRow with contract
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for k in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data=data, contract=contract)
 
 
 # Concrete subclass of BaseLLMTransform for testing
@@ -145,7 +169,7 @@ class TestLLMTransformIntegration:
             }
         )
 
-        result = transform.process({"name": "Alice"}, ctx)
+        result = transform.process(_make_pipeline_row({"name": "Alice"}), ctx)
 
         # Verify result
         assert result.status == "success"
@@ -205,7 +229,7 @@ class TestLLMTransformIntegration:
             }
         )
 
-        result = transform.process({"text": "Hello world"}, ctx)
+        result = transform.process(_make_pipeline_row({"text": "Hello world"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -248,7 +272,7 @@ class TestLLMTransformIntegration:
             }
         )
 
-        result = transform.process({"text": "test"}, ctx)
+        result = transform.process(_make_pipeline_row({"text": "test"}), ctx)
 
         # Transform should return error result
         assert result.status == "error"
@@ -294,7 +318,7 @@ class TestLLMTransformIntegration:
         from elspeth.plugins.clients.llm import RateLimitError
 
         with pytest.raises(RateLimitError):
-            transform.process({"text": "test"}, ctx)
+            transform.process(_make_pipeline_row({"text": "test"}), ctx)
 
         # Audit trail should record as error
         calls = recorder.get_calls(state_id)
@@ -338,7 +362,7 @@ class TestLLMTransformIntegration:
             }
         )
 
-        transform.process({"text": "Hello"}, ctx)
+        transform.process(_make_pipeline_row({"text": "Hello"}), ctx)
 
         # Verify messages include system prompt
         call_args = mock_client.chat.completions.create.call_args
@@ -409,7 +433,9 @@ class TestOpenRouterLLMTransformIntegration:
             row_id=row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token_id)
-        return TokenInfo(row_id=row_id, token_id=token_id, row_data=row_data)
+        # Wrap row_data in PipelineRow with contract
+        pipeline_row = _make_pipeline_row(row_data)
+        return TokenInfo(row_id=row_id, token_id=token_id, row_data=pipeline_row)
 
     def _patch_httpx_for_chaosllm(self, chaosllm_server) -> Any:
         """Route httpx.Client calls to the ChaosLLM ASGI app."""

@@ -288,7 +288,7 @@ class TestTransformExecutorPipelineRow:
         assert updated_token.row_data.contract is output_contract
 
     def test_execute_transform_uses_input_contract_as_fallback(self) -> None:
-        """When result has no contract, should use input token's contract."""
+        """When result has no contract and transform has no output_schema, should use input token's contract."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -299,10 +299,12 @@ class TestTransformExecutorPipelineRow:
         token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
 
         # Mock transform - NO contract on result (typical passthrough transform)
+        # Set output_schema to None to force fallback to input contract
         mock_transform = MagicMock()
         mock_transform.name = "test_transform"
         mock_transform.node_id = "transform_001"
         mock_transform._on_error = None
+        mock_transform.output_schema = None  # No output schema - should fallback to input contract
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(
@@ -445,7 +447,7 @@ class TestTransformExecutorPipelineRow:
             assert isinstance(first_call_arg, dict), f"stable_hash should receive dict, got {type(first_call_arg)}"
 
     def test_execute_transform_crashes_if_no_contract_available(self) -> None:
-        """Should crash if neither result nor input has contract (B6 fix)."""
+        """Should crash if result, input, and output_schema all have no contract (B6 fix)."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -455,11 +457,12 @@ class TestTransformExecutorPipelineRow:
         row = PipelineRow({"value": "test"}, contract)
         token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
 
-        # Mock transform - returns success with NO contract
+        # Mock transform - returns success with NO contract and NO output_schema
         mock_transform = MagicMock()
         mock_transform.name = "test_transform"
         mock_transform.node_id = "transform_001"
         mock_transform._on_error = None
+        mock_transform.output_schema = None  # No output schema
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(

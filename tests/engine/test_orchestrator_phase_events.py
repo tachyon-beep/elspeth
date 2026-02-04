@@ -70,7 +70,7 @@ class TestPhaseErrorEmission:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("Transform exploded!")
 
         class CollectSink(_TestSinkBase):

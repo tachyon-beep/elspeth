@@ -84,7 +84,11 @@ def create_output_contract_from_schema(
     elif extra == "forbid":
         mode = "FIXED"
     else:
-        mode = "FIXED"  # Default: transforms have fixed output (extra="ignore")
+        # extra="ignore": Use FLEXIBLE mode to allow extra fields to pass through
+        # Sources may load data with extra fields not in schema (e.g., CSV with extra columns)
+        # Transforms may receive rows with extra fields from upstream
+        # FLEXIBLE mode allows these extras while enforcing declared field requirements
+        mode = "FLEXIBLE"
 
     # Get field information from Pydantic model_fields
     # This gives us accurate required/optional info

@@ -139,9 +139,14 @@ class TestCompletedOutcomeTimingContract:
                 super().__init__()
                 self._data = data
 
+                # Create schema contract from output_schema
+                from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+                self._schema_contract = create_output_contract_from_schema(self.output_schema)
+
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield SourceRow.valid(row, contract=self._schema_contract)
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
@@ -151,8 +156,12 @@ class TestCompletedOutcomeTimingContract:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(
+                    row.to_dict(),
+                    success_reason={"action": "passthrough"},
+                    contract=row.contract,
+                )
 
         class FailingSink(_TestSinkBase):
             """Sink that always throws on write.
@@ -240,9 +249,14 @@ class TestCompletedOutcomeTimingContract:
                 super().__init__()
                 self._data = data
 
+                # Create schema contract from output_schema
+                from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+                self._schema_contract = create_output_contract_from_schema(self.output_schema)
+
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield SourceRow.valid(row, contract=self._schema_contract)
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
@@ -252,8 +266,12 @@ class TestCompletedOutcomeTimingContract:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(
+                    row.to_dict(),
+                    success_reason={"action": "passthrough"},
+                    contract=row.contract,
+                )
 
         class FailingSink(_TestSinkBase):
             name = "failing_sink"
@@ -326,9 +344,14 @@ class TestCompletedOutcomeTimingContract:
                 super().__init__()
                 self._data = data
 
+                # Create schema contract from output_schema
+                from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+                self._schema_contract = create_output_contract_from_schema(self.output_schema)
+
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield SourceRow.valid(row, contract=self._schema_contract)
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
@@ -338,8 +361,12 @@ class TestCompletedOutcomeTimingContract:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(
+                    row.to_dict(),
+                    success_reason={"action": "passthrough"},
+                    contract=row.contract,
+                )
 
         class FailingSink(_TestSinkBase):
             name = "failing_sink"

@@ -59,7 +59,7 @@ class TestOrchestratorPayloadStoreRequirement:
 
             def load(self, ctx: Any) -> Any:
                 self.load_called = True
-                yield SourceRow.valid({"value": 1})
+                yield from self.wrap_rows([{"value": 1}])
 
             def close(self) -> None:
                 pass
@@ -124,7 +124,7 @@ class TestOrchestratorPayloadStoreRequirement:
 
             def load(self, ctx: Any) -> Any:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield from self.wrap_rows([row])
 
             def close(self) -> None:
                 pass
@@ -202,7 +202,7 @@ class TestOrchestratorPayloadStoreRequirement:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"value": 1})
+                yield from self.wrap_rows([{"value": 1}])
 
             def close(self) -> None:
                 pass
@@ -305,7 +305,7 @@ class TestOrchestratorPayloadStoreIntegration:
 
             def load(self, ctx: Any) -> Any:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield from self.wrap_rows([row])
 
             def close(self) -> None:
                 pass
@@ -318,7 +318,7 @@ class TestOrchestratorPayloadStoreIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
                     {
                         "value": row["value"],

@@ -55,7 +55,7 @@ class TestPluginTypeDetection:
             name = "duck"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         duck = DuckTypedTransform()
         # Has the method but NOT an instance of BaseTransform
@@ -124,7 +124,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             node_id = "fake_node_id"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

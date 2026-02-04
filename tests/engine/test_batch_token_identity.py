@@ -72,7 +72,20 @@ class SumTransform(BaseTransform):
     def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
         if isinstance(rows, list):
             total = sum(r.get("value", 0) for r in rows)
-            return TransformResult.success({"total": total}, success_reason={"action": "sum"})
+            output_row = {"total": total}
+            # Create contract for the output row
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="observed",
+                )
+                for key in output_row.keys()
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+            return TransformResult.success(output_row, success_reason={"action": "sum"}, contract=contract)
         return TransformResult.success(rows, success_reason={"action": "passthrough"})
 
 

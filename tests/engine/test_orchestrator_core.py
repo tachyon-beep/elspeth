@@ -59,8 +59,7 @@ class TestOrchestrator:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -73,7 +72,7 @@ class TestOrchestrator:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
                     {
                         "value": row["value"],
@@ -141,8 +140,7 @@ class TestOrchestrator:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -219,8 +217,7 @@ class TestOrchestratorMultipleTransforms:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -233,7 +230,7 @@ class TestOrchestratorMultipleTransforms:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
 
         class MultiplyTwoTransform(BaseTransform):
@@ -244,7 +241,7 @@ class TestOrchestratorMultipleTransforms:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "multiply_two"})
 
         class CollectSink(_TestSinkBase):
@@ -311,8 +308,7 @@ class TestOrchestratorEmptyPipeline:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -386,8 +382,8 @@ class TestOrchestratorEmptyPipeline:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"

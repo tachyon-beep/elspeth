@@ -14,11 +14,27 @@ from typing import Any
 import pytest
 
 from elspeth.contracts.enums import BatchStatus, Determinism, NodeType, RunStatus
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+
+
+def _make_contract(data: dict[str, Any]) -> SchemaContract:
+    """Create a contract from observed data fields."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for k in data.keys()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestAggregationRecoveryIntegration:
@@ -456,7 +472,10 @@ class TestAggregationRecoveryIntegration:
         assert evaluator.should_trigger() is False
 
         # Create checkpoint with aggregation state
-        # Note: token format must match v1.1 checkpoint schema (all fields required)
+        # Note: token format must match v2.0 checkpoint schema (includes contract)
+        # Create a contract for the checkpoint
+        contract = _make_contract({"id": 0, "value": 0})
+        contract_version = contract.version_hash()
         sum_agg_state: dict[str, Any] = {
             "tokens": [
                 {
@@ -467,6 +486,7 @@ class TestAggregationRecoveryIntegration:
                     "fork_group_id": None,
                     "join_group_id": None,
                     "expand_group_id": None,
+                    "contract_version": contract_version,  # v2.0: required for contract reference
                 }
                 for t in tokens
             ],
@@ -474,6 +494,7 @@ class TestAggregationRecoveryIntegration:
             "elapsed_age_seconds": evaluator.get_age_seconds(),  # Bug #6 fix: store elapsed time
             "count_fire_offset": evaluator.get_count_fire_offset(),  # P2-2026-02-01
             "condition_fire_offset": evaluator.get_condition_fire_offset(),  # P2-2026-02-01
+            "contract": contract.to_checkpoint_format(),  # v2.0: contract required for PipelineRow restoration
         }
         agg_state: dict[str, Any] = {
             "_version": "2.0",  # Required checkpoint version

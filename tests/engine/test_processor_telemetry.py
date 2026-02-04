@@ -66,8 +66,8 @@ class PassthroughTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row, success_reason={"action": "passthrough"})
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
 
 class FailingTransform(BaseTransform):
@@ -82,7 +82,7 @@ class FailingTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: Any, ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         return TransformResult.error({"reason": "intentional_failure"})
 
 
@@ -524,7 +524,7 @@ class BatchAwareTransformForTelemetry(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: Any, ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         if isinstance(row, list):
             # Batch mode - aggregate
             total = sum(r.get("value", 0) for r in row)
@@ -534,7 +534,7 @@ class BatchAwareTransformForTelemetry(BaseTransform):
             )
         else:
             # Single row mode
-            return TransformResult.success(row, success_reason={"action": "passthrough"})
+            return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
 
 class FailingBatchAwareTransform(BaseTransform):
@@ -552,13 +552,13 @@ class FailingBatchAwareTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: Any, ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         if isinstance(row, list):
             # Batch mode - return error to simulate flush failure
             return TransformResult.error({"reason": "intentional_batch_failure"})
         else:
             # Single row mode - succeed (shouldn't be called in batch mode)
-            return TransformResult.success(row)
+            return TransformResult.success(row.to_dict())
 
 
 class PassthroughBatchAwareTransform(BaseTransform):
@@ -577,7 +577,7 @@ class PassthroughBatchAwareTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: Any, ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         if isinstance(row, list):
             # Batch mode - enrich each row with batch metadata
             enriched_rows = [{**r, "batch_processed": True, "batch_size": len(row)} for r in row]

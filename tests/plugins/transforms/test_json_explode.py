@@ -411,3 +411,91 @@ class TestJSONExplodeOutputSchema:
 
         config = transform.output_schema.model_config
         assert config.get("extra") == "allow", "Output schema should allow extra fields (dynamic)"
+
+
+class TestJSONExplodeContractPropagation:
+    """Tests for JSONExplode contract propagation."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_contract_contains_output_field_not_array_field(self, ctx: PluginContext) -> None:
+        """Output contract contains output_field and item_index, not array_field."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = _make_pipeline_row({"id": 1, "items": ["a", "b"]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+
+        field_names = {f.normalized_name for f in result.contract.fields}
+        assert "item" in field_names
+        assert "item_index" in field_names
+        assert "items" not in field_names  # Array field removed
+        assert "id" in field_names  # Other fields preserved
+
+    def test_contract_empty_array_case(self, ctx: PluginContext) -> None:
+        """Output contract for empty array contains output_field with None type."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = _make_pipeline_row({"id": 1, "items": []})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+
+        field_names = {f.normalized_name for f in result.contract.fields}
+        assert "item" in field_names
+        assert "item_index" in field_names
+        assert "items" not in field_names
+
+    def test_downstream_can_access_exploded_fields(self, ctx: PluginContext) -> None:
+        """Downstream transforms can access exploded fields via contract."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "tags",
+                "output_field": "tag",
+            }
+        )
+
+        row = _make_pipeline_row({"id": 1, "tags": ["python", "elspeth"]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+        assert result.rows is not None
+        assert len(result.rows) == 2
+
+        # Create PipelineRow with output contract for first child
+        output_row = PipelineRow(result.rows[0], result.contract)
+
+        # Downstream access via contract should work
+        assert output_row["tag"] == "python"
+        assert output_row["item_index"] == 0
+        assert output_row["id"] == 1
+
+        # Original array field should not be accessible
+        with pytest.raises(KeyError, match="not found in schema contract"):
+            _ = output_row["tags"]

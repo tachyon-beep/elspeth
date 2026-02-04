@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
@@ -614,7 +615,17 @@ class RowProcessor:
                     f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
                 )
 
-            for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
+            # Contract validation for passthrough mode
+            if result.contract is None:
+                raise ValueError(
+                    f"Passthrough aggregation {transform.name} produced multi-row output but returned no contract. "
+                    f"Schema-changing aggregations must update contracts. This is a plugin bug."
+                )
+
+            # Convert output rows (plain dicts) to PipelineRow objects using contract
+            pipeline_rows = [PipelineRow(row, result.contract) for row in result.rows]
+
+            for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                 # Update token with enriched data, preserving all lineage metadata
                 updated_token = token.with_updated_data(enriched_data)
 
@@ -682,9 +693,18 @@ class RowProcessor:
             # Create new tokens via expand_token using first buffered token as parent
             # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
             if buffered_tokens:
+                # B1: No fallback - schema-changing transforms MUST provide contract
+                # Per CLAUDE.md Three-Tier Trust Model: transforms are system code, bugs should crash
+                if result.contract is None:
+                    raise ValueError(
+                        f"Batch transform {transform.name} produced multi-row output but returned no contract. "
+                        f"Schema-changing transforms must update contracts. This is a plugin bug."
+                    )
+
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
                     expanded_rows=output_rows,
+                    output_contract=result.contract,
                     step_in_pipeline=audit_step,
                     run_id=self._run_id,
                     record_parent_outcome=False,
@@ -920,6 +940,16 @@ class RowProcessor:
                         f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
                     )
 
+                # P1: Passthrough aggregations must provide contracts to enable PipelineRow conversion
+                if result.contract is None:
+                    raise ValueError(
+                        f"Batch transform {transform.name} produced multi-row output but returned no contract. "
+                        f"Schema-changing transforms must update contracts. This is a plugin bug."
+                    )
+
+                # Convert output rows (plain dicts) to PipelineRow objects using contract
+                pipeline_rows = [PipelineRow(row, result.contract) for row in result.rows]
+
                 # Build COMPLETED results for all buffered tokens with enriched data
                 # Check if there are more transforms after this one
                 more_transforms = step < total_steps
@@ -937,7 +967,7 @@ class RowProcessor:
                     # p is current 0-indexed position). So transforms[step:] gives remaining.
                     # If there's a coalesce point, skip directly there (matches fork behavior).
                     continuation_start = coalesce_at_step if coalesce_at_step is not None else step
-                    for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
+                    for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
                         updated_token = token.with_updated_data(enriched_data)
                         child_items.append(
@@ -953,14 +983,15 @@ class RowProcessor:
                 else:
                     # No more transforms and no coalesce - return COMPLETED for all tokens
                     passthrough_results: list[RowResult] = []
-                    for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
+                    for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
                         updated_token = token.with_updated_data(enriched_data)
                         # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
+                        # Convert PipelineRow to dict for final_data (RowResult expects dict)
                         passthrough_results.append(
                             RowResult(
                                 token=updated_token,
-                                final_data=enriched_data,
+                                final_data=enriched_data.to_dict(),
                                 outcome=RowOutcome.COMPLETED,
                             )
                         )
@@ -1002,9 +1033,18 @@ class RowProcessor:
                 # Create new tokens via expand_token using triggering token as parent
                 # This establishes audit trail linkage
                 # NOTE: Don't record EXPANDED - triggering token gets CONSUMED_IN_BATCH below
+
+                # B1: No fallback - aggregations producing multi-row output MUST provide contract
+                if result.contract is None:
+                    raise ValueError(
+                        f"Aggregation {settings.name} produced multi-row output but returned no contract. "
+                        f"Schema-changing aggregations must update contracts. This is a plugin bug."
+                    )
+
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=current_token,
                     expanded_rows=output_rows,
+                    output_contract=result.contract,
                     step_in_pipeline=step,
                     run_id=self._run_id,
                     record_parent_outcome=False,
@@ -1766,9 +1806,19 @@ class RowProcessor:
                     # Deaggregation: create child tokens for each output row
                     # transform_result.rows is guaranteed non-None when is_multi_row is True
                     # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+
+                    # B1: No fallback - transforms producing multi-row output MUST provide contract
+                    # Per CLAUDE.md: Transforms are system code (Tier 1), bugs should crash immediately
+                    if transform_result.contract is None:
+                        raise ValueError(
+                            f"Transform {transform.name} produced multi-row output but returned no contract. "
+                            f"Schema-changing transforms must update contracts. This is a plugin bug."
+                        )
+
                     child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,
                         expanded_rows=transform_result.rows,  # type: ignore[arg-type]
+                        output_contract=transform_result.contract,
                         step_in_pipeline=step,
                         run_id=self._run_id,
                     )

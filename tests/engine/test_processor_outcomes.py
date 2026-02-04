@@ -17,6 +17,29 @@ from elspeth.contracts.types import GateName, NodeID
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
+
+
 class TestProcessorRecordsOutcomes:
     """Test that processor records outcomes at determination points."""
 
@@ -456,7 +479,7 @@ class TestEngineIntegrationOutcomes:
         ctx = PluginContext(run_id=run.run_id, config={})
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=make_source_row({"value": 42}),
             transforms=[EnricherTransform(transform.node_id)],
             ctx=ctx,
         )
@@ -528,7 +551,7 @@ class TestEngineIntegrationOutcomes:
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if row["value"] < 0:
                     return TransformResult.error({"reason": "validation_failed", "error": "negative_value"})
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         processor = RowProcessor(
             recorder=recorder,
@@ -540,7 +563,7 @@ class TestEngineIntegrationOutcomes:
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
         results = processor.process_row(
             row_index=0,
-            row_data={"value": -5},
+            source_row=make_source_row({"value": -5}),
             transforms=[ValidatingTransform(transform.node_id)],
             ctx=ctx,
         )
@@ -644,7 +667,7 @@ class TestEngineIntegrationOutcomes:
         ctx = PluginContext(run_id=run.run_id, config={})
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=make_source_row({"value": 42}),
             transforms=[],
             ctx=ctx,
         )

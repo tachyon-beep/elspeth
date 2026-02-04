@@ -58,6 +58,27 @@ if TYPE_CHECKING:
 # definitions into reusable parameterized classes.
 
 from elspeth.core.landscape import LandscapeDB
+from elspeth.contracts import FieldContract, PipelineRow, SchemaContract
+
+
+def _make_source_row(data: dict[str, Any]) -> SourceRow:
+    """Create a SourceRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in SourceRow with flexible schema contract.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(data, contract=contract)
 
 
 @pytest.fixture(scope="module")
@@ -95,8 +116,7 @@ class _ListSource(_TestSourceBase):
         pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._data:
-            yield SourceRow.valid(row)
+        yield from self.wrap_rows(self._data)
 
     def close(self) -> None:
         pass
@@ -307,8 +327,7 @@ class TestEngineIntegration:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -321,7 +340,7 @@ class TestEngineIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
                     {
                         "value": row["value"],
@@ -446,8 +465,7 @@ class TestEngineIntegration:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -460,7 +478,7 @@ class TestEngineIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({"n": row["n"] * 2}, success_reason={"action": "multiply"})
 
         class AddTenTransform(BaseTransform):
@@ -471,7 +489,7 @@ class TestEngineIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({"n": row["n"] + 10}, success_reason={"action": "add"})
 
         class CollectSink(_TestSinkBase):
@@ -576,8 +594,7 @@ class TestEngineIntegration:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -708,8 +725,7 @@ class TestNoSilentAuditLoss:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -805,8 +821,7 @@ class TestNoSilentAuditLoss:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -819,7 +834,7 @@ class TestNoSilentAuditLoss:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("Intentional explosion")
 
         class CollectSink(_TestSinkBase):
@@ -890,8 +905,7 @@ class TestNoSilentAuditLoss:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -904,8 +918,8 @@ class TestNoSilentAuditLoss:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         class ExplodingSink(_TestSinkBase):
             name = "exploding_sink"
@@ -985,8 +999,8 @@ class TestAuditTrailCompleteness:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         class CollectSink(_TestSinkBase):
             name = "sink"
@@ -1052,8 +1066,7 @@ class TestAuditTrailCompleteness:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -1256,9 +1269,10 @@ class TestForkIntegration:
         source_rows = [{"value": 1}, {"value": 2}]
         all_results = []
         for row_index, row_data in enumerate(source_rows):
+            source_row = _make_source_row(row_data)
             results = processor.process_row(
                 row_index=row_index,
-                row_data=row_data,
+                source_row=source_row,
                 transforms=[],  # No plugin transforms, only config gate
                 ctx=ctx,
             )
@@ -1484,7 +1498,7 @@ class TestForkCoalescePipelineIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({"sentiment": "positive"}, success_reason={"action": "test"})
 
         class EntityTransform(BaseTransform):
@@ -1498,7 +1512,7 @@ class TestForkCoalescePipelineIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({"entities": ["ACME"]}, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
@@ -1559,14 +1573,15 @@ class TestForkCoalescePipelineIntegration:
 
         # Process a single source row through the pipeline
         # The flow: source -> fork gate -> [sentiment branch, entity branch] -> coalesce
-        source_row = {"text": "ACME reported great earnings"}
+        source_row_data = {"text": "ACME reported great earnings"}
 
         # Step 1: Process through gate (fork)
+        source_row = _make_source_row(source_row_data)
         initial_token = token_manager.create_initial_token(
             run_id=run_id,
             source_node_id=source_node.node_id,
             row_index=0,
-            row_data=source_row,
+            source_row=source_row,
         )
 
         # Execute the config-driven fork gate
@@ -1607,10 +1622,12 @@ class TestForkCoalescePipelineIntegration:
         assert sentiment_result.status == "success"
         # Update token with transformed data while preserving branch_name
         assert sentiment_result.row is not None
+        # Test transforms don't set contracts, so manually wrap in PipelineRow
+        sentiment_pipeline_row = PipelineRow(sentiment_result.row, _make_source_row(sentiment_result.row).contract)
         sentiment_token_processed = TokenInfo(
             row_id=sentiment_token_updated.row_id,
             token_id=sentiment_token_updated.token_id,
-            row_data=sentiment_result.row,
+            row_data=sentiment_pipeline_row,
             branch_name="sentiment",
         )
 
@@ -1624,10 +1641,12 @@ class TestForkCoalescePipelineIntegration:
         assert entity_result.status == "success"
         # Update token with transformed data while preserving branch_name
         assert entity_result.row is not None
+        # Test transforms don't set contracts, so manually wrap in PipelineRow
+        entity_pipeline_row = PipelineRow(entity_result.row, _make_source_row(entity_result.row).contract)
         entity_token_processed = TokenInfo(
             row_id=entity_token_updated.row_id,
             token_id=entity_token_updated.token_id,
-            row_data=entity_result.row,
+            row_data=entity_pipeline_row,
             branch_name="entities",
         )
 
@@ -1856,13 +1875,14 @@ class TestForkCoalescePipelineIntegration:
         source_rows = [{"id": 1}, {"id": 2}, {"id": 3}]
         merged_tokens: list[TokenInfo] = []
 
-        for idx, source_row in enumerate(source_rows):
+        for idx, source_row_data in enumerate(source_rows):
             # Create initial token
+            source_row = _make_source_row(source_row_data)
             initial_token = token_manager.create_initial_token(
                 run_id=run_id,
                 source_node_id=source_node.node_id,
                 row_index=idx,
-                row_data=source_row,
+                source_row=source_row,
             )
 
             # Fork using config-driven gate
@@ -1877,13 +1897,15 @@ class TestForkCoalescePipelineIntegration:
 
             # Simulate branch processing - each branch adds its identifier
             for child in gate_outcome.child_tokens:
-                processed_data = child.row_data.copy()
+                processed_data = child.row_data.to_dict()
                 processed_data[f"from_{child.branch_name}"] = True
 
+                # Create new PipelineRow with updated data
+                processed_pipeline_row = PipelineRow(processed_data, child.row_data.contract)
                 processed_token = TokenInfo(
                     row_id=child.row_id,
                     token_id=child.token_id,
-                    row_data=processed_data,
+                    row_data=processed_pipeline_row,
                     branch_name=child.branch_name,
                 )
 
@@ -2091,7 +2113,7 @@ class TestComplexDAGIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 # Simple sentiment: "good" in text means positive
                 text = row["text"]
                 sentiment = "positive" if "good" in text.lower() else "neutral"
@@ -2108,7 +2130,7 @@ class TestComplexDAGIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 # Simple entity extraction: uppercase words are entities
                 text = row["text"]
                 entities = [word for word in text.split() if word.isupper()]
@@ -2172,14 +2194,15 @@ class TestComplexDAGIntegration:
         ctx = PluginContext(run_id=run_id, config={})
 
         # Test data: row with text
-        source_row = {"text": "ACME reported good earnings"}
+        source_row_data = {"text": "ACME reported good earnings"}
 
         # Step 1: Create initial token from source
+        source_row = _make_source_row(source_row_data)
         initial_token = token_manager.create_initial_token(
             run_id=run_id,
             source_node_id=source_node.node_id,
             row_index=0,
-            row_data=source_row,
+            source_row=source_row,
         )
 
         # Step 2: Execute fork gate
@@ -2208,10 +2231,12 @@ class TestComplexDAGIntegration:
         )
         assert sentiment_result.status == "success"
         assert sentiment_result.row is not None
+        # Test transforms don't set contracts, so manually wrap in PipelineRow
+        sentiment_pipeline_row = PipelineRow(sentiment_result.row, _make_source_row(sentiment_result.row).contract)
         sentiment_token_processed = TokenInfo(
             row_id=sentiment_token_updated.row_id,
             token_id=sentiment_token_updated.token_id,
-            row_data=sentiment_result.row,
+            row_data=sentiment_pipeline_row,
             branch_name="sentiment_path",
         )
 
@@ -2224,10 +2249,12 @@ class TestComplexDAGIntegration:
         )
         assert entity_result.status == "success"
         assert entity_result.row is not None
+        # Test transforms don't set contracts, so manually wrap in PipelineRow
+        entity_pipeline_row = PipelineRow(entity_result.row, _make_source_row(entity_result.row).contract)
         entity_token_processed = TokenInfo(
             row_id=entity_token_updated.row_id,
             token_id=entity_token_updated.token_id,
-            row_data=entity_result.row,
+            row_data=entity_pipeline_row,
             branch_name="entity_path",
         )
 
@@ -2363,8 +2390,7 @@ class TestComplexDAGIntegration:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -2600,8 +2626,7 @@ class TestRetryIntegration:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -2758,8 +2783,7 @@ class TestRetryIntegration:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -2966,11 +2990,12 @@ class TestExplainQuery:
         token_manager = TokenManager(recorder)
 
         source_data = {"value": 42, "name": "test_row"}
+        source_row = _make_source_row(source_data)
         token = token_manager.create_initial_token(
             run_id=run_id,
             source_node_id=source_node.node_id,
             row_index=0,
-            row_data=source_data,
+            source_row=source_row,
         )
 
         # Record transform processing
@@ -3079,11 +3104,12 @@ class TestExplainQuery:
         token_manager = TokenManager(recorder)
         input_tokens = []
         for i in range(3):
+            source_row = _make_source_row({"value": (i + 1) * 10})  # 10, 20, 30
             token = token_manager.create_initial_token(
                 run_id=run_id,
                 source_node_id=source_node.node_id,
                 row_index=i,
-                row_data={"value": (i + 1) * 10},  # 10, 20, 30
+                source_row=source_row,
             )
             input_tokens.append(token)
 
@@ -3231,11 +3257,12 @@ class TestExplainQuery:
         # Create initial token (before fork)
         token_manager = TokenManager(recorder)
         source_data = {"value": 100, "name": "original"}
+        source_row = _make_source_row(source_data)
         parent_token = token_manager.create_initial_token(
             run_id=run_id,
             source_node_id=source_node.node_id,
             row_index=0,
-            row_data=source_data,
+            source_row=source_row,
         )
 
         # Record parent token processing at gate (fork point)
@@ -3404,8 +3431,7 @@ class TestErrorRecovery:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -3427,7 +3453,7 @@ class TestErrorRecovery:
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             """Sink that collects rows in memory."""
@@ -3521,8 +3547,7 @@ class TestErrorRecovery:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -3544,7 +3569,7 @@ class TestErrorRecovery:
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             """Sink that collects rows in memory."""

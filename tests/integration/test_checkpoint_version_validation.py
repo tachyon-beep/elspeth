@@ -9,10 +9,26 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
+
+
+def _make_contract(data: dict[str, Any]) -> SchemaContract:
+    """Create a contract from observed data fields."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for k in data.keys()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestCheckpointVersionValidation:
@@ -138,6 +154,8 @@ class TestCheckpointVersionValidation:
         )
 
         # Valid checkpoint state with matching version
+        contract = _make_contract({"value": 1})
+        contract_version = contract.version_hash()
         valid_state = {
             "_version": "2.0",  # Matching version
             "test_node": {
@@ -150,12 +168,14 @@ class TestCheckpointVersionValidation:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
+                        "contract_version": contract_version,  # v2.0: required for contract reference
                     }
                 ],
                 "batch_id": "batch-001",
                 "elapsed_age_seconds": 0.0,
                 "count_fire_offset": None,  # P2-2026-02-01: Required in v2.0
                 "condition_fire_offset": None,  # P2-2026-02-01: Required in v2.0
+                "contract": contract.to_checkpoint_format(),  # v2.0: contract required for PipelineRow restoration
             },
         }
 

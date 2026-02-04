@@ -50,8 +50,8 @@ class PassthroughTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row, success_reason={"action": "passthrough"})
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
 
 @dataclass
@@ -381,7 +381,7 @@ class TestTelemetryOnRunFailure:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("Simulated transform failure")
 
         # Source that yields a row to trigger the transform

@@ -7,10 +7,21 @@ import pytest
 
 from elspeth.contracts import NodeStateCompleted, NodeStateFailed, NodeType
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from tests.conftest import as_transform
+from tests.engine.conftest import _TestSchema
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+
+
+def _make_contract() -> SchemaContract:
+    """Create a flexible schema contract for testing."""
+    return SchemaContract(
+        mode="FLEXIBLE",
+        fields=(),
+        locked=True,
+    )
 
 
 class TestTransformExecutor:
@@ -39,9 +50,11 @@ class TestTransformExecutor:
         # Mock transform plugin
         class DoubleTransform:
             name = "double"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
             node_id = node.node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         transform = DoubleTransform()
@@ -51,7 +64,7 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 21},
+            row_data=PipelineRow({"value": 21}, _make_contract()),
         )
 
         # Need to create row/token in landscape first
@@ -59,7 +72,7 @@ class TestTransformExecutor:
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -103,7 +116,7 @@ class TestTransformExecutor:
             node_id = node.node_id
             _on_error = "discard"  # Required for transforms that return errors
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "validation_failed", "message": "validation failed"})
 
         transform = FailingTransform()
@@ -113,13 +126,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": -1},
+            row_data=PipelineRow({"value": -1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -173,7 +186,7 @@ class TestTransformExecutor:
             name = "exploding"
             node_id = node.node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise RuntimeError("kaboom!")
 
         transform = ExplodingTransform()
@@ -183,13 +196,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 99},
+            row_data=PipelineRow({"value": 99}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -234,9 +247,11 @@ class TestTransformExecutor:
 
         class EnrichTransform:
             name = "enricher"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
             node_id = node.node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         transform = EnrichTransform()
@@ -246,13 +261,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"original": "data"},
+            row_data=PipelineRow({"original": "data"}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -265,7 +280,7 @@ class TestTransformExecutor:
         )
 
         # Updated token has new row data
-        assert updated_token.row_data == {"original": "data", "enriched": True}
+        assert updated_token.row_data.to_dict() == {"original": "data", "enriched": True}
         # Identity preserved
         assert updated_token.token_id == token.token_id
         assert updated_token.row_id == token.row_id
@@ -293,10 +308,12 @@ class TestTransformExecutor:
 
         class IdentityTransform:
             name = "identity"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
             node_id = node.node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         transform = IdentityTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -305,13 +322,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"key": "value"},
+            row_data=PipelineRow({"key": "value"}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -361,7 +378,7 @@ class TestTransformExecutor:
             node_id = node.node_id
             _on_error = "discard"
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "invalid_input", "message": "invalid input"})
 
         transform = DiscardingTransform()
@@ -371,13 +388,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": -1},
+            row_data=PipelineRow({"value": -1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -432,7 +449,7 @@ class TestTransformExecutor:
             node_id = node.node_id
             _on_error = "error_sink"  # Routes to named error sink
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "validation_failed", "message": "routing to error sink"})
 
         transform = ErrorRoutingTransform()
@@ -442,13 +459,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": "bad"},
+            row_data=PipelineRow({"value": "bad"}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -486,9 +503,11 @@ class TestTransformExecutor:
 
         class SuccessfulTransform:
             name = "successful"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
             node_id = node.node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"result": "ok"}, success_reason={"action": "test"})
 
         transform = SuccessfulTransform()
@@ -498,13 +517,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -544,10 +563,12 @@ class TestTransformExecutor:
 
         class SimpleTransform:
             name = "attempt_test"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
             node_id = node.node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         transform = SimpleTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -556,13 +577,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -621,11 +642,13 @@ class TestTransformExecutor:
 
         class PooledTransform:
             name = "pool_metadata"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
             node_id = node.node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
-                    row,
+                    row.to_dict(),
                     success_reason={"action": "enriched"},
                     context_after=pool_context,
                 )
@@ -637,13 +660,13 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -728,7 +751,7 @@ class TestTransformErrorIdRegression:
             node_id = node2.node_id  # This is the unique DAG node ID
             _on_error = "error_sink"
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "validation_failed", "error": "invalid phone format"})
 
         transform = FailingFieldMapper()
@@ -738,13 +761,13 @@ class TestTransformErrorIdRegression:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"phone": "invalid"},
+            row_data=PipelineRow({"phone": "invalid"}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node1.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)

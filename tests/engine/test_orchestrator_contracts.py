@@ -229,7 +229,7 @@ class TestOrchestratorContractRecording:
                 super().__init__()
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"x": 1})
+                yield from self.wrap_rows([{"x": 1}])
 
             def get_schema_contract(self) -> SchemaContract | None:
                 return None
@@ -326,7 +326,8 @@ class TestOrchestratorContractRecording:
 
         assert result.rows_processed == 0
 
-        # With no rows processed, contract should NOT be recorded (first-row inference didn't happen)
+        # PIPELINEROW MIGRATION: Contract IS recorded even with no rows
+        # Source contract is stored at run start (not after first row) to support resume/recovery
         from sqlalchemy import select
 
         from elspeth.core.landscape.schema import runs_table
@@ -335,8 +336,14 @@ class TestOrchestratorContractRecording:
             run_row = conn.execute(select(runs_table).where(runs_table.c.run_id == result.run_id)).fetchone()
 
             assert run_row is not None
-            # No contract recorded because first-row callback never fires
-            assert run_row.schema_contract_json is None
+            # Contract recorded from source at run start, even with 0 rows processed
+            assert run_row.schema_contract_json is not None
+            # Empty source produces empty contract (no fields)
+            import json
+
+            contract_data = json.loads(run_row.schema_contract_json)
+            assert contract_data["fields"] == []
+            assert contract_data["mode"] == "OBSERVED"
 
     def test_contract_recorded_after_first_valid_row_not_first_iteration(self, payload_store) -> None:
         """Contract recorded after first VALID row, not first iteration.
@@ -471,7 +478,7 @@ class TestOrchestratorSecretResolutions:
             output_schema = _TestSchema
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"x": 1})
+                yield from self.wrap_rows([{"x": 1}])
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -551,7 +558,7 @@ class TestOrchestratorSecretResolutions:
             output_schema = _TestSchema
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"x": 1})
+                yield from self.wrap_rows([{"x": 1}])
 
         class CollectSink(_TestSinkBase):
             name = "collect"

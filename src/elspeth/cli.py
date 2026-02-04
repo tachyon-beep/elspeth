@@ -743,6 +743,7 @@ def _execute_pipeline(
 
     # Initialize rate_limit_registry to None so it's defined in finally block
     rate_limit_registry = None
+    telemetry_manager = None
 
     try:
         # Instantiate transforms from transforms via PluginManager
@@ -1061,6 +1062,7 @@ def _execute_pipeline_with_instances(
 
     # Initialize rate_limit_registry to None so it's defined in finally block
     rate_limit_registry = None
+    telemetry_manager = None
 
     try:
         # Build PipelineConfig with pre-instantiated plugins

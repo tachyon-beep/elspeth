@@ -396,13 +396,27 @@ class TransformExecutor:
             # For multi-row results, keep original row_data (engine will expand tokens later)
             if result.row is not None:
                 # Single-row result: create new PipelineRow from result dict + contract
-                # Use result.contract if provided, otherwise fallback to input contract
-                output_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
-                if output_contract is None:
+                # Contract fallback chain:
+                # 1. result.contract (if transform provides it)
+                # 2. transform.output_schema (create contract from schema)
+                # 3. input token contract (passthrough scenario)
+                # 4. None of above available -> crash (plugin bug)
+                if result.contract is not None:
+                    output_contract = result.contract
+                elif transform.output_schema is not None:
+                    # Create contract from transform's output_schema
+                    from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+                    output_contract = create_output_contract_from_schema(transform.output_schema)
+                elif token.row_data.contract is not None:
+                    # Fallback to input contract (passthrough transform)
+                    output_contract = token.row_data.contract
+                else:
+                    # No contract available anywhere - plugin bug
                     raise ValueError(
                         f"Cannot create PipelineRow: no contract available. "
-                        f"TransformResult.contract is None and input token has no contract. "
-                        f"This is a bug in transform '{transform.name}' or upstream pipeline."
+                        f"Transform '{transform.name}' returned no contract, has no output_schema, "
+                        f"and input token has no contract. This is a bug in the transform or upstream pipeline."
                     )
                 new_row = PipelineRow(result.row, output_contract)
 

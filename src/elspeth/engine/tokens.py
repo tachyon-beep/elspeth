@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
 
 from elspeth.contracts import SourceRow, TokenInfo
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.landscape import LandscapeRecorder
 
 
@@ -308,6 +308,7 @@ class TokenManager:
         self,
         parent_token: TokenInfo,
         expanded_rows: list[dict[str, Any]],
+        output_contract: SchemaContract,
         step_in_pipeline: int,
         run_id: str,
         record_parent_outcome: bool = True,
@@ -324,6 +325,7 @@ class TokenManager:
         Args:
             parent_token: The token being expanded
             expanded_rows: List of output row dicts (transforms output dicts, not PipelineRow)
+            output_contract: Contract for output rows (from TransformResult.contract)
             step_in_pipeline: Current step (for audit)
             run_id: Run ID (required for atomic outcome recording)
             record_parent_outcome: If True (default), record EXPANDED outcome for parent.
@@ -333,9 +335,8 @@ class TokenManager:
             Tuple of (child TokenInfo list, expand_group_id)
 
         Note:
-            W6 fix: Parent's contract is propagated to all expanded children.
             Expanded rows are dicts from transform output; we wrap them in PipelineRow
-            with the parent's contract.
+            with the output_contract (post-transform schema), not parent's contract.
         """
         # Delegate to recorder which handles DB operations and parent linking
         db_children, expand_group_id = self._recorder.expand_token(
@@ -347,10 +348,16 @@ class TokenManager:
             record_parent_outcome=record_parent_outcome,
         )
 
-        # CRITICAL: Propagate parent's contract to all expanded children
-        # W6 fix: Expanded rows need contract for downstream processing
-        parent_contract = parent_token.row_data.contract
+        # W3: Guard - contract must be locked before expansion
+        if not output_contract.locked:
+            raise ValueError(
+                f"Output contract must be locked before token expansion. "
+                f"Contract mode={output_contract.mode}, locked={output_contract.locked}"
+            )
 
+        # Use output_contract (post-transform schema) for all expanded children
+        # This ensures downstream transforms can access newly added/renamed fields
+        #
         # CRITICAL: Use deepcopy to prevent nested mutable objects from being
         # shared across expanded children. Same reasoning as fork_token - without
         # this, mutations in one sibling leak to others, corrupting audit trail.
@@ -359,8 +366,8 @@ class TokenManager:
             TokenInfo(
                 row_id=parent_token.row_id,
                 token_id=db_child.token_id,
-                # Create PipelineRow with parent's contract
-                row_data=PipelineRow(copy.deepcopy(row_data), parent_contract),
+                # Create PipelineRow with output contract
+                row_data=PipelineRow(copy.deepcopy(row_data), output_contract),
                 branch_name=parent_token.branch_name,  # Inherit branch
                 expand_group_id=db_child.expand_group_id,
             )

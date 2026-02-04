@@ -113,9 +113,9 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
                 original_name=key,
                 python_type=object,
                 required=False,
-                source="observed",
+                source="inferred",
             )
-            for key in merged_data.keys()
+            for key in merged_data
         )
         contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         pipeline_row = PipelineRow(merged_data, contract)

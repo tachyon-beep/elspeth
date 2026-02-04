@@ -31,6 +31,25 @@ if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
 
 
+
+def _make_test_source_row(data: dict) -> SourceRow:
+    """Helper to create SourceRow with contract for mocked sources."""
+    from elspeth.contracts import FieldContract, SchemaContract
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(data, contract=contract)
+
+
+
 class TestLifecycleHooks:
     """Orchestrator invokes plugin lifecycle hooks."""
 
@@ -62,9 +81,9 @@ class TestLifecycleHooks:
             def on_start(self, ctx: Any) -> None:
                 call_order.append("on_start")
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 call_order.append("process")
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         db = landscape_db
 
@@ -78,7 +97,7 @@ class TestLifecycleHooks:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
+        mock_source.load.return_value = iter([_make_test_source_row({"id": 1})])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None
 
@@ -145,9 +164,9 @@ class TestLifecycleHooks:
             def on_start(self, ctx: Any) -> None:
                 call_order.append("on_start")
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 call_order.append("process")
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 call_order.append("on_complete")
@@ -164,7 +183,7 @@ class TestLifecycleHooks:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"id": 1}), SourceRow.valid({"id": 2})])
+        mock_source.load.return_value = iter([_make_test_source_row({"id": 1}), _make_test_source_row({"id": 2})])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None
 
@@ -231,7 +250,7 @@ class TestLifecycleHooks:
             def on_start(self, ctx: Any) -> None:
                 pass
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("intentional failure")
 
             def on_complete(self, ctx: Any) -> None:
@@ -249,7 +268,7 @@ class TestLifecycleHooks:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
+        mock_source.load.return_value = iter([_make_test_source_row({"id": 1})])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None
 
@@ -314,7 +333,7 @@ class TestSourceLifecycleHooks:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 call_order.append("source_load")
-                yield SourceRow.valid({"value": 1})
+                yield from self.wrap_rows([{"value": 1}])
 
             def on_complete(self, ctx: Any) -> None:
                 call_order.append("source_on_complete")
@@ -407,7 +426,7 @@ class TestSinkLifecycleHooks:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
+        mock_source.load.return_value = iter([_make_test_source_row({"value": 1})])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None
 
@@ -467,7 +486,7 @@ class TestSinkLifecycleHooks:
             def on_complete(self, ctx: Any) -> None:
                 pass
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("intentional failure")
 
         class TrackedSink(_TestSinkBase):
@@ -497,7 +516,7 @@ class TestSinkLifecycleHooks:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
+        mock_source.load.return_value = iter([_make_test_source_row({"value": 1})])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None
 

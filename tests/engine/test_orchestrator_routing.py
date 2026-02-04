@@ -62,8 +62,7 @@ class TestOrchestratorInvalidRouting:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -231,8 +230,7 @@ class TestOrchestratorGateRouting:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -314,8 +312,7 @@ class TestRouteValidation:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -476,8 +473,7 @@ class TestRouteValidation:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -549,8 +545,7 @@ class TestRouteValidation:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass

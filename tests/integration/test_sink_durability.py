@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, PendingOutcome, RowOutcome, TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -22,6 +23,21 @@ from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.executors import SinkExecutor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
+
+
+def _make_contract(data: dict[str, Any]) -> SchemaContract:
+    """Create a simple schema contract for test data."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for k in data.keys()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestSinkDurability:
@@ -160,11 +176,14 @@ class TestSinkDurability:
         )
         db_token = recorder.create_token(row_id=row.row_id)
 
-        # Create TokenInfo for executor (includes row_data)
+        # Create TokenInfo for executor (includes PipelineRow)
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,
-            row_data=row_data,
+            row_data=pipeline_row,
         )
 
         # Create context
@@ -256,11 +275,14 @@ class TestSinkDurability:
         )
         db_token = recorder.create_token(row_id=row.row_id)
 
-        # Create TokenInfo for executor (includes row_data)
+        # Create TokenInfo for executor (includes PipelineRow)
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,
-            row_data=row_data,
+            row_data=pipeline_row,
         )
 
         # Create context
@@ -345,11 +367,14 @@ class TestSinkDurability:
         )
         db_token = recorder.create_token(row_id=row.row_id)
 
-        # Create TokenInfo for executor (includes row_data)
+        # Create TokenInfo for executor (includes PipelineRow)
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        pipeline_row = PipelineRow(data=row_data, contract=_make_contract(row_data))
         token = TokenInfo(
             row_id=row.row_id,
             token_id=db_token.token_id,
-            row_data=row_data,
+            row_data=pipeline_row,
         )
 
         # Create context

@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, SourceRow, PipelineRow
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -56,10 +56,10 @@ class _PassthroughTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
-        return TransformResult.success(row, success_reason={"action": "passthrough"})
+        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
 
 class _EnrichingTransform(BaseTransform):
@@ -126,7 +126,7 @@ class TestLineageCompleteness:
 
     def test_simple_pipeline_runs(self, tmp_path: Path, payload_store) -> None:
         """Simple pipeline: source -> transform -> sink runs successfully."""
-        from elspeth.contracts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor, PipelineRow
 
         # Setup database (use SQLAlchemy connection string)
         db = LandscapeDB.in_memory()
@@ -137,9 +137,7 @@ class TestLineageCompleteness:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"id": "row_1", "value": 100})
-                yield SourceRow.valid({"id": "row_2", "value": 200})
-                yield SourceRow.valid({"id": "row_3", "value": 300})
+                yield from self.wrap_rows([{"id": "row_1", "value": 100}, {"id": "row_2", "value": 200}, {"id": "row_3", "value": 300}])
 
             def close(self) -> None:
                 pass
@@ -180,7 +178,7 @@ class TestLineageCompleteness:
 
     def test_multi_transform_pipeline_runs(self, tmp_path: Path, payload_store) -> None:
         """Multi-transform pipeline runs successfully."""
-        from elspeth.contracts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor, PipelineRow
 
         # Setup database
         db = LandscapeDB.in_memory()
@@ -191,8 +189,7 @@ class TestLineageCompleteness:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"id": "doc_1", "value": 10})
-                yield SourceRow.valid({"id": "doc_2", "value": 20})
+                yield from self.wrap_rows([{"id": "doc_1", "value": 10}, {"id": "doc_2", "value": 20}])
 
             def close(self) -> None:
                 pass
@@ -251,7 +248,7 @@ class TestLineageAfterRetention:
         """
         from datetime import UTC, datetime, timedelta
 
-        from elspeth.contracts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor, PipelineRow
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.row_data import RowDataState
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -265,7 +262,7 @@ class TestLineageAfterRetention:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"id": "row_1", "value": 100})
+                yield from self.wrap_rows([{"id": "row_1", "value": 100}])
 
             def close(self) -> None:
                 pass
@@ -334,7 +331,7 @@ class TestExplainQueryFunctionality:
         Uses PayloadStore to persist source data, as required by CLAUDE.md:
         "Source entry - Raw data stored before any processing" (non-negotiable)
         """
-        from elspeth.contracts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor, PipelineRow
         from elspeth.core.landscape.lineage import explain
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -354,7 +351,7 @@ class TestExplainQueryFunctionality:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid(source_data)
+                yield from self.wrap_rows([source_data])
 
             def close(self) -> None:
                 pass
@@ -417,7 +414,7 @@ class TestExplainQueryFunctionality:
         This verifies that explain() returns node_states showing each transform
         the row passed through, enabling full audit trail reconstruction.
         """
-        from elspeth.contracts import ArtifactDescriptor, NodeStateStatus
+        from elspeth.contracts import ArtifactDescriptor, NodeStateStatus, PipelineRow
         from elspeth.core.landscape.lineage import explain
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -430,7 +427,7 @@ class TestExplainQueryFunctionality:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"id": "history_row", "value": 100})
+                yield from self.wrap_rows([{"id": "history_row", "value": 100}])
 
             def close(self) -> None:
                 pass

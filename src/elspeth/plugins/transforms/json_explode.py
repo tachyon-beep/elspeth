@@ -23,6 +23,7 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
@@ -153,6 +154,13 @@ class JSONExplode(BaseTransform):
             fields_added = [self._output_field]
             if self._include_index:
                 fields_added.append("item_index")
+
+            # Update contract: array_field removed, output_field/item_index added
+            output_contract = narrow_contract_to_output(
+                input_contract=row.contract,
+                output_row=output,
+            )
+
             return TransformResult.success(
                 output,
                 success_reason={
@@ -160,7 +168,7 @@ class JSONExplode(BaseTransform):
                     "fields_added": fields_added,
                     "fields_removed": [self._array_field],
                 },
-                contract=row.contract,
+                contract=output_contract,
             )
 
         # Explode array into multiple rows
@@ -175,6 +183,25 @@ class JSONExplode(BaseTransform):
         fields_added = [self._output_field]
         if self._include_index:
             fields_added.append("item_index")
+
+        # B3: Validate schema homogeneity before using first row's schema
+        if len(output_rows) > 1:
+            first_keys = set(output_rows[0].keys())
+            for i, output_row in enumerate(output_rows[1:], start=1):
+                row_keys = set(output_row.keys())
+                if row_keys != first_keys:
+                    raise ValueError(
+                        f"Multi-row output has heterogeneous schema: "
+                        f"row 0 has fields {sorted(first_keys)}, "
+                        f"row {i} has fields {sorted(row_keys)}"
+                    )
+
+        # Update contract using first output row (all rows have same schema)
+        output_contract = narrow_contract_to_output(
+            input_contract=row.contract,
+            output_row=output_rows[0],
+        )
+
         return TransformResult.success_multi(
             output_rows,
             success_reason={
@@ -182,7 +209,7 @@ class JSONExplode(BaseTransform):
                 "fields_added": fields_added,
                 "fields_removed": [self._array_field],
             },
-            contract=row.contract,
+            contract=output_contract,
         )
 
     def close(self) -> None:

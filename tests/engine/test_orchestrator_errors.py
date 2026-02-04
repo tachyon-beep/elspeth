@@ -51,8 +51,7 @@ class TestOrchestratorErrorHandling:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -65,7 +64,7 @@ class TestOrchestratorErrorHandling:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("Transform exploded!")
 
         class CollectSink(_TestSinkBase):
@@ -160,7 +159,7 @@ class TestOrchestratorSourceQuarantineValidation:
             def load(self, ctx: Any) -> Any:
                 self.load_called = True
                 # Valid row
-                yield SourceRow.valid({"id": 1, "name": "alice"})
+                yield from self.wrap_rows([{"id": 1, "name": "alice"}])
                 # Quarantined row - destination doesn't exist!
                 yield SourceRow.quarantined(
                     row={"id": 2, "name": "bob", "bad_field": "invalid"},
@@ -247,8 +246,7 @@ class TestOrchestratorQuarantineMetrics:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -267,10 +265,10 @@ class TestOrchestratorQuarantineMetrics:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 if row.get("quality") == "bad":
                     return TransformResult.error({"reason": "validation_failed", "error": "bad_quality", "value": row["value"]})
-                return TransformResult.success(row, success_reason={"action": "quality_check_passed"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "quality_check_passed"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -367,7 +365,7 @@ class TestSourceQuarantineTokenOutcome:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Valid row
-                yield SourceRow.valid({"id": 1, "name": "alice"})
+                yield from self.wrap_rows([{"id": 1, "name": "alice"}])
                 # Quarantined row - simulates validation failure
                 yield SourceRow.quarantined(
                     row={"id": 2, "name": "bob", "invalid_field": "bad_data"},
@@ -375,7 +373,7 @@ class TestSourceQuarantineTokenOutcome:
                     destination="quarantine",
                 )
                 # Another valid row
-                yield SourceRow.valid({"id": 3, "name": "charlie"})
+                yield from self.wrap_rows([{"id": 3, "name": "charlie"}])
 
         class CollectSink(_TestSinkBase):
             name = "collect_sink"
@@ -603,7 +601,7 @@ class TestQuarantineDestinationRuntimeValidation:
 
             def load(self, ctx: Any) -> Any:
                 # Valid row - no problem
-                yield SourceRow.valid({"id": 1, "name": "alice"})
+                yield from self.wrap_rows([{"id": 1, "name": "alice"}])
 
                 # BUG: yields destination that differs from _on_validation_failure
                 # "typo_sink" doesn't exist - this is a plugin bug
@@ -715,7 +713,7 @@ class TestQuarantineDestinationRuntimeValidation:
 
             def load(self, ctx: Any) -> Any:
                 # Valid row - no problem
-                yield SourceRow.valid({"id": 1, "name": "alice"})
+                yield from self.wrap_rows([{"id": 1, "name": "alice"}])
 
                 # BUG: Directly construct SourceRow with None destination
                 # This bypasses the factory method's required destination parameter

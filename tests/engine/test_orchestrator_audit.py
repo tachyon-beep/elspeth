@@ -54,8 +54,7 @@ class TestOrchestratorAuditTrail:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -68,8 +67,8 @@ class TestOrchestratorAuditTrail:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -194,8 +193,7 @@ class TestOrchestratorLandscapeExport:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -329,8 +327,7 @@ class TestOrchestratorLandscapeExport:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -460,8 +457,7 @@ class TestOrchestratorLandscapeExport:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -576,8 +572,7 @@ class TestOrchestratorLandscapeExport:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -689,8 +684,7 @@ class TestOrchestratorConfigRecording:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -703,8 +697,8 @@ class TestOrchestratorConfigRecording:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -781,8 +775,7 @@ class TestOrchestratorConfigRecording:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -867,8 +860,7 @@ class TestNodeMetadataFromPlugin:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -883,8 +875,8 @@ class TestNodeMetadataFromPlugin:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "versioned"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "versioned"})
 
         class VersionedSink(_TestSinkBase):
             name = "versioned_sink"
@@ -982,8 +974,7 @@ class TestNodeMetadataFromPlugin:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -998,8 +989,8 @@ class TestNodeMetadataFromPlugin:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "nondeterministic"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "nondeterministic"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -1092,8 +1083,7 @@ class TestNodeMetadataFromPlugin:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -1119,7 +1109,7 @@ class TestNodeMetadataFromPlugin:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
                     return TransformResult.success({"value": total}, success_reason={"action": "batch_aggregated"})
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -1234,8 +1224,7 @@ class TestNodeMetadataFromPlugin:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass

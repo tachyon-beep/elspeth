@@ -56,8 +56,7 @@ class TestOrchestratorRetry:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -73,12 +72,12 @@ class TestOrchestratorRetry:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 attempt_count["count"] += 1
                 # Fail with retryable error on first attempt
                 if attempt_count["count"] == 1:
                     raise ConnectionError("Transient failure")
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -170,8 +169,7 @@ class TestOrchestratorRetry:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -185,7 +183,7 @@ class TestOrchestratorRetry:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise ConnectionError("Persistent failure")
 
         class CollectSink(_TestSinkBase):

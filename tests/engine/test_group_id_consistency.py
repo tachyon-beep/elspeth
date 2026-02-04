@@ -44,8 +44,7 @@ class ListSource(_TestSourceBase):
         pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._data:
-            yield SourceRow.valid(row)
+        yield from self.wrap_rows(self._data)
 
     def close(self) -> None:
         pass

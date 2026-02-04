@@ -1200,7 +1200,7 @@ class AzureBatchLLMTransform(BaseTransform):
                     original_name=key,
                     python_type=object,  # Use object for dynamic typing
                     required=False,
-                    source="observed",
+                    source="inferred",
                 )
                 for key in first_row
             )

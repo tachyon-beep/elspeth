@@ -18,7 +18,9 @@ import pytest
 
 from elspeth.contracts import (
     ArtifactDescriptor,
+    FieldContract,
     RunStatus,
+    SchemaContract,
 )
 from elspeth.core.config import (
     AggregationSettings,
@@ -57,9 +59,23 @@ class BatchCollectorTransform(BaseTransform):
         if isinstance(row, list):
             # Batch mode - aggregate
             total = sum(r.get("value", 0) for r in row)
+            output = {"id": row[0].get("id"), "value": total, "count": len(row)}
+
+            # Provide contract for output (adds "count" field)
+            contract = SchemaContract(
+                mode="OBSERVED",
+                fields=(
+                    FieldContract(normalized_name="id", original_name="id", python_type=int, required=False, source="inferred"),
+                    FieldContract(normalized_name="value", original_name="value", python_type=int, required=False, source="inferred"),
+                    FieldContract(normalized_name="count", original_name="count", python_type=int, required=False, source="inferred"),
+                ),
+                locked=True,
+            )
+
             return TransformResult.success(
-                {"id": row[0].get("id"), "value": total, "count": len(row)},
+                output,
                 success_reason={"action": "batch"},
+                contract=contract,
             )
         else:
             # Single row - passthrough

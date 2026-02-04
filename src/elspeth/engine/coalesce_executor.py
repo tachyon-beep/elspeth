@@ -378,38 +378,87 @@ class CoalesceExecutor:
             )
 
         # ─────────────────────────────────────────────────────────────────────
-        # Merge contracts from all branches at coalesce point
-        # ─────────────────────────────────────────────────────────────────────
-        contracts: list[SchemaContract] = [t.row_data.contract for t in pending.arrived.values()]
-        merged_contract = contracts[0]
-        for c in contracts[1:]:
-            try:
-                merged_contract = merged_contract.merge(c)
-            except Exception as e:
-                # Contract merge failure is an orchestration invariant violation
-                # Contracts with conflicting types cannot be merged
-                slog.error(
-                    "contract_merge_failed",
-                    coalesce_name=coalesce_name,
-                    branches=list(pending.arrived.keys()),
-                    error=str(e),
-                )
-                raise OrchestrationInvariantError(
-                    f"Contract merge failed at coalesce point '{coalesce_name}'. Branches: {list(pending.arrived.keys())}. Error: {e}"
-                ) from e
-
-        # Log successful merge (B2 fix: observability)
-        slog.info(
-            "contract_merge_success",
-            coalesce_name=coalesce_name,
-            branch_count=len(pending.arrived),
-            branches=list(pending.arrived.keys()),
-        )
-
         # Merge row data according to strategy (returns dict)
+        # We do this FIRST so we can derive contract from actual data shape
+        # ─────────────────────────────────────────────────────────────────────
         merged_data_dict = self._merge_data(settings, pending.arrived)
 
-        # Create PipelineRow with merged contract
+        # ─────────────────────────────────────────────────────────────────────
+        # Build contract based on merge strategy and actual data shape
+        # ─────────────────────────────────────────────────────────────────────
+        contracts: list[SchemaContract] = [t.row_data.contract for t in pending.arrived.values()]
+
+        if settings.merge == "union":
+            # Union: Merge all contracts (current behavior - correct)
+            merged_contract = contracts[0]
+            for c in contracts[1:]:
+                try:
+                    merged_contract = merged_contract.merge(c)
+                except Exception as e:
+                    # Contract merge failure is an orchestration invariant violation
+                    # Contracts with conflicting types cannot be merged
+                    slog.error(
+                        "contract_merge_failed",
+                        coalesce_name=coalesce_name,
+                        branches=list(pending.arrived.keys()),
+                        error=str(e),
+                    )
+                    raise OrchestrationInvariantError(
+                        f"Contract merge failed at coalesce point '{coalesce_name}'. Branches: {list(pending.arrived.keys())}. Error: {e}"
+                    ) from e
+
+            slog.info(
+                "contract_merge_success",
+                coalesce_name=coalesce_name,
+                merge_strategy="union",
+                branch_count=len(pending.arrived),
+                branches=list(pending.arrived.keys()),
+            )
+
+        elif settings.merge == "nested":
+            # Nested: Contract must match nested structure {branch_a: {...}, branch_b: {...}}
+            # Dict values are not tracked in contracts (non-primitive type)
+            # Use FLEXIBLE mode with no declared fields - allows access to any data field
+            merged_contract = SchemaContract(
+                fields=(),  # No declared fields - all access goes through FLEXIBLE mode
+                mode="FLEXIBLE",
+                locked=True,
+            )
+
+            slog.info(
+                "contract_created_for_nested_merge",
+                coalesce_name=coalesce_name,
+                merge_strategy="nested",
+                branch_count=len(pending.arrived),
+                branches=list(pending.arrived.keys()),
+                output_keys=list(merged_data_dict.keys()),
+            )
+
+        elif settings.merge == "select":
+            # Select: Use selected branch's contract directly (data has only those fields)
+            # Find the selected branch's contract
+            if settings.select_branch is None:
+                raise RuntimeError(
+                    f"select_branch is None for select merge strategy at coalesce '{settings.name}'. This indicates a config validation bug."
+                )
+
+            # Get the token for the selected branch
+            selected_token = pending.arrived[settings.select_branch]
+            merged_contract = selected_token.row_data.contract
+
+            slog.info(
+                "contract_from_selected_branch",
+                coalesce_name=coalesce_name,
+                merge_strategy="select",
+                selected_branch=settings.select_branch,
+                branches_arrived=list(pending.arrived.keys()),
+            )
+
+        else:
+            # Unreachable - config validation ensures merge is one of the above
+            raise RuntimeError(f"Unknown merge strategy: {settings.merge}")
+
+        # Create PipelineRow with strategy-appropriate contract
         merged_data = PipelineRow(merged_data_dict, merged_contract)
 
         # Get list of consumed tokens

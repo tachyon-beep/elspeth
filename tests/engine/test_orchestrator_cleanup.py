@@ -39,8 +39,7 @@ class ListSource(_TestSourceBase):
         pass
 
     def load(self, ctx: Any) -> Any:
-        for _row in self._data:
-            yield SourceRow.valid(_row)
+        yield from self.wrap_rows(self._data)
 
     def close(self) -> None:
         pass
@@ -100,8 +99,8 @@ class TrackingTransform(BaseTransform):
     def on_complete(self, ctx: Any) -> None:
         pass
 
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row, success_reason={"action": "test"})
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
     def close(self) -> None:
         self.close_called = True
@@ -204,8 +203,8 @@ class TestOrchestratorCleanup:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
             # Uses default close() from BaseTransform (no-op)
 

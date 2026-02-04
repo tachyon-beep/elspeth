@@ -77,3 +77,24 @@
 | 2026-02-03T17:34:33+00:00 | ok | src/elspeth/contracts/transform_contract.py | docs/bugs/generated/elspeth/contracts/transform_contract.py.md |  | 383.01 |  |
 | 2026-02-03T17:35:03+00:00 | ok | src/elspeth/contracts/schema_contract_factory.py | docs/bugs/generated/elspeth/contracts/schema_contract_factory.py.md |  | 412.78 |  |
 | 2026-02-03T17:36:14+00:00 | ok | src/elspeth/contracts/results.py | docs/bugs/generated/elspeth/contracts/results.py.md |  | 484.53 |  |
+| 2026-02-03T17:42:05+00:00 | ok | src/elspeth/contracts/schema_contract.py | docs/bugs/generated/elspeth/contracts/schema_contract.py.md |  | 835.54 |  |
+| 2026-02-03T17:43:20+00:00 | ok | src/elspeth/core/checkpoint/__init__.py | docs/bugs/generated/elspeth/core/checkpoint/__init__.py.md |  | 74.36 |  |
+| 2026-02-03T17:43:30+00:00 | ok | src/elspeth/contracts/types.py | docs/bugs/generated/elspeth/contracts/types.py.md |  | 85.07 |  |
+| 2026-02-03T17:44:00+00:00 | ok | src/elspeth/core/__init__.py | docs/bugs/generated/elspeth/core/__init__.py.md |  | 114.31 | evidence_gate=1 |
+| 2026-02-03T17:45:09+00:00 | ok | src/elspeth/contracts/url.py | docs/bugs/generated/elspeth/contracts/url.py.md |  | 183.98 |  |
+| 2026-02-03T17:46:46+00:00 | ok | src/elspeth/core/canonical.py | docs/bugs/generated/elspeth/core/canonical.py.md |  | 280.26 |  |
+| 2026-02-03T17:48:08+00:00 | ok | src/elspeth/contracts/type_normalization.py | docs/bugs/generated/elspeth/contracts/type_normalization.py.md |  | 362.85 |  |
+| 2026-02-03T17:48:52+00:00 | ok | src/elspeth/core/checkpoint/compatibility.py | docs/bugs/generated/elspeth/core/checkpoint/compatibility.py.md |  | 406.89 | evidence_gate=1 |
+| 2026-02-03T17:50:47+00:00 | ok | src/elspeth/core/config.py | docs/bugs/generated/elspeth/core/config.py.md |  | 521.57 |  |
+| 2026-02-03T17:52:12+00:00 | ok | src/elspeth/core/checkpoint/manager.py | docs/bugs/generated/elspeth/core/checkpoint/manager.py.md |  | 606.56 |  |
+| 2026-02-03T17:54:41+00:00 | ok | src/elspeth/core/checkpoint/recovery.py | docs/bugs/generated/elspeth/core/checkpoint/recovery.py.md |  | 755.65 |  |
+| 2026-02-03T17:55:27+00:00 | ok | src/elspeth/core/landscape/__init__.py | docs/bugs/generated/elspeth/core/landscape/__init__.py.md |  | 46.10 | evidence_gate=1 |
+| 2026-02-03T17:56:21+00:00 | ok | src/elspeth/core/identifiers.py | docs/bugs/generated/elspeth/core/identifiers.py.md |  | 100.50 |  |
+| 2026-02-03T17:56:55+00:00 | ok | src/elspeth/core/events.py | docs/bugs/generated/elspeth/core/events.py.md |  | 134.17 | evidence_gate=1 |
+| 2026-02-03T17:57:01+00:00 | ok | src/elspeth/core/landscape/journal.py | docs/bugs/generated/elspeth/core/landscape/journal.py.md |  | 140.44 |  |
+| 2026-02-03T17:57:01+00:00 | ok | src/elspeth/core/landscape/database.py | docs/bugs/generated/elspeth/core/landscape/database.py.md |  | 140.44 |  |
+| 2026-02-03T17:57:01+00:00 | ok | src/elspeth/core/landscape/exporter.py | docs/bugs/generated/elspeth/core/landscape/exporter.py.md |  | 140.44 |  |
+| 2026-02-03T17:57:01+00:00 | ok | src/elspeth/core/landscape/formatters.py | docs/bugs/generated/elspeth/core/landscape/formatters.py.md |  | 140.44 |  |
+| 2026-02-03T17:57:01+00:00 | ok | src/elspeth/core/dag.py | docs/bugs/generated/elspeth/core/dag.py.md |  | 140.45 |  |
+| 2026-02-03T17:57:01+00:00 | ok | src/elspeth/core/landscape/_database_ops.py | docs/bugs/generated/elspeth/core/landscape/_database_ops.py.md |  | 140.44 |  |
+| 2026-02-03T17:57:01+00:00 | ok | src/elspeth/core/landscape/_helpers.py | docs/bugs/generated/elspeth/core/landscape/_helpers.py.md |  | 140.44 |  |

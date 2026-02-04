@@ -22,9 +22,10 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 from pydantic import Field, field_validator
 
-from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
+from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
@@ -927,7 +928,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             success_reason={"action": "enriched", "fields_added": fields_added},
         )
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
 
         Submits the row to the batch processing pipeline. Returns quickly
@@ -935,7 +936,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         the output port in FIFO order.
 
         Args:
-            row: Input row with all case study fields
+            row: Input row with all case study fields as PipelineRow
             ctx: Plugin context with token and landscape
 
         Raises:
@@ -970,7 +971,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
     def _process_row(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row with all queries. Called by worker threads.
@@ -981,7 +982,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         for query-level parallelism.
 
         Args:
-            row: Input row with all case study fields
+            row: Input row with all case study fields as PipelineRow
             ctx: Plugin context with state_id for audit trail
 
         Returns:
@@ -992,11 +993,17 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         import time
 
+        # Extract dict from PipelineRow for internal processing
+        row_data = row.to_dict()
+
+        # Store contract for propagation
+        input_contract = row.contract
+
         token_id = ctx.token.token_id if ctx.token else "unknown"
         start_time = time.monotonic()
 
         try:
-            result = self._process_single_row_internal(row, ctx.state_id)
+            result = self._process_single_row_internal(row_data, ctx.state_id)
 
             # Record in Langfuse using v3 nested context managers (after processing)
             latency_ms = (time.monotonic() - start_time) * 1000
@@ -1012,6 +1019,14 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 succeeded_count=succeeded,
                 latency_ms=latency_ms,
             )
+
+            # Propagate contract on success
+            if result.status == "success" and result.row is not None:
+                result.contract = propagate_contract(
+                    input_contract=input_contract,
+                    output_row=result.row,
+                    transform_adds_fields=True,  # Multi-query transforms add multiple output fields
+                )
 
             return result
         finally:

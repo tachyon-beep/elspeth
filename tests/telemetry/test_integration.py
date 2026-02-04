@@ -149,10 +149,18 @@ class ListSource(_TestSourceBase):
     def __init__(self, data: list[dict[str, Any]]) -> None:
         super().__init__()
         self._data = data
+        # Create minimal FLEXIBLE contract for test rows
+        from elspeth.contracts.schema_contract import SchemaContract
+
+        self._contract = SchemaContract(
+            fields=(),  # No declared fields
+            mode="FLEXIBLE",
+            locked=True,
+        )
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         for row in self._data:
-            yield SourceRow.valid(row)
+            yield SourceRow.valid(row, contract=self._contract)
 
 
 class PassthroughTransform:
@@ -170,7 +178,17 @@ class PassthroughTransform:
     _on_error: str | None = None
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row, success_reason={"action": "passthrough"})
+        # Handle both PipelineRow and dict for test compatibility
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        row_dict = row.to_dict() if isinstance(row, PipelineRow) else row
+        result_contract = row.contract if isinstance(row, PipelineRow) else None
+
+        return TransformResult.success(
+            row_dict,
+            success_reason={"action": "passthrough"},
+            contract=result_contract
+        )
 
     def on_start(self, ctx: Any) -> None:
         pass

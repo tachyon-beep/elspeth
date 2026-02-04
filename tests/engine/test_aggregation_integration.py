@@ -42,6 +42,7 @@ from tests.conftest import (
     as_sink,
     as_source,
     as_transform,
+    create_observed_contract,
 )
 
 # Note: ExecutionGraph.from_plugin_instances is used directly (imported locally)
@@ -121,8 +122,10 @@ class TestAggregationTimeoutIntegration:
                     # Batch mode - aggregate the rows
                     rows = row
                     total = sum(r.get("value", 0) for r in rows)
+                    output_row = {"id": rows[0].get("id"), "value": total, "count": len(rows)}
+                    contract = create_observed_contract(output_row)
                     return TransformResult.success(
-                        {"id": rows[0].get("id"), "value": total, "count": len(rows)}, success_reason={"action": "test"}
+                        output_row, success_reason={"action": "test"}, contract=contract
                     )
                 else:
                     # Single row mode - passthrough
@@ -315,7 +318,9 @@ class TestAggregationTimeoutIntegration:
                 if isinstance(row, list):
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(row)}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
@@ -472,7 +477,9 @@ class TestAggregationTimeoutIntegration:
                     flush_count += 1
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(row)}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
@@ -610,9 +617,11 @@ class TestEndOfSourceFlush:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Emit 3 rows, all will be buffered (count trigger is 100)
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
                 # Source completes - end-of-source flush should trigger
 
             def close(self) -> None:
@@ -633,7 +642,9 @@ class TestEndOfSourceFlush:
                 if isinstance(row, list):
                     batch_data.append({"rows": len(row), "total": sum(r.get("value", 0) for r in row)})
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(row)}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
@@ -748,9 +759,11 @@ class TestEndOfSourceFlush:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
 
             def close(self) -> None:
                 pass
@@ -772,7 +785,8 @@ class TestEndOfSourceFlush:
                     # Passthrough: return same number of rows, enriched
                     batch_total = sum(r.get("value", 0) for r in row)
                     enriched = [{**r, "batch_total": batch_total, "batch_size": len(row)} for r in row]
-                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+                    contract = create_observed_contract(enriched[0]) if enriched else None
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
@@ -887,9 +901,11 @@ class TestEndOfSourceFlush:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
 
             def close(self) -> None:
                 pass
@@ -910,12 +926,15 @@ class TestEndOfSourceFlush:
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
                     # Transform mode: N inputs → 2 outputs (summary row + count row)
+                    output_rows = [
+                        {"type": "summary", "total": total},
+                        {"type": "count", "count": len(row)},
+                    ]
+                    contract = create_observed_contract(output_rows[0])
                     return TransformResult.success_multi(
-                        [
-                            {"type": "summary", "total": total},
-                            {"type": "count", "count": len(row)},
-                        ],
+                        output_rows,
                         success_reason={"action": "test"},
+                        contract=contract,
                     )
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
@@ -1029,8 +1048,10 @@ class TestEndOfSourceFlush:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                ])
 
             def close(self) -> None:
                 pass
@@ -1051,7 +1072,8 @@ class TestEndOfSourceFlush:
                     # Passthrough: enrich with batch_total
                     batch_total = sum(r.get("value", 0) for r in row)
                     enriched = [{**r, "batch_total": batch_total} for r in row]
-                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+                    contract = create_observed_contract(enriched[0]) if enriched else None
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
@@ -1176,8 +1198,10 @@ class TestEndOfSourceFlush:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                ])
 
             def close(self) -> None:
                 pass
@@ -1196,7 +1220,9 @@ class TestEndOfSourceFlush:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(row)}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
@@ -1495,7 +1521,9 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch mode - combine rows
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(row)}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         # Create mock clock for deterministic timeout testing
@@ -1702,11 +1730,13 @@ class TestTimeoutFlushErrorHandling:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Row 1: Gets buffered, marked BUFFERED
-                yield SourceRow.valid({"id": 1, "value": 100})
                 # Row 2: Gets buffered, marked BUFFERED
-                yield SourceRow.valid({"id": 2, "value": 200})
                 # Row 3: Triggers count flush (count=3) → flush fails
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
 
             def close(self) -> None:
                 pass
@@ -1870,8 +1900,10 @@ class TestTimeoutFlushErrorHandling:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                ])
                 # Source completes → END_OF_SOURCE flush
 
             def close(self) -> None:
@@ -2045,12 +2077,14 @@ class TestTimeoutFlushErrorHandling:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Row 1: Gets buffered, marked CONSUMED_IN_BATCH (non-flushing path)
-                yield SourceRow.valid({"id": 1, "value": 100})
                 # Row 2: Gets buffered, marked CONSUMED_IN_BATCH (non-flushing path)
-                yield SourceRow.valid({"id": 2, "value": 200})
                 # Row 3: Triggers count flush (count=3) → flush fails
                 # BUG: This token has NO outcome recorded!
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
 
             def close(self) -> None:
                 pass
@@ -2204,9 +2238,11 @@ class TestTimeoutFlushErrorHandling:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
 
             def close(self) -> None:
                 pass
@@ -2364,7 +2400,9 @@ class TestTimeoutFlushStepIndexing:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(row)}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
@@ -2489,8 +2527,10 @@ class TestTimeoutFlushStepIndexing:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Emit rows that will be buffered (count trigger won't fire)
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                ])
                 # Source completes - end-of-source flush triggers
 
             def close(self) -> None:
@@ -2510,7 +2550,9 @@ class TestTimeoutFlushStepIndexing:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(row)}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
@@ -2636,9 +2678,11 @@ class TestExpectedOutputCountEnforcement:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
 
             def close(self) -> None:
                 pass
@@ -2657,7 +2701,9 @@ class TestExpectedOutputCountEnforcement:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                    output_row = {"total": total, "count": len(row)}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
@@ -2761,9 +2807,11 @@ class TestExpectedOutputCountEnforcement:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
 
             def close(self) -> None:
                 pass
@@ -2782,9 +2830,12 @@ class TestExpectedOutputCountEnforcement:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return 2 rows instead of 1 - this violates expected_output_count=1
+                    output_rows = [{"part": 1, "total": sum(r.get("value", 0) for r in row)}, {"part": 2, "count": len(row)}]
+                    contract = create_observed_contract(output_rows[0])
                     return TransformResult.success_multi(
-                        [{"part": 1, "total": sum(r.get("value", 0) for r in row)}, {"part": 2, "count": len(row)}],
+                        output_rows,
                         success_reason={"action": "test"},
+                        contract=contract,
                     )
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
@@ -2907,9 +2958,12 @@ class TestExpectedOutputCountEnforcement:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return 2 rows - violates expected_output_count=1
+                    output_rows = [{"part": 1}, {"part": 2}]
+                    contract = create_observed_contract(output_rows[0])
                     return TransformResult.success_multi(
-                        [{"part": 1}, {"part": 2}],
+                        output_rows,
                         success_reason={"action": "test"},
+                        contract=contract,
                     )
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
@@ -3017,9 +3071,11 @@ class TestExpectedOutputCountEnforcement:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([
+                    {"id": 1, "value": 100},
+                    {"id": 2, "value": 200},
+                    {"id": 3, "value": 300},
+                ])
 
             def close(self) -> None:
                 pass
@@ -3038,9 +3094,12 @@ class TestExpectedOutputCountEnforcement:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return N rows where N = len(input) - could be any number
+                    output_rows = [{"idx": i, "value": r.get("value", 0)} for i, r in enumerate(row)]
+                    contract = create_observed_contract(output_rows[0]) if output_rows else None
                     return TransformResult.success_multi(
-                        [{"idx": i, "value": r.get("value", 0)} for i, r in enumerate(row)],
+                        output_rows,
                         success_reason={"action": "test"},
+                        contract=contract,
                     )
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 

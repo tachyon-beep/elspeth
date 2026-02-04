@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
@@ -135,6 +136,12 @@ class FieldMapper(BaseTransform):
                 else:
                     fields_added.append(target)
 
+        # Update contract to reflect field mapping (renames and removals)
+        output_contract = narrow_contract_to_output(
+            input_contract=row.contract,
+            output_row=output,
+        )
+
         return TransformResult.success(
             output,
             success_reason={
@@ -142,7 +149,7 @@ class FieldMapper(BaseTransform):
                 "fields_modified": fields_modified,
                 "fields_added": fields_added,
             },
-            contract=row.contract,
+            contract=output_contract,
         )
 
     def close(self) -> None:

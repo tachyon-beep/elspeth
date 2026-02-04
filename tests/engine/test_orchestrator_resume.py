@@ -221,6 +221,34 @@ class TestOrchestratorResumeRowProcessing:
 
             conn.commit()
 
+        # Store schema contract (required for PipelineRow wrapping during resume)
+        # Create contract matching the data schema ({"id": int, "value": str})
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=False,
+                    source="observed",
+                ),
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=str,
+                    required=False,
+                    source="observed",
+                ),
+            ),
+            locked=True,
+        )
+        recorder = LandscapeRecorder(landscape_db, payload_store=payload_store)
+        recorder.update_run_contract(run_id, contract)
+
         # Build graph matching the nodes created above
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -548,20 +576,25 @@ class TestOrchestratorResumeCleanup:
         """
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
+        from elspeth.contracts import PluginSchema
+        from elspeth.contracts.schema_contract import PipelineRow
 
         # Create tracking transform
+        class TestSchema(PluginSchema):
+            id: int
+
         class TrackingTransform(BaseTransform):
             name = "tracking"
-            input_schema = None  # type: ignore[assignment]
-            output_schema = None  # type: ignore[assignment]
+            input_schema = TestSchema
+            output_schema = TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.close_called = False
                 self.on_complete_called = False
 
-            def process(self, row: dict, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 self.on_complete_called = True
@@ -681,6 +714,26 @@ class TestOrchestratorResumeCleanup:
 
             conn.commit()
 
+        # Store schema contract (required for PipelineRow wrapping during resume)
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=False,
+                    source="observed",
+                ),
+            ),
+            locked=True,
+        )
+        recorder = LandscapeRecorder(landscape_db, payload_store=payload_store)
+        recorder.update_run_contract(run_id, contract)
+
         # Build graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -754,20 +807,26 @@ class TestOrchestratorResumeCleanup:
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
 
+        from elspeth.contracts import PluginSchema
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        class TestSchema(PluginSchema):
+            id: int
+
         class FailingOnCompleteTransform(BaseTransform):
             """Transform where on_complete() raises but close() should still be called."""
 
             name = "failing_on_complete"
-            input_schema = None  # type: ignore[assignment]
-            output_schema = None  # type: ignore[assignment]
+            input_schema = TestSchema
+            output_schema = TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.close_called = False
                 self.on_complete_called = False
 
-            def process(self, row: dict, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 self.on_complete_called = True
@@ -882,6 +941,26 @@ class TestOrchestratorResumeCleanup:
             )
 
             conn.commit()
+
+        # Store schema contract (required for PipelineRow wrapping during resume)
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=False,
+                    source="observed",
+                ),
+            ),
+            locked=True,
+        )
+        recorder = LandscapeRecorder(landscape_db, payload_store=payload_store)
+        recorder.update_run_contract(run_id, contract)
 
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}

@@ -527,8 +527,15 @@ class PipelineRow:
         Raises:
             KeyError: If field not found in contract or data
         """
-        normalized = self._contract.resolve_name(key)
-        return self._data[normalized]
+        try:
+            normalized = self._contract.resolve_name(key)
+            return self._data[normalized]
+        except KeyError:
+            # For FLEXIBLE mode: allow access to extra fields in data not in contract
+            # For FIXED mode: resolve_name raises KeyError which we re-raise
+            if self._contract.mode in ("FLEXIBLE", "OBSERVED") and key in self._data:
+                return self._data[key]
+            raise
 
     def __getattr__(self, key: str) -> Any:
         """Dot notation access: row.field_name.

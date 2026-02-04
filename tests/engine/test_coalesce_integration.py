@@ -276,7 +276,7 @@ class TestForkCoalescePipeline:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
                     {
                         **row,
@@ -831,7 +831,7 @@ class TestCoalesceTimeoutIntegration:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 # Fail for row id=2 - this creates the timeout scenario
                 # Row 2's path_a will arrive at coalesce, but path_b won't
                 if row.get("id") == 2:
@@ -1054,13 +1054,19 @@ class TestForkAggregationCoalesce:
                     # Batch mode: sum all values
                     total = sum(r.get("value", 0) for r in row)
                     ids = [r.get("id") for r in row]
+                    output_row = {
+                        "aggregated": True,
+                        "sum": total,
+                        "source_ids": ids,
+                    }
+                    # Create contract for aggregation output (transform mode requires this)
+                    from tests.conftest import create_observed_contract
+
+                    contract = create_observed_contract(output_row)
                     return TransformResult.success(
-                        {
-                            "aggregated": True,
-                            "sum": total,
-                            "source_ids": ids,
-                        },
+                        output_row,
                         success_reason={"action": "sum_aggregation"},
+                        contract=contract,
                     )
                 # Single row mode (shouldn't happen with count trigger)
                 return TransformResult.success(dict(row), success_reason={"action": "passthrough"})

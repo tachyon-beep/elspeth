@@ -69,7 +69,7 @@ class CoalesceTestSource(_TestSourceBase):
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         for row in self._rows:
-            yield SourceRow.valid(row)
+            yield from self.wrap_rows([row])
 
 
 class TestOrchestratorForkExecution:
@@ -110,9 +110,7 @@ class TestOrchestratorForkExecution:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"value": 1})
-                yield SourceRow.valid({"value": 2})
-                yield SourceRow.valid({"value": 3})
+                yield from self.wrap_rows([{"value": 1}, {"value": 2}, {"value": 3}])
 
             def close(self) -> None:
                 pass
@@ -125,8 +123,8 @@ class TestOrchestratorForkExecution:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         class CollectSink(_TestSinkBase):
             name = "collect_sink"

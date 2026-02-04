@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import Field, model_validator
 
-from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
+from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
@@ -356,14 +357,14 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 hint="Install with: uv pip install elspeth[tracing-langfuse]",
             )
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
 
         This is the pipeline entry point. Rows are processed concurrently
         with FIFO output ordering. Blocks when buffer is full (backpressure).
 
         Args:
-            row: Row to process
+            row: Row to process as PipelineRow
             ctx: Plugin context with landscape and state_id
 
         Raises:
@@ -391,7 +392,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
         )
 
-    def _process_row(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Process a single row through Azure OpenAI.
 
         Called by worker threads from the BatchTransformMixin. Each row is
@@ -403,15 +404,19 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         3. Internal logic (OUR CODE) - let crash
 
         Args:
-            row: Row to process
+            row: Row to process as PipelineRow
             ctx: Plugin context with landscape and state_id
 
         Returns:
             TransformResult with processed row or error
         """
+        # Extract dict from PipelineRow for template rendering (which hashes the data)
+        # PipelineRow itself cannot be serialized by canonical_json
+        row_data = row.to_dict()
+
         # 1. Render template with row data (THEIR DATA - wrap)
         try:
-            rendered = self._template.render_with_metadata(row)
+            rendered = self._template.render_with_metadata(row_data)
         except TemplateError as e:
             error_reason: TransformErrorReason = {
                 "reason": "template_rendering_failed",
@@ -483,7 +488,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             # 5. Build output row (OUR CODE - let exceptions crash)
-            output = dict(row)
+            output = dict(row_data)
             output[self._response_field] = response.content
             output[f"{self._response_field}_usage"] = response.usage
             output[f"{self._response_field}_template_hash"] = rendered.template_hash
@@ -494,9 +499,17 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
             output[f"{self._response_field}_model"] = response.model
 
+            # 6. Propagate contract (always present in PipelineRow)
+            output_contract = propagate_contract(
+                input_contract=row.contract,
+                output_row=output,
+                transform_adds_fields=True,  # LLM transforms add response field + metadata
+            )
+
             return TransformResult.success(
                 output,
                 success_reason={"action": "enriched", "fields_added": [self._response_field]},
+                contract=output_contract,
             )
         finally:
             # Clean up cached client for this state_id to prevent unbounded growth

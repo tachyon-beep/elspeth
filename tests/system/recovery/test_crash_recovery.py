@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from elspeth.contracts import PipelineRow,  Determinism, NodeType, PluginSchema, RoutingMode, RowOutcome, RunStatus, SourceRow
+from elspeth.contracts import Determinism, NodeType, PipelineRow, PluginSchema, RoutingMode, RowOutcome, RunStatus, SourceRow
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -133,7 +133,7 @@ class TestResumeIdempotence:
         import json
         from collections.abc import Iterator
 
-        from elspeth.contracts import PipelineRow,  ArtifactDescriptor, Determinism, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
@@ -443,7 +443,7 @@ class TestRetryBehavior:
 
         from sqlalchemy import select
 
-        from elspeth.contracts import PipelineRow,  ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape.schema import transform_errors_table
         from elspeth.plugins.results import TransformResult
 

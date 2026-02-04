@@ -32,6 +32,28 @@ from tests.engine.orchestrator_test_helpers import build_production_graph
 # =============================================================================
 
 
+def _make_pipeline_row(data: dict[str, Any]) -> Any:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper for tests that manually create TokenInfo objects.
+    Creates a PipelineRow with a contract that accepts any fields.
+    """
+    from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
+
+
 class _CompositeSchema(PluginSchema):
     """Schema for composite condition tests (a: int, b: str)."""
 
@@ -105,9 +127,14 @@ class ListSource(_TestSourceBase):
         if schema is not None:
             self.output_schema = schema
 
+        # Create schema contract from output_schema
+        from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+        self._schema_contract = create_output_contract_from_schema(self.output_schema)
+
     def load(self, ctx: Any) -> Any:
         for row in self._data:
-            yield SourceRow.valid(row)
+            yield SourceRow.valid(row, contract=self._schema_contract)
 
     def close(self) -> None:
         pass
@@ -1073,9 +1100,14 @@ class TestEndToEndPipeline:
             output_schema = _NormalizedScoreSchema
             plugin_version = "1.0.0"
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                normalized = row["raw_score"] / 100.0
-                return TransformResult.success({**row, "score": normalized}, success_reason={"action": "normalize"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                # row is now a PipelineRow, convert to dict for output
+                row_dict = row.to_dict()
+                normalized = row_dict["raw_score"] / 100.0
+                return TransformResult.success(
+                    {**row_dict, "score": normalized},
+                    success_reason={"action": "normalize"},
+                )
 
         source = ListSource(
             [
@@ -1399,7 +1431,7 @@ class TestGateRuntimeErrors:
         token = TokenInfo(
             row_id="row_1",
             token_id="token_1",
-            row_data={"existing_field": 42},  # Missing 'nonexistent' field
+            row_data=_make_pipeline_row({"existing_field": 42}),  # Missing 'nonexistent' field
         )
 
         # Create row and token in landscape for audit trail
@@ -1407,7 +1439,7 @@ class TestGateRuntimeErrors:
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1523,7 +1555,7 @@ class TestGateRuntimeErrors:
         token_missing = TokenInfo(
             row_id="row_1",
             token_id="token_1",
-            row_data={"required": "value"},  # Missing 'optional' field
+            row_data=_make_pipeline_row({"required": "value"}),  # Missing 'optional' field
         )
 
         # Create row and token in landscape for audit trail
@@ -1531,7 +1563,7 @@ class TestGateRuntimeErrors:
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token_missing.row_data,
+            data=token_missing.row_data.to_dict(),
             row_id=token_missing.row_id,
         )
         recorder.create_token(row_id=row1.row_id, token_id=token_missing.token_id)
@@ -1556,14 +1588,14 @@ class TestGateRuntimeErrors:
         token_present = TokenInfo(
             row_id="row_2",
             token_id="token_2",
-            row_data={"required": "value", "optional": 10},
+            row_data=_make_pipeline_row({"required": "value", "optional": 10}),
         )
 
         row2 = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=1,
-            data=token_present.row_data,
+            data=token_present.row_data.to_dict(),
             row_id=token_present.row_id,
         )
         recorder.create_token(row_id=row2.row_id, token_id=token_present.token_id)
@@ -1584,14 +1616,14 @@ class TestGateRuntimeErrors:
         token_low = TokenInfo(
             row_id="row_3",
             token_id="token_3",
-            row_data={"required": "value", "optional": 3},
+            row_data=_make_pipeline_row({"required": "value", "optional": 3}),
         )
 
         row3 = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=2,
-            data=token_low.row_data,
+            data=token_low.row_data.to_dict(),
             row_id=token_low.row_id,
         )
         recorder.create_token(row_id=row3.row_id, token_id=token_low.token_id)

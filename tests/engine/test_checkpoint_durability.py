@@ -187,7 +187,8 @@ class TestCheckpointDurability:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    pipeline_row = _make_pipeline_row(row)
+                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -227,8 +228,8 @@ class TestCheckpointDurability:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -338,7 +339,8 @@ class TestCheckpointDurability:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    pipeline_row = _make_pipeline_row(row)
+                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -374,8 +376,8 @@ class TestCheckpointDurability:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         # --- Phase 1: Simulate a partial run with crash ---
         # We manually create the database state that would exist if:
@@ -450,6 +452,7 @@ class TestCheckpointDurability:
         all_rows = [{"value": i} for i in range(5)]
         row_ids = []
         token_ids = []
+        schema_contract_recorded = False
 
         for i, row_data in enumerate(all_rows):
             # Store payload
@@ -469,6 +472,12 @@ class TestCheckpointDurability:
             # Create token for the row
             token = recorder.create_token(row_id=row.row_id)
             token_ids.append(token.token_id)
+
+            # Store schema contract on first row (matches production behavior)
+            # Resume requires this contract to wrap row data in PipelineRow
+            if not schema_contract_recorded:
+                recorder.update_run_contract(run_id, pipeline_row.contract)
+                schema_contract_recorded = True
 
         # Build graph for checkpoint topology validation
         test_graph = ExecutionGraph()
@@ -635,7 +644,8 @@ class TestCheckpointDurability:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    pipeline_row = _make_pipeline_row(row)
+                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -665,8 +675,8 @@ class TestCheckpointDurability:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -725,7 +735,8 @@ class TestCheckpointDurability:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    pipeline_row = _make_pipeline_row(row)
+                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -738,7 +749,7 @@ class TestCheckpointDurability:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         class CapturingSink(_TestSinkBase):
@@ -831,7 +842,8 @@ class TestCheckpointDurability:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    pipeline_row = _make_pipeline_row(row)
+                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -875,8 +887,8 @@ class TestCheckpointDurability:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(3)])
         transform = PassthroughTransform()
@@ -940,7 +952,8 @@ class TestCheckpointTimingInvariants:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    pipeline_row = _make_pipeline_row(row)
+                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -977,8 +990,8 @@ class TestCheckpointTimingInvariants:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         # Process 5 rows
         source = ListSource([{"value": i} for i in range(5)])
@@ -1041,7 +1054,8 @@ class TestCheckpointTimingInvariants:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    pipeline_row = _make_pipeline_row(row)
+                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -1073,8 +1087,8 @@ class TestCheckpointTimingInvariants:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -1122,7 +1136,8 @@ class TestCheckpointTimingInvariants:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    pipeline_row = _make_pipeline_row(row)
+                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -1154,8 +1169,8 @@ class TestCheckpointTimingInvariants:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(3)])
         transform = PassthroughTransform()
