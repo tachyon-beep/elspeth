@@ -23,7 +23,7 @@ def _make_observed_contract(*field_names: str) -> SchemaContract:
         )
         for name in field_names
     )
-    return SchemaContract(mode="OBSERVED", fields=fields, locked=False)
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 def _make_source_row(data: dict[str, Any]) -> SourceRow:
@@ -360,6 +360,7 @@ class TestTokenManagerExpandIsolation:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
+            output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             step_in_pipeline=1,
             run_id=run.run_id,
         )
@@ -416,6 +417,7 @@ class TestTokenManagerExpandIsolation:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
+            output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             step_in_pipeline=1,
             run_id=run.run_id,
         )
@@ -464,6 +466,7 @@ class TestTokenManagerExpandIsolation:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
+            output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             step_in_pipeline=1,
             run_id=run.run_id,
         )
@@ -642,6 +645,7 @@ class TestTokenManagerEdgeCases:
         expanded_children, expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=[{"id": 1}, {"id": 2}],
+            output_contract=_make_observed_contract("id"),
             step_in_pipeline=2,
             run_id=run.run_id,
         )
@@ -875,6 +879,7 @@ class TestTokenManagerExpand:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
+            output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             step_in_pipeline=2,
             run_id=run.run_id,
         )
@@ -939,6 +944,7 @@ class TestTokenManagerExpand:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=[{"a": 1}, {"a": 2}],
+            output_contract=_make_observed_contract("a"),
             step_in_pipeline=2,
             run_id=run.run_id,
         )
@@ -974,6 +980,7 @@ class TestTokenManagerExpand:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=[{"a": 1}, {"a": 2}],
+            output_contract=_make_observed_contract("a"),
             step_in_pipeline=5,
             run_id=run.run_id,
         )
