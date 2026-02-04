@@ -250,8 +250,7 @@ class ListSource(_TestSourceBase):
         pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._data:
-            yield SourceRow.valid(row)
+        yield from self.wrap_rows(self._data)
 
     def close(self) -> None:
         pass
@@ -268,6 +267,11 @@ class PassTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
+        from elspeth.contracts import PipelineRow
+
+        # Handle both dict (old tests) and PipelineRow (production) for backwards compat
+        if isinstance(row, PipelineRow):
+            return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
         return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
@@ -287,10 +291,18 @@ class ConditionalErrorTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
+        from elspeth.contracts import PipelineRow
+
+        # Handle both dict (old tests) and PipelineRow (production)
+        if isinstance(row, PipelineRow):
+            row_dict = row.to_dict()
+        else:
+            row_dict = row
+
         # Direct access - no defensive .get() per CLAUDE.md
-        if row["fail"]:
+        if row_dict["fail"]:
             return TransformResult.error({"reason": "property_test_error"})
-        return TransformResult.success(row, success_reason={"action": "test"})
+        return TransformResult.success(row_dict, success_reason={"action": "test"})
 
 
 class CollectSink(_TestSinkBase):

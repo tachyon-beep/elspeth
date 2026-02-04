@@ -33,7 +33,17 @@ if TYPE_CHECKING:
     from elspeth.telemetry import TelemetryManager
 
 from elspeth import __version__ as ENGINE_VERSION
-from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, PendingOutcome, RowOutcome, RunStatus, TokenInfo
+from elspeth.contracts import (
+    BatchPendingError,
+    ExportStatus,
+    NodeType,
+    PendingOutcome,
+    PipelineRow,
+    RowOutcome,
+    RunStatus,
+    SchemaContract,
+    TokenInfo,
+)
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.errors import OrchestrationInvariantError
@@ -405,11 +415,16 @@ class Orchestrator:
             # SourceProtocol requires output_schema - all sources have schemas (even dynamic ones)
             source_schema_json = json.dumps(config.source.output_schema.model_json_schema())
 
+            # Get source schema contract for resume PipelineRow wrapping
+            # This enables proper contract propagation when resuming from stored payloads
+            source_contract = config.source.get_schema_contract()
+
             recorder = LandscapeRecorder(self._db, payload_store=payload_store)
             run = recorder.begin_run(
                 config=config.config,
                 canonical_version=self._canonical_version,
                 source_schema_json=source_schema_json,
+                schema_contract=source_contract,
             )
 
             # Record secret resolutions in audit trail (deferred from pre-run loading)
@@ -1708,6 +1723,36 @@ class Orchestrator:
         schema_dict = json.loads(source_schema_json)
         source_schema_class = reconstruct_schema_from_json(schema_dict)
 
+        # PIPELINEROW MIGRATION: Retrieve contract from audit trail for row wrapping
+        # During resume, we need to wrap plain dicts in PipelineRow with contract
+        # This ensures type fidelity and maintains the same data structures as main run
+        schema_contract = recorder.get_run_contract(run_id)
+        if schema_contract is None:
+            # Backward compatibility: Generate OBSERVED contract from first row
+            # This handles runs that were started before PipelineRow migration
+            # or test sources that don't set contracts
+            from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+            # Get first unprocessed row to infer contract
+            unprocessed_test = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
+            if unprocessed_test:
+                # unprocessed_test is list[tuple[row_id, row_index, row_data]]
+                _, _, first_row_data = unprocessed_test[0]
+                fields = tuple(
+                    FieldContract(
+                        normalized_name=key,
+                        original_name=key,
+                        python_type=object,
+                        required=False,
+                        source="observed",
+                    )
+                    for key in first_row_data
+                )
+                schema_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+            else:
+                # No rows to process - create empty contract
+                schema_contract = SchemaContract(mode="OBSERVED", fields=(), locked=True)
+
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
         if not unprocessed_rows:
@@ -1737,6 +1782,7 @@ class Orchestrator:
             restored_aggregation_state=restored_state,
             settings=settings,
             payload_store=payload_store,
+            schema_contract=schema_contract,
         )
 
         # 6. Complete the run with reproducibility grade
@@ -1759,6 +1805,7 @@ class Orchestrator:
         settings: ElspethSettings | None = None,
         *,
         payload_store: PayloadStore,
+        schema_contract: SchemaContract,
     ) -> RunResult:
         """Process unprocessed rows during resume.
 
@@ -1777,6 +1824,7 @@ class Orchestrator:
             restored_aggregation_state: Map of node_id -> state dict
             settings: Full settings (optional)
             payload_store: Optional PayloadStore for persisting source row payloads
+            schema_contract: SchemaContract for wrapping row data in PipelineRow
 
         Returns:
             RunResult with processing counts
@@ -2001,9 +2049,13 @@ class Orchestrator:
                 for dest, count in timeout_result.routed_destinations.items():
                     routed_destinations[dest] += count
 
+                # Wrap row_data in PipelineRow with contract (PIPELINEROW MIGRATION)
+                # Row data from resume is a plain dict, but process_existing_row expects PipelineRow
+                pipeline_row = PipelineRow(data=row_data, contract=schema_contract)
+
                 results = processor.process_existing_row(
                     row_id=row_id,
-                    row_data=row_data,
+                    row_data=pipeline_row,
                     transforms=config.transforms,
                     ctx=ctx,
                 )

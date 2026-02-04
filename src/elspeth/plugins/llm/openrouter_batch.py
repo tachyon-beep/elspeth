@@ -480,9 +480,31 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 # Success
                 output_rows.append(result)
 
+        # Create OBSERVED contract from first output row
+        # Batch transforms don't have access to input contracts (architectural gap),
+        # so we infer an OBSERVED contract from the output data
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        if output_rows:
+            first_row = output_rows[0]
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,  # Use object for dynamic typing
+                    required=False,
+                    source="observed",
+                )
+                for key in first_row
+            )
+            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        else:
+            output_contract = None
+
         return TransformResult.success_multi(
             output_rows,
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
+            contract=output_contract,
         )
 
     def _process_single_row(

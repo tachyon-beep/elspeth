@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, RowOutcome, RunStatus, SourceRow
+from elspeth.contracts import PipelineRow,  Determinism, NodeType, PluginSchema, RoutingMode, RowOutcome, RunStatus, SourceRow
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -67,7 +67,7 @@ class _FailOnceTransform(BaseTransform):
         cls._attempt_count.clear()
         cls._fail_row_ids.clear()
 
-    def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
         row_id = row.get("id", "unknown")
@@ -133,7 +133,7 @@ class TestResumeIdempotence:
         import json
         from collections.abc import Iterator
 
-        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
+        from elspeth.contracts import PipelineRow,  ArtifactDescriptor, Determinism, PluginSchema
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
@@ -162,8 +162,7 @@ class TestResumeIdempotence:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -179,7 +178,7 @@ class TestResumeIdempotence:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({**row, "value": row["value"] * 2}, success_reason={"action": "doubler"})
 
         class CollectSink(_TestSinkBase):
@@ -444,7 +443,7 @@ class TestRetryBehavior:
 
         from sqlalchemy import select
 
-        from elspeth.contracts import ArtifactDescriptor
+        from elspeth.contracts import PipelineRow,  ArtifactDescriptor
         from elspeth.core.landscape.schema import transform_errors_table
         from elspeth.plugins.results import TransformResult
 
@@ -462,7 +461,7 @@ class TestRetryBehavior:
                 super().__init__({"schema": {"mode": "observed"}})
                 self._fail_ids = fail_ids
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 if row["id"] in self._fail_ids:
                     return TransformResult.error(
                         {
@@ -470,7 +469,7 @@ class TestRetryBehavior:
                             "error": f"Row {row['id']} failed validation",
                         }
                     )
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
 
@@ -479,9 +478,7 @@ class TestRetryBehavior:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": "row_1", "value": 100})
-                yield SourceRow.valid({"id": "row_2", "value": 200})  # Will fail
-                yield SourceRow.valid({"id": "row_3", "value": 300})
+                yield from self.wrap_rows([{"id": "row_1", "value": 100}, {"id": "row_2", "value": 200}, {"id": "row_3", "value": 300}])  # Row 2 will fail
 
             def close(self) -> None:
                 pass
