@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -125,7 +126,7 @@ class BatchReplicate(BaseTransform):
                 success_reason={"action": "processed", "metadata": {"empty_batch": True}},
             )
 
-        output_rows: list[dict[str, Any]] = []
+        output_rows: list[dict[str, Any] | PipelineRow] = []
 
         for row in rows:
             # Get copies count - field is optional, type must be correct if present

@@ -293,7 +293,7 @@ class _ExpressionValidator(ast.NodeVisitor):
 class _ExpressionEvaluator(ast.NodeVisitor):
     """AST visitor that evaluates validated expressions."""
 
-    def __init__(self, row: dict[str, Any]) -> None:
+    def __init__(self, row: dict[str, Any] | PipelineRow) -> None:
         self._row = row
 
     def visit_Expression(self, node: ast.Expression) -> Any:

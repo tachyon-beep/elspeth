@@ -172,7 +172,7 @@ class JSONExplode(BaseTransform):
             )
 
         # Explode array into multiple rows
-        output_rows = []
+        output_rows: list[dict[str, Any] | PipelineRow] = []
         for i, item in enumerate(array_value):
             output = dict(base)
             output[self._output_field] = item
@@ -197,9 +197,12 @@ class JSONExplode(BaseTransform):
                     )
 
         # Update contract using first output row (all rows have same schema)
+        # output_rows only contains dicts (never PipelineRow), but typed as union for success_multi
+        from typing import cast
+
         output_contract = narrow_contract_to_output(
             input_contract=row.contract,
-            output_row=output_rows[0],
+            output_row=cast(dict[str, Any], output_rows[0]),
         )
 
         return TransformResult.success_multi(

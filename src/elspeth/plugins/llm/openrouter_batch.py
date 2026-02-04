@@ -437,7 +437,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             ThreadPoolExecutor(max_workers=self._pool_size) as executor,
         ):
             # Submit all rows with shared client
-            futures = {executor.submit(self._process_single_row, idx, row, ctx, client): idx for idx, row in enumerate(rows)}
+            futures = {executor.submit(self._process_single_row, idx, row.to_dict(), ctx, client): idx for idx, row in enumerate(rows)}
 
             # Collect results - catch only transport exceptions, let plugin bugs crash
             for future in as_completed(futures):
@@ -450,7 +450,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Assemble output rows in original order
         # Every row gets an output (success or with error markers) - no rows are dropped
-        output_rows: list[dict[str, Any]] = []
+        output_rows: list[dict[str, Any] | PipelineRow] = []
 
         for idx in range(len(rows)):
             if idx not in results:

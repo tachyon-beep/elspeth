@@ -536,7 +536,7 @@ class AzureBatchLLMTransform(BaseTransform):
             custom_id = f"row-{idx}-{uuid.uuid4().hex[:8]}"
 
             try:
-                rendered = self._template.render_with_metadata(row)
+                rendered = self._template.render_with_metadata(row.to_dict())
             except TemplateError as e:
                 template_errors.append((idx, str(e)))
                 continue
@@ -772,7 +772,7 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
             # Download results and assemble output
-            return self._download_results(batch, checkpoint, rows, ctx)
+            return self._download_results(batch, checkpoint, [row.to_dict() for row in rows], ctx)
 
         elif batch.status == "failed":
             # Batch failed - clear checkpoint and return error
@@ -1003,7 +1003,7 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         # Assemble output rows in original order
-        output_rows: list[dict[str, Any]] = []
+        output_rows: list[dict[str, Any] | PipelineRow] = []
         row_errors: list[RowErrorEntry] = []
 
         # Track which rows had template errors (excluded from batch)

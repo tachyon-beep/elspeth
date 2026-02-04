@@ -408,27 +408,18 @@ class TransformExecutor:
                 # Contract fallback chain:
                 # 1. result.contract (if transform provides it)
                 # 2. transform.output_schema (create contract from schema)
-                # 3. input token contract (passthrough scenario)
-                # 4. None of above available -> crash (plugin bug)
+                #    All transforms have output_schema per protocol, so this always succeeds
                 if result.contract is not None:
                     output_contract = result.contract
-                elif transform.output_schema is not None:
+                else:
                     # Create contract from transform's output_schema
+                    # transform.output_schema is always non-None per TransformProtocol
                     from elspeth.contracts.transform_contract import create_output_contract_from_schema
 
                     output_contract = create_output_contract_from_schema(transform.output_schema)
-                elif token.row_data.contract is not None:
-                    # Fallback to input contract (passthrough transform)
-                    output_contract = token.row_data.contract
-                else:
-                    # No contract available anywhere - plugin bug
-                    raise ValueError(
-                        f"Cannot create PipelineRow: no contract available. "
-                        f"Transform '{transform.name}' returned no contract, has no output_schema, "
-                        f"and input token has no contract. This is a bug in the transform or upstream pipeline."
-                    )
+
                 # Extract dict if result.row is already a PipelineRow (boundary operation)
-                row_dict = result.row._data if isinstance(result.row, PipelineRow) else result.row
+                row_dict = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
                 new_row = PipelineRow(row_dict, output_contract)
 
                 # B2 fix: Log PipelineRow creation for observability

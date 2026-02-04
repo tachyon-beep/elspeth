@@ -655,9 +655,11 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             result = self._process_single_row_internal(row_data, ctx.state_id, token_id)
             # Propagate contract on success
             if result.status == "success" and result.row is not None:
+                # Convert PipelineRow to dict for contract propagation
+                output_row = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
                 result.contract = propagate_contract(
                     input_contract=input_contract,
-                    output_row=result.row,
+                    output_row=output_row,
                     transform_adds_fields=True,  # Multi-query transforms add multiple output fields
                 )
             return result

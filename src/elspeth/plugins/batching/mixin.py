@@ -202,9 +202,9 @@ class BatchTransformMixin:
         self,
         ticket: RowTicket,
         token: TokenInfo,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
-        processor: Callable[[dict[str, Any], PluginContext], TransformResult],
+        processor: Callable[[PipelineRow, PluginContext], TransformResult],
     ) -> None:
         """Worker thread: process row and mark complete.
 
