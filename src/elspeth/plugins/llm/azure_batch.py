@@ -26,6 +26,7 @@ from pydantic import Field
 
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -354,7 +355,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def process(
         self,
-        row: dict[str, Any] | list[dict[str, Any]],
+        row: PipelineRow | list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Process batch with checkpoint-based recovery.
@@ -380,7 +381,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def _process_single(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row (fallback for non-batch mode).
@@ -415,7 +416,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def _process_batch(
         self,
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Process batch with two-phase checkpoint approach.
@@ -511,7 +512,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def _submit_batch(
         self,
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Submit new batch to Azure Batch API.
@@ -693,7 +694,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def _check_batch_status(
         self,
         checkpoint: dict[str, Any],
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Check batch status and complete if ready.

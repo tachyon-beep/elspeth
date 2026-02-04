@@ -376,12 +376,21 @@ class TransformExecutor:
 
             # For single-row: output_data is the row
             # For multi-row: output_data is the rows list (engine handles expansion)
-            output_data: dict[str, Any] | list[dict[str, Any]]
+            output_data_with_pipe: dict[str, Any] | PipelineRow | list[dict[str, Any] | PipelineRow]
             if result.row is not None:
-                output_data = result.row
+                output_data_with_pipe = result.row
             else:
                 # result.rows is guaranteed non-None by has_output_data check above
-                output_data = result.rows  # type: ignore[assignment]
+                output_data_with_pipe = result.rows  # type: ignore[assignment]
+
+            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
+            def _to_dict(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
+                return dict(r._data) if isinstance(r, PipelineRow) else r
+
+            if isinstance(output_data_with_pipe, list):
+                output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict(r) for r in output_data_with_pipe]
+            else:
+                output_data = _to_dict(output_data_with_pipe)
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -418,7 +427,9 @@ class TransformExecutor:
                         f"Transform '{transform.name}' returned no contract, has no output_schema, "
                         f"and input token has no contract. This is a bug in the transform or upstream pipeline."
                     )
-                new_row = PipelineRow(result.row, output_contract)
+                # Extract dict if result.row is already a PipelineRow (boundary operation)
+                row_dict = result.row._data if isinstance(result.row, PipelineRow) else result.row
+                new_row = PipelineRow(row_dict, output_contract)
 
                 # B2 fix: Log PipelineRow creation for observability
                 slog.debug(
@@ -1372,11 +1383,11 @@ class AggregationExecutor:
 
         # Step 5: Complete node state
         if result.status == "success":
-            output_data: dict[str, Any] | list[dict[str, Any]]
+            output_data_with_pipe: dict[str, Any] | PipelineRow | list[dict[str, Any] | PipelineRow]
             if result.row is not None:
-                output_data = result.row
+                output_data_with_pipe = result.row
             elif result.rows is not None:
-                output_data = result.rows
+                output_data_with_pipe = result.rows
             else:
                 # Contract violation: success status requires output data
                 raise RuntimeError(
@@ -1385,6 +1396,15 @@ class AggregationExecutor:
                     f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
                     f"This is a plugin bug."
                 )
+
+            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
+            def _to_dict_agg(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
+                return dict(r._data) if isinstance(r, PipelineRow) else r
+
+            if isinstance(output_data_with_pipe, list):
+                output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict_agg(r) for r in output_data_with_pipe]
+            else:
+                output_data = _to_dict_agg(output_data_with_pipe)
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,

@@ -47,6 +47,20 @@ from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import GateProtocol, TransformProtocol
 
+
+def _extract_dict(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
+    """Extract dict from PipelineRow or pass through dict.
+
+    This is a legitimate boundary operation when we need to create a NEW
+    PipelineRow with a different contract. We're not hiding bugs - we're
+    converting between representations at a known boundary.
+    """
+    if isinstance(row, PipelineRow):
+        # Extract immutable dict from PipelineRow
+        return dict(row._data)
+    return row
+
+
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
 
@@ -623,7 +637,7 @@ class RowProcessor:
                 )
 
             # Convert output rows (plain dicts) to PipelineRow objects using contract
-            pipeline_rows = [PipelineRow(row, result.contract) for row in result.rows]
+            pipeline_rows = [PipelineRow(_extract_dict(row), result.contract) for row in result.rows]
 
             for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                 # Update token with enriched data, preserving all lineage metadata
@@ -703,7 +717,7 @@ class RowProcessor:
 
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
-                    expanded_rows=output_rows,
+                    expanded_rows=[_extract_dict(row) for row in output_rows],
                     output_contract=result.contract,
                     step_in_pipeline=audit_step,
                     run_id=self._run_id,
@@ -948,7 +962,7 @@ class RowProcessor:
                     )
 
                 # Convert output rows (plain dicts) to PipelineRow objects using contract
-                pipeline_rows = [PipelineRow(row, result.contract) for row in result.rows]
+                pipeline_rows = [PipelineRow(_extract_dict(row), result.contract) for row in result.rows]
 
                 # Build COMPLETED results for all buffered tokens with enriched data
                 # Check if there are more transforms after this one
@@ -1043,7 +1057,7 @@ class RowProcessor:
 
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=current_token,
-                    expanded_rows=output_rows,
+                    expanded_rows=[_extract_dict(row) for row in output_rows],
                     output_contract=result.contract,
                     step_in_pipeline=step,
                     run_id=self._run_id,
@@ -1373,7 +1387,7 @@ class RowProcessor:
     def process_existing_row(
         self,
         row_id: str,
-        row_data: dict[str, Any],
+        row_data: PipelineRow,
         transforms: list[Any],
         ctx: PluginContext,
         *,

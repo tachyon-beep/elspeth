@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.errors import ContractViolation, TransformSuccessReason
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema import SchemaConfig
-    from elspeth.contracts.schema_contract import SchemaContract
+    from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 from sqlalchemy import select
@@ -3018,7 +3018,7 @@ class LandscapeRecorder:
         run_id: str,
         token_id: str,
         transform_id: str,
-        row_data: dict[str, Any],
+        row_data: dict[str, Any] | PipelineRow,
         error_details: TransformErrorReason,
         destination: str,
     ) -> str:

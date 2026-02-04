@@ -10,6 +10,8 @@ Phase 3 Integration Points:
 - payload_store: PayloadStore for large blob storage
 """
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
     from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.identity import TokenInfo
-    from elspeth.contracts.schema_contract import SchemaContract
+    from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.plugins.clients.http import AuditedHTTPClient
@@ -436,7 +438,7 @@ class PluginContext:
         self,
         token_id: str,
         transform_id: str,
-        row: dict[str, Any],
+        row: dict[str, Any] | PipelineRow,
         error_details: "TransformErrorReason",
         destination: str,
     ) -> TransformErrorToken:

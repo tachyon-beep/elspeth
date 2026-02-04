@@ -25,6 +25,7 @@ from pydantic import Field
 
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
@@ -337,7 +338,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     def process(
         self,
-        row: dict[str, Any] | list[dict[str, Any]],
+        row: PipelineRow | list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Process batch of rows in parallel.
@@ -360,7 +361,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     def _process_single(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row (fallback for non-batch mode).
@@ -398,7 +399,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     def _process_batch(
         self,
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Process batch of rows in parallel via ThreadPoolExecutor.

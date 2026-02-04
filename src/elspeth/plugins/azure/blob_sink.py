@@ -378,16 +378,28 @@ class AzureBlobSink(BaseSink):
     def _get_fieldnames_from_schema_or_row(self, row: dict[str, Any]) -> list[str]:
         """Get fieldnames from schema or row keys.
 
-        When schema is explicit, returns field names from schema definition.
-        This ensures optional fields are present in the header.
-
-        When schema is dynamic, falls back to inferring from row keys.
+        Field selection depends on schema mode:
+        - fixed: Only declared fields (extras rejected)
+        - flexible: Declared fields first, then extras from row
+        - observed: All fields from row (infer and lock)
         """
-        if not self._schema_config.is_observed and self._schema_config.fields:
-            # Explicit schema: use field names from schema definition
-            return [field_def.name for field_def in self._schema_config.fields]
+        if self._schema_config.is_observed:
+            # Observed mode: infer all fields from row keys
+            return list(row.keys())
+        elif self._schema_config.fields:
+            # Explicit schema: start with declared field names in schema order
+            declared_fields = [field_def.name for field_def in self._schema_config.fields]
+            declared_set = set(declared_fields)
+
+            if self._schema_config.mode == "flexible":
+                # Flexible mode: declared fields first, then extras from row
+                extras = [key for key in row if key not in declared_set]
+                return declared_fields + extras
+            else:
+                # Fixed mode: only declared fields
+                return declared_fields
         else:
-            # Dynamic schema: infer from row keys
+            # Fallback (shouldn't happen with valid config): use row keys
             return list(row.keys())
 
     def _get_field_names_and_display(self, row: dict[str, Any]) -> tuple[list[str], list[str]]:

@@ -954,7 +954,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Not supported - use accept() for row-level pipelining.
