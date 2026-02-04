@@ -15,6 +15,7 @@ from typing import Any
 
 from elspeth.contracts import NodeType
 from elspeth.contracts.types import NodeID
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -22,6 +23,28 @@ from elspeth.plugins.results import (
     TransformResult,
 )
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
 
 
 class TestProcessorBatchTransforms:
@@ -53,7 +76,22 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
-                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                    output_row = {"total": total}
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -106,7 +144,7 @@ class TestProcessorBatchTransforms:
         for i in range(3):
             result_list = processor.process_row(
                 row_index=i,
-                row_data={"value": i + 1},  # 1, 2, 3
+                source_row=make_source_row({"value": i + 1}),  # 1, 2, 3
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -188,7 +226,7 @@ class TestProcessorBatchTransforms:
         # Process row - should use single-row mode (double)
         result_list = processor.process_row(
             row_index=0,
-            row_data={"value": 5},
+            source_row=make_source_row({"value": 5}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -223,7 +261,22 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
-                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                    output_row = {"total": total}
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -334,7 +387,7 @@ class TestProcessorBatchTransforms:
         # - The flush produces a NEW row with the aggregated result
         result_list = processor.process_row(
             row_index=2,
-            row_data={"value": 3},  # Third value
+            source_row=make_source_row({"value": 3}),  # Third value
             transforms=[transform],
             ctx=ctx,
         )
@@ -414,7 +467,7 @@ class TestProcessorDeaggregation:
         # Process a row through the expanding transform
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=make_source_row({"value": 42}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -494,7 +547,7 @@ class TestProcessorDeaggregation:
         with pytest.raises(RuntimeError, match="creates_tokens=False"):
             processor.process_row(
                 row_index=0,
-                row_data={"value": 1},
+                source_row=make_source_row({"value": 1}),
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -588,7 +641,7 @@ class TestProcessorDeaggregation:
         # Process first row - buffered (not flushed yet)
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 1},
+            source_row=make_source_row({"value": 1}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -599,7 +652,7 @@ class TestProcessorDeaggregation:
         with pytest.raises(RuntimeError, match="neither row nor rows contains data"):
             processor.process_row(
                 row_index=1,
-                row_data={"value": 2},
+                source_row=make_source_row({"value": 2}),
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -691,7 +744,7 @@ class TestProcessorDeaggregation:
         # Process first row - buffered
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 1},
+            source_row=make_source_row({"value": 1}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -701,7 +754,7 @@ class TestProcessorDeaggregation:
         with pytest.raises(RuntimeError, match="neither row nor rows contains data"):
             processor.process_row(
                 row_index=1,
-                row_data={"value": 2},
+                source_row=make_source_row({"value": 2}),
                 transforms=[transform],
                 ctx=ctx,
             )
