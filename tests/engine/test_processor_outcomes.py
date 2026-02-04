@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeType, RoutingMode, RowOutcome, RunStatus
+from elspeth.contracts import NodeType, RoutingMode, RowOutcome, RunStatus, SourceRow
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import GateName, NodeID
 

@@ -1,7 +1,6 @@
 # tests/engine/test_transform_executor.py
 """Tests for transform executor."""
 
-from typing import Any
 
 import pytest
 

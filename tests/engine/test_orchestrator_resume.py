@@ -574,10 +574,10 @@ class TestOrchestratorResumeCleanup:
         P3-2026-01-28: Bug fix ensures _process_resumed_rows() finally block
         calls transform.close() in addition to on_complete().
         """
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.schema_contract import PipelineRow
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.results import TransformResult
 
         # Create tracking transform
         class TestSchema(PluginSchema):
@@ -804,11 +804,10 @@ class TestOrchestratorResumeCleanup:
         Verifies that the suppress(Exception) wrapper in the finally block
         allows close() to be called even when on_complete() fails.
         """
-        from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.results import TransformResult
-
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.schema_contract import PipelineRow
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.results import TransformResult
 
         class TestSchema(PluginSchema):
             id: int

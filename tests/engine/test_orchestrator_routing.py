@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, SourceRow
+from elspeth.contracts import Determinism, FieldContract, SchemaContract, SourceRow
 from elspeth.core.landscape import LandscapeDB
 from tests.conftest import (
     _TestSinkBase,
@@ -24,6 +24,21 @@ from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     pass
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 @pytest.fixture(scope="module")
@@ -40,7 +55,7 @@ class TestOrchestratorInvalidRouting:
 
     def test_gate_routing_to_unknown_sink_raises_error(self, routing_db: LandscapeDB, payload_store) -> None:
         """Gate routing to non-existent sink must fail loudly, not silently."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import GraphValidationError
         from elspeth.engine.orchestrator import (
@@ -170,7 +185,8 @@ class TestOrchestratorOutputSinkRouting:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"id": 1, "value": "test"})])
+        row = {"id": 1, "value": "test"}
+        mock_source.load.return_value = iter([SourceRow.valid(row, contract=_make_observed_contract(row))])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None
 
@@ -211,7 +227,7 @@ class TestOrchestratorGateRouting:
 
     def test_gate_routes_to_named_sink(self, routing_db: LandscapeDB, payload_store) -> None:
         """Gate can route rows to a named sink using route labels."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -294,7 +310,7 @@ class TestRouteValidation:
 
     def test_valid_routes_pass_validation(self, routing_db: LandscapeDB, payload_store) -> None:
         """Valid route configurations should pass validation without error."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -392,7 +408,7 @@ class TestRouteValidation:
             def load(self, ctx: Any) -> Any:
                 self.load_called = True
                 for _row in self._data:
-                    yield SourceRow.valid(_row)
+                    yield SourceRow.valid(_row, contract=_make_observed_contract(_row))
 
             def close(self) -> None:
                 pass
@@ -451,7 +467,7 @@ class TestRouteValidation:
 
     def test_error_message_includes_route_label(self, routing_db: LandscapeDB, payload_store) -> None:
         """Error message should include the route label for debugging."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import GraphValidationError
         from elspeth.engine.orchestrator import (
@@ -527,7 +543,7 @@ class TestRouteValidation:
 
     def test_continue_routes_are_not_validated_as_sinks(self, routing_db: LandscapeDB, payload_store) -> None:
         """Routes that resolve to 'continue' should not be validated as sinks."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 

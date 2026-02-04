@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts import FieldContract, PluginSchema, SchemaContract, SourceRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
@@ -27,6 +27,26 @@ from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 # ============================================================================
@@ -62,7 +82,7 @@ class TestTransformErrorSinkValidation:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 self.load_called = True
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class TransformWithInvalidOnError(BaseTransform):
             """Transform configured to route errors to non-existent sink."""
@@ -137,7 +157,7 @@ class TestTransformErrorSinkValidation:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class MyBadTransform(BaseTransform):
             """Transform with bad on_error config."""
@@ -216,7 +236,7 @@ class TestTransformErrorSinkValidation:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class DiscardTransform(BaseTransform):
             """Transform that discards errors."""
@@ -284,7 +304,7 @@ class TestTransformErrorSinkValidation:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class NormalTransform(BaseTransform):
             """Transform with no error routing (default)."""
@@ -352,7 +372,7 @@ class TestTransformErrorSinkValidation:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class ErrorRoutingTransform(BaseTransform):
             """Transform that routes errors to a valid sink."""

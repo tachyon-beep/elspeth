@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeID, NodeStateStatus, NodeType, RoutingMode, RunStatus, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeID, NodeStateStatus, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName
 from elspeth.contracts.audit import NodeStateCompleted
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (

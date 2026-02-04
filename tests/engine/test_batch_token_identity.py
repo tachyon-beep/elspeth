@@ -48,7 +48,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             required=False,
             source="observed",
         )
-        for key in data.keys()
+        for key in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return PipelineRow(data, contract)
@@ -82,7 +82,7 @@ class SumTransform(BaseTransform):
                     required=False,
                     source="observed",
                 )
-                for key in output_row.keys()
+                for key in output_row
             )
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
             return TransformResult.success(output_row, success_reason={"action": "sum"}, contract=contract)

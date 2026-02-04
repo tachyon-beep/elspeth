@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import SourceRow
+from elspeth.contracts import PipelineRow, SourceRow
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,

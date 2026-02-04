@@ -69,7 +69,7 @@ def test_narrow_contract_field_addition():
 
     # Find the new field
     new_field = next(f for f in result.fields if f.normalized_name == "b")
-    assert new_field.python_type == int
+    assert new_field.python_type is int
     assert new_field.required is False
     assert new_field.source == "inferred"
 
@@ -96,7 +96,7 @@ def test_narrow_contract_field_rename():
 
     assert len(result.fields) == 1
     assert result.fields[0].normalized_name == "new"
-    assert result.fields[0].python_type == str
+    assert result.fields[0].python_type is str
     assert result.fields[0].source == "inferred"
 
 

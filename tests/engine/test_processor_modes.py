@@ -10,7 +10,10 @@ in batch-aware transforms (aggregations). These tests verify:
 Extracted from test_processor.py to improve test organization.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from elspeth.contracts import SourceRow
 
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID

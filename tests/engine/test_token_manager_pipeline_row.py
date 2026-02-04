@@ -159,6 +159,7 @@ class TestTokenManagerExpandToken:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent_token,
             expanded_rows=expanded_rows,
+            output_contract=contract,
             step_in_pipeline=1,
             run_id="run_001",
         )

@@ -13,7 +13,7 @@ Gates are config-driven using GateSettings.
 
 from typing import Any
 
-from elspeth.contracts import NodeType, RunStatus
+from elspeth.contracts import NodeType, RunStatus, SourceRow
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -24,7 +24,7 @@ from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
 )
-from tests.conftest import as_transform
+from tests.conftest import as_transform, create_observed_contract
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
@@ -42,7 +42,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             required=False,
             source="observed",
         )
-        for key in data.keys()
+        for key in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return PipelineRow(data, contract)
@@ -636,13 +636,13 @@ class TestRowProcessorCoalesce:
 
         # Verify merged data contains sentiment and entities but not summary
         merged_data = outcome.merged_token.row_data
-        assert "sentiment" in merged_data
+        assert "sentiment" in merged_data.to_dict()
         assert merged_data["sentiment"] == "positive"
-        assert "entities" in merged_data
+        assert "entities" in merged_data.to_dict()
         assert merged_data["entities"] == ["ACME"]
         # summary never arrived, so its data is NOT in merged result
         # (The original text field should be there from union merge)
-        assert "text" in merged_data
+        assert "text" in merged_data.to_dict()
 
         # Verify coalesce metadata shows partial merge
         assert outcome.coalesce_metadata is not None
@@ -754,8 +754,8 @@ class TestRowProcessorCoalesce:
 
         # Verify merged data using nested strategy
         merged_data = outcome2.merged_token.row_data
-        assert "fast" in merged_data, "Merged data should have 'fast' branch"
-        assert "medium" in merged_data, "Merged data should have 'medium' branch"
+        assert "fast" in merged_data.to_dict(), "Merged data should have 'fast' branch"
+        assert "medium" in merged_data.to_dict(), "Merged data should have 'medium' branch"
         assert "slow" not in merged_data, "Merged data should NOT have 'slow' branch"
 
         # Check nested structure contains expected data
@@ -968,7 +968,7 @@ class TestRowProcessorCoalesce:
         assert enriched_a2.token_id in consumed_inner_ids
 
         # Verify inner merged data has nested structure
-        inner_merged_data = inner_merged_token.row_data
+        inner_merged_data = inner_merged_token.row_data.to_dict()
         assert "path_a1" in inner_merged_data
         assert "path_a2" in inner_merged_data
         assert inner_merged_data["path_a1"]["sentiment"] == "positive"
@@ -1012,7 +1012,7 @@ class TestRowProcessorCoalesce:
         assert enriched_b.token_id in consumed_outer_ids
 
         # === Verify final merged data has complete nested hierarchy ===
-        final_data = outer_merged_token.row_data
+        final_data = outer_merged_token.row_data.to_dict()
         assert "path_a_merged" in final_data
         assert "path_b" in final_data
 
@@ -1399,7 +1399,9 @@ class TestAggregationCoalesceMetadataPropagation:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total}, success_reason={"action": "aggregate"})
+                    output_row = {"total": total}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "aggregate"}, contract=contract)
                 return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
 
         agg_transform = as_transform(BatchAggForCoalesce())
@@ -1709,7 +1711,6 @@ class TestCoalesceSelectBranchFailure:
         from sqlalchemy import func, select
 
         from elspeth.core.landscape.schema import token_outcomes_table
-
         with landscape_db.engine.connect() as conn:
             # Count outcomes per token_id - should never be > 1
             stmt = (

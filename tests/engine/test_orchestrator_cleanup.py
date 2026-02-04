@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig

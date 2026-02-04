@@ -20,7 +20,7 @@ import pytest
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import ArtifactDescriptor, GateName, NodeID, NodeType, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import ArtifactDescriptor, GateName, NodeID, NodeType, PipelineRow, PluginSchema, RoutingMode, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.expression_parser import ExpressionEvaluationError
@@ -48,7 +48,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> Any:
             required=False,
             source="observed",
         )
-        for key in data.keys()
+        for key in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return PipelineRow(data, contract)

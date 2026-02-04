@@ -29,6 +29,7 @@ from elspeth.contracts import (
     ArtifactDescriptor,
     NodeStateStatus,
     NodeType,
+    PipelineRow,
     PluginSchema,
     RoutingMode,
     RowOutcome,

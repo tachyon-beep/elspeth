@@ -13,7 +13,7 @@ Mutant gaps addressed:
 
 from typing import Any
 
-from elspeth.contracts import Determinism, NodeType, RoutingMode, TriggerType
+from elspeth.contracts import Determinism, NodeType, RoutingMode, SourceRow, TriggerType
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig

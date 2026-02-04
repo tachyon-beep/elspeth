@@ -54,8 +54,8 @@ class TestResumeComprehensive:
         Returns:
             Tuple of (schema_contract_json, schema_contract_hash)
         """
-        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
         field_contracts = tuple(
             FieldContract(
@@ -135,8 +135,8 @@ class TestResumeComprehensive:
 
         # PIPELINEROW MIGRATION: Create schema contract for resume
         # Resume now requires a contract to wrap row data in PipelineRow
-        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
         contract = SchemaContract(
             mode="FIXED",

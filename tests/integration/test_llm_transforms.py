@@ -61,7 +61,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             required=False,
             source="observed",
         )
-        for k in data.keys()
+        for k in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return PipelineRow(data=data, contract=contract)

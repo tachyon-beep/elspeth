@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import ArtifactDescriptor, Determinism, NodeID, NodeType, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import ArtifactDescriptor, Determinism, NodeID, NodeType, PipelineRow, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
 from elspeth.contracts.events import TelemetryEvent
 from elspeth.core.dag import ExecutionGraph

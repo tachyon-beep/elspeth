@@ -9,9 +9,24 @@ GateSettings.
 
 from typing import Any
 
-from elspeth.contracts import NodeType, RoutingMode
+from elspeth.contracts import FieldContract, NodeType, RoutingMode, SchemaContract, SourceRow
 from elspeth.contracts.types import GateName, NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestRowProcessorGates:
@@ -98,7 +113,7 @@ class TestRowProcessorGates:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=SourceRow.valid({"value": 42}, contract=_make_observed_contract({"value": 42})),
             transforms=[FinalTransform(transform.node_id)],
             ctx=ctx,
         )
@@ -107,7 +122,7 @@ class TestRowProcessorGates:
         assert len(results) == 1
         result = results[0]
 
-        assert result.final_data == {"value": 42, "final": True}
+        assert result.final_data.to_dict() == {"value": 42, "final": True}
         assert result.outcome == RowOutcome.COMPLETED
 
     def test_gate_route_to_sink(self) -> None:
@@ -181,7 +196,7 @@ class TestRowProcessorGates:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 150},
+            source_row=SourceRow.valid({"value": 150}, contract=_make_observed_contract({"value": 150})),
             transforms=[],
             ctx=ctx,
         )
@@ -192,7 +207,7 @@ class TestRowProcessorGates:
 
         assert result.outcome == RowOutcome.ROUTED
         assert result.sink_name == "high_values"
-        assert result.final_data == {"value": 150}
+        assert result.final_data.to_dict() == {"value": 150}
 
     def test_gate_fork_returns_forked(self) -> None:
         """Gate forking returns forked outcome (linear pipeline mode)."""
@@ -281,7 +296,7 @@ class TestRowProcessorGates:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=SourceRow.valid({"value": 42}, contract=_make_observed_contract({"value": 42})),
             transforms=[],
             ctx=ctx,
         )
@@ -298,11 +313,11 @@ class TestRowProcessorGates:
 
         # Parent has FORKED outcome
         parent = forked_results[0]
-        assert parent.final_data == {"value": 42}
+        assert parent.final_data.to_dict() == {"value": 42}
 
         # Children completed with original data (no transforms after fork)
         for child in completed_results:
-            assert child.final_data == {"value": 42}
+            assert child.final_data.to_dict() == {"value": 42}
             assert child.token.branch_name in ("path_a", "path_b")
 
         # === P1: Audit trail verification for FORKED ===
@@ -462,7 +477,7 @@ class TestRowProcessorNestedForks:
         ctx = PluginContext(run_id=run.run_id, config={})
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=SourceRow.valid({"value": 42}, contract=_make_observed_contract({"value": 42})),
             transforms=[transform],
             ctx=ctx,
         )

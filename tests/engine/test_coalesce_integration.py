@@ -25,6 +25,7 @@ from elspeth.contracts import (
     ArtifactDescriptor,
     NodeStateStatus,
     NodeType,
+    PipelineRow,
     RunStatus,
     SourceRow,
 )

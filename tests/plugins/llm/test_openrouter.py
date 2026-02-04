@@ -3,6 +3,7 @@
 
 import json
 from collections.abc import Generator
+from typing import Any
 from unittest.mock import Mock
 
 import httpx
@@ -10,6 +11,7 @@ import pytest
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
@@ -20,6 +22,26 @@ from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_ht
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 def _create_mock_response(
@@ -322,7 +344,7 @@ class TestOpenRouterLLMTransformPipelining:
         )
 
         with mock_httpx_client(chaosllm_server, response=mock_response):
-            transform.accept({"text": "hello world"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello world"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -352,7 +374,7 @@ class TestOpenRouterLLMTransformPipelining:
         """Template rendering failure emits TransformResult.error()."""
         # Missing required_field triggers template error (no HTTP call needed)
         with mock_httpx_client(chaosllm_server):
-            transform.accept({"other_field": "value"}, ctx)
+            transform.accept(_make_pipeline_row({"other_field": "value"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -376,7 +398,7 @@ class TestOpenRouterLLMTransformPipelining:
                 response=Mock(status_code=400),
             ),
         ):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -406,7 +428,7 @@ class TestOpenRouterLLMTransformPipelining:
                 response=Mock(status_code=500),
             ),
         ):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -436,7 +458,7 @@ class TestOpenRouterLLMTransformPipelining:
                 response=Mock(status_code=429),
             ),
         ):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -466,7 +488,7 @@ class TestOpenRouterLLMTransformPipelining:
                 response=Mock(status_code=503),
             ),
         ):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -496,7 +518,7 @@ class TestOpenRouterLLMTransformPipelining:
                 response=Mock(status_code=529),
             ),
         ):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -520,7 +542,7 @@ class TestOpenRouterLLMTransformPipelining:
         from elspeth.plugins.clients.llm import NetworkError
 
         with mock_httpx_client(chaosllm_server, side_effect=httpx.ConnectError("Connection refused")):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -552,7 +574,7 @@ class TestOpenRouterLLMTransformPipelining:
             token=token,
         )
 
-        transform.accept({"text": "hello"}, ctx)
+        transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
         transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -591,7 +613,7 @@ class TestOpenRouterLLMTransformPipelining:
         try:
             mock_response = _create_mock_response(chaosllm_server)
             with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
                 # Verify request body
@@ -617,7 +639,7 @@ class TestOpenRouterLLMTransformPipelining:
         """Without system prompt, only user message is sent."""
         mock_response = _create_mock_response(chaosllm_server)
         with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             call_args = mock_client.post.call_args
@@ -655,7 +677,7 @@ class TestOpenRouterLLMTransformPipelining:
         try:
             mock_response = _create_mock_response(chaosllm_server, content="Result text")
             with mock_httpx_client(chaosllm_server, response=mock_response):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -685,7 +707,7 @@ class TestOpenRouterLLMTransformPipelining:
             model="anthropic/claude-3-opus-20240229",  # Different from request
         )
         with mock_httpx_client(chaosllm_server, response=mock_response):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -707,7 +729,7 @@ class TestOpenRouterLLMTransformPipelining:
             ),
         )
         with mock_httpx_client(chaosllm_server, response=mock_response):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -736,7 +758,7 @@ class TestOpenRouterLLMTransformPipelining:
         )
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
 
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
@@ -823,7 +845,7 @@ class TestOpenRouterLLMTransformIntegration:
             mock_response = _create_mock_response(chaosllm_server, content="Summary text")
             with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
                 transform.accept(
-                    {"name": "Test Item", "score": 95, "category": "A"},
+                    _make_pipeline_row({"name": "Test Item", "score": 95, "category": "A"}),
                     ctx,
                 )
                 transform.flush_batch_processing(timeout=10.0)
@@ -879,7 +901,7 @@ class TestOpenRouterLLMTransformIntegration:
 
         try:
             with mock_httpx_client(chaosllm_server, response=response):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -922,7 +944,7 @@ class TestOpenRouterLLMTransformIntegration:
 
         try:
             with mock_httpx_client(chaosllm_server, side_effect=httpx.ConnectError("Failed to connect to server")):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -965,7 +987,7 @@ class TestOpenRouterLLMTransformIntegration:
         try:
             mock_response = _create_mock_response(chaosllm_server)
             with mock_httpx_client(chaosllm_server, response=mock_response):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1013,7 +1035,7 @@ class TestOpenRouterLLMTransformIntegration:
 
         try:
             with mock_httpx_client(chaosllm_server, response=response):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1062,7 +1084,7 @@ class TestOpenRouterLLMTransformIntegration:
 
         try:
             with mock_httpx_client(chaosllm_server, response=response):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1112,7 +1134,7 @@ class TestOpenRouterLLMTransformIntegration:
 
         try:
             with mock_httpx_client(chaosllm_server, response=response):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1156,7 +1178,7 @@ class TestOpenRouterLLMTransformIntegration:
 
         try:
             with mock_httpx_client(chaosllm_server, response=response):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1216,7 +1238,7 @@ class TestOpenRouterTemplateFeatures:
         try:
             mock_response = _create_mock_response(chaosllm_server, content="positive")
             with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
-                transform.accept({"text": "I love this!"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "I love this!"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
                 assert len(collector.results) == 1
@@ -1260,7 +1282,7 @@ class TestOpenRouterTemplateFeatures:
         try:
             mock_response = _create_mock_response(chaosllm_server, content="Processed")
             with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
-                transform.accept({"text": "Hello", "tone_id": "formal"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "Hello", "tone_id": "formal"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
                 assert len(collector.results) == 1
@@ -1302,7 +1324,7 @@ class TestOpenRouterTemplateFeatures:
         try:
             mock_response = _create_mock_response(chaosllm_server, content="Result")
             with mock_httpx_client(chaosllm_server, response=mock_response):
-                transform.accept({"text": "test"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "test"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1346,7 +1368,7 @@ class TestOpenRouterTemplateFeatures:
         try:
             mock_response = _create_mock_response(chaosllm_server, content="Analysis result")
             with mock_httpx_client(chaosllm_server, response=mock_response):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1388,7 +1410,7 @@ class TestOpenRouterTemplateFeatures:
         try:
             mock_response = _create_mock_response(chaosllm_server, content="Done")
             with mock_httpx_client(chaosllm_server, response=mock_response):
-                transform.accept({"text": "data"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "data"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1440,7 +1462,7 @@ class TestOpenRouterTemplateFeatures:
         try:
             mock_response = _create_mock_response(chaosllm_server, content="Result")
             with mock_httpx_client(chaosllm_server, response=mock_response):
-                transform.accept({"text": "test"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "test"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1493,7 +1515,7 @@ Text: {{ row.text }}""",
         try:
             mock_response = _create_mock_response(chaosllm_server, content="spam")
             with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
-                transform.accept({"text": "Buy now! Limited offer!"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "Buy now! Limited offer!"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
                 assert len(collector.results) == 1
@@ -1535,7 +1557,7 @@ Text: {{ row.text }}""",
 
         try:
             # Process with missing required_field - should fail template rendering
-            transform.accept({"other_field": "value"}, ctx)
+            transform.accept(_make_pipeline_row({"other_field": "value"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -1597,7 +1619,7 @@ class TestOpenRouterConcurrency:
                         state_id=f"state-{i}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:

@@ -111,7 +111,7 @@ class TestTransformErrorRouting:
 
         assert result.status == "success"
         assert result.row == {"value": 42}
-        assert updated_token.row_data == {"value": 42}
+        assert updated_token.row_data.to_dict() == {"value": 42}
 
     def test_error_result_with_on_error_routes_to_sink(self, setup_landscape: tuple[Any, Any, Any]) -> None:
         """TransformResult.error() with on_error routes to configured sink."""
@@ -548,7 +548,7 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data=original_row,
+            row_data=PipelineRow(original_row, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,

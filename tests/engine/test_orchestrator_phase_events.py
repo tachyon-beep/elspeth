@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus, SourceRow
+from elspeth.contracts import ArtifactDescriptor, FieldContract, PipelineRow, PluginSchema, RunStatus, SchemaContract, SourceRow
 from elspeth.contracts.events import PhaseError, PipelinePhase
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.events import EventBus
@@ -57,7 +57,19 @@ class TestPhaseErrorEmission:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
-                    yield SourceRow.valid(row)
+                    # Create contract from row data (OBSERVED mode for test)
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=type(value),
+                            required=False,
+                            source="inferred",
+                        )
+                        for key, value in row.items()
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+                    yield SourceRow.valid(row, contract=contract)
 
             def close(self) -> None:
                 pass

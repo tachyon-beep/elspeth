@@ -23,7 +23,7 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             required=False,
             source="inferred",
         )
-        for name in data.keys()
+        for name in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=False)
     return PipelineRow(data, contract)

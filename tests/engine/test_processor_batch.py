@@ -13,9 +13,9 @@ because the processor uses isinstance() for type-safe plugin detection.
 
 from typing import Any
 
-from elspeth.contracts import NodeType
-from elspeth.contracts.types import NodeID
+from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (

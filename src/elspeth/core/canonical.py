@@ -120,9 +120,10 @@ def _normalize_for_canonical(data: Any) -> Any:
     """Recursively normalize a data structure for canonical JSON.
 
     Converts pandas/numpy types to JSON-safe primitives.
+    Handles PipelineRow by converting to dict.
 
     Args:
-        data: Any data structure (dict, list, primitive)
+        data: Any data structure (dict, list, primitive, PipelineRow)
 
     Returns:
         Normalized data structure with only JSON-safe types
@@ -130,6 +131,12 @@ def _normalize_for_canonical(data: Any) -> Any:
     Raises:
         ValueError: If data contains NaN, Infinity, or other non-serializable values
     """
+    # Handle PipelineRow - convert to dict before processing
+    # Import here to avoid circular dependency
+    from elspeth.contracts.schema_contract import PipelineRow
+    if isinstance(data, PipelineRow):
+        data = data.to_dict()
+
     if isinstance(data, dict):
         return {k: _normalize_for_canonical(v) for k, v in data.items()}
     if isinstance(data, list | tuple):

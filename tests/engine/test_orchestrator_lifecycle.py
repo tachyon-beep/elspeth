@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import Determinism, NodeID, NodeType, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeID, NodeType, PipelineRow, RoutingMode, SinkName, SourceRow
 from elspeth.core.landscape import LandscapeDB
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
@@ -43,7 +43,7 @@ def _make_test_source_row(data: dict) -> SourceRow:
             required=False,
             source="observed",
         )
-        for key in data.keys()
+        for key in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return SourceRow.valid(data, contract=contract)
@@ -64,7 +64,7 @@ class TestLifecycleHooks:
 
         call_order: list[str] = []
 
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import PluginSchema
 
         class TestSchema(PluginSchema):
             model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
@@ -142,7 +142,7 @@ class TestLifecycleHooks:
         """on_complete() called after all rows processed."""
         from unittest.mock import MagicMock
 
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.dag import ExecutionGraph
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -229,7 +229,7 @@ class TestLifecycleHooks:
         """on_complete() called even when run fails."""
         from unittest.mock import MagicMock
 
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import PluginSchema
         from elspeth.core.dag import ExecutionGraph
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -462,7 +462,7 @@ class TestSinkLifecycleHooks:
         """Sink on_complete should be called even when run fails."""
         from unittest.mock import MagicMock
 
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.dag import ExecutionGraph
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 

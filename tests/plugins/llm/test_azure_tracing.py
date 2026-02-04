@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from elspeth.plugins.llm.azure import AzureLLMTransform, AzureOpenAIConfig
 from elspeth.plugins.llm.tracing import AzureAITracingConfig
+from tests.plugins.llm.conftest import _make_pipeline_row
 
 
 def _make_base_config() -> dict[str, Any]:
@@ -384,7 +385,7 @@ class TestLangfuseFailedCallTracing:
         mock_client.chat_completion.side_effect = LLMClientError("Content policy violation", retryable=False)
 
         with patch.object(transform, "_get_llm_client", return_value=mock_client):
-            result = transform._process_row({"name": "test"}, ctx)
+            result = transform._process_row(_make_pipeline_row({"name": "test"}), ctx)
 
         # Should return error result
         assert result.status == "error"
@@ -419,7 +420,7 @@ class TestLangfuseFailedCallTracing:
 
         with patch.object(transform, "_get_llm_client", return_value=mock_client):
             try:
-                transform._process_row({"name": "test"}, ctx)
+                transform._process_row(_make_pipeline_row({"name": "test"}), ctx)
                 raise AssertionError("Should have raised LLMClientError")
             except LLMClientError:
                 pass  # Expected

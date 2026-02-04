@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import SourceRow
+from elspeth.contracts import FieldContract, SchemaContract, SourceRow
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
@@ -21,6 +21,21 @@ from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     pass
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestOrchestratorProgress:
@@ -48,7 +63,8 @@ class TestOrchestratorProgress:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(self._count):
-                    yield SourceRow.valid({"value": i})
+                    row = {"value": i}
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class CollectSink(_TestSinkBase):
             name = "collect_sink"
@@ -132,7 +148,8 @@ class TestOrchestratorProgress:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(50):
-                    yield SourceRow.valid({"value": i})
+                    row = {"value": i}
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class CollectSink(_TestSinkBase):
             name = "collect_sink"
@@ -183,14 +200,15 @@ class TestOrchestratorProgress:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(150):
+                    row = {"value": i}
                     if i == 99:  # Row 100 (0-indexed 99) is quarantined
                         yield SourceRow.quarantined(
-                            row={"value": i},
+                            row=row,
                             error="test_quarantine_at_boundary",
                             destination="quarantine",
                         )
                     else:
-                        yield SourceRow.valid({"value": i})
+                        yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class CollectSink(_TestSinkBase):
             name = "collect_sink"
@@ -276,7 +294,8 @@ class TestOrchestratorProgress:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(150):
-                    yield SourceRow.valid({"value": i})
+                    row = {"value": i}
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class TrackingSink(_TestSinkBase):
             """Sink that tracks whether it received writes."""

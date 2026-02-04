@@ -10,7 +10,7 @@ Aggregation is now handled by batch-aware transforms (is_batch_aware=True).
 
 from typing import Any
 
-from elspeth.contracts import NodeID, NodeType
+from elspeth.contracts import FieldContract, NodeID, NodeType, SchemaContract, SourceRow
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -18,6 +18,21 @@ from elspeth.plugins.results import (
     RoutingAction,
     TransformResult,
 )
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestPluginTypeDetection:
@@ -157,7 +172,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(
                 row_index=0,
-                row_data={"value": 1},
+                source_row=SourceRow.valid({"value": 1}, contract=_make_observed_contract({"value": 1})),
                 transforms=[duck],
                 ctx=ctx,
             )
@@ -177,7 +192,6 @@ class TestProcessorRejectsDuckTypedPlugins:
 
         class DuckTypedGate:
             """Looks like a gate but doesn't inherit from BaseGate."""
-
             name = "duck_gate"
             node_id = "fake_gate_id"
 
@@ -215,7 +229,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(
                 row_index=0,
-                row_data={"value": 1},
+                source_row=SourceRow.valid({"value": 1}, contract=_make_observed_contract({"value": 1})),
                 transforms=[duck],
                 ctx=ctx,
             )

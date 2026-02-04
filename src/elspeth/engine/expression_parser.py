@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import ast
 import operator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from elspeth.contracts import PipelineRow
 
 
 class ExpressionSecurityError(Exception):
@@ -564,7 +567,7 @@ class ExpressionParser:
         # Everything else (field access, arithmetic, etc.) is not guaranteed boolean
         return False
 
-    def evaluate(self, row: dict[str, Any] | "PipelineRow") -> Any:
+    def evaluate(self, row: dict[str, Any] | PipelineRow) -> Any:
         """Evaluate expression against row data.
 
         Args:

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
-from elspeth.contracts import ArtifactDescriptor, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PipelineRow, SourceRow
 from elspeth.core.landscape import LandscapeDB
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult

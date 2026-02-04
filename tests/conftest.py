@@ -93,6 +93,7 @@ from tests.fixtures.chaosllm import pytest_configure as _chaosllm_pytest_configu
 
 if TYPE_CHECKING:
     from elspeth.contracts import TransformResult
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.plugins.protocols import (
         GateProtocol,
         SinkProtocol,
@@ -830,7 +831,7 @@ def create_observed_contract(row: dict[str, Any]) -> "SchemaContract":
             required=False,
             source="observed",
         )
-        for key in row.keys()
+        for key in row
     )
     return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 

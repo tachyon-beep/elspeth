@@ -17,7 +17,7 @@ from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig

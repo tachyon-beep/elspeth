@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import SourceRow
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,
@@ -29,7 +28,7 @@ class TestOrchestratorRetry:
 
     def test_orchestrator_creates_retry_manager_from_settings(self, payload_store) -> None:
         """Orchestrator creates RetryManager when settings.retry is configured."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             RetrySettings,
@@ -143,7 +142,7 @@ class TestOrchestratorRetry:
 
     def test_orchestrator_retry_exhausted_marks_row_failed(self, payload_store) -> None:
         """When all retry attempts fail, row should be marked FAILED."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             RetrySettings,

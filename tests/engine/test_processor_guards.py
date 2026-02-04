@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from elspeth.contracts import TokenInfo
+from elspeth.contracts import SourceRow, TokenInfo
 from elspeth.contracts.enums import NodeType, RowOutcome
 from elspeth.contracts.results import RowResult
 from elspeth.contracts.schema import SchemaConfig
@@ -43,10 +43,25 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             required=False,
             source="observed",
         )
-        for key in data.keys()
+        for key in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return PipelineRow(data, contract)
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestProcessorGuards:
@@ -214,7 +229,8 @@ class TestProcessorGuards:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> PluginTransformResult:
-                return PluginTransformResult.success(row, success_reason={"action": "passthrough"})
+                # Passthrough - return dict copy of row data
+                return PluginTransformResult.success(dict(row), success_reason={"action": "passthrough"})
 
         transform = PassthroughTransform(transform_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -222,7 +238,7 @@ class TestProcessorGuards:
         # This should complete successfully without hitting the guard
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=SourceRow.valid({"value": 42}, contract=_make_observed_contract({"value": 42})),
             transforms=[transform],
             ctx=ctx,
         )

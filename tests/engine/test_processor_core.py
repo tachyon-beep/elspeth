@@ -11,7 +11,10 @@ Test plugins inherit from base classes (BaseTransform) because the processor
 uses isinstance() for type-safe plugin detection.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from elspeth.contracts import SourceRow
 
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID

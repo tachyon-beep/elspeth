@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import GateName, NodeID, NodeType, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, RoutingMode, SinkName
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,

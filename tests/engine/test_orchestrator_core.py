@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeType, RoutingMode, RunStatus, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,

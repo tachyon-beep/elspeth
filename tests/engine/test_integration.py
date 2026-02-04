@@ -57,8 +57,8 @@ if TYPE_CHECKING:
 # These helpers consolidate the >10 duplicate inline ListSource/CollectSink
 # definitions into reusable parameterized classes.
 
-from elspeth.core.landscape import LandscapeDB
 from elspeth.contracts import FieldContract, PipelineRow, SchemaContract
+from elspeth.core.landscape import LandscapeDB
 
 
 def _make_source_row(data: dict[str, Any]) -> SourceRow:
@@ -75,7 +75,7 @@ def _make_source_row(data: dict[str, Any]) -> SourceRow:
             required=False,
             source="observed",
         )
-        for key in data.keys()
+        for key in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return SourceRow.valid(data, contract=contract)

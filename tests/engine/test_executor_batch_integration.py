@@ -155,7 +155,7 @@ def create_token_in_recorder(
             required=False,
             source="observed",
         )
-        for key in row_data.keys()
+        for key in row_data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     pipeline_row = PipelineRow(row_data, contract)

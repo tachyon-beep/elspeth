@@ -23,9 +23,11 @@ from elspeth.contracts import (
     Determinism,
     NodeID,
     NodeType,
+    PipelineRow,
     PluginSchema,
     RoutingMode,
     RowOutcome,
+    SchemaContract,
     SinkName,
     SourceRow,
 )
@@ -691,7 +693,7 @@ class TelemetryTestSource:
         for row in self._rows:
             yield SourceRow.valid(row, contract=self._contract)
 
-    def get_schema_contract(self) -> "SchemaContract":
+    def get_schema_contract(self) -> SchemaContract:
         """Return the schema contract for this source."""
         return self._contract
 
@@ -705,10 +707,6 @@ class TelemetryTestSource:
         pass
 
     def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
-        return None
-
-    def get_schema_contract(self) -> Any:
-        """Return schema contract (None for dynamic sources)."""
         return None
 
 

@@ -8,8 +8,7 @@ This test reproduces the P2 bug identified in code review:
 
 import pytest
 
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract, PipelineRow
-
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 
 # Integration tests are commented out pending decision on test fixtures
 # These demonstrate the bug but require more complex setup

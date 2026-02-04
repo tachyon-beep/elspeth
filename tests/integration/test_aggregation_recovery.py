@@ -32,7 +32,7 @@ def _make_contract(data: dict[str, Any]) -> SchemaContract:
             required=False,
             source="observed",
         )
-        for k in data.keys()
+        for k in data
     )
     return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
