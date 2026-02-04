@@ -46,7 +46,7 @@
 
 ## Evidence
 
-- `src/elspeth/contracts/url.py:228-236` reconstructs the sanitized URL using `parsed.fragment` unchanged, so any secrets in the fragment are preserved.  
+- `src/elspeth/contracts/url.py:228-236` reconstructs the sanitized URL using `parsed.fragment` unchanged, so any secrets in the fragment are preserved.
 - `src/elspeth/contracts/url.py:2-6` claims sanitized URLs cannot contain credentials, which is violated when fragments carry secrets.
 
 ## Impact

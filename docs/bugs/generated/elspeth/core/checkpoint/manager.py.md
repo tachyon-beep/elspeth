@@ -47,11 +47,11 @@
 
 ## Evidence
 
-- `CheckpointManager.create_checkpoint()` uses `json.dumps()` for `aggregation_state` without a custom encoder.  
+- `CheckpointManager.create_checkpoint()` uses `json.dumps()` for `aggregation_state` without a custom encoder.
   `src/elspeth/core/checkpoint/manager.py:91-95`
-- Aggregation checkpoints include `row_data` dicts taken directly from `PipelineRow.to_dict()`, which can contain datetime values.  
+- Aggregation checkpoints include `row_data` dicts taken directly from `PipelineRow.to_dict()`, which can contain datetime values.
   `src/elspeth/engine/executors.py:1464-1542`
-- Pipeline contracts explicitly allow `datetime` field types.  
+- Pipeline contracts explicitly allow `datetime` field types.
   `src/elspeth/contracts/schema_contract.py:29-39`
 
 ## Impact
