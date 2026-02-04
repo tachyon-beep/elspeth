@@ -112,6 +112,8 @@ def create_minimal_graph() -> ExecutionGraph:
 
 def create_mock_source(rows: list[dict[str, Any]]) -> MagicMock:
     """Create a mock source that yields specified rows."""
+    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
     mock_source = MagicMock()
     mock_source.name = "test_source"
     mock_source._on_validation_failure = "discard"
@@ -122,9 +124,26 @@ def create_mock_source(rows: list[dict[str, Any]]) -> MagicMock:
     schema_mock.model_json_schema.return_value = {"type": "object"}
     mock_source.output_schema = schema_mock
 
-    mock_source.load.return_value = iter([SourceRow.valid(row) for row in rows])
+    # PIPELINEROW MIGRATION: Create contract for rows
+    # Use first row to infer schema (or empty if no rows)
+    if rows:
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=object,
+                required=False,
+                source="inferred",
+            )
+            for key in rows[0]
+        )
+    else:
+        fields = ()
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+    mock_source.load.return_value = iter([SourceRow.valid(row, contract=contract) for row in rows])
     mock_source.get_field_resolution.return_value = None
-    mock_source.get_schema_contract.return_value = None
+    mock_source.get_schema_contract.return_value = contract
 
     return mock_source
 
@@ -385,7 +404,23 @@ class TestTelemetryOnRunFailure:
                 raise RuntimeError("Simulated transform failure")
 
         # Source that yields a row to trigger the transform
-        failing_source.load.return_value = iter([SourceRow.valid({"id": 1})])
+        # PIPELINEROW MIGRATION: Create contract for test row
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        test_row = {"id": 1}
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=object,
+                required=False,
+                source="inferred",
+            )
+            for key in test_row
+        )
+        test_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        failing_source.load.return_value = iter([SourceRow.valid(test_row, contract=test_contract)])
+        failing_source.get_schema_contract.return_value = test_contract
 
         config = PipelineConfig(
             source=failing_source,
