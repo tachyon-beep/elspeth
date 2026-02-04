@@ -555,7 +555,7 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            source_row=make_source_row({"id": 1}),
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         gate_result = GateResult(
@@ -622,7 +622,7 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            source_row=make_source_row({"id": 1}),
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         gate_result = GateResult(
@@ -689,20 +689,20 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            source_row=make_source_row({"id": 1}),
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         child_tokens = [
             TokenInfo(
                 row_id="row1",
                 token_id="child_a",
-                source_row=make_source_row({"id": 1}),
+                row_data=_make_pipeline_row({"id": 1}),
                 branch_name="path_a",
             ),
             TokenInfo(
                 row_id="row1",
                 token_id="child_b",
-                source_row=make_source_row({"id": 1}),
+                row_data=_make_pipeline_row({"id": 1}),
                 branch_name="path_b",
             ),
         ]
@@ -969,7 +969,7 @@ class TestCoalesceStepCalculations:
         token = TokenInfo(
             row_id="row1",
             token_id="token1",
-            source_row=make_source_row({"id": 1}),
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         # Create work item with specific step
@@ -995,7 +995,7 @@ class TestCoalesceStepCalculations:
         token = TokenInfo(
             row_id="row1",
             token_id="token1",
-            source_row=make_source_row({"id": 1}),
+            row_data=_make_pipeline_row({"id": 1}),
             branch_name="left_branch",
         )
 
