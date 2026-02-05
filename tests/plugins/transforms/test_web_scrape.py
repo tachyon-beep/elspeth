@@ -470,12 +470,8 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
     by default, but testing this with respx mocking requires integration test setup.
     """
     # Set up redirect chain: /old -> /new
-    respx.get("https://example.com/old").mock(
-        return_value=httpx.Response(301, headers={"Location": "https://example.com/new"})
-    )
-    respx.get("https://example.com/new").mock(
-        return_value=httpx.Response(200, text="<html><body><h1>New Location</h1></body></html>")
-    )
+    respx.get("https://example.com/old").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/new"}))
+    respx.get("https://example.com/new").mock(return_value=httpx.Response(200, text="<html><body><h1>New Location</h1></body></html>"))
 
     transform = WebScrapeTransform(
         {
@@ -512,15 +508,9 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
     but testing with respx mocking is complex and better suited for integration tests.
     """
     # Set up redirect chain: /start -> /middle -> /end
-    respx.get("https://example.com/start").mock(
-        return_value=httpx.Response(301, headers={"Location": "https://example.com/middle"})
-    )
-    respx.get("https://example.com/middle").mock(
-        return_value=httpx.Response(302, headers={"Location": "https://example.com/end"})
-    )
-    respx.get("https://example.com/end").mock(
-        return_value=httpx.Response(200, text="<html><body><h1>Final Destination</h1></body></html>")
-    )
+    respx.get("https://example.com/start").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/middle"}))
+    respx.get("https://example.com/middle").mock(return_value=httpx.Response(302, headers={"Location": "https://example.com/end"}))
+    respx.get("https://example.com/end").mock(return_value=httpx.Response(200, text="<html><body><h1>Final Destination</h1></body></html>"))
 
     transform = WebScrapeTransform(
         {
@@ -557,12 +547,8 @@ def test_web_scrape_redirect_limit_exceeded(mock_ctx):
     but testing this with respx mocking is complex and better suited for integration tests.
     """
     # Set up circular redirect: /a -> /b -> /a (loop)
-    respx.get("https://example.com/a").mock(
-        return_value=httpx.Response(301, headers={"Location": "https://example.com/b"})
-    )
-    respx.get("https://example.com/b").mock(
-        return_value=httpx.Response(301, headers={"Location": "https://example.com/a"})
-    )
+    respx.get("https://example.com/a").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/b"}))
+    respx.get("https://example.com/b").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/a"}))
 
     transform = WebScrapeTransform(
         {
@@ -580,7 +566,7 @@ def test_web_scrape_redirect_limit_exceeded(mock_ctx):
     )
 
     # httpx has a default redirect limit of 20, circular redirects should hit it
-    with pytest.raises(NetworkError, match="redirect|too many redirects"):
+    with pytest.raises(NetworkError, match=r"redirect|too many redirects"):
         transform.process(_make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
 
 

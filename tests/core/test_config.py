@@ -33,7 +33,6 @@ class TestDatabaseSettings:
             DatabaseSettings(url="sqlite:///test.db", pool_size=0)
 
 
-
 class TestRetrySettings:
     """Retry configuration validation."""
 
@@ -83,7 +82,6 @@ class TestElspethSettings:
             retry={"max_attempts": 5},
         )
         assert settings.retry.max_attempts == 5
-
 
 
 class TestLoadSettings:
@@ -235,7 +233,6 @@ class TestSourceSettings:
         assert ds.options == {}
 
 
-
 class TestTransformSettings:
     """TransformSettings matches architecture specification."""
 
@@ -321,7 +318,6 @@ class TestLandscapeExportSettings:
 
         with pytest.raises(ValidationError):
             LandscapeExportSettings(format="xml")
-
 
 
 class TestLandscapeSettings:
@@ -665,7 +661,6 @@ class TestCheckpointSettings:
         with pytest.raises(ValidationError):
             CheckpointSettings(frequency="every_n", checkpoint_interval=-1)
 
-
     def test_checkpoint_settings_invalid_frequency(self) -> None:
         """Frequency must be a valid option."""
         from pydantic import ValidationError
@@ -792,8 +787,6 @@ class TestRateLimitSettings:
         # Unconfigured service falls back to default
         other_config = settings.get_service_config("other_api")
         assert other_config.requests_per_minute == 60
-
-
 
     def test_service_rate_limit_requests_per_minute_must_be_positive(self) -> None:
         """requests_per_minute must be > 0."""
@@ -938,7 +931,6 @@ class TestGateSettings:
         assert gate.name == "parallel_analysis"
         assert gate.routes == {"true": "fork", "false": "continue"}
         assert gate.fork_to == ["path_a", "path_b"]
-
 
     def test_gate_settings_invalid_condition_syntax(self) -> None:
         """Condition must be valid Python syntax."""
@@ -1537,7 +1529,6 @@ class TestCoalesceSettings:
                 merge="union",
                 quorum_count=0,
             )
-
 
     def test_coalesce_settings_first_policy(self) -> None:
         """First policy should validate without additional requirements."""
@@ -2494,7 +2485,6 @@ class TestRunModeSettings:
                 default_sink="output",
                 run_mode="invalid_mode",
             )
-
 
     def test_resolve_config_includes_run_mode(self) -> None:
         """resolve_config includes run_mode settings."""

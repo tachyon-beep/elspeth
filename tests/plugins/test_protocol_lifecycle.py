@@ -32,7 +32,7 @@ class TestTransformProtocolLifecycle:
             routes: ClassVar[dict[str, str]] = {}
             fork_to: list[str] | None = None
             node_id: str | None = None  # Set by orchestrator
-            config: dict[str, Any] = {}  # Required by TransformProtocol
+            config: ClassVar[dict[str, Any]] = {}  # Required by TransformProtocol
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
             is_batch_aware = False  # Batch support (structural aggregation)
@@ -87,7 +87,7 @@ class TestGateProtocolLifecycle:
             routes: ClassVar[dict[str, str]] = {}
             fork_to: list[str] | None = None
             node_id: str | None = None  # Set by orchestrator
-            config: dict[str, Any] = {}  # Required by GateProtocol
+            config: ClassVar[dict[str, Any]] = {}  # Required by GateProtocol
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 

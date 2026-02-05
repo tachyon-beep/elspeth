@@ -463,7 +463,6 @@ def test_azure_batch_with_pipeline_row_inputs():
     This is a type-signature verification test.
     """
     from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
-    from tests.plugins.llm.conftest import _make_pipeline_row
 
     transform = AzureBatchLLMTransform(
         {
@@ -476,15 +475,10 @@ def test_azure_batch_with_pipeline_row_inputs():
         }
     )
 
-    # Create PipelineRow inputs (simulates what engine passes to batch transforms)
-    rows = [
-        _make_pipeline_row({"text": "input 1"}),
-        _make_pipeline_row({"text": "input 2"}),
-    ]
-
     # Verify signature accepts list[PipelineRow]
     # We don't need to call process() - just verifying the type annotation
     from inspect import signature
+
     sig = signature(transform.process)
     assert "row" in sig.parameters
     # The actual runtime test is implicitly covered by other integration tests

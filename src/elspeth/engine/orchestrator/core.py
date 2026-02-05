@@ -1426,7 +1426,9 @@ class Orchestrator:
                                 rows_coalesced += 1
                                 # Get the correct step for this coalesce
                                 # Business logic: coalesce_name is guaranteed non-None when merged_token is not None
-                                assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
+                                assert outcome.coalesce_name is not None, (
+                                    "Coalesce outcome must have coalesce_name when merged_token exists"
+                                )
                                 coalesce_name = CoalesceName(outcome.coalesce_name)
                                 coalesce_step = coalesce_step_map[coalesce_name]
                                 # Check if merged token should continue downstream processing

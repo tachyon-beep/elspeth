@@ -31,8 +31,6 @@ class TestSchemaCreation:
         assert "node_states" in tables
 
 
-
-
 class TestNodesDeterminismColumn:
     """Tests for determinism column in nodes table."""
 

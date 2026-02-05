@@ -777,11 +777,7 @@ class TestContractIntegrityVerification:
 
         # Query database DIRECTLY to get the stored hash
         with db.connection() as conn:
-            result = conn.execute(
-                select(runs_table.c.schema_contract_hash).where(
-                    runs_table.c.run_id == run.run_id
-                )
-            ).fetchone()
+            result = conn.execute(select(runs_table.c.schema_contract_hash).where(runs_table.c.run_id == run.run_id)).fetchone()
             assert result is not None, "Run not found in database"
             stored_hash = result[0]
 
@@ -791,9 +787,7 @@ class TestContractIntegrityVerification:
         # Verify hash integrity: stored DB hash must match recomputed hash
         assert retrieved is not None
         computed_hash = retrieved.version_hash()
-        assert stored_hash == computed_hash, (
-            f"Hash integrity violation: stored={stored_hash}, computed={computed_hash}"
-        )
+        assert stored_hash == computed_hash, f"Hash integrity violation: stored={stored_hash}, computed={computed_hash}"
         # Also verify against original (should match if storage is correct)
         assert computed_hash == contract.version_hash()
 
