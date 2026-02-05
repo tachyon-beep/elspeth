@@ -453,33 +453,3 @@ def test_missing_result_gets_call_record(real_landscape_db) -> None:
     # Verify error contains "result_not_found"
     error = json.loads(error_call.error_json)
     assert error["reason"] == "result_not_found"
-
-
-def test_azure_batch_with_pipeline_row_inputs():
-    """Verify AzureBatchLLMTransform accepts PipelineRow inputs from engine.
-
-    This test verifies the plugin signature accepts list[PipelineRow] without
-    crashing. It doesn't test full Azure integration (that's covered by other tests).
-    This is a type-signature verification test.
-    """
-    from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
-
-    transform = AzureBatchLLMTransform(
-        {
-            "schema": {"mode": "observed"},
-            "template": "Process: {{ text }}",
-            "response_field": "llm_response",
-            "deployment_name": "gpt-4",
-            "endpoint": "https://test.openai.azure.com",
-            "api_key": "test-key",
-        }
-    )
-
-    # Verify signature accepts list[PipelineRow]
-    # We don't need to call process() - just verifying the type annotation
-    from inspect import signature
-
-    sig = signature(transform.process)
-    assert "row" in sig.parameters
-    # The actual runtime test is implicitly covered by other integration tests
-    # that call process() with real data. This test just confirms the type hint.

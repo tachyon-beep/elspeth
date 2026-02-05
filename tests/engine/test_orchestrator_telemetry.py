@@ -10,24 +10,24 @@ Tests verify:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, ClassVar
-from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import ArtifactDescriptor, Determinism, NodeID, NodeType, PipelineRow, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
 from elspeth.contracts.events import TelemetryEvent
-from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.telemetry.events import PhaseChanged, RunFinished, RunStarted
-from tests.conftest import as_transform
+from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 # =============================================================================
 # Test Fixtures
@@ -53,6 +53,40 @@ class PassthroughTransform(BaseTransform):
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+
+
+# =============================================================================
+# Production-Path Test Fixtures
+# =============================================================================
+
+
+class ListSource(_TestSourceBase):
+    """Test source that yields rows from a list."""
+
+    name = "list_source"
+    output_schema = DynamicSchema
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self._rows = rows
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        yield from self.wrap_rows(self._rows)
+
+
+class CollectSink(_TestSinkBase):
+    """Test sink that collects written rows."""
+
+    name = "collect_sink"
+    input_schema = DynamicSchema
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.results: list[dict[str, Any]] = []
+
+    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+        self.results.extend(rows)
+        return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
 
 @dataclass
@@ -96,74 +130,6 @@ class RecordingExporter:
         pass
 
 
-def create_minimal_graph() -> ExecutionGraph:
-    """Create a minimal valid execution graph."""
-    graph = ExecutionGraph()
-    schema_config = {"schema": {"mode": "observed"}}
-    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
-    graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
-    graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
-    graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-    graph._transform_id_map = {0: NodeID("transform")}
-    graph._sink_id_map = {SinkName("output"): NodeID("sink")}
-    graph._default_sink = "output"
-    return graph
-
-
-def create_mock_source(rows: list[dict[str, Any]]) -> MagicMock:
-    """Create a mock source that yields specified rows."""
-    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
-    mock_source = MagicMock()
-    mock_source.name = "test_source"
-    mock_source._on_validation_failure = "discard"
-    mock_source.determinism = Determinism.IO_READ
-    mock_source.plugin_version = "1.0.0"
-
-    schema_mock = MagicMock()
-    schema_mock.model_json_schema.return_value = {"type": "object"}
-    mock_source.output_schema = schema_mock
-
-    # PIPELINEROW MIGRATION: Create contract for rows
-    # Use first row to infer schema (or empty if no rows)
-    if rows:
-        fields = tuple(
-            FieldContract(
-                normalized_name=key,
-                original_name=key,
-                python_type=object,
-                required=False,
-                source="inferred",
-            )
-            for key in rows[0]
-        )
-    else:
-        fields = ()
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-
-    mock_source.load.return_value = iter([SourceRow.valid(row, contract=contract) for row in rows])
-    mock_source.get_field_resolution.return_value = None
-    mock_source.get_schema_contract.return_value = contract
-
-    return mock_source
-
-
-def create_mock_sink() -> MagicMock:
-    """Create a mock sink."""
-    mock_sink = MagicMock()
-    mock_sink.name = "test_sink"
-    mock_sink.determinism = Determinism.IO_WRITE
-    mock_sink.plugin_version = "1.0.0"
-
-    schema_mock = MagicMock()
-    schema_mock.model_json_schema.return_value = {"type": "object"}
-    mock_sink.input_schema = schema_mock
-    mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
-
-    return mock_sink
-
-
 # =============================================================================
 # Basic Integration Tests
 # =============================================================================
@@ -180,19 +146,19 @@ class TestTelemetryEventEmission:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify RunStarted was emitted
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
         assert len(run_started_events) == 1
 
         event = run_started_events[0]
-        assert event.source_plugin == "test_source"
+        assert event.source_plugin == "list_source"
         assert event.config_hash is not None
         assert event.run_id is not None
 
@@ -204,12 +170,12 @@ class TestTelemetryEventEmission:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}, {"id": 2}]),
+            source=as_source(ListSource([{"id": 1}, {"id": 2}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify RunFinished was emitted
         run_completed_events = [e for e in exporter.events if isinstance(e, RunFinished)]
@@ -230,12 +196,12 @@ class TestTelemetryEventEmission:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify PhaseChanged events were emitted
         phase_events = [e for e in exporter.events if isinstance(e, PhaseChanged)]
@@ -254,12 +220,12 @@ class TestTelemetryEventEmission:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify order: RunStarted must be first, RunFinished must be last
         assert len(exporter.events) >= 2
@@ -276,13 +242,13 @@ class TestTelemetryDisabledByDefault:
         orchestrator = Orchestrator(landscape_db)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
         # Should complete without error
-        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
     def test_no_telemetry_when_manager_is_none(self, landscape_db: LandscapeDB, payload_store) -> None:
@@ -290,12 +256,12 @@ class TestTelemetryDisabledByDefault:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=None)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
 
@@ -331,13 +297,13 @@ class TestNoTelemetryOnLandscapeFailure:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
         # Run successfully - this verifies the normal path works
-        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify RunStarted was emitted (confirming telemetry is working)
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
@@ -363,12 +329,12 @@ class TestNoTelemetryOnLandscapeFailure:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify the run completed successfully
         assert result.status == RunStatus.COMPLETED
@@ -389,9 +355,6 @@ class TestTelemetryOnRunFailure:
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
-        # Create a source that will cause an error
-        failing_source = create_mock_source([])
-
         class FailingTransform(BaseTransform):
             name = "failing"
             input_schema = DynamicSchema
@@ -404,33 +367,14 @@ class TestTelemetryOnRunFailure:
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("Simulated transform failure")
 
-        # Source that yields a row to trigger the transform
-        # PIPELINEROW MIGRATION: Create contract for test row
-        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
-        test_row = {"id": 1}
-        fields = tuple(
-            FieldContract(
-                normalized_name=key,
-                original_name=key,
-                python_type=object,
-                required=False,
-                source="inferred",
-            )
-            for key in test_row
-        )
-        test_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-        failing_source.load.return_value = iter([SourceRow.valid(test_row, contract=test_contract)])
-        failing_source.get_schema_contract.return_value = test_contract
-
         config = PipelineConfig(
-            source=failing_source,
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(FailingTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
         with pytest.raises(RuntimeError, match="Simulated transform failure"):
-            orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify RunStarted was emitted (before failure)
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
@@ -458,12 +402,12 @@ class TestTelemetryEventContent:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         run_started = next(e for e in exporter.events if isinstance(e, RunStarted))
         assert run_started.config_hash is not None
@@ -478,12 +422,12 @@ class TestTelemetryEventContent:
 
         # 3 rows
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}, {"id": 2}, {"id": 3}]),
+            source=as_source(ListSource([{"id": 1}, {"id": 2}, {"id": 3}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         run_completed = next(e for e in exporter.events if isinstance(e, RunFinished))
         assert run_completed.row_count == 3
@@ -497,12 +441,12 @@ class TestTelemetryEventContent:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}]),
+            source=as_source(ListSource([{"id": 1}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # All events should have the same run_id
         run_ids = {e.run_id for e in exporter.events}
@@ -533,13 +477,8 @@ class TestRowCreatedTelemetry:
         2. Emits RowCreated telemetry AFTER Landscape recording succeeds
         3. Records QUARANTINED outcome
         """
-        from collections.abc import Iterator
-
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.canonical import stable_hash
         from elspeth.telemetry.events import RowCreated
-        from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
-        from tests.engine.orchestrator_test_helpers import build_production_graph
 
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -562,7 +501,7 @@ class TestRowCreatedTelemetry:
                     destination="quarantine",
                 )
 
-        class CollectSink(_TestSinkBase):
+        class _QuarantineCollectSink(_TestSinkBase):
             name = "collect_sink"
 
             def __init__(self) -> None:
@@ -574,8 +513,8 @@ class TestRowCreatedTelemetry:
                 return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
         source = QuarantiningSource()
-        default_sink = CollectSink()
-        quarantine_sink = CollectSink()
+        default_sink = _QuarantineCollectSink()
+        quarantine_sink = _QuarantineCollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
@@ -602,11 +541,6 @@ class TestRowCreatedTelemetry:
 
     def test_row_created_not_emitted_without_telemetry_manager(self, landscape_db: LandscapeDB, payload_store) -> None:
         """No RowCreated event when telemetry manager is not configured."""
-        from collections.abc import Iterator
-
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
-        from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
-        from tests.engine.orchestrator_test_helpers import build_production_graph
 
         class RowSchema(PluginSchema):
             id: int
@@ -622,7 +556,7 @@ class TestRowCreatedTelemetry:
                     destination="quarantine",
                 )
 
-        class CollectSink(_TestSinkBase):
+        class _QuarantineCollectSink(_TestSinkBase):
             name = "collect_sink"
 
             def __init__(self) -> None:
@@ -639,8 +573,8 @@ class TestRowCreatedTelemetry:
             source=as_source(source),
             transforms=[],
             sinks={
-                "output": as_sink(CollectSink()),
-                "quarantine": as_sink(CollectSink()),
+                "output": as_sink(_QuarantineCollectSink()),
+                "quarantine": as_sink(_QuarantineCollectSink()),
             },
         )
 
@@ -679,7 +613,7 @@ class TestTelemetryPartialStatus:
         a separate PARTIAL status event for CLI observability, but telemetry
         is not duplicated.
         """
-        from unittest.mock import patch
+        from unittest.mock import MagicMock, patch
 
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -687,9 +621,9 @@ class TestTelemetryPartialStatus:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         config = PipelineConfig(
-            source=create_mock_source([{"id": 1}, {"id": 2}]),
+            source=as_source(ListSource([{"id": 1}, {"id": 2}])),
             transforms=[as_transform(PassthroughTransform())],
-            sinks={"output": create_mock_sink()},
+            sinks={"output": as_sink(CollectSink())},
         )
 
         # Create mock settings that enable export
@@ -710,7 +644,7 @@ class TestTelemetryPartialStatus:
             patch("elspeth.engine.orchestrator.core.export_landscape", side_effect=RuntimeError("Simulated export failure")),
             pytest.raises(RuntimeError, match="Simulated export failure"),
         ):
-            orchestrator.run(config, graph=create_minimal_graph(), settings=mock_settings, payload_store=payload_store)
+            orchestrator.run(config, graph=build_production_graph(config), settings=mock_settings, payload_store=payload_store)
 
         # Verify RunStarted was emitted (before failure)
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]

@@ -5,10 +5,24 @@ Tests cover:
 - Configuration validation (format and output enum values)
 - Type validation for configuration options
 - Error handling
+- Export behavior (JSON/pretty formats, stream selection)
+- Lifecycle operations (flush, close)
+- Datetime and enum serialization
 """
+
+import json
+import sys
+from datetime import UTC, datetime
+from io import StringIO
 
 import pytest
 
+from elspeth.contracts.enums import NodeStateStatus, RoutingMode, RowOutcome
+from elspeth.contracts.events import (
+    GateEvaluated,
+    TokenCompleted,
+    TransformCompleted,
+)
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters.console import ConsoleExporter
 
@@ -69,6 +83,363 @@ class TestConsoleExporterConfiguration:
             exporter.configure({"output": ["stdout", "stderr"]})
         assert "'output' must be a string" in str(exc_info.value)
         assert "list" in str(exc_info.value)
+
+
+class TestConsoleExporterExportBehavior:
+    """Tests for export() method behavior with different formats and events."""
+
+    def test_json_format_produces_valid_json(self) -> None:
+        """JSON format exports valid JSON with event_type and run_id."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json", "output": "stdout"})
+
+        # Capture output
+        captured = StringIO()
+        exporter._stream = captured
+
+        # Create test event
+        event = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-123",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="test_transform",
+            status=NodeStateStatus.COMPLETED,
+            duration_ms=42.5,
+            input_hash="hash-in",
+            output_hash="hash-out",
+        )
+
+        exporter.export(event)
+
+        # Parse and validate JSON
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)
+
+        assert parsed["event_type"] == "TransformCompleted"
+        assert parsed["run_id"] == "run-123"
+        assert parsed["row_id"] == "row-1"
+        assert parsed["token_id"] == "token-1"
+        assert parsed["node_id"] == "node-1"
+        assert parsed["plugin_name"] == "test_transform"
+        assert parsed["status"] == "completed"  # Enum serialized to value
+        assert parsed["duration_ms"] == 42.5
+        assert parsed["input_hash"] == "hash-in"
+        assert parsed["output_hash"] == "hash-out"
+        assert parsed["timestamp"] == "2026-01-15T10:30:00+00:00"  # ISO 8601
+
+    def test_json_format_with_gate_event(self) -> None:
+        """JSON format handles GateEvaluated events with routing mode enum."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event = GateEvaluated(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-456",
+            row_id="row-2",
+            token_id="token-2",
+            node_id="gate-1",
+            plugin_name="routing_gate",
+            routing_mode=RoutingMode.COPY,
+            destinations=("sink-a", "sink-b"),
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)
+
+        assert parsed["event_type"] == "GateEvaluated"
+        assert parsed["routing_mode"] == "copy"  # Enum serialized
+        assert parsed["destinations"] == ["sink-a", "sink-b"]  # Tuple serialized
+
+    def test_json_format_with_token_completed_event(self) -> None:
+        """JSON format handles TokenCompleted events with outcome enum."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event = TokenCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-789",
+            row_id="row-3",
+            token_id="token-3",
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output_sink",
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)
+
+        assert parsed["event_type"] == "TokenCompleted"
+        assert parsed["outcome"] == "completed"  # Enum serialized
+        assert parsed["sink_name"] == "output_sink"
+
+    def test_pretty_format_includes_timestamp_and_event_type(self) -> None:
+        """Pretty format includes ISO timestamp and event type."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "pretty"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 45, tzinfo=UTC),
+            run_id="run-pretty",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="test_transform",
+            status=NodeStateStatus.COMPLETED,
+            duration_ms=100.0,
+            input_hash="hash-in",
+            output_hash="hash-out",
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+
+        # Format: [TIMESTAMP] EventType: run_id (details)
+        assert output.startswith("[2026-01-15T10:30:45+00:00]")
+        assert "TransformCompleted" in output
+        assert "run-pretty" in output
+        assert "duration_ms=100.0" in output
+        assert "status=completed" in output  # Enum value used
+
+    def test_pretty_format_with_minimal_event(self) -> None:
+        """Pretty format handles events with only base fields."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "pretty"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        # TokenCompleted with None sink_name (minimal details)
+        event = TokenCompleted(
+            timestamp=datetime(2026, 1, 15, 11, 0, 0, tzinfo=UTC),
+            run_id="run-minimal",
+            row_id="row-x",
+            token_id="token-x",
+            outcome=RowOutcome.QUARANTINED,
+            sink_name=None,
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+
+        assert "[2026-01-15T11:00:00+00:00]" in output
+        assert "TokenCompleted" in output
+        assert "run-minimal" in output
+        assert "outcome=quarantined" in output
+        # sink_name=None should not appear in details
+        assert "sink_name=None" not in output
+
+    def test_stream_selection_stdout(self) -> None:
+        """Output stream selection: stdout is used correctly."""
+        exporter = ConsoleExporter()
+        exporter.configure({"output": "stdout"})
+
+        assert exporter._stream is sys.stdout
+
+    def test_stream_selection_stderr(self) -> None:
+        """Output stream selection: stderr is used correctly."""
+        exporter = ConsoleExporter()
+        exporter.configure({"output": "stderr"})
+
+        assert exporter._stream is sys.stderr
+
+    def test_export_does_not_raise_on_serialization_error(self) -> None:
+        """Export must not raise exceptions - telemetry failures should not crash."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        # Mock a broken stream that raises on write
+        class BrokenStream:
+            def write(self, *args, **kwargs):
+                raise OSError("Simulated I/O error")
+
+            def flush(self):
+                pass
+
+        exporter._stream = BrokenStream()
+
+        event = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-error",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="test",
+            status=NodeStateStatus.COMPLETED,
+            duration_ms=1.0,
+            input_hash="h1",
+            output_hash="h2",
+        )
+
+        # Should not raise
+        exporter.export(event)
+
+
+class TestConsoleExporterLifecycle:
+    """Tests for flush() and close() lifecycle methods."""
+
+    def test_flush_flushes_stream(self) -> None:
+        """Flush calls flush() on the underlying stream."""
+        exporter = ConsoleExporter()
+        exporter.configure({})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        # Write some data
+        event = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-flush",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="test",
+            status=NodeStateStatus.COMPLETED,
+            duration_ms=1.0,
+            input_hash="h1",
+            output_hash="h2",
+        )
+        exporter.export(event)
+
+        # Flush should succeed
+        exporter.flush()
+
+        # Data should be available
+        assert captured.getvalue()
+
+    def test_flush_does_not_raise_on_error(self) -> None:
+        """Flush must not raise exceptions."""
+
+        class BrokenStream:
+            def flush(self):
+                raise OSError("Simulated flush error")
+
+        exporter = ConsoleExporter()
+        exporter.configure({})
+        exporter._stream = BrokenStream()
+
+        # Should not raise
+        exporter.flush()
+
+    def test_close_is_noop(self) -> None:
+        """Close is a no-op for console exporter (does not own streams)."""
+        exporter = ConsoleExporter()
+        exporter.configure({})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        # Close should not close the stream
+        exporter.close()
+
+        # Stream should still be usable
+        assert not captured.closed
+
+
+class TestConsoleExporterDatetimeAndEnumSerialization:
+    """Tests for datetime and enum serialization in JSON format."""
+
+    def test_datetime_serialization_to_iso8601(self) -> None:
+        """Datetime fields are serialized to ISO 8601 format."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 14, 30, 45, 123456, tzinfo=UTC),
+            run_id="run-dt",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="test",
+            status=NodeStateStatus.COMPLETED,
+            duration_ms=1.0,
+            input_hash="h1",
+            output_hash="h2",
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)
+
+        # ISO 8601 with microseconds and timezone
+        assert parsed["timestamp"] == "2026-01-15T14:30:45.123456+00:00"
+
+    def test_enum_serialization_to_value(self) -> None:
+        """Enum fields are serialized to their string values."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-enum",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="test",
+            status=NodeStateStatus.FAILED,
+            duration_ms=1.0,
+            input_hash="h1",
+            output_hash=None,
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)
+
+        # NodeStateStatus.FAILED -> "failed" (enum value, not name)
+        assert parsed["status"] == "failed"
+        assert isinstance(parsed["status"], str)
+
+    def test_multiple_enum_types_serialized_correctly(self) -> None:
+        """Different enum types are all serialized to their values."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event = GateEvaluated(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-enums",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="gate-1",
+            plugin_name="gate",
+            routing_mode=RoutingMode.MOVE,
+            destinations=("error_sink",),
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)
+
+        # RoutingMode.MOVE -> "move"
+        assert parsed["routing_mode"] == "move"
+        assert isinstance(parsed["routing_mode"], str)
 
 
 class TestConsoleExporterRegistration:

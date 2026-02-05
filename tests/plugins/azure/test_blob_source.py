@@ -584,8 +584,8 @@ class TestAzureBlobSourceErrors:
 
     def test_csv_structural_failure_quarantines_blob(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
         """BUG-BLOB-01: Catastrophic CSV structure failure quarantines blob, doesn't crash."""
-        # Binary data masquerading as CSV - completely unparseable
-        bad_csv = b"\x00\x01\x02\x03\x04\x05"
+        # Empty file triggers EmptyDataError - completely unparseable
+        bad_csv = b""
         mock_client = MagicMock()
         mock_client.download_blob.return_value.readall.return_value = bad_csv
         mock_blob_client.return_value = mock_client
@@ -602,9 +602,12 @@ class TestAzureBlobSourceErrors:
         # Should NOT raise - should quarantine the entire blob
         rows = list(source.load(ctx))
 
-        # Should get one quarantined "row" representing the unparseable blob
-        assert len(rows) >= 0  # Either empty or quarantined row
-        # No crash = success
+        # Should get exactly one quarantined "row" representing the unparseable blob
+        assert len(rows) == 1
+        assert rows[0].is_quarantined
+        assert rows[0].quarantine_destination == QUARANTINE_SINK
+        assert rows[0].quarantine_error is not None
+        assert "CSV parse error" in rows[0].quarantine_error
 
 
 class TestAzureBlobSourceLifecycle:

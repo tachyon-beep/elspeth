@@ -7,7 +7,6 @@ correctly prevent pathological scenarios from hanging the pipeline.
 
 from __future__ import annotations
 
-from collections import deque
 from typing import Any
 from unittest.mock import patch
 
@@ -18,7 +17,7 @@ from elspeth.contracts.enums import NodeType, RowOutcome
 from elspeth.contracts.results import RowResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.processor import MAX_WORK_QUEUE_ITERATIONS, RowProcessor, _WorkItem
@@ -78,9 +77,9 @@ class TestProcessorGuards:
     def test_work_queue_exceeding_limit_raises_runtime_error(self) -> None:
         """Exceeding MAX_WORK_QUEUE_ITERATIONS must raise RuntimeError.
 
-        This test verifies the infinite loop guard fires correctly.
-        We patch the constant to a lower value and create a mock scenario
-        where the work queue keeps growing indefinitely.
+        This test verifies the infinite loop guard fires correctly by using
+        the production process_row() path with a transform that creates
+        infinite child work items.
         """
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -95,6 +94,15 @@ class TestProcessorGuards:
             config={},
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
+        # Must register transform node for FK constraint
+        transform_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="infinite_fork",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
 
         span_factory = SpanFactory()
 
@@ -106,65 +114,60 @@ class TestProcessorGuards:
             source_node_id=NodeID(source.node_id),
         )
 
-        # Create a simple token to use in the work queue
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
-            row_index=0,
-            data={"value": 1},
-        )
-        token = recorder.create_token(row_id=row.row_id)
-        token_info = TokenInfo(
-            token_id=token.token_id,
-            row_id=row.row_id,
-            row_data=_make_pipeline_row({"value": 1}),
-            branch_name=None,
-        )
+        # Create a buggy transform that always returns ITSELF as a child work item
+        # This simulates a transform bug that creates infinite loops
+        class InfiniteForkTransform(BaseTransform):
+            name = "infinite_fork"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
-        # Create a mock result that will be returned by the patched method
-        mock_result = RowResult(
-            token=token_info,
-            final_data={"value": 1},
-            outcome=RowOutcome.COMPLETED,
-            sink_name="output",
-        )
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"mode": "observed"}})
+                self.node_id = node_id
 
-        # Patch the internal _process_single_token method to always return more work
+            def process(self, row: PipelineRow, ctx: PluginContext) -> PluginTransformResult:
+                # Return the same row - the bug is in _process_single_token which we'll mock
+                # to create infinite child work items
+                return PluginTransformResult.success(row.to_dict(), success_reason={"action": "fork"})
+
+        transform = InfiniteForkTransform(transform_node.node_id)
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Patch _process_single_token to always return a child work item with the same token
+        # This simulates a buggy transform that creates infinite work
+        def buggy_process_single_token(
+            token: TokenInfo,
+            transforms: list[Any],
+            ctx: PluginContext,
+            start_step: int,
+            coalesce_at_step: int | None = None,
+            coalesce_name: CoalesceName | None = None,
+        ) -> tuple[RowResult | list[RowResult] | None, list[_WorkItem]]:
+            # Always return the same token as a child work item (infinite loop!)
+            mock_result = RowResult(
+                token=token,
+                final_data=token.row_data.to_dict(),
+                outcome=RowOutcome.COMPLETED,
+                sink_name="output",
+            )
+            # BUG: Return the same token as a child work item (simulates infinite fork)
+            child_items = [_WorkItem(token=token, start_step=0)]
+            return mock_result, child_items
+
+        # Patch MAX_WORK_QUEUE_ITERATIONS to a lower value for faster test
+        # and use the buggy _process_single_token that creates infinite work
         with (
-            patch.object(
-                processor,
-                "_process_single_token",
-                side_effect=lambda **kwargs: (
-                    mock_result,
-                    [_WorkItem(token=token_info, start_step=0)],
-                ),
-            ),
+            patch.object(processor, "_process_single_token", side_effect=buggy_process_single_token),
             patch("elspeth.engine.processor.MAX_WORK_QUEUE_ITERATIONS", 5),
+            pytest.raises(RuntimeError, match=r"exceeded .* iterations"),
         ):
-            # Simulate the work queue loop that's inside process_row
-            # to test the guard logic more directly
-            work_queue: deque[_WorkItem] = deque([_WorkItem(token=token_info, start_step=0)])
-            iterations = 0
-
-            # Use the patched value
-            limit = 5
-
-            with (
-                pytest.raises(RuntimeError, match=r"exceeded .* iterations"),
-                processor._spans.row_span(token_info.row_id, token_info.token_id),
-            ):
-                while work_queue:
-                    iterations += 1
-                    if iterations > limit:
-                        raise RuntimeError(f"Work queue exceeded {limit} iterations. Possible infinite loop in pipeline.")
-                    item = work_queue.popleft()
-                    _result, child_items = processor._process_single_token(
-                        token=item.token,
-                        transforms=[],
-                        ctx=PluginContext(run_id=run.run_id, config={}),
-                        start_step=item.start_step,
-                    )
-                    work_queue.extend(child_items)
+            # Call the PRODUCTION process_row() - the guard should fire
+            processor.process_row(
+                row_index=0,
+                source_row=SourceRow.valid({"value": 1}, contract=_make_observed_contract({"value": 1})),
+                transforms=[transform],
+                ctx=ctx,
+            )
 
     def test_normal_processing_completes_without_hitting_guard(self) -> None:
         """Normal DAG processing should never approach the iteration limit.
