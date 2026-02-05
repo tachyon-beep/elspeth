@@ -216,8 +216,9 @@ class TestUnsupportedTypeRejection:
 
     def test_uuid_rejected_during_serialization(self) -> None:
         """UUID objects are not JSON-serializable and must fail at serialization boundary."""
-        import rfc8785
         from uuid import UUID
+
+        import rfc8785
 
         from elspeth.core.canonical import canonical_json
 
