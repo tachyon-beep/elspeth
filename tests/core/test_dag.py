@@ -167,6 +167,122 @@ class TestDAGValidation:
         # Should not raise - labels are unique per source node
         graph.validate()
 
+    def test_validate_rejects_disconnected_graph(self) -> None:
+        """Graphs with unreachable nodes must be rejected.
+
+        If a node cannot be reached from the source, it will never execute.
+        This is either a configuration error or indicates orphaned nodes.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="process")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("orphan", node_type=NodeType.TRANSFORM, plugin_name="abandoned")  # Not connected!
+
+        graph.add_edge("source", "transform", label="continue")
+        graph.add_edge("transform", "sink", label="continue")
+        # orphan has no incoming edges - unreachable
+
+        with pytest.raises(GraphValidationError, match=r"unreachable|disconnected"):
+            graph.validate()
+
+    def test_validate_rejects_self_loop(self) -> None:
+        """Self-loops (node with edge to itself) must be rejected.
+
+        A node cannot route to itself - this would create infinite recursion.
+        Should be caught as a special case of cycle detection.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="loop")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source", "transform", label="continue")
+        graph.add_edge("transform", "transform", label="retry")  # Self-loop!
+        graph.add_edge("transform", "sink", label="continue")
+
+        with pytest.raises(GraphValidationError, match=r"cycle|self-loop"):
+            graph.validate()
+
+    def test_validate_allows_diamond_merge(self) -> None:
+        """Diamond patterns (node with multiple incoming edges) should be allowed.
+
+        A node can have multiple incoming edges as long as the graph is acyclic.
+        Common pattern: fork → parallel processing → merge.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork_gate")
+        graph.add_node("path_a", node_type=NodeType.TRANSFORM, plugin_name="fast")
+        graph.add_node("path_b", node_type=NodeType.TRANSFORM, plugin_name="slow")
+        graph.add_node("merge", node_type=NodeType.COALESCE, plugin_name="merge_results")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source", "gate", label="continue")
+        graph.add_edge("gate", "path_a", label="path_a")
+        graph.add_edge("gate", "path_b", label="path_b")
+        graph.add_edge("path_a", "merge", label="continue")  # First incoming edge
+        graph.add_edge("path_b", "merge", label="continue")  # Second incoming edge (diamond!)
+        graph.add_edge("merge", "sink", label="continue")
+
+        # Should not raise - diamond merge is valid
+        graph.validate()
+
+
+class TestSchemaContractValidation:
+    """Schema contract validation during DAG construction."""
+
+    def test_unsatisfiable_contract_dependencies_detected(self) -> None:
+        """Impossible contract dependencies should be detected during validation.
+
+        Scenario: Transform B requires field from Transform A's output, but A comes
+        AFTER B in the pipeline (impossible to satisfy).
+
+        This documents the "circular contract dependencies" edge case: when contract
+        requirements create a logical impossibility in a linear pipeline.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+
+        # Build a linear pipeline: source → transform_b → transform_a → sink
+        # But transform_b requires a field that only transform_a produces (impossible!)
+
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node(
+            "transform_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="requires_a_output",
+            config={"required_input_fields": ["field_from_a"]},  # Requires A's output
+        )
+        graph.add_node(
+            "transform_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="produces_output",
+            output_schema_config=SchemaConfig.from_dict({"mode": "observed", "guaranteed_fields": ["field_from_a"]}),  # Produces the field
+        )
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        # Pipeline order means B can't see A's output
+        graph.add_edge("source", "transform_b", label="continue")
+        graph.add_edge("transform_b", "transform_a", label="continue")
+        graph.add_edge("transform_a", "sink", label="continue")
+
+        # Should raise during edge validation - B requires field that isn't available
+        with pytest.raises(ValueError, match=r"required field|missing field|unsatisfied"):
+            graph.validate_edge_compatibility()
+
 
 class TestSourceSinkValidation:
     """Validation of source and sink constraints."""

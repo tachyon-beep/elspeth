@@ -192,7 +192,8 @@ class ExecutionGraph:
         1. Graph is acyclic (no cycles)
         2. Exactly one source node exists
         3. At least one sink node exists
-        4. Edge labels are unique per source node
+        4. All nodes are reachable from source (no disconnected/orphaned nodes)
+        5. Edge labels are unique per source node
 
         Does NOT check schema compatibility - plugins validate their own
         schemas during construction.
@@ -220,6 +221,23 @@ class ExecutionGraph:
         sinks = self.get_sinks()
         if len(sinks) < 1:
             raise GraphValidationError("Graph must have at least one sink")
+
+        # Check for unreachable nodes (nodes not reachable from source)
+        source_id = sources[0]  # We already validated exactly one source exists
+        reachable = nx.descendants(self._graph, source_id)
+        reachable.add(source_id)  # Include source itself in reachable set
+
+        all_nodes = set(self._graph.nodes())
+        unreachable = all_nodes - reachable
+
+        if unreachable:
+            # Build detailed error message with node types
+            unreachable_details = [f"{node_id} ({self._graph.nodes[node_id]['info'].node_type})" for node_id in sorted(unreachable)]
+            raise GraphValidationError(
+                f"Graph validation failed: {len(unreachable)} unreachable node(s) detected:\n"
+                f"  {', '.join(unreachable_details)}\n"
+                f"All nodes must be reachable from the source node '{source_id}'."
+            )
 
         # Check outgoing edge labels are unique per node.
         # The orchestrator's edge_map keys by (from_node, label), so duplicate
