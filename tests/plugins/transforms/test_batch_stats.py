@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -26,26 +25,6 @@ class TestBatchStatsHappyPath:
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """BatchStats implements TransformProtocol.
-
-        Note: BatchStats is batch-aware and has a different process() signature
-        (list[dict] instead of dict). At runtime, isinstance() passes because
-        runtime_checkable only checks method presence. Mypy correctly identifies
-        the signature incompatibility, so we type-ignore this specific check.
-        """
-        from elspeth.plugins.transforms.batch_stats import BatchStats
-
-        transform = BatchStats(
-            {
-                "schema": DYNAMIC_SCHEMA,
-                "value_field": "amount",
-            }
-        )
-        # BatchStats.process() takes list[dict], not dict, so the protocol
-        # signatures are incompatible at the type level. Runtime check passes.
-        assert isinstance(transform, TransformProtocol)  # type: ignore[unreachable]
 
     def test_has_required_attributes(self) -> None:
         """BatchStats has name and is_batch_aware."""

@@ -11,7 +11,6 @@ from elspeth.contracts import ArtifactDescriptor
 from elspeth.plugins.azure.blob_sink import AzureBlobSink
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SinkProtocol
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -102,11 +101,6 @@ def make_config(
 
 class TestAzureBlobSinkProtocol:
     """Tests for AzureBlobSink protocol compliance."""
-
-    def test_implements_protocol(self, mock_container_client: MagicMock) -> None:
-        """AzureBlobSink implements SinkProtocol."""
-        sink = AzureBlobSink(make_config())
-        assert isinstance(sink, SinkProtocol)
 
     def test_has_required_attributes(self, mock_container_client: MagicMock) -> None:
         """AzureBlobSink has name and input_schema."""

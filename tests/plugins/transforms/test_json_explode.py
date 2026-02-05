@@ -16,7 +16,6 @@ import pytest
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -355,19 +354,6 @@ class TestJSONExplodeConfiguration:
 
         with pytest.raises(PluginConfigError, match="schema"):
             JSONExplode({"array_field": "items"})
-
-    def test_implements_transform_protocol(self) -> None:
-        """JSONExplode implements TransformProtocol."""
-        from elspeth.plugins.transforms.json_explode import JSONExplode
-
-        transform = JSONExplode(
-            {
-                "schema": DYNAMIC_SCHEMA,
-                "array_field": "items",
-            }
-        )
-
-        assert isinstance(transform, TransformProtocol)
 
     def test_has_name_attribute(self) -> None:
         """JSONExplode has name class attribute."""

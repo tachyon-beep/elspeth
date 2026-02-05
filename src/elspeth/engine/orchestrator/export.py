@@ -87,10 +87,9 @@ def export_landscape(
         # Multi-file CSV export: one file per record type
         # CSV export writes files directly (not via sink.write), so we need
         # the path from sink config. CSV format requires file-based sink.
-        # Note: SinkProtocol doesn't define config, but all concrete sinks have it
-        if "path" not in sink.config:  # type: ignore[attr-defined]
+        if "path" not in sink.config:
             raise ValueError(f"CSV export requires file-based sink with 'path' in config, but sink '{sink_name}' has no path configured")
-        artifact_path: str = sink.config["path"]  # type: ignore[attr-defined]
+        artifact_path: str = sink.config["path"]
         _export_csv_multifile(
             exporter=exporter,
             run_id=run_id,

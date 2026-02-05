@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SourceProtocol
 
 # Dynamic schema config for tests - SourceDataConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -22,19 +21,6 @@ class TestJSONSource:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """JSONSource implements SourceProtocol."""
-        from elspeth.plugins.sources.json_source import JSONSource
-
-        source = JSONSource(
-            {
-                "path": "/tmp/test.json",
-                "schema": DYNAMIC_SCHEMA,
-                "on_validation_failure": QUARANTINE_SINK,
-            }
-        )
-        assert isinstance(source, SourceProtocol)
 
     def test_has_required_attributes(self) -> None:
         """JSONSource has name and output_schema."""

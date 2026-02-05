@@ -381,10 +381,12 @@ class TestCoalesceProtocol:
             quorum_threshold = 2  # At least 2 branches must arrive
             output_schema = OutputSchema
             node_id: str | None = None  # Set by orchestrator
+            config: dict[str, Any] = {}  # Required by CoalesceProtocol
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
             def __init__(self, config: dict[str, Any]) -> None:
+                self.config = config
                 self.expected_branches = ["branch_a", "branch_b", "branch_c"]
 
             def merge(self, branch_outputs: dict[str, dict[str, Any]], ctx: PluginContext) -> dict[str, Any]:
@@ -424,10 +426,12 @@ class TestCoalesceProtocol:
             quorum_threshold = None
             output_schema = OutputSchema
             node_id: str | None = None  # Set by orchestrator
+            config: dict[str, Any] = {}  # Required by CoalesceProtocol
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
             def __init__(self, config: dict[str, Any]) -> None:
+                self.config = config
                 self.expected_branches = ["branch_a", "branch_b"]
 
             def merge(self, branch_outputs: dict[str, dict[str, Any]], ctx: PluginContext) -> dict[str, Any]:
@@ -497,11 +501,13 @@ class TestSinkProtocol:
             input_schema = InputSchema
             idempotent = True
             node_id: str | None = None
+            config: dict[str, Any] = {}  # Required by SinkProtocol
             determinism = Determinism.IO_WRITE
             plugin_version = "1.0.0"
             supports_resume = False  # Required by SinkProtocol
 
             def __init__(self, config: dict[str, Any]) -> None:
+                self.config = config
                 self.rows: list[dict[str, Any]] = []
 
             def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:

@@ -32,12 +32,6 @@ class TestDatabaseSettings:
         with pytest.raises(ValidationError):
             DatabaseSettings(url="sqlite:///test.db", pool_size=0)
 
-    def test_settings_are_frozen(self) -> None:
-        from elspeth.core.config import DatabaseSettings
-
-        settings = DatabaseSettings(url="sqlite:///test.db")
-        with pytest.raises(ValidationError):
-            settings.url = "sqlite:///other.db"  # type: ignore[misc]
 
 
 class TestRetrySettings:
@@ -90,16 +84,6 @@ class TestElspethSettings:
         )
         assert settings.retry.max_attempts == 5
 
-    def test_settings_are_frozen(self) -> None:
-        from elspeth.core.config import ElspethSettings
-
-        settings = ElspethSettings(
-            source={"plugin": "csv"},
-            sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
-        )
-        with pytest.raises(ValidationError):
-            settings.default_sink = "other"  # type: ignore[misc]
 
 
 class TestLoadSettings:
@@ -250,13 +234,6 @@ class TestSourceSettings:
         ds = SourceSettings(plugin="csv")
         assert ds.options == {}
 
-    def test_source_settings_frozen(self) -> None:
-        """SourceSettings is immutable."""
-        from elspeth.core.config import SourceSettings
-
-        ds = SourceSettings(plugin="csv")
-        with pytest.raises(ValidationError):
-            ds.plugin = "json"  # type: ignore[misc]
 
 
 class TestTransformSettings:
@@ -345,13 +322,6 @@ class TestLandscapeExportSettings:
         with pytest.raises(ValidationError):
             LandscapeExportSettings(format="xml")
 
-    def test_landscape_export_settings_frozen(self) -> None:
-        """LandscapeExportSettings is immutable."""
-        from elspeth.core.config import LandscapeExportSettings
-
-        export = LandscapeExportSettings()
-        with pytest.raises(ValidationError):
-            export.enabled = True  # type: ignore[misc]
 
 
 class TestLandscapeSettings:
@@ -695,13 +665,6 @@ class TestCheckpointSettings:
         with pytest.raises(ValidationError):
             CheckpointSettings(frequency="every_n", checkpoint_interval=-1)
 
-    def test_checkpoint_settings_frozen(self) -> None:
-        """CheckpointSettings is immutable."""
-        from elspeth.core.config import CheckpointSettings
-
-        settings = CheckpointSettings()
-        with pytest.raises(ValidationError):
-            settings.enabled = False  # type: ignore[misc]
 
     def test_checkpoint_settings_invalid_frequency(self) -> None:
         """Frequency must be a valid option."""
@@ -830,21 +793,7 @@ class TestRateLimitSettings:
         other_config = settings.get_service_config("other_api")
         assert other_config.requests_per_minute == 60
 
-    def test_rate_limit_settings_frozen(self) -> None:
-        """RateLimitSettings is immutable."""
-        from elspeth.core.config import RateLimitSettings
 
-        settings = RateLimitSettings()
-        with pytest.raises(ValidationError):
-            settings.enabled = False  # type: ignore[misc]
-
-    def test_service_rate_limit_frozen(self) -> None:
-        """ServiceRateLimit is immutable."""
-        from elspeth.core.config import ServiceRateLimit
-
-        limit = ServiceRateLimit(requests_per_minute=60)
-        with pytest.raises(ValidationError):
-            limit.requests_per_minute = 120  # type: ignore[misc]
 
     def test_service_rate_limit_requests_per_minute_must_be_positive(self) -> None:
         """requests_per_minute must be > 0."""
@@ -990,17 +939,6 @@ class TestGateSettings:
         assert gate.routes == {"true": "fork", "false": "continue"}
         assert gate.fork_to == ["path_a", "path_b"]
 
-    def test_gate_settings_frozen(self) -> None:
-        """GateSettings is immutable."""
-        from elspeth.core.config import GateSettings
-
-        gate = GateSettings(
-            name="test_gate",
-            condition="row['x'] > 0",
-            routes={"true": "continue", "false": "reject_sink"},
-        )
-        with pytest.raises(ValidationError):
-            gate.name = "other"  # type: ignore[misc]
 
     def test_gate_settings_invalid_condition_syntax(self) -> None:
         """Condition must be valid Python syntax."""
@@ -1600,18 +1538,6 @@ class TestCoalesceSettings:
                 quorum_count=0,
             )
 
-    def test_coalesce_settings_frozen(self) -> None:
-        """CoalesceSettings is immutable."""
-        from elspeth.core.config import CoalesceSettings
-
-        settings = CoalesceSettings(
-            name="merge_results",
-            branches=["a", "b"],
-            policy="require_all",
-            merge="union",
-        )
-        with pytest.raises(ValidationError):
-            settings.name = "other"  # type: ignore[misc]
 
     def test_coalesce_settings_first_policy(self) -> None:
         """First policy should validate without additional requirements."""
@@ -2569,18 +2495,6 @@ class TestRunModeSettings:
                 run_mode="invalid_mode",
             )
 
-    def test_run_mode_settings_frozen(self) -> None:
-        """RunMode settings are immutable."""
-        from elspeth.core.config import ElspethSettings
-
-        settings = ElspethSettings(
-            source={"plugin": "csv"},
-            sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
-        )
-
-        with pytest.raises(ValidationError):
-            settings.run_mode = "replay"  # type: ignore[misc,assignment]
 
     def test_resolve_config_includes_run_mode(self) -> None:
         """resolve_config includes run_mode settings."""

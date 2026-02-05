@@ -1161,18 +1161,12 @@ class TestAzureBatchLLMTransformAuditRecording:
         }
         transform = AzureBatchLLMTransform(config)
 
-        # Track recorded calls
-        recorded_calls: list[dict[str, Any]] = []
-
-        def capture_call(**kwargs: Any) -> MagicMock:
-            recorded_calls.append(kwargs)
-            return MagicMock()
-
         # Create mock context with state_id (simulates batch's aggregation state)
         ctx = MagicMock()
         ctx.run_id = "test-run"
         ctx.state_id = "batch-state-123"  # The batch's node_state
-        ctx.record_call = capture_call
+        # Use MagicMock for record_call to track invocations
+        ctx.record_call = MagicMock(return_value=MagicMock())
         ctx.get_checkpoint.return_value = {
             "batch_id": "azure-batch-789",
             "row_mapping": {
@@ -1206,7 +1200,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         mock_output_content = MagicMock()
         mock_output_content.text = output_jsonl
 
-        rows = [{"text": "Hello"}, {"text": "World"}]
+        rows = [_make_pipeline_row({"text": "Hello"}), _make_pipeline_row({"text": "World"})]
 
         with patch.object(transform, "_get_client") as mock_client:
             mock_client.return_value.files.content.return_value = mock_output_content
@@ -1218,21 +1212,35 @@ class TestAzureBatchLLMTransformAuditRecording:
         assert result.rows is not None
         assert len(result.rows) == 2
 
-        # Verify LLM calls were recorded
+        # Verify record_call was invoked correctly
         from elspeth.contracts import CallStatus, CallType
 
-        llm_calls = [c for c in recorded_calls if c.get("call_type") == CallType.LLM]
-        assert len(llm_calls) == 2, f"Expected 2 LLM calls, got {len(llm_calls)}"
+        # Verify record_call was invoked 3 times: 1 HTTP (file download) + 2 LLM (one per row)
+        assert ctx.record_call.call_count == 3, (
+            f"Expected record_call to be invoked 3 times (1 HTTP + 2 LLM), got {ctx.record_call.call_count}"
+        )
 
-        # Verify first LLM call has correct data
-        call1 = llm_calls[0]
-        assert "custom_id" in call1["request_data"]
-        assert call1["request_data"]["messages"][0]["content"] == "Analyze: Hello"
-        assert call1["status"] == CallStatus.SUCCESS
+        # Verify call arguments using call_args_list
+        calls = ctx.record_call.call_args_list
 
-        # Verify second LLM call
-        call2 = llm_calls[1]
-        assert call2["request_data"]["messages"][0]["content"] == "Analyze: World"
+        # First call should be HTTP (downloading output file)
+        http_call = calls[0].kwargs
+        assert http_call["call_type"] == CallType.HTTP
+        assert http_call["status"] == CallStatus.SUCCESS
+        assert http_call["request_data"]["operation"] == "files.content"
+
+        # Second call should be first LLM call
+        llm_call1 = calls[1].kwargs
+        assert llm_call1["call_type"] == CallType.LLM
+        assert "custom_id" in llm_call1["request_data"]
+        assert llm_call1["request_data"]["messages"][0]["content"] == "Analyze: Hello"
+        assert llm_call1["status"] == CallStatus.SUCCESS
+
+        # Third call should be second LLM call
+        llm_call2 = calls[2].kwargs
+        assert llm_call2["call_type"] == CallType.LLM
+        assert llm_call2["request_data"]["messages"][0]["content"] == "Analyze: World"
+        assert llm_call2["status"] == CallStatus.SUCCESS
 
     def test_download_results_records_failed_llm_calls_correctly(self) -> None:
         """LLM calls that failed should be recorded with ERROR status."""
@@ -1279,7 +1287,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         mock_output_content = MagicMock()
         mock_output_content.text = output_jsonl
 
-        rows = [{"text": "Good"}, {"text": "Bad"}]
+        rows = [_make_pipeline_row({"text": "Good"}), _make_pipeline_row({"text": "Bad"})]
 
         with patch.object(transform, "_get_client") as mock_client:
             mock_client.return_value.files.content.return_value = mock_output_content

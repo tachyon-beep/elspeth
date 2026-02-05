@@ -126,7 +126,7 @@ class Orchestrator:
         self,
         db: LandscapeDB,
         *,
-        event_bus: EventBusProtocol = None,  # type: ignore[assignment]
+        event_bus: EventBusProtocol | None = None,
         canonical_version: str = "sha256-rfc8785-v1",
         checkpoint_manager: CheckpointManager | None = None,
         checkpoint_config: RuntimeCheckpointConfig | None = None,
@@ -1425,8 +1425,9 @@ class Orchestrator:
                                 # Successful merge
                                 rows_coalesced += 1
                                 # Get the correct step for this coalesce
-                                # outcome.coalesce_name is guaranteed non-None when merged_token is not None
-                                coalesce_name = CoalesceName(outcome.coalesce_name)  # type: ignore[arg-type]
+                                # Business logic: coalesce_name is guaranteed non-None when merged_token is not None
+                                assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
+                                coalesce_name = CoalesceName(outcome.coalesce_name)
                                 coalesce_step = coalesce_step_map[coalesce_name]
                                 # Check if merged token should continue downstream processing
                                 if coalesce_step < total_steps:
@@ -2173,8 +2174,9 @@ class Orchestrator:
                     if outcome.merged_token is not None:
                         rows_coalesced += 1
                         # Get the correct step for this coalesce
-                        # outcome.coalesce_name is guaranteed non-None when merged_token is not None
-                        coalesce_name = CoalesceName(outcome.coalesce_name)  # type: ignore[arg-type]
+                        # Business logic: coalesce_name is guaranteed non-None when merged_token is not None
+                        assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
+                        coalesce_name = CoalesceName(outcome.coalesce_name)
                         coalesce_step = coalesce_step_map[coalesce_name]
                         # Check if merged token should continue downstream processing
                         if coalesce_step < total_steps:

@@ -431,7 +431,7 @@ class TestOrchestratorAcceptsGraph:
 
     def test_orchestrator_uses_graph_node_ids(self, plugin_manager, payload_store) -> None:
         """Orchestrator uses node IDs from graph, not generated IDs."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, PropertyMock
 
         from elspeth.core.config import (
             ElspethSettings,
@@ -469,19 +469,21 @@ class TestOrchestratorAcceptsGraph:
             coalesce_settings=settings.coalesce,
         )
 
-        # P2 Fix: Use explicit node_id initialization instead of hasattr on MagicMock
-        # MagicMock auto-creates attributes on access, making hasattr meaningless.
-        # Initialize node_id to a sentinel value to verify it was actually set.
+        # Use PropertyMock to track node_id setter calls
+        # PropertyMock tracks when attributes are SET, not just accessed
+        # This proves the orchestrator actually assigns node_id, not just that MagicMock accepts it
         mock_source = MagicMock()
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
-        mock_source.node_id = None  # Explicit initialization - orchestrator should set this
         mock_source._on_validation_failure = "discard"  # Required by SourceProtocol
+
+        # Track node_id setter with PropertyMock
+        source_node_id_setter = PropertyMock()
+        type(mock_source).node_id = source_node_id_setter
+
         schema_mock = MagicMock()
-
         schema_mock.model_json_schema.return_value = {"type": "object"}
-
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([])  # Empty source
         mock_source.get_field_resolution.return_value = None
@@ -491,11 +493,13 @@ class TestOrchestratorAcceptsGraph:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
-        mock_sink.node_id = None  # Explicit initialization - orchestrator should set this
+
+        # Track node_id setter with PropertyMock
+        sink_node_id_setter = PropertyMock()
+        type(mock_sink).node_id = sink_node_id_setter
+
         schema_mock = MagicMock()
-
         schema_mock.model_json_schema.return_value = {"type": "object"}
-
         mock_sink.input_schema = schema_mock
 
         pipeline_config = PipelineConfig(
@@ -507,16 +511,118 @@ class TestOrchestratorAcceptsGraph:
         orchestrator = Orchestrator(db)
         orchestrator.run(pipeline_config, graph=graph, payload_store=payload_store)
 
-        # Source should have node_id set from graph (was None, now should be set)
+        # Verify orchestrator called the node_id setter with correct value from graph
         expected_source_id = graph.get_source()
-        assert mock_source.node_id == expected_source_id, (
-            f"Source node_id not set: expected {expected_source_id}, got {mock_source.node_id}"
-        )
+        source_node_id_setter.assert_called_once_with(expected_source_id)
 
-        # Sink should have node_id set from graph's sink_id_map
+        # Verify sink node_id was set with correct value from graph's sink_id_map
         sink_id_map = graph.get_sink_id_map()
         expected_sink_id = sink_id_map[SinkName("output")]
-        assert mock_sink.node_id == expected_sink_id, f"Sink node_id not set: expected {expected_sink_id}, got {mock_sink.node_id}"
+        sink_node_id_setter.assert_called_once_with(expected_sink_id)
+
+    def test_orchestrator_assigns_unique_node_ids_to_multiple_sinks(self, plugin_manager, payload_store) -> None:
+        """Each sink should get a unique node_id from the graph, not shared."""
+        from unittest.mock import MagicMock, PropertyMock
+
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        # Build config with MULTIPLE sinks
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output_a": SinkSettings(plugin="json", options={"path": "a.json", "schema": {"mode": "observed"}}),
+                "output_b": SinkSettings(plugin="json", options={"path": "b.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="output_a",
+        )
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        # Track node_id assignments with PropertyMock
+        mock_source = MagicMock()
+        mock_source.name = "csv"
+        mock_source.determinism = Determinism.IO_READ
+        mock_source.plugin_version = "1.0.0"
+        mock_source._on_validation_failure = "discard"
+
+        source_node_id_setter = PropertyMock()
+        type(mock_source).node_id = source_node_id_setter
+
+        schema_mock = MagicMock()
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+        mock_source.output_schema = schema_mock
+        mock_source.load.return_value = iter([])  # Empty source
+        mock_source.get_field_resolution.return_value = None
+        mock_source.get_schema_contract.return_value = None
+
+        mock_sink_a = MagicMock()
+        mock_sink_a.name = "output_a"
+        mock_sink_a.determinism = Determinism.IO_WRITE
+        mock_sink_a.plugin_version = "1.0.0"
+
+        sink_a_node_id_setter = PropertyMock()
+        type(mock_sink_a).node_id = sink_a_node_id_setter
+
+        schema_mock = MagicMock()
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+        mock_sink_a.input_schema = schema_mock
+
+        mock_sink_b = MagicMock()
+        mock_sink_b.name = "output_b"
+        mock_sink_b.determinism = Determinism.IO_WRITE
+        mock_sink_b.plugin_version = "1.0.0"
+
+        sink_b_node_id_setter = PropertyMock()
+        type(mock_sink_b).node_id = sink_b_node_id_setter
+
+        schema_mock = MagicMock()
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+        mock_sink_b.input_schema = schema_mock
+
+        pipeline_config = PipelineConfig(
+            source=mock_source,
+            transforms=[],
+            sinks={"output_a": mock_sink_a, "output_b": mock_sink_b},
+        )
+
+        orchestrator = Orchestrator(db)
+        orchestrator.run(pipeline_config, graph=graph, payload_store=payload_store)
+
+        # Verify each sink got a unique node_id from the graph
+        sink_id_map = graph.get_sink_id_map()
+        expected_sink_a_id = sink_id_map[SinkName("output_a")]
+        expected_sink_b_id = sink_id_map[SinkName("output_b")]
+
+        sink_a_node_id_setter.assert_called_once_with(expected_sink_a_id)
+        sink_b_node_id_setter.assert_called_once_with(expected_sink_b_id)
+
+        # Verify node IDs are different
+        assert expected_sink_a_id != expected_sink_b_id, "Sinks should have unique node IDs"
 
     def test_orchestrator_run_accepts_graph(self) -> None:
         """Orchestrator.run() accepts graph parameter."""

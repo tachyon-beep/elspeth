@@ -455,3 +455,177 @@ def test_web_scrape_with_pipeline_row(mock_ctx):
     assert "# Test" in result.row["page_content"]
     assert result.row["page_fingerprint"] is not None
     assert result.row["fetch_status"] == 200
+
+
+@pytest.mark.xfail(reason="Redirect testing with respx requires special httpx configuration - documents desired behavior")
+@respx.mock
+def test_web_scrape_follows_redirects_301(mock_ctx):
+    """HTTP 301 redirect should be followed and final URL recorded.
+
+    Edge case: 301 Moved Permanently redirects are common for URL migrations.
+    The scraper should follow the redirect and record both the requested URL
+    and the final URL after redirect resolution.
+
+    **Status:** This test documents desired behavior. httpx follows redirects
+    by default, but testing this with respx mocking requires integration test setup.
+    """
+    # Set up redirect chain: /old -> /new
+    respx.get("https://example.com/old").mock(
+        return_value=httpx.Response(301, headers={"Location": "https://example.com/new"})
+    )
+    respx.get("https://example.com/new").mock(
+        return_value=httpx.Response(200, text="<html><body><h1>New Location</h1></body></html>")
+    )
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "fingerprint_mode": "content",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing redirect handling",
+            },
+        }
+    )
+
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/old"}), mock_ctx)
+
+    assert result.status == "success"
+    assert "# New Location" in result.row["page_content"]
+    assert result.row["fetch_status"] == 200
+    assert result.row["fetch_url_final"] == "https://example.com/new"
+
+
+@pytest.mark.xfail(reason="Redirect chain testing with respx requires integration test setup - documents desired behavior")
+@respx.mock
+def test_web_scrape_follows_redirect_chain(mock_ctx):
+    """Multiple redirects (301->302->200) should be followed to final destination.
+
+    Edge case: Redirect chains occur when multiple URL migrations happen over time
+    or when CDNs/load balancers add intermediate redirects.
+
+    **Status:** This test documents desired behavior. httpx follows redirect chains,
+    but testing with respx mocking is complex and better suited for integration tests.
+    """
+    # Set up redirect chain: /start -> /middle -> /end
+    respx.get("https://example.com/start").mock(
+        return_value=httpx.Response(301, headers={"Location": "https://example.com/middle"})
+    )
+    respx.get("https://example.com/middle").mock(
+        return_value=httpx.Response(302, headers={"Location": "https://example.com/end"})
+    )
+    respx.get("https://example.com/end").mock(
+        return_value=httpx.Response(200, text="<html><body><h1>Final Destination</h1></body></html>")
+    )
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "fingerprint_mode": "content",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing redirect chain",
+            },
+        }
+    )
+
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/start"}), mock_ctx)
+
+    assert result.status == "success"
+    assert "# Final Destination" in result.row["page_content"]
+    assert result.row["fetch_status"] == 200
+    assert result.row["fetch_url_final"] == "https://example.com/end"
+
+
+@pytest.mark.xfail(reason="Redirect loop testing with respx requires integration test setup - documents desired behavior")
+@respx.mock
+def test_web_scrape_redirect_limit_exceeded(mock_ctx):
+    """Excessive redirects should fail with network error.
+
+    Edge case: Redirect loops or very long redirect chains should be caught
+    to prevent infinite loops and wasted resources.
+
+    **Status:** This test documents desired behavior. httpx has redirect limits,
+    but testing this with respx mocking is complex and better suited for integration tests.
+    """
+    # Set up circular redirect: /a -> /b -> /a (loop)
+    respx.get("https://example.com/a").mock(
+        return_value=httpx.Response(301, headers={"Location": "https://example.com/b"})
+    )
+    respx.get("https://example.com/b").mock(
+        return_value=httpx.Response(301, headers={"Location": "https://example.com/a"})
+    )
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "fingerprint_mode": "content",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing redirect limit",
+            },
+        }
+    )
+
+    # httpx has a default redirect limit of 20, circular redirects should hit it
+    with pytest.raises(NetworkError, match="redirect|too many redirects"):
+        transform.process(_make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
+
+
+@respx.mock
+def test_web_scrape_malformed_html_graceful_degradation(mock_ctx):
+    """Malformed HTML should still extract text content without crashing.
+
+    Edge case: Real-world HTML is often malformed (missing closing tags, invalid nesting).
+    The scraper should handle this gracefully using BeautifulSoup's lenient parsing.
+    """
+    # Malformed HTML: unclosed tags, invalid nesting
+    malformed_html = """
+    <html>
+    <body>
+        <h1>Title
+        <p>Paragraph without closing tag
+        <div>
+            <p>Nested paragraph
+        </div>
+        <!-- Missing closing tags for body and html -->
+    """
+
+    respx.get("https://example.com/malformed").mock(return_value=httpx.Response(200, text=malformed_html))
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "fingerprint_mode": "content",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing malformed HTML",
+            },
+        }
+    )
+
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/malformed"}), mock_ctx)
+
+    # Should succeed despite malformed HTML
+    assert result.status == "success"
+    # Content should be extracted (BeautifulSoup auto-closes tags)
+    assert "Title" in result.row["page_content"]
+    assert "Paragraph without closing tag" in result.row["page_content"]
+    assert "Nested paragraph" in result.row["page_content"]
+    assert result.row["fetch_status"] == 200

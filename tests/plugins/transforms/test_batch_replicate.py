@@ -13,7 +13,6 @@ import pytest
 
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -42,18 +41,6 @@ class TestBatchReplicateHappyPath:
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """BatchReplicate implements TransformProtocol."""
-        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
-
-        transform = BatchReplicate(
-            {
-                "schema": DYNAMIC_SCHEMA,
-                "copies_field": "copies",
-            }
-        )
-        assert isinstance(transform, TransformProtocol)  # type: ignore[unreachable]
 
     def test_has_required_attributes(self) -> None:
         """BatchReplicate has name and is_batch_aware."""

@@ -78,6 +78,99 @@ def executor_setup(recorder: LandscapeRecorder, run: Run) -> tuple[LandscapeReco
     return recorder, span_factory, token_manager, run.run_id
 
 
+@pytest.fixture
+def coalesce_setup(recorder: LandscapeRecorder, run: Run):
+    """Factory fixture for creating coalesce executor with different policies.
+
+    Reduces boilerplate by handling node registration and executor creation.
+    Each test can call this with its specific policy and branches.
+
+    Returns a factory function that creates a configured coalesce executor.
+    """
+    from elspeth.contracts import NodeType
+    from elspeth.engine.coalesce_executor import CoalesceExecutor
+    from elspeth.engine.tokens import TokenManager
+
+    def _create_coalesce(
+        policy: str,
+        branches: list[str],
+        coalesce_name: str = "merge_results",
+        merge: str = "union",
+        quorum_count: int | None = None,
+        timeout_seconds: float | None = None,
+        clock=None,
+    ) -> tuple[CoalesceExecutor, TokenManager, str, str]:
+        """Create a coalesce executor with specified policy.
+
+        Args:
+            policy: Coalesce policy (require_all, first, quorum, best_effort)
+            branches: List of branch names
+            coalesce_name: Name for the coalesce node
+            merge: Merge strategy (union, first, etc.)
+            quorum_count: For quorum policy, number of branches needed
+            timeout_seconds: For best_effort/quorum, timeout in seconds
+            clock: Optional MockClock for timeout testing
+
+        Returns:
+            Tuple of (executor, token_manager, source_node_id, coalesce_node_id)
+        """
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        # Register source node
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Register coalesce node
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name=coalesce_name,
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Create coalesce settings with optional parameters
+        settings_kwargs: dict[str, Any] = {
+            "name": coalesce_name,
+            "branches": branches,
+            "policy": policy,
+            "merge": merge,
+        }
+        if quorum_count is not None:
+            settings_kwargs["quorum_count"] = quorum_count
+        if timeout_seconds is not None:
+            settings_kwargs["timeout_seconds"] = timeout_seconds
+
+        settings = CoalesceSettings(**settings_kwargs)
+
+        # Create and register executor with optional clock
+        executor_kwargs: dict[str, Any] = {
+            "recorder": recorder,
+            "span_factory": span_factory,
+            "token_manager": token_manager,
+            "run_id": run.run_id,
+        }
+        if clock is not None:
+            executor_kwargs["clock"] = clock
+
+        executor = CoalesceExecutor(**executor_kwargs)
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        return executor, token_manager, source_node.node_id, coalesce_node.node_id
+
+    return _create_coalesce
+
+
 class TestCoalesceExecutorInit:
     """Test CoalesceExecutor initialization."""
 
@@ -102,56 +195,20 @@ class TestCoalesceExecutorRequireAll:
 
     def test_accept_holds_first_token(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """First token should be held, waiting for others."""
-        from elspeth.contracts import NodeType
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
-
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        # Register source and coalesce nodes
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="merge_results",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="merge_results",
-            branches=["path_a", "path_b"],
+        # Setup executor with require_all policy
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
             policy="require_all",
-            merge="union",
+            branches=["path_a", "path_b"],
         )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
-        )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         # Create a token from path_a
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 42}),
         )
@@ -178,56 +235,22 @@ class TestCoalesceExecutorRequireAll:
 
     def test_accept_merges_when_all_arrive(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """When all branches arrive, should merge and return merged token."""
-        from elspeth.contracts import NodeType, TokenInfo
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
+        from elspeth.contracts import TokenInfo
 
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        # Register nodes
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="merge_results",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="merge_results",
-            branches=["path_a", "path_b"],
+        # Setup executor with require_all policy
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
             policy="require_all",
-            merge="union",
+            branches=["path_a", "path_b"],
         )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
-        )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         # Create tokens from both paths with different data
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"original": True}),
         )
@@ -272,54 +295,22 @@ class TestCoalesceExecutorFirst:
 
     def test_first_merges_immediately(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """FIRST policy should merge as soon as one token arrives."""
-        from elspeth.contracts import NodeType, TokenInfo
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
+        from elspeth.contracts import TokenInfo
 
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="first_wins",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="first_wins",
-            branches=["fast", "slow"],
+        # Setup executor with first policy
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
             policy="first",
-            merge="union",  # Union merge takes first arrival's data (policy=first means one token)
+            branches=["fast", "slow"],
+            coalesce_name="first_wins",
         )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
-        )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"original": True}),
         )
@@ -347,7 +338,7 @@ class TestCoalesceExecutorFirst:
 
     def test_late_arrival_after_first_merge_handled_gracefully(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """Late arrivals after FIRST policy merge should be handled gracefully.
@@ -370,51 +361,19 @@ class TestCoalesceExecutorFirst:
         2. Would fail at flush_pending() with incomplete_branches
         3. Created confusing duplicate audit entries for the same fork operation
         """
-        from elspeth.contracts import NodeType, TokenInfo
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
+        from elspeth.contracts import TokenInfo
 
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="first_wins",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="first_wins",
-            branches=["fast", "slow"],
+        # Setup executor with first policy
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
             policy="first",
-            merge="union",
+            branches=["fast", "slow"],
+            coalesce_name="first_wins",
         )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
-        )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         # Create parent token and fork it
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 100}),
         )
@@ -463,55 +422,24 @@ class TestCoalesceExecutorQuorum:
 
     def test_quorum_merges_at_threshold(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """QUORUM should merge when quorum_count branches arrive."""
-        from elspeth.contracts import NodeType, TokenInfo
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
+        from elspeth.contracts import TokenInfo
 
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="quorum_merge",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="quorum_merge",
-            branches=["model_a", "model_b", "model_c"],
+        # Setup executor with quorum policy (need 2 of 3)
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
             policy="quorum",
-            quorum_count=2,  # Merge when 2 of 3 arrive
+            branches=["model_a", "model_b", "model_c"],
+            coalesce_name="quorum_merge",
             merge="nested",
+            quorum_count=2,
         )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
-        )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({}),
         )
@@ -551,7 +479,7 @@ class TestCoalesceExecutorQuorum:
 
     def test_quorum_records_failure_on_timeout_if_quorum_not_met(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """QUORUM should record failure on timeout if quorum not met.
@@ -560,57 +488,26 @@ class TestCoalesceExecutorQuorum:
         to asserting len(timed_out) == 1 with failure outcome (correct behavior).
         Bug 6tb fix ensures stranded tokens are properly recorded as failed.
         """
-        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts import TokenInfo
         from elspeth.engine.clock import MockClock
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
 
         # Deterministic clock for timeout testing
         clock = MockClock(start=100.0)
 
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="quorum_merge",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="quorum_merge",
-            branches=["model_a", "model_b", "model_c"],
+        # Setup executor with quorum policy and timeout
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
             policy="quorum",
-            quorum_count=2,  # Need 2 of 3
+            branches=["model_a", "model_b", "model_c"],
+            coalesce_name="quorum_merge",
             merge="nested",
+            quorum_count=2,
             timeout_seconds=0.1,
-        )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
             clock=clock,
         )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({}),
         )
@@ -643,7 +540,7 @@ class TestCoalesceExecutorQuorum:
 
     def test_flush_pending_quorum_failure_records_audit_trail(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """When coalesce fails (quorum not met), consumed tokens MUST have audit records.
@@ -662,52 +559,20 @@ class TestCoalesceExecutorQuorum:
 
         Without this, tokens "disappear" from audit trail - violating auditability contract.
         """
-        from elspeth.contracts import NodeType, TokenInfo
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
+        from elspeth.contracts import TokenInfo
 
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="quorum_merge",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="quorum_merge",
-            branches=["path_a", "path_b", "path_c"],
+        # Setup executor with quorum policy (need all 3)
+        executor, token_manager, source_node_id, coalesce_node_id = coalesce_setup(
             policy="quorum",
-            quorum_count=3,  # Need all 3 branches
-            merge="union",
+            branches=["path_a", "path_b", "path_c"],
+            coalesce_name="quorum_merge",
+            quorum_count=3,
         )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
-        )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         # Create parent token and fork it
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 100}),
         )
@@ -764,10 +629,10 @@ class TestCoalesceExecutorQuorum:
         # AUDIT TRAIL VERIFICATION:
         # Each consumed token MUST have node state recorded
         for token in failure_outcome.consumed_tokens:
-            node_states = recorder.get_node_states_for_token(token.token_id)
+            node_states = executor._recorder.get_node_states_for_token(token.token_id)
 
             # Find the coalesce node state
-            coalesce_states = [ns for ns in node_states if ns.node_id == coalesce_node.node_id]
+            coalesce_states = [ns for ns in node_states if ns.node_id == coalesce_node_id]
 
             assert len(coalesce_states) > 0, (
                 f"Token {token.token_id} has NO node state for coalesce_1 - audit gap! Cannot trace what happened to this token."
@@ -796,7 +661,7 @@ class TestCoalesceExecutorQuorum:
 
     def test_held_tokens_have_audit_trail(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """Held tokens (waiting for siblings) MUST have audit trail showing open state.
@@ -820,51 +685,19 @@ class TestCoalesceExecutorQuorum:
         If pipeline crashed or was queried mid-run, held tokens were invisible.
         This violated ELSPETH's core contract: "I don't know what happened is never acceptable"
         """
-        from elspeth.contracts import NodeType, TokenInfo
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
+        from elspeth.contracts import TokenInfo
 
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="require_all_merge",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="require_all_merge",
-            branches=["path_a", "path_b", "path_c"],
+        # Setup executor with require_all policy
+        executor, token_manager, source_node_id, coalesce_node_id = coalesce_setup(
             policy="require_all",
-            merge="union",
+            branches=["path_a", "path_b", "path_c"],
+            coalesce_name="require_all_merge",
         )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
-        )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         # Create parent token and fork it
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({"value": 100}),
         )
@@ -886,8 +719,9 @@ class TestCoalesceExecutorQuorum:
         assert outcome_a.held is True
 
         # CRITICAL: Token A should now have audit trail showing it's held
-        node_states_a = recorder.get_node_states_for_token(token_a.token_id)
-        coalesce_states_a = [ns for ns in node_states_a if ns.node_id == coalesce_node.node_id]
+        # Note: need to access recorder via executor._recorder
+        node_states_a = executor._recorder.get_node_states_for_token(token_a.token_id)
+        coalesce_states_a = [ns for ns in node_states_a if ns.node_id == coalesce_node_id]
 
         assert len(coalesce_states_a) > 0, (
             f"Held token {token_a.token_id} has NO node state for coalesce - "
@@ -913,8 +747,8 @@ class TestCoalesceExecutorQuorum:
         assert outcome_b.held is True
 
         # Token B should also have audit trail
-        node_states_b = recorder.get_node_states_for_token(token_b.token_id)
-        coalesce_states_b = [ns for ns in node_states_b if ns.node_id == coalesce_node.node_id]
+        node_states_b = executor._recorder.get_node_states_for_token(token_b.token_id)
+        coalesce_states_b = [ns for ns in node_states_b if ns.node_id == coalesce_node_id]
 
         assert len(coalesce_states_b) > 0, f"Held token {token_b.token_id} has NO node state - audit gap!"
 
@@ -929,60 +763,28 @@ class TestCoalesceExecutorBestEffort:
 
     def test_best_effort_merges_on_timeout(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """BEST_EFFORT should merge whatever arrived when timeout expires."""
-        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts import TokenInfo
         from elspeth.engine.clock import MockClock
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
 
         # Deterministic clock for timeout testing
         clock = MockClock(start=100.0)
 
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="source_1",
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        coalesce_node = recorder.register_node(
-            run_id=run.run_id,
-            node_id="coalesce_1",
-            plugin_name="best_effort_merge",
-            node_type=NodeType.COALESCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        settings = CoalesceSettings(
-            name="best_effort_merge",
-            branches=["path_a", "path_b", "path_c"],
+        # Setup executor with best_effort policy and timeout
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
             policy="best_effort",
-            timeout_seconds=0.1,  # Short timeout for testing
-            merge="union",
-        )
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
+            branches=["path_a", "path_b", "path_c"],
+            coalesce_name="best_effort_merge",
+            timeout_seconds=0.1,
             clock=clock,
         )
-        executor.register_coalesce(settings, coalesce_node.node_id)
 
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=source_node_id,
             row_index=0,
             source_row=_make_source_row({}),
         )
@@ -1017,21 +819,14 @@ class TestCoalesceExecutorBestEffort:
 
     def test_check_timeouts_unregistered_raises(
         self,
-        recorder: LandscapeRecorder,
+        coalesce_setup,
         run: Run,
     ) -> None:
         """check_timeouts should raise ValueError for unregistered coalesce."""
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
-
-        span_factory = SpanFactory()
-        token_manager = TokenManager(recorder)
-
-        executor = CoalesceExecutor(
-            recorder=recorder,
-            span_factory=span_factory,
-            token_manager=token_manager,
-            run_id=run.run_id,
+        # Setup executor with any policy
+        executor, _token_manager, _source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="first",
+            branches=["a", "b"],
         )
 
         with pytest.raises(ValueError, match="not registered"):

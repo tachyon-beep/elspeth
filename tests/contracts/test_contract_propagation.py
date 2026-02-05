@@ -436,6 +436,140 @@ class TestMergeContractWithOutput:
         assert id_field.source == "declared"
 
 
+class TestPropagateContractEdgeCases:
+    """Edge case tests for contract propagation."""
+
+    def test_field_rename_loses_original_name_metadata(self) -> None:
+        """When a field is renamed, original_name metadata is lost.
+
+        This documents the current behavior: narrow_contract_to_output()
+        treats renamed fields as NEW fields, so they get original_name = normalized_name.
+
+        Example: FieldMapper renames customer_id → customer
+        - Input contract has: normalized="customer_id", original="Customer ID"
+        - Output row has: {"customer": "Alice", "id": 1}
+        - Output contract has: normalized="customer", original="customer" (metadata lost)
+        """
+        from elspeth.contracts.contract_propagation import narrow_contract_to_output
+
+        input_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract(
+                    normalized_name="customer_id",
+                    original_name="Customer ID",  # Original name from source
+                    python_type=str,
+                    required=True,
+                    source="declared",
+                ),
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+        # Transform renamed customer_id → customer
+        output_row = {"customer": "Alice", "id": 1}
+
+        output_contract = narrow_contract_to_output(
+            input_contract=input_contract,
+            output_row=output_row,
+        )
+
+        # customer_id field is gone, customer field is new
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "customer_id" not in field_names
+        assert "customer" in field_names
+
+        # New field loses original name metadata (becomes normalized name)
+        customer_field = next(f for f in output_contract.fields if f.normalized_name == "customer")
+        assert customer_field.original_name == "customer"  # Lost "Customer ID" metadata
+
+    def test_type_conflict_between_contract_and_actual_data(self) -> None:
+        """Input contract declares int, but output has string - documents mismatch behavior.
+
+        propagate_contract() doesn't validate that existing fields match their
+        declared types. It only infers types for NEW fields.
+
+        This test documents that type mismatches are NOT caught at propagation time.
+        """
+        input_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract(
+                    normalized_name="amount",
+                    original_name="amount",
+                    python_type=int,  # Contract says int
+                    required=True,
+                    source="declared",
+                ),
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+        # Transform outputs amount as string, violating contract
+        output_row = {"amount": "99.5", "id": 1}  # amount is string, not int!
+
+        # propagate_contract with transform_adds_fields=False just returns input contract
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=False,
+        )
+
+        # Contract still says int, but data is string - mismatch not detected
+        amount_field = next(f for f in output_contract.fields if f.normalized_name == "amount")
+        assert amount_field.python_type is int  # Contract unchanged
+        assert isinstance(output_row["amount"], str)  # Actual data is string
+
+        # NOTE: This mismatch would be caught later during validation or sink processing
+
+    def test_none_value_included_in_contract(self) -> None:
+        """None values in output rows are included in contract with type(None)."""
+        input_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+        # Transform adds field with None value
+        output_row = {"id": 1, "optional_field": None}
+
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=True,
+        )
+
+        # None field should be in contract with type(None)
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "optional_field" in field_names
+
+        optional_field = next(f for f in output_contract.fields if f.normalized_name == "optional_field")
+        assert optional_field.python_type is type(None)
+        assert optional_field.required is False  # Inferred fields are never required
+
+
 class TestPropagateContractNonPrimitiveTypes:
     """Test contract propagation with non-primitive types (dict, list)."""
 
@@ -476,7 +610,9 @@ class TestPropagateContractNonPrimitiveTypes:
 
         # Contract should be returned without the non-primitive field
         # (skipped rather than crashing)
-        assert output_contract is not None
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "id" in field_names  # Primitive field preserved
+        assert "response_usage" not in field_names  # Non-primitive field skipped
 
     def test_list_field_does_not_crash_propagation(self, input_contract: SchemaContract) -> None:
         """List fields should not crash propagation."""
@@ -492,7 +628,9 @@ class TestPropagateContractNonPrimitiveTypes:
             transform_adds_fields=True,
         )
 
-        assert output_contract is not None
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "id" in field_names  # Primitive field preserved
+        assert "tags" not in field_names  # Non-primitive field skipped
 
     def test_mixed_primitive_and_nonprimitive_fields(self, input_contract: SchemaContract) -> None:
         """Primitive fields are added, non-primitive fields are skipped."""

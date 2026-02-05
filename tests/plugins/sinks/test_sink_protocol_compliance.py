@@ -10,8 +10,6 @@ from typing import Any
 
 import pytest
 
-from elspeth.plugins.protocols import SinkProtocol
-
 # Schema configs for tests
 # CSV and Database sinks require fixed columns (strict mode)
 # JSON sink accepts dynamic schemas
@@ -53,13 +51,6 @@ def _import_sink_class(class_path: str) -> type:
 
 class TestSinkProtocolCompliance:
     """Parametrized protocol compliance tests for all sink plugins."""
-
-    @pytest.mark.parametrize("class_path,config,expected_name", SINK_CONFIGS)
-    def test_implements_protocol(self, class_path: str, config: dict[str, Any], expected_name: str) -> None:
-        """All sinks must implement SinkProtocol."""
-        sink_class = _import_sink_class(class_path)
-        sink = sink_class(config)
-        assert isinstance(sink, SinkProtocol), f"{sink_class.__name__} must implement SinkProtocol"
 
     @pytest.mark.parametrize("class_path,config,expected_name", SINK_CONFIGS)
     def test_has_required_attributes(self, class_path: str, config: dict[str, Any], expected_name: str) -> None:

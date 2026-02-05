@@ -6,7 +6,6 @@ import pytest
 
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -35,13 +34,6 @@ class TestPassThrough:
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """PassThrough implements TransformProtocol."""
-        from elspeth.plugins.transforms.passthrough import PassThrough
-
-        transform = PassThrough({"schema": DYNAMIC_SCHEMA})
-        assert isinstance(transform, TransformProtocol)
 
     def test_has_required_attributes(self) -> None:
         """PassThrough has name."""

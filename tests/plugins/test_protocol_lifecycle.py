@@ -32,6 +32,7 @@ class TestTransformProtocolLifecycle:
             routes: ClassVar[dict[str, str]] = {}
             fork_to: list[str] | None = None
             node_id: str | None = None  # Set by orchestrator
+            config: dict[str, Any] = {}  # Required by TransformProtocol
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
             is_batch_aware = False  # Batch support (structural aggregation)
@@ -39,6 +40,7 @@ class TestTransformProtocolLifecycle:
             _on_error: str | None = None  # Error routing (WP-11.99b)
 
             def __init__(self, config: dict[str, Any]) -> None:
+                self.config = config
                 self.closed = False
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -85,10 +87,12 @@ class TestGateProtocolLifecycle:
             routes: ClassVar[dict[str, str]] = {}
             fork_to: list[str] | None = None
             node_id: str | None = None  # Set by orchestrator
+            config: dict[str, Any] = {}  # Required by GateProtocol
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
             def __init__(self, config: dict[str, Any]) -> None:
+                self.config = config
                 self.closed = False
 
             def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:

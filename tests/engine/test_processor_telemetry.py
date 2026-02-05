@@ -93,6 +93,7 @@ class SimpleGate:
 
     name = "simple_gate"
     node_id: str | None = None
+    config: dict[str, Any] = {}  # Required by GateProtocol
     input_schema = DynamicSchema
     output_schema = DynamicSchema
     plugin_version = "1.0.0"

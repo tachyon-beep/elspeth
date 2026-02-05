@@ -87,8 +87,10 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
         raise SecretLoadError("Azure Key Vault packages not installed. Install with: uv pip install 'elspeth[azure]'") from e
 
     # Create loader (has built-in caching)
+    # load_secrets_from_config() only called when config.source == "keyvault"
+    assert config.vault_url is not None, "vault_url required when source=keyvault"
     try:
-        loader = KeyVaultSecretLoader(vault_url=config.vault_url)  # type: ignore[arg-type]
+        loader = KeyVaultSecretLoader(vault_url=config.vault_url)
     except ImportError as e:
         raise SecretLoadError("Azure Key Vault packages not installed. Install with: uv pip install 'elspeth[azure]'") from e
     except Exception as e:

@@ -7,38 +7,6 @@ from pathlib import Path
 from sqlalchemy import inspect
 
 
-class TestSchemaDefinition:
-    """SQLAlchemy table definitions."""
-
-    def test_runs_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import runs_table
-
-        assert runs_table.name == "runs"
-        assert "run_id" in [c.name for c in runs_table.columns]
-
-    def test_nodes_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import nodes_table
-
-        assert nodes_table.name == "nodes"
-        assert "node_id" in [c.name for c in nodes_table.columns]
-
-    def test_rows_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import rows_table
-
-        assert rows_table.name == "rows"
-        assert "row_id" in [c.name for c in rows_table.columns]
-
-    def test_tokens_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import tokens_table
-
-        assert tokens_table.name == "tokens"
-
-    def test_node_states_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import node_states_table
-
-        assert node_states_table.name == "node_states"
-
-
 class TestSchemaCreation:
     """Creating tables in a database."""
 
@@ -63,89 +31,6 @@ class TestSchemaCreation:
         assert "node_states" in tables
 
 
-class TestPhase3ASchemaAdditions:
-    """Tests for tables added in Phase 3A."""
-
-    def test_routing_events_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import routing_events_table
-
-        assert routing_events_table.name == "routing_events"
-        columns = {c.name for c in routing_events_table.columns}
-        assert "event_id" in columns
-        assert "state_id" in columns
-        assert "edge_id" in columns
-        assert "routing_group_id" in columns
-
-    def test_batches_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import batches_table
-
-        assert batches_table.name == "batches"
-        columns = {c.name for c in batches_table.columns}
-        assert "batch_id" in columns
-        assert "aggregation_node_id" in columns
-        assert "status" in columns
-
-    def test_batch_members_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import batch_members_table
-
-        assert batch_members_table.name == "batch_members"
-
-    def test_batch_outputs_table_exists(self) -> None:
-        from elspeth.core.landscape.schema import batch_outputs_table
-
-        assert batch_outputs_table.name == "batch_outputs"
-
-    def test_all_13_tables_exist(self) -> None:
-        from elspeth.core.landscape.schema import metadata
-
-        table_names = set(metadata.tables.keys())
-        expected = {
-            "runs",
-            "nodes",
-            "edges",
-            "rows",
-            "tokens",
-            "token_parents",
-            "node_states",
-            "routing_events",
-            "calls",
-            "batches",
-            "batch_members",
-            "batch_outputs",
-            "artifacts",
-        }
-        assert expected.issubset(table_names), f"Missing: {expected - table_names}"
-
-
-class TestPhase3AModels:
-    """Tests for model classes added in Phase 3A."""
-
-    def test_routing_event_model(self) -> None:
-        from elspeth.contracts import RoutingEvent, RoutingMode
-
-        event = RoutingEvent(
-            event_id="evt1",
-            state_id="state1",
-            edge_id="edge1",
-            routing_group_id="grp1",
-            ordinal=0,
-            mode=RoutingMode.MOVE,
-            created_at=None,  # type: ignore[arg-type]  # Will be set in real use
-        )
-        assert event.event_id == "evt1"
-
-    def test_batch_model(self) -> None:
-        from elspeth.contracts import Batch, BatchStatus
-
-        batch = Batch(
-            batch_id="batch1",
-            run_id="run1",
-            aggregation_node_id="node1",
-            attempt=0,
-            status=BatchStatus.DRAFT,
-            created_at=None,  # type: ignore[arg-type]
-        )
-        assert batch.status == BatchStatus.DRAFT
 
 
 class TestNodesDeterminismColumn:

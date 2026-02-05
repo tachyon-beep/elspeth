@@ -21,6 +21,7 @@ import httpx
 from pydantic import Field
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.security import validate_ip, validate_url_scheme
 from elspeth.plugins.base import BaseTransform
@@ -208,12 +209,20 @@ class WebScrapeTransform(BaseTransform):
         output["fetch_response_raw_hash"] = response_raw_hash
         output["fetch_response_processed_hash"] = response_processed_hash
 
+        # Propagate contract with new fields inferred from output
+        # Per P2 bug fix: Without this, FIXED schemas can't access new fields
+        output_contract = narrow_contract_to_output(
+            input_contract=row.contract,
+            output_row=output,
+        )
+
         return TransformResult.success(
             output,
             success_reason={
                 "action": "enriched",
                 "fields_added": [self._content_field, self._fingerprint_field],
             },
+            contract=output_contract,
         )
 
     def _fetch_url(self, url: str, ctx: PluginContext) -> httpx.Response:

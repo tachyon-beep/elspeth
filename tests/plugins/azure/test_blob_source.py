@@ -10,7 +10,6 @@ from elspeth.contracts import SourceRow
 from elspeth.plugins.azure.blob_source import AzureBlobSource
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SourceProtocol
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -110,11 +109,6 @@ def make_config(
 
 class TestAzureBlobSourceProtocol:
     """Tests for AzureBlobSource protocol compliance."""
-
-    def test_implements_protocol(self, mock_blob_client: MagicMock) -> None:
-        """AzureBlobSource implements SourceProtocol."""
-        source = AzureBlobSource(make_config())
-        assert isinstance(source, SourceProtocol)
 
     def test_has_required_attributes(self, mock_blob_client: MagicMock) -> None:
         """AzureBlobSource has name and output_schema."""

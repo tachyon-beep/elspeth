@@ -222,13 +222,15 @@ class RowProcessor:
 
         status = NodeStateStatus.COMPLETED if transform_result.status == "success" else NodeStateStatus.FAILED
 
+        # node_id is assigned by orchestrator before execution (see _assign_node_ids_to_plugins)
+        assert transform.node_id is not None, "node_id must be assigned by orchestrator before execution"
         self._emit_telemetry(
             TransformCompleted(
                 timestamp=datetime.now(UTC),
                 run_id=self._run_id,
                 row_id=token.row_id,
                 token_id=token.token_id,
-                node_id=transform.node_id,  # type: ignore[arg-type]
+                node_id=transform.node_id,
                 plugin_name=transform.name,
                 status=status,
                 duration_ms=transform_result.duration_ms or 0.0,
@@ -1644,10 +1646,12 @@ class RowProcessor:
 
                 # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
                 # (Landscape recording happens inside execute_gate)
+                # node_id is assigned by orchestrator before execution (see _assign_node_ids_to_plugins)
+                assert transform.node_id is not None, "node_id must be assigned by orchestrator before execution"
                 self._emit_gate_evaluated(
                     token=current_token,
                     gate_name=transform.name,
-                    gate_node_id=transform.node_id,  # type: ignore[arg-type]
+                    gate_node_id=transform.node_id,
                     routing_mode=outcome.result.action.mode,
                     destinations=self._get_gate_destinations(outcome),
                 )
@@ -1818,7 +1822,6 @@ class RowProcessor:
                         )
 
                     # Deaggregation: create child tokens for each output row
-                    # transform_result.rows is guaranteed non-None when is_multi_row is True
                     # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
 
                     # B1: No fallback - transforms producing multi-row output MUST provide contract
@@ -1829,9 +1832,16 @@ class RowProcessor:
                             f"Schema-changing transforms must update contracts. This is a plugin bug."
                         )
 
+                    # is_multi_row check above guarantees rows is not None
+                    assert transform_result.rows is not None, "is_multi_row guarantees rows is not None"
+                    # Convert any PipelineRow instances to dicts for TokenManager
+                    expanded_rows = [
+                        dict(r._data) if isinstance(r, PipelineRow) else r
+                        for r in transform_result.rows
+                    ]
                     child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,
-                        expanded_rows=transform_result.rows,  # type: ignore[arg-type]
+                        expanded_rows=expanded_rows,
                         output_contract=transform_result.contract,
                         step_in_pipeline=step,
                         run_id=self._run_id,
