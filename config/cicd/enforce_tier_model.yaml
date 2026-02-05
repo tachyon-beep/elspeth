@@ -1599,11 +1599,6 @@ allow_hits:
   reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
   safety: 'isinstance() check handles union type from aggregation output'
   expires: null
-- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=dd2b7a10d16b6570
-  owner: P1-2026-02-05-schema-evolution
-  reason: Optional method check for schema evolution - transforms optionally implement get_transform_adds_fields()
-  safety: hasattr() with callable() check ensures method exists and is callable before invocation
-  expires: null
 - key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=80f4b2eb31815f95
   owner: P1-2026-02-05-schema-evolution
   reason: Internal boundary - PipelineRow vs dict discrimination for contract propagation

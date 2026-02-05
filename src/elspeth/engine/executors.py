@@ -404,14 +404,9 @@ class TransformExecutor:
             )
 
             # Record schema evolution if transform adds fields
-            # Transforms signal field addition via get_transform_adds_fields() method
+            # Transforms signal field addition via transforms_adds_fields attribute
             # When True, compute evolved contract and record to audit trail
-            if (
-                result.row is not None
-                and hasattr(transform, "get_transform_adds_fields")
-                and callable(transform.get_transform_adds_fields)
-                and transform.get_transform_adds_fields()
-            ):
+            if result.row is not None and transform.transforms_adds_fields:
                 from elspeth.contracts.contract_propagation import propagate_contract
 
                 # Compute evolved contract: input contract + fields added by transform

@@ -759,6 +759,7 @@ class _TestTransformBase:
     plugin_version = "1.0.0"
     is_batch_aware: bool = False
     creates_tokens: bool = False
+    transforms_adds_fields: bool = False
     _on_error: str | None = None
 
     def __init__(self) -> None:

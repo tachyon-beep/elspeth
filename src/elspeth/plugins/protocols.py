@@ -67,6 +67,7 @@ class SourceProtocol(Protocol):
     name: str
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
@@ -177,6 +178,7 @@ class TransformProtocol(Protocol):
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
@@ -191,6 +193,12 @@ class TransformProtocol(Protocol):
     # and new tokens will be created for each output row.
     # When False, success_multi() is only valid in passthrough aggregation mode.
     creates_tokens: bool
+
+    # Schema evolution flag (P1-2026-02-05)
+    # When True, transform adds fields during execution and evolved contract
+    # should be recorded to audit trail (input fields + added fields).
+    # When False (default), transform does not add fields to schema.
+    transforms_adds_fields: bool
 
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig set this from config.
@@ -279,6 +287,7 @@ class BatchTransformProtocol(Protocol):
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
@@ -370,6 +379,7 @@ class GateProtocol(Protocol):
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Routing configuration (set from GateSettings during instantiation)
     routes: dict[str, str]  # Maps route names to destinations
@@ -471,6 +481,7 @@ class CoalesceProtocol(Protocol):
     expected_branches: list[str]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
@@ -541,6 +552,7 @@ class SinkProtocol(Protocol):
     input_schema: type["PluginSchema"]
     idempotent: bool  # Can this sink handle retries safely?
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism

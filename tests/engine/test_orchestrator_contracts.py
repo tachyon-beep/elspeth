@@ -514,6 +514,7 @@ class TestOrchestratorContractRecording:
             """Transform that adds a 'score' field."""
 
             name = "enrich_transform"
+            transforms_adds_fields = True  # Signal that this transform adds fields
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 # Add new field
@@ -522,9 +523,6 @@ class TestOrchestratorContractRecording:
                     output,
                     success_reason={"action": "enriched"},
                 )
-
-            def get_transform_adds_fields(self) -> bool:
-                return True  # Signal that this transform adds fields
 
         class CollectSink(_TestSinkBase):
             name = "collect"
