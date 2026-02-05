@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from elspeth.plugins.context import ValidationErrorToken
 
 
-class TestablePluginContext(PluginContext):
+class _TestablePluginContext(PluginContext):
     """PluginContext subclass with validation error tracking for tests."""
 
     def __init__(self) -> None:
@@ -61,9 +61,9 @@ class TestablePluginContext(PluginContext):
         )
 
 
-def make_test_context() -> TestablePluginContext:
+def make_test_context() -> _TestablePluginContext:
     """Create a test context for integration tests."""
-    return TestablePluginContext()
+    return _TestablePluginContext()
 
 
 class TestSourceContractIntegration:
