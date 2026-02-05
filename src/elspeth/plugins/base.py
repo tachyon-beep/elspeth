@@ -80,6 +80,12 @@ class BaseTransform(ABC):
     # Default: False (most transforms don't create new tokens)
     creates_tokens: bool = False
 
+    # Schema evolution flag (P1-2026-02-05)
+    # When True, transform adds fields during execution and evolved contract
+    # should be recorded to audit trail (input fields + added fields).
+    # When False (default), transform does not add fields to schema.
+    transforms_adds_fields: bool = False
+
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig override this from config.
     # None means: transform doesn't return errors, OR errors are bugs.
