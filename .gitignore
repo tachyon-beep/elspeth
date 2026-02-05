@@ -150,3 +150,6 @@ landscape.db-wal
 # FINAL RULE: Always keep .gitkeep files (preserve directory structure)
 # This must be at the end to override any earlier ignore patterns
 !.gitkeep
+
+# bv (beads viewer) local config and caches
+.bv/
