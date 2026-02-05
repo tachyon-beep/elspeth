@@ -131,11 +131,11 @@ class WebScrapeTransform(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-    def process(self, row: PipelineRow | dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Fetch URL and enrich row with content and fingerprint.
 
         Args:
-            row: Input row containing URL field
+            row: Input row (PipelineRow guaranteed by engine)
             ctx: Plugin context with landscape, payload_store, etc.
 
         Returns:
@@ -198,8 +198,8 @@ class WebScrapeTransform(BaseTransform):
         response_processed_hash = ctx.payload_store.store(content.encode())
 
         # Enrich row with scraped data
-        # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
-        output = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
+        # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
+        output = row.to_dict()
         output[self._content_field] = content
         output[self._fingerprint_field] = fingerprint
         output["fetch_status"] = response.status_code

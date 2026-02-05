@@ -360,11 +360,11 @@ class AzureBatchLLMTransform(BaseTransform):
     ) -> TransformResult:
         """Process batch with checkpoint-based recovery.
 
-        When is_batch_aware=True, the engine passes list[dict].
-        For single-row fallback, the engine passes dict.
+        When is_batch_aware=True and configured as aggregation, the engine passes list[PipelineRow].
+        For single-row fallback (non-aggregation), the engine passes PipelineRow.
 
         Args:
-            row: Single row dict OR list of row dicts (batch)
+            row: Single PipelineRow OR list[PipelineRow] (batch mode)
             ctx: Plugin context with checkpoint support
 
         Returns:
@@ -774,7 +774,7 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
             # Download results and assemble output
-            return self._download_results(batch, checkpoint, [row.to_dict() for row in rows], ctx)
+            return self._download_results(batch, checkpoint, rows, ctx)
 
         elif batch.status == "failed":
             # Batch failed - clear checkpoint and return error
@@ -877,7 +877,7 @@ class AzureBatchLLMTransform(BaseTransform):
         self,
         batch: Any,
         checkpoint: dict[str, Any],
-        rows: list[PipelineRow | dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Download batch results and assemble output rows.
@@ -885,7 +885,7 @@ class AzureBatchLLMTransform(BaseTransform):
         Args:
             batch: Completed Azure batch object
             checkpoint: Checkpoint data with row mapping
-            rows: Original input rows
+            rows: Original input rows (list[PipelineRow])
             ctx: Plugin context
 
         Returns:
@@ -1018,7 +1018,7 @@ class AzureBatchLLMTransform(BaseTransform):
             if idx in template_error_indices:
                 # Row had template error - include original row with error field
                 error_msg = next((err for i, err in template_errors if i == idx), "Unknown error")
-                output_row = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
+                output_row = row.to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
                     "reason": "template_rendering_failed",
@@ -1035,7 +1035,7 @@ class AzureBatchLLMTransform(BaseTransform):
             if custom_id not in results_by_id:
                 # Result not found in Azure batch output - request was sent but no response received
                 # This is rare but can happen with Azure Batch API edge cases
-                output_row = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
+                output_row = row.to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
                     "reason": "result_not_found",
@@ -1066,7 +1066,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
             if "error" in result:
                 # API error for this row
-                output_row = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
+                output_row = row.to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
                     "reason": "api_error",
@@ -1084,7 +1084,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 choices = body.get("choices")
                 if not isinstance(choices, list) or len(choices) == 0:
                     # Missing or empty choices - record as validation error
-                    output_row = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
+                    output_row = row.to_dict()
                     output_row[self._response_field] = None
                     output_row[f"{self._response_field}_error"] = {
                         "reason": "invalid_response_structure",
@@ -1096,7 +1096,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
                 first_choice = choices[0]
                 if not isinstance(first_choice, dict):
-                    output_row = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
+                    output_row = row.to_dict()
                     output_row[self._response_field] = None
                     output_row[f"{self._response_field}_error"] = {
                         "reason": "invalid_response_structure",
@@ -1108,7 +1108,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
                 message = first_choice.get("message")
                 if not isinstance(message, dict):
-                    output_row = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
+                    output_row = row.to_dict()
                     output_row[self._response_field] = None
                     output_row[f"{self._response_field}_error"] = {
                         "reason": "invalid_response_structure",
@@ -1122,7 +1122,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 content = message.get("content", "")  # content can be empty string, that's valid
                 usage = body.get("usage", {})  # usage is optional in Azure API
 
-                output_row = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
+                output_row = row.to_dict()
                 output_row[self._response_field] = content
 
                 # Retrieve variables_hash from checkpoint

@@ -93,13 +93,16 @@ class BaseTransform(ABC):
         """
         self.config = config
 
-    @abstractmethod
     def process(
         self,
         row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row.
+
+        Single-row transforms must override this method.
+        Batch-aware transforms (is_batch_aware=True) should override with
+        signature: process(self, rows: list[PipelineRow], ctx) -> TransformResult
 
         Args:
             row: Input row as PipelineRow (immutable, supports dual-name access)
@@ -108,7 +111,11 @@ class BaseTransform(ABC):
         Returns:
             TransformResult with processed row dict or error
         """
-        ...
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement process(). "
+            f"Single-row transforms: process(row: PipelineRow, ctx) -> TransformResult. "
+            f"Batch-aware transforms: process(rows: list[PipelineRow], ctx) -> TransformResult."
+        )
 
     def close(self) -> None:  # noqa: B027 - optional override, not abstract
         """Clean up resources after pipeline completion.

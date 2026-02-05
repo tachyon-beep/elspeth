@@ -141,24 +141,16 @@ class SourceProtocol(Protocol):
 
 @runtime_checkable
 class TransformProtocol(Protocol):
-    """Protocol for stateless row transforms.
+    """Protocol for stateless single-row transforms.
 
-    Transforms process rows and emit results. They can operate in two modes:
-    - Single row: process(row: PipelineRow, ctx) -> TransformResult
-    - Batch: process(rows: list[dict], ctx) -> TransformResult (if is_batch_aware=True)
+    Transforms process individual rows and emit results.
 
-    The engine decides which mode to use based on:
-    - is_batch_aware attribute (default False)
-    - Aggregation configuration in pipeline
-
-    For batch-aware transforms used in aggregation nodes:
-    - Engine buffers rows until trigger fires
-    - Engine calls process(rows: list[dict], ctx)
-    - Transform returns single aggregated result
+    For batch-aware transforms (is_batch_aware=True), use BatchTransformProtocol instead.
+    The engine uses is_batch_aware to decide whether to buffer rows and call the batch protocol.
 
     Lifecycle:
         - __init__(config): Called once at pipeline construction
-        - process(row, ctx): Called for each row (or batch if is_batch_aware)
+        - process(row, ctx): Called for each row
         - close(): Called at pipeline completion for cleanup
 
     Error Routing (WP-11.99b):
@@ -171,6 +163,7 @@ class TransformProtocol(Protocol):
             name = "enrich"
             input_schema = InputSchema
             output_schema = OutputSchema
+            is_batch_aware = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 enriched = {**row.to_dict(), "timestamp": datetime.now().isoformat()}
@@ -189,8 +182,8 @@ class TransformProtocol(Protocol):
     determinism: Determinism
     plugin_version: str
 
-    # Batch support (for aggregation nodes)
-    # When True, engine may pass list[dict] instead of single dict to process()
+    # Batch support flag (must be False for TransformProtocol)
+    # When True, transform must implement BatchTransformProtocol instead
     is_batch_aware: bool
 
     # Token creation flag for deaggregation
@@ -230,6 +223,100 @@ class TransformProtocol(Protocol):
         Called once after all rows have been processed. Use for closing
         connections, flushing buffers, or releasing external resources.
         """
+        ...
+
+    # === Optional Lifecycle Hooks ===
+
+    def on_start(self, ctx: "PluginContext") -> None:
+        """Called at start of run."""
+        ...
+
+    def on_complete(self, ctx: "PluginContext") -> None:
+        """Called at end of run."""
+        ...
+
+
+@runtime_checkable
+class BatchTransformProtocol(Protocol):
+    """Protocol for batch-aware transforms.
+
+    Batch transforms receive lists of rows and emit results. Used in aggregation
+    nodes where the engine buffers rows until trigger fires.
+
+    The engine passes list[PipelineRow] - each row is guaranteed to be a PipelineRow
+    instance with its schema contract. Transforms should use row.to_dict() to get
+    mutable dicts when constructing output.
+
+    Lifecycle:
+        - __init__(config): Called once at pipeline construction
+        - process(rows, ctx): Called when trigger fires with buffered rows
+        - close(): Called at pipeline completion for cleanup
+
+    Error Routing (WP-11.99b):
+        Batch transforms that can return TransformResult.error() must set _on_error
+        to specify where errored batches go.
+
+    Example:
+        class BatchStats:
+            name = "batch_stats"
+            input_schema = InputSchema
+            output_schema = OutputSchema
+            is_batch_aware = True
+
+            def process(
+                self,
+                rows: list[PipelineRow],
+                ctx: PluginContext,
+            ) -> TransformResult:
+                total = sum(row["amount"] for row in rows)
+                return TransformResult.success(
+                    {"count": len(rows), "total": total},
+                    success_reason={"action": "aggregated"},
+                )
+    """
+
+    name: str
+    input_schema: type["PluginSchema"]
+    output_schema: type["PluginSchema"]
+    node_id: str | None  # Set by orchestrator after registration
+
+    # Metadata for Phase 3 audit/reproducibility
+    determinism: Determinism
+    plugin_version: str
+
+    # Batch support flag (must be True for BatchTransformProtocol)
+    is_batch_aware: bool
+
+    # Token creation flag for deaggregation
+    # When True, process() may return TransformResult.success_multi(rows)
+    # and new tokens will be created for each output row.
+    creates_tokens: bool
+
+    # Error routing configuration (WP-11.99b)
+    _on_error: str | None
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Initialize with configuration."""
+        ...
+
+    def process(
+        self,
+        rows: list["PipelineRow"],
+        ctx: "PluginContext",
+    ) -> "TransformResult":
+        """Process a batch of rows.
+
+        Args:
+            rows: List of input rows as PipelineRow instances
+            ctx: Plugin context
+
+        Returns:
+            TransformResult with aggregated result or multiple output rows
+        """
+        ...
+
+    def close(self) -> None:
+        """Clean up resources after pipeline completion."""
         ...
 
     # === Optional Lifecycle Hooks ===

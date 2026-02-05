@@ -343,11 +343,11 @@ class OpenRouterBatchLLMTransform(BaseTransform):
     ) -> TransformResult:
         """Process batch of rows in parallel.
 
-        When is_batch_aware=True, the engine passes list[dict].
-        For single-row fallback, the engine passes dict.
+        When is_batch_aware=True and configured as aggregation, the engine passes list[PipelineRow].
+        For single-row fallback (non-aggregation), the engine passes PipelineRow.
 
         Args:
-            row: Single row dict OR list of row dicts (batch)
+            row: Single PipelineRow OR list[PipelineRow] (batch mode)
             ctx: Plugin context
 
         Returns:

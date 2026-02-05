@@ -106,13 +106,13 @@ class BatchReplicate(BaseTransform):
             allow_coercion=False,
         )
 
-    def process(  # type: ignore[override]
-        self, rows: list[PipelineRow | dict[str, Any]], ctx: PluginContext
+    def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
+        self, rows: list[PipelineRow], ctx: PluginContext
     ) -> TransformResult:
         """Replicate each row based on its copies field.
 
         Args:
-            rows: List of input rows (batch-aware receives list)
+            rows: List of input rows (batch-aware receives list[PipelineRow])
             ctx: Plugin context
 
         Returns:
@@ -155,8 +155,8 @@ class BatchReplicate(BaseTransform):
 
             # Create copies of this row
             for copy_idx in range(copies):
-                # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
-                output = row.to_dict() if isinstance(row, PipelineRow) else dict(row)  # Shallow copy preserves original data
+                # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
+                output = row.to_dict()  # Shallow copy preserves original data
                 if self._include_copy_index:
                     output["copy_index"] = copy_idx
                 output_rows.append(output)

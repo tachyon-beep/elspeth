@@ -1038,7 +1038,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
     def _process_single_row_internal(
         self,
-        row: PipelineRow | dict[str, Any],
+        row: dict[str, Any],
         state_id: str,
     ) -> TransformResult:
         """Internal row processing with explicit state_id.
@@ -1046,14 +1046,14 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         Used by both single-row and batch processing paths.
 
         Args:
-            row: Input row with all case study fields
+            row: Input row dict with all case study fields
             state_id: State ID for audit trail
 
         Returns:
             TransformResult with all query results merged, or error
         """
-        # Convert row to dict for internal processing
-        row_dict = row.to_dict() if isinstance(row, PipelineRow) else row
+        # Use row dict directly (already converted by caller)
+        row_dict = row
 
         # Execute all queries (parallel or sequential)
         # P3-2026-02-02: Parallel mode returns pool context for audit trail

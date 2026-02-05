@@ -48,6 +48,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import (
+    BatchTransformProtocol,
     GateProtocol,
     SinkProtocol,
     TransformProtocol,
@@ -1193,7 +1194,7 @@ class AggregationExecutor:
     def execute_flush(
         self,
         node_id: NodeID,
-        transform: TransformProtocol,
+        transform: BatchTransformProtocol,
         ctx: PluginContext,
         step_in_pipeline: int,
         trigger_type: TriggerType,
@@ -1209,7 +1210,7 @@ class AggregationExecutor:
 
         Args:
             node_id: Aggregation node ID
-            transform: Batch-aware transform plugin
+            transform: Batch-aware transform plugin (must implement BatchTransformProtocol)
             ctx: Plugin context
             step_in_pipeline: Current position in DAG
             trigger_type: What triggered the flush (COUNT, TIMEOUT, END_OF_SOURCE, etc.)
@@ -1314,8 +1315,8 @@ class AggregationExecutor:
         ):
             start = time.perf_counter()
             try:
-                # Pass reconstructed PipelineRow objects (not plain dicts)
-                result = transform.process(pipeline_rows, ctx)  # type: ignore[arg-type]
+                # Pass reconstructed PipelineRow objects to batch-aware transform
+                result = transform.process(pipeline_rows, ctx)
                 duration_ms = (time.perf_counter() - start) * 1000
             except BatchPendingError:
                 # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
