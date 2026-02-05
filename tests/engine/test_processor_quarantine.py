@@ -151,6 +151,7 @@ class TestQuarantineIntegration:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
+
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
@@ -219,7 +220,9 @@ class TestQuarantineIntegration:
         assert result.outcome == RowOutcome.QUARANTINED
 
         # Verify original data is preserved
-        assert result.final_data.to_dict() == {"other_field": "some_value"}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"other_field": "some_value"}
 
         # Query the node_states table to confirm the record exists
         states = recorder.get_node_states_for_token(result.token.token_id)

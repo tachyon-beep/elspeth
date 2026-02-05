@@ -70,12 +70,12 @@ class TestPluginTypeDetection:
             name = "duck"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})  # type: ignore[attr-defined]
 
         duck = DuckTypedTransform()
         # Has the method but NOT an instance of BaseTransform
         assert hasattr(duck, "process")
-        assert not isinstance(duck, BaseTransform)
+        assert not isinstance(duck, BaseTransform)  # type: ignore[unreachable]
 
     def test_duck_typed_gate_not_recognized(self) -> None:
         """Duck-typed gates without inheritance should NOT be recognized.
@@ -95,7 +95,7 @@ class TestPluginTypeDetection:
         duck = DuckTypedGate()
         # Has the method but NOT an instance of BaseGate
         assert hasattr(duck, "evaluate")
-        assert not isinstance(duck, BaseGate)
+        assert not isinstance(duck, BaseGate)  # type: ignore[unreachable]
 
 
 class TestPluginInheritanceHierarchy:
@@ -139,7 +139,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             node_id = "fake_node_id"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})  # type: ignore[attr-defined]
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -192,6 +192,7 @@ class TestProcessorRejectsDuckTypedPlugins:
 
         class DuckTypedGate:
             """Looks like a gate but doesn't inherit from BaseGate."""
+
             name = "duck_gate"
             node_id = "fake_gate_id"
 

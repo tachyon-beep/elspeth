@@ -585,6 +585,7 @@ class TestMergeDataProperties:
         executor.accept(token_a, "test_coalesce", step_in_pipeline=0)
         outcome = executor.accept(token_b, "test_coalesce", step_in_pipeline=0)
 
+        assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
 
         # All keys from both dicts should be in merged (last write wins for conflicts)
@@ -615,6 +616,7 @@ class TestMergeDataProperties:
         executor.accept(token_a, "test_coalesce", step_in_pipeline=0)
         outcome = executor.accept(token_b, "test_coalesce", step_in_pipeline=0)
 
+        assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
 
         # Should have branch names as top-level keys
@@ -644,6 +646,7 @@ class TestMergeDataProperties:
         executor.accept(token_selected, "test_coalesce", step_in_pipeline=0)
         outcome = executor.accept(token_other, "test_coalesce", step_in_pipeline=0)
 
+        assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
 
         # Should be exactly the selected branch's data
@@ -750,6 +753,7 @@ class TestCoalesceMetadataProperties:
             token = make_token(f"token-{i}", row_id, branch, {"field": i})
             outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
 
+        assert outcome.coalesce_metadata is not None
         arrival_order = outcome.coalesce_metadata["arrival_order"]
 
         # Verify chronological order

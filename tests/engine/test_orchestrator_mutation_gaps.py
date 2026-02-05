@@ -223,11 +223,12 @@ class TestRouteValidationEdgeCases:
 
     def test_continue_destination_is_not_validated_as_sink(self, orchestrator: Orchestrator) -> None:
         """Line 245: 'continue' destination should skip sink validation."""
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.orchestrator.validation import validate_route_destinations
 
         # Route map with 'continue' destination
         route_resolution_map = {
-            ("gate_1", "default"): "continue",  # Should be skipped
+            (NodeID("gate_1"), "default"): "continue",  # Should be skipped
         }
         available_sinks = {"output"}  # 'continue' is not in sinks, but shouldn't error
 
@@ -242,10 +243,11 @@ class TestRouteValidationEdgeCases:
 
     def test_fork_destination_is_not_validated_as_sink(self, orchestrator: Orchestrator) -> None:
         """Line 249: 'fork' destination should skip sink validation."""
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.orchestrator.validation import validate_route_destinations
 
         route_resolution_map = {
-            ("gate_1", "split"): "fork",  # Should be skipped
+            (NodeID("gate_1"), "split"): "fork",  # Should be skipped
         }
         available_sinks = {"output"}
 

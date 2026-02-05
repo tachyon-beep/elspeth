@@ -340,7 +340,7 @@ class TestTransformErrorRouting:
             node_id=node.node_id,
             landscape=recorder,
         )
-        ctx.record_transform_error = capture_record  # type: ignore[method-assign]
+        ctx.record_transform_error = capture_record  # type: ignore[method-assign,assignment]
         ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
 
         executor = TransformExecutor(recorder, SpanFactory())
@@ -418,7 +418,7 @@ class TestTransformErrorRouting:
             node_id=node.node_id,
             landscape=recorder,
         )
-        ctx.record_transform_error = capture_record  # type: ignore[method-assign]
+        ctx.record_transform_error = capture_record  # type: ignore[method-assign,assignment]
 
         executor = TransformExecutor(recorder, SpanFactory())
 

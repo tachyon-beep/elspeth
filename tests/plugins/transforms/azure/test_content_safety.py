@@ -596,8 +596,10 @@ class TestContentSafetyBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "content_safety_violation"
-            assert result.reason["categories"]["hate"]["exceeded"] is True
-            assert result.reason["categories"]["hate"]["severity"] == 4
+            categories = result.reason["categories"]
+            assert isinstance(categories, dict)  # dict variant, not list
+            assert categories["hate"]["exceeded"] is True
+            assert categories["hate"]["severity"] == 4
         finally:
             transform.close()
 
@@ -866,7 +868,9 @@ class TestContentSafetyBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "content_safety_violation"
-            assert result.reason["categories"]["self_harm"]["exceeded"] is True
+            categories = result.reason["categories"]
+            assert isinstance(categories, dict)  # dict variant, not list
+            assert categories["self_harm"]["exceeded"] is True
         finally:
             transform.close()
 

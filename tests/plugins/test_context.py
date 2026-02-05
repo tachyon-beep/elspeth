@@ -549,13 +549,13 @@ class TestRecordCallTelemetryResponseHash:
         Bug: Using truthiness check (if response_data) causes empty responses
         to emit response_hash=None, breaking telemetry/audit correlation.
         """
+        # Set up telemetry callback to capture emitted events
+        from typing import Any
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        # Set up telemetry callback to capture emitted events
-        from typing import Any
         emitted_events: list[Any] = []
 
         def capture_telemetry(event):
@@ -593,12 +593,12 @@ class TestRecordCallTelemetryResponseHash:
 
     def test_empty_list_response_gets_hashed(self) -> None:
         """Empty list [] response should emit response_hash in telemetry."""
+        from typing import Any
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        from typing import Any
         emitted_events: list[Any] = []
 
         def capture_telemetry(event):

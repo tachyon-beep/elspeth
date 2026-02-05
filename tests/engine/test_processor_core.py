@@ -136,7 +136,9 @@ class TestRowProcessor:
         result = results[0]
 
         # 10 * 2 = 20, 20 + 1 = 21
-        assert result.final_data.to_dict() == {"value": 21}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"value": 21}
         assert result.outcome == RowOutcome.COMPLETED
 
         # === P1: Audit trail verification ===
@@ -214,7 +216,9 @@ class TestRowProcessor:
         assert len(results) == 1
         result = results[0]
 
-        assert result.final_data.to_dict() == {"name": "test", "enriched": True}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"name": "test", "enriched": True}
         assert result.outcome == RowOutcome.COMPLETED
         # Check identity preserved
         assert result.token.token_id is not None
@@ -258,7 +262,9 @@ class TestRowProcessor:
         assert len(results) == 1
         result = results[0]
 
-        assert result.final_data.to_dict() == {"passthrough": True}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"passthrough": True}
         assert result.outcome == RowOutcome.COMPLETED
 
     @staticmethod
@@ -360,7 +366,9 @@ class TestRowProcessor:
         assert len(results) == 1
         result = results[0]
         assert result.outcome == expected_behavior
-        assert result.final_data.to_dict() == {"value": -5}  # Original data preserved
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"value": -5}  # Original data preserved
 
         # Audit trail verification differs by outcome
         if expected_behavior == RowOutcome.QUARANTINED:

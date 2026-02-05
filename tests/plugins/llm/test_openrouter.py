@@ -2,8 +2,9 @@
 """Tests for OpenRouter LLM transform with row-level pipelining."""
 
 import json
-from collections.abc import Generator
-from typing import Any
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
+from typing import Any, cast
 from unittest.mock import Mock
 
 import httpx
@@ -12,6 +13,7 @@ import pytest
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
@@ -52,7 +54,7 @@ def _create_mock_response(
     headers: dict[str, str] | None = None,
     raw_body: str | None = None,
     raise_for_status_error: Exception | None = None,
-) -> Mock:
+) -> httpx.Response:
     """Create an httpx.Response using ChaosLLM response generation."""
     request = {
         "model": model,
@@ -69,24 +71,36 @@ def _create_mock_response(
         usage_override=usage,
     )
     if raise_for_status_error is not None:
-        response.raise_for_status = Mock(side_effect=raise_for_status_error)
+        # Override raise_for_status to raise the specified error
+        response.raise_for_status = Mock(side_effect=raise_for_status_error)  # type: ignore[method-assign]
     return response
 
 
+@contextmanager
 def mock_httpx_client(
     chaosllm_server,
     response: httpx.Response | list[httpx.Response] | None = None,
     side_effect: Exception | None = None,
-) -> Generator[Mock, None, None]:
+) -> Iterator[Mock]:
     """Context manager to mock httpx.Client using ChaosLLM responses."""
     if response is None and side_effect is None:
         response = _create_mock_response(chaosllm_server)
-    responses = response if isinstance(response, list) else [response]
-    return chaosllm_openrouter_http_responses(
+    # Build list of responses, ensuring no None values
+    if response is None:
+        # side_effect is provided, responses list not used
+        responses: list[httpx.Response] = []
+    elif isinstance(response, list):
+        responses = response
+    else:
+        responses = [response]
+    # Cast to the expected type - these are all httpx.Response objects
+    typed_responses = cast(list[dict[str, Any] | str | httpx.Response], responses)
+    with chaosllm_openrouter_http_responses(
         chaosllm_server,
-        responses,
+        typed_responses,
         side_effect=side_effect,
-    )
+    ) as mock_client:
+        yield mock_client
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:

@@ -108,7 +108,7 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture(autouse=True)
-def _auto_close_telemetry_managers():
+def _auto_close_telemetry_managers() -> Iterator[None]:
     """Automatically close all TelemetryManager instances created during tests.
 
     TelemetryManager starts a non-daemon background thread for async export.
@@ -134,10 +134,10 @@ def _auto_close_telemetry_managers():
     from elspeth.telemetry.manager import TelemetryManager
 
     # Track managers AND their original queues
-    created_managers: list[tuple[TelemetryManager, queue_module.Queue]] = []
+    created_managers: list[tuple[TelemetryManager, queue_module.Queue[Any]]] = []
     original_init = TelemetryManager.__init__
 
-    def tracking_init(self: TelemetryManager, *args, **kwargs) -> None:
+    def tracking_init(self: TelemetryManager, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
         # Store manager AND its original queue (in case tests replace _queue)
         created_managers.append((self, self._queue))
@@ -509,7 +509,7 @@ class _TestSourceBase:
 
     def __init__(self) -> None:
         """Initialize test source with empty config."""
-        self.config = {"schema": {"mode": "observed"}}
+        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
 
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
         """Wrap plain dicts in SourceRow.valid() as required by source protocol."""
@@ -693,7 +693,7 @@ class _TestSinkBase:
 
     def __init__(self) -> None:
         """Initialize test sink with empty config."""
-        self.config = {"schema": {"mode": "observed"}}
+        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
@@ -757,7 +757,7 @@ class _TestTransformBase:
 
     def __init__(self) -> None:
         """Initialize test transform with empty config."""
-        self.config = {"schema": {"mode": "observed"}}
+        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""

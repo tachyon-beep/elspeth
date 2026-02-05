@@ -59,7 +59,7 @@ class TestBaseTransform:
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 row_dict = row.to_dict()
-                return TransformResult.success_multi([row_dict, row_dict])
+                return TransformResult.success_multi([row_dict, row_dict], success_reason={"action": "expand"})
 
         transform = ExpandingTransform({})
         assert transform.creates_tokens is True

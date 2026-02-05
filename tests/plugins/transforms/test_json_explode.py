@@ -487,6 +487,7 @@ class TestJSONExplodeContractPropagation:
         assert result.contract is not None
         assert result.rows is not None
         assert len(result.rows) == 2
+        assert isinstance(result.rows[0], dict)
 
         # Create PipelineRow with output contract for first child
         output_row = PipelineRow(result.rows[0], result.contract)

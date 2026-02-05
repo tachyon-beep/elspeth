@@ -71,7 +71,7 @@ class MockBatchTransform(_TestTransformBase):
             total = sum(r.get("x", 0) for r in row)
             return TransformResult.success({"sum": total, "count": len(row)}, success_reason={"action": "sum_batch"})
         # Single row mode
-        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})  # type: ignore[attr-defined]
 
 
 class FailingBatchTransform(_TestTransformBase):

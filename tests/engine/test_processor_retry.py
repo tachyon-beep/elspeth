@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
 
 
-
 def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
     """Create an OBSERVED contract from row data for testing."""
     fields = tuple(
@@ -680,6 +679,7 @@ class TestNoRetryAuditCompleteness:
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
+
         # Set up real Landscape
         recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")

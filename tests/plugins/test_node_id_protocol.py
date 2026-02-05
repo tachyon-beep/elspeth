@@ -56,7 +56,6 @@ class TestNodeIdProtocol:
 
     def test_base_transform_has_node_id(self) -> None:
         """BaseTransform has node_id attribute with default None."""
-        from typing import Any
 
         from elspeth.contracts import PipelineRow, PluginSchema
         from elspeth.plugins.base import BaseTransform
@@ -90,7 +89,6 @@ class TestNodeIdProtocol:
 
     def test_base_gate_has_node_id(self) -> None:
         """BaseGate has node_id attribute with default None."""
-        from typing import Any
 
         from elspeth.contracts import PipelineRow, PluginSchema, RoutingAction
         from elspeth.plugins.base import BaseGate
@@ -106,7 +104,7 @@ class TestNodeIdProtocol:
             output_schema = TestSchema
 
             def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-                return GateResult(row=row, action=RoutingAction.continue_())
+                return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
 
         gate = TestGate({"routes": {"default": "continue"}})
         assert gate.node_id is None

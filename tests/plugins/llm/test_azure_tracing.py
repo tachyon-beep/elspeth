@@ -202,7 +202,7 @@ class TestLangfuseSpanCreation:
         @contextmanager
         def mock_start_observation(**kwargs: Any):
             obs = MagicMock()
-            obs_record = {"kwargs": kwargs, "updates": []}
+            obs_record: dict[str, Any] = {"kwargs": kwargs, "updates": []}
             captured_observations.append(obs_record)
             obs.update = lambda **uk: obs_record["updates"].append(uk)
             yield obs
@@ -306,7 +306,7 @@ class TestLangfuseFailedCallTracing:
         @contextmanager
         def mock_start_observation(**kwargs: Any):
             obs = MagicMock()
-            obs_record = {"kwargs": kwargs, "updates": []}
+            obs_record: dict[str, Any] = {"kwargs": kwargs, "updates": []}
             captured_observations.append(obs_record)
             obs.update = lambda **uk: obs_record["updates"].append(uk)
             yield obs
@@ -389,7 +389,7 @@ class TestLangfuseFailedCallTracing:
 
         # Should return error result
         assert result.status == "error"
-        assert result.reason["reason"] == "llm_call_failed"
+        assert result.reason is not None and result.reason["reason"] == "llm_call_failed"
 
         # And also have recorded the error trace in Langfuse
         assert len(captured_observations) == 2  # span + generation

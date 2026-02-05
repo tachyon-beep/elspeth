@@ -115,10 +115,12 @@ class TestTruncate:
         )
 
         result = transform.process(
-            _make_pipeline_row({
-                "title": "Very long title",
-                "description": "Very long description text",
-            }),
+            _make_pipeline_row(
+                {
+                    "title": "Very long title",
+                    "description": "Very long description text",
+                }
+            ),
             ctx,
         )
 
@@ -186,11 +188,13 @@ class TestTruncate:
         )
 
         result = transform.process(
-            _make_pipeline_row({
-                "title": "Long title here",
-                "id": 123,
-                "other": "unchanged",
-            }),
+            _make_pipeline_row(
+                {
+                    "title": "Long title here",
+                    "id": 123,
+                    "other": "unchanged",
+                }
+            ),
             ctx,
         )
 

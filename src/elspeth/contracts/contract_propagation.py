@@ -100,10 +100,7 @@ def narrow_contract_to_output(
     output_field_names = set(output_row.keys())
 
     # Keep fields from input contract that exist in output
-    kept_fields = [
-        fc for fc in input_contract.fields
-        if fc.normalized_name in output_field_names
-    ]
+    kept_fields = [fc for fc in input_contract.fields if fc.normalized_name in output_field_names]
 
     # Find NEW fields in output (not in input contract)
     existing_names = {f.normalized_name for f in input_contract.fields}

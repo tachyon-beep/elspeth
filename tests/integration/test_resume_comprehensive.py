@@ -496,10 +496,12 @@ class TestResumeComprehensive:
         )
 
         # PIPELINEROW MIGRATION: Create schema contract
-        schema_contract_json, schema_contract_hash = self._create_schema_contract([
-            ("id", int),
-            ("timestamp", datetime),
-        ])
+        schema_contract_json, schema_contract_hash = self._create_schema_contract(
+            [
+                ("id", int),
+                ("timestamp", datetime),
+            ]
+        )
 
         # Create graph
         graph = ExecutionGraph()
@@ -624,10 +626,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": strict_schema}
-        resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        resume_schema_config: dict[str, Any] = {"schema": strict_schema}
+        resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=resume_schema_config)
+        resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=resume_schema_config)
+        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=resume_schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -698,10 +700,12 @@ class TestResumeComprehensive:
 
         # PIPELINEROW MIGRATION: Create schema contract
         # Note: We use float here as Decimal is not in VALID_FIELD_TYPES
-        schema_contract_json, schema_contract_hash = self._create_schema_contract([
-            ("id", int),
-            ("amount", float),  # Decimal coerces to float in contracts
-        ])
+        schema_contract_json, schema_contract_hash = self._create_schema_contract(
+            [
+                ("id", int),
+                ("amount", float),  # Decimal coerces to float in contracts
+            ]
+        )
 
         # Create graph
         graph = ExecutionGraph()
@@ -826,10 +830,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": strict_schema}
-        resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        resume_schema_config: dict[str, Any] = {"schema": strict_schema}
+        resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=resume_schema_config)
+        resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=resume_schema_config)
+        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=resume_schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -896,10 +900,12 @@ class TestResumeComprehensive:
 
         # PIPELINEROW MIGRATION: Create schema contract
         # Arrays use object type (any) in contracts
-        schema_contract_json, schema_contract_hash = self._create_schema_contract([
-            ("id", int),
-            ("tags", object),  # Arrays use 'any'/object type
-        ])
+        schema_contract_json, schema_contract_hash = self._create_schema_contract(
+            [
+                ("id", int),
+                ("tags", object),  # Arrays use 'any'/object type
+            ]
+        )
 
         # Create graph
         graph = ExecutionGraph()
@@ -1094,10 +1100,12 @@ class TestResumeComprehensive:
         )
 
         # PIPELINEROW MIGRATION: Create schema contract
-        schema_contract_json, schema_contract_hash = self._create_schema_contract([
-            ("id", int),
-            ("metadata", object),  # Nested objects use 'any'/object type
-        ])
+        schema_contract_json, schema_contract_hash = self._create_schema_contract(
+            [
+                ("id", int),
+                ("metadata", object),  # Nested objects use 'any'/object type
+            ]
+        )
 
         # Create graph
         graph = ExecutionGraph()

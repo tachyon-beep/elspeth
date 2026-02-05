@@ -856,7 +856,7 @@ class TestAggregationExecutor:
             token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
-                row_data=_make_pipeline_row({"value": i}),
+                row_data={"value": i},
                 contract=contract,
             )
             executor.buffer_row(node_id, token)
@@ -908,7 +908,7 @@ class TestAggregationExecutor:
             token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
-                row_data=_make_pipeline_row({"value": i}),
+                row_data={"value": i},
                 contract=contract,
             )
             executor.buffer_row(node_id, token)
@@ -919,7 +919,7 @@ class TestAggregationExecutor:
         token = self._make_token_with_pipeline_row(
             row_id="row-2",
             token_id="tok-2",
-            row_data=_make_pipeline_row({"value": 2}),
+            row_data={"value": 2},
             contract=contract,
         )
         executor.buffer_row(node_id, token)
@@ -970,7 +970,7 @@ class TestAggregationExecutor:
             token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
-                row_data=_make_pipeline_row({"value": i}),
+                row_data={"value": i},
                 contract=contract,
             )
             executor.buffer_row(node_id, token)
@@ -1020,7 +1020,7 @@ class TestAggregationExecutor:
         token = self._make_token_with_pipeline_row(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"value": 1}),
+            row_data={"value": 1},
         )
         executor.buffer_row(node_id, token)
 
@@ -1075,7 +1075,7 @@ class TestAggregationExecutor:
             token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
-                row_data=_make_pipeline_row({"value": i}),
+                row_data={"value": i},
                 contract=contract,
                 branch_name="main" if i == 0 else None,
             )
@@ -1404,7 +1404,7 @@ class TestTransformCanonicalValidation:
         class NaNTransform(_TestTransformBase):
             """Transform that returns NaN - violates canonical contract."""
 
-            name: ClassVar[str] = "nan_transform"
+            name = "nan_transform"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
@@ -1471,7 +1471,7 @@ class TestTransformCanonicalValidation:
         class InfTransform(_TestTransformBase):
             """Transform that returns Infinity - violates canonical contract."""
 
-            name: ClassVar[str] = "inf_transform"
+            name = "inf_transform"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
@@ -1534,7 +1534,7 @@ class TestTransformCanonicalValidation:
         class ValidTransform(_TestTransformBase):
             """Transform that returns valid canonical data."""
 
-            name: ClassVar[str] = "valid_transform"
+            name = "valid_transform"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(

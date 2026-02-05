@@ -195,6 +195,7 @@ class TestJSONSource:
 
         assert len(results) == 1
         assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None
         assert "array" in results[0].quarantine_error.lower()
         assert "dict" in results[0].quarantine_error.lower()
 
@@ -661,6 +662,7 @@ class TestJSONSourceNonFiniteConstants:
         assert results[2].is_quarantined is True
 
         # Both Infinity values should be rejected
+        assert results[1].quarantine_error is not None
         assert "Infinity" in results[1].quarantine_error or "non-standard" in results[1].quarantine_error.lower()
 
     def test_json_array_nan_constant_quarantined(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -685,6 +687,7 @@ class TestJSONSourceNonFiniteConstants:
         # File-level quarantine since NaN is in the whole array parse
         assert len(results) == 1
         assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None
         assert "NaN" in results[0].quarantine_error or "non-standard" in results[0].quarantine_error.lower()
 
     def test_nan_with_discard_mode_not_yielded(self, tmp_path: Path, ctx: PluginContext) -> None:

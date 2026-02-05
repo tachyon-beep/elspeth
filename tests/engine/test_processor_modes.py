@@ -10,11 +10,12 @@ in batch-aware transforms (aggregations). These tests verify:
 Extracted from test_processor.py to improve test organization.
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from elspeth.contracts import PipelineRow, SourceRow
+    from elspeth.contracts import SourceRow
 
+from elspeth.contracts import PipelineRow
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
@@ -96,7 +97,11 @@ class TestProcessorPassthroughMode:
                         fields = ()
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success_multi(enriched, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success_multi(
+                        cast(list[dict[str, Any] | PipelineRow], enriched),
+                        success_reason={"action": "test"},
+                        contract=contract,
+                    )
                 # Single row mode
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
@@ -319,7 +324,11 @@ class TestProcessorPassthroughMode:
                         fields = ()
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success_multi(enriched, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success_multi(
+                        cast(list[dict[str, Any] | PipelineRow], enriched),
+                        success_reason={"action": "test"},
+                        contract=contract,
+                    )
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         class DoubleTransform(BaseTransform):
@@ -478,7 +487,11 @@ class TestProcessorTransformMode:
                         fields = ()
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success_multi(output_rows, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success_multi(
+                        cast(list[dict[str, Any] | PipelineRow], output_rows),
+                        success_reason={"action": "test"},
+                        contract=contract,
+                    )
                 # Single row mode - not used in this test
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
@@ -744,7 +757,11 @@ class TestProcessorTransformMode:
                         fields = ()
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success_multi(output_rows, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success_multi(
+                        cast(list[dict[str, Any] | PipelineRow], output_rows),
+                        success_reason={"action": "test"},
+                        contract=contract,
+                    )
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         class DoubleCount(BaseTransform):
@@ -1006,7 +1023,9 @@ class TestProcessorSingleMode:
         assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
 
         # CRITICAL: The aggregated row must have passed through AddMarker
-        final_dict = completed[0].final_data.to_dict()
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        final_dict = final_data.to_dict()
         assert final_dict["total"] == 30, "Sum should be 10 + 20 = 30"
         assert "marker" in final_dict, (
             f"BUG: Aggregated row did not pass through downstream transform! Expected 'marker' field, got: {final_dict}"

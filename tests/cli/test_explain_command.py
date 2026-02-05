@@ -139,6 +139,7 @@ class TestExplainJsonMode:
         db = LandscapeDB.from_url(f"sqlite:///{db_path}")
         recorder = LandscapeRecorder(db)
         token = recorder.get_token(token_id)
+        assert token is not None
         row_id = token.row_id
         db.close()
 

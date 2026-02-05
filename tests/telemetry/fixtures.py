@@ -98,7 +98,7 @@ class TelemetryTestExporter:
             for key, expected in filters.items():
                 actual = getattr(event, key, None)
                 # Handle enum comparisons
-                if hasattr(actual, "value"):
+                if actual is not None and hasattr(actual, "value"):
                     actual = actual.value
                 if hasattr(expected, "value"):
                     expected = expected.value
@@ -164,7 +164,7 @@ class MockTelemetryConfig:
     backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
 
     @property
-    def exporter_configs(self) -> tuple:
+    def exporter_configs(self) -> tuple[()]:
         """Return empty tuple - exporters are passed directly in tests."""
         return ()
 

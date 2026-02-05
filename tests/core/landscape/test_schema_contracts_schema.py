@@ -5,7 +5,7 @@ Phase 5 Unified Schema Contracts: These columns store schema contracts
 in the audit trail for complete field mapping traceability.
 """
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import String, create_engine, inspect
 
 
 class TestRunsSchemaContractColumns:
@@ -44,8 +44,9 @@ class TestRunsSchemaContractColumns:
         from elspeth.core.landscape.schema import runs_table
 
         columns = {c.name: c for c in runs_table.columns}
-        # String type has length attribute
-        assert columns["schema_contract_hash"].type.length == 16
+        col = columns["schema_contract_hash"]
+        assert isinstance(col.type, String)
+        assert col.type.length == 16
 
 
 class TestNodesContractColumns:
@@ -130,35 +131,45 @@ class TestValidationErrorsContractColumns:
         from elspeth.core.landscape.schema import validation_errors_table
 
         columns = {c.name: c for c in validation_errors_table.columns}
-        assert columns["violation_type"].type.length == 32
+        col = columns["violation_type"]
+        assert isinstance(col.type, String)
+        assert col.type.length == 32
 
     def test_original_field_name_length(self) -> None:
         """original_field_name should be String(256) per design."""
         from elspeth.core.landscape.schema import validation_errors_table
 
         columns = {c.name: c for c in validation_errors_table.columns}
-        assert columns["original_field_name"].type.length == 256
+        col = columns["original_field_name"]
+        assert isinstance(col.type, String)
+        assert col.type.length == 256
 
     def test_normalized_field_name_length(self) -> None:
         """normalized_field_name should be String(256) per design."""
         from elspeth.core.landscape.schema import validation_errors_table
 
         columns = {c.name: c for c in validation_errors_table.columns}
-        assert columns["normalized_field_name"].type.length == 256
+        col = columns["normalized_field_name"]
+        assert isinstance(col.type, String)
+        assert col.type.length == 256
 
     def test_expected_type_length(self) -> None:
         """expected_type should be String(32) per design."""
         from elspeth.core.landscape.schema import validation_errors_table
 
         columns = {c.name: c for c in validation_errors_table.columns}
-        assert columns["expected_type"].type.length == 32
+        col = columns["expected_type"]
+        assert isinstance(col.type, String)
+        assert col.type.length == 32
 
     def test_actual_type_length(self) -> None:
         """actual_type should be String(32) per design."""
         from elspeth.core.landscape.schema import validation_errors_table
 
         columns = {c.name: c for c in validation_errors_table.columns}
-        assert columns["actual_type"].type.length == 32
+        col = columns["actual_type"]
+        assert isinstance(col.type, String)
+        assert col.type.length == 32
 
 
 class TestSchemaContractColumnsInDatabase:

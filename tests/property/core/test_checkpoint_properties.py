@@ -548,7 +548,7 @@ class TestCompatibilityValidationProperties:
             result = validator.validate(checkpoint, graph_modified)
 
             assert result.can_resume is False
-            assert "no longer exists" in result.reason
+            assert result.reason is not None and "no longer exists" in result.reason
         finally:
             db.close()
 
@@ -598,7 +598,7 @@ class TestCompatibilityValidationProperties:
             result = validator.validate(checkpoint, graph2)
 
             assert result.can_resume is False
-            assert "configuration has changed" in result.reason
+            assert result.reason is not None and "configuration has changed" in result.reason
         finally:
             db.close()
 

@@ -95,8 +95,8 @@ messy_headers = st.text(
     min_size=1,
     max_size=100,
     alphabet=st.characters(
-        whitelist_categories=("L", "N", "P", "S", "Z"),  # Letters, Numbers, Punctuation, Symbols, Spaces
-        blacklist_categories=("Cc",),  # Exclude control characters
+        whitelist_categories=["L", "N", "P", "S", "Z"],  # Letters, Numbers, Punctuation, Symbols, Spaces
+        blacklist_categories=["Cc"],  # Exclude control characters
     ),
 ).filter(lambda s: any(c.isalnum() for c in s))
 
@@ -105,7 +105,7 @@ messy_headers = st.text(
 normalizable_headers = st.text(
     min_size=1,
     max_size=50,
-    alphabet=st.characters(whitelist_categories=("L", "N")),  # Letters and numbers only
+    alphabet=st.characters(whitelist_categories=["L", "N"]),  # Letters and numbers only
 ).filter(lambda s: s[0].isalpha() if s else False)  # Must start with letter
 
 # Python keywords (for testing keyword collision handling)
@@ -122,13 +122,13 @@ mutable_nested_data = st.dictionaries(
     keys=st.text(
         min_size=1,
         max_size=10,
-        alphabet=st.characters(whitelist_categories=("L",)),  # Letters only for clean keys
+        alphabet=st.characters(whitelist_categories=["L"]),  # Letters only for clean keys
     ),
     values=st.one_of(
         st.integers(),
         st.lists(st.integers(), min_size=1, max_size=5),
         st.dictionaries(
-            st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=("L",))),
+            st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=["L"])),
             st.integers(),
             min_size=1,
             max_size=3,
@@ -144,7 +144,7 @@ deeply_nested_data = st.recursive(
     lambda children: st.one_of(
         st.lists(children, min_size=1, max_size=3),
         st.dictionaries(
-            st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=("L",))),
+            st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=["L"])),
             children,
             min_size=1,
             max_size=3,

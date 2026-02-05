@@ -7,13 +7,16 @@ to NodeInfo, and that _get_schema_config_from_node() prioritizes these computed
 configs over raw config dict parsing.
 """
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
 from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.dag import ExecutionGraph
+
+if TYPE_CHECKING:
+    pass
 
 
 class MockTransformWithSchemaConfig:
@@ -67,7 +70,7 @@ class TestOutputSchemaConfigPropagation:
         transform = MockTransformWithSchemaConfig()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),
+            source=MockSource(),  # type: ignore[arg-type]
             transforms=[transform],  # type: ignore[list-item]
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
@@ -92,7 +95,7 @@ class TestOutputSchemaConfigPropagation:
         transform = MockTransformWithoutSchemaConfig()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),
+            source=MockSource(),  # type: ignore[arg-type]
             transforms=[transform],  # type: ignore[list-item]
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
@@ -334,7 +337,7 @@ class TestAggregationSchemaConfigPropagation:
         )
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),
+            source=MockSource(),  # type: ignore[arg-type]
             transforms=[],
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={"test_agg": (transform, agg_settings)},  # type: ignore[dict-item]

@@ -305,7 +305,7 @@ class TestConcurrentRowProcessing:
         without interference from query-level pooling.
         """
         # Use consistent response for all queries
-        responses = [{"score": 85, "rationale": "R"}]
+        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "R"}]
 
         # Sequential query execution - focus on row pipelining
         config = make_config()
@@ -413,13 +413,13 @@ class TestConcurrentRowProcessing:
             # Verify atomicity: each row has 0 or 4 output fields
             for token, result, _state_id in collector.results:
                 assert isinstance(result, TransformResult)
-                row = result.row if result.row is not None else {}
+                output_row: dict[str, Any] = dict(result.row) if result.row is not None else {}
                 output_field_count = sum(
                     [
-                        "cs1_diagnosis_score" in row,
-                        "cs1_treatment_score" in row,
-                        "cs2_diagnosis_score" in row,
-                        "cs2_treatment_score" in row,
+                        "cs1_diagnosis_score" in output_row,
+                        "cs1_treatment_score" in output_row,
+                        "cs2_diagnosis_score" in output_row,
+                        "cs2_treatment_score" in output_row,
                     ]
                 )
 
@@ -586,7 +586,11 @@ class TestSequentialFallback:
 
             # Verify it's an immediate failure, not a retry timeout
             # error is now a string extracted from the TransformErrorReason["error"] field
-            assert "Rate limit" in result.reason["failed_queries"][0]["error"]
+            failed_queries = result.reason["failed_queries"]
+            assert isinstance(failed_queries, list)
+            first_failure = failed_queries[0]
+            assert isinstance(first_failure, dict)  # QueryFailureDetail
+            assert "Rate limit" in first_failure["error"]
 
 
 class TestMemoryLeakPrevention:
@@ -621,7 +625,7 @@ class TestMemoryLeakPrevention:
         without interference from query-level pooling race conditions.
         """
         # Use consistent response for all queries
-        responses = [{"score": 90, "rationale": "Good"}]
+        responses: list[dict[str, Any] | str] = [{"score": 90, "rationale": "Good"}]
 
         # Sequential query execution - focus on client cleanup behavior
         config = make_config(max_capacity_retry_seconds=10)

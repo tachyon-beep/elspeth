@@ -13,7 +13,7 @@ Gates are config-driven using GateSettings.
 
 from typing import Any
 
-from elspeth.contracts import NodeType, RunStatus, SourceRow
+from elspeth.contracts import NodeStateStatus, NodeType, SourceRow
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -509,7 +509,7 @@ class TestRowProcessorCoalesce:
             assert len(coalesce_states) == 1, "Child token should have exactly one coalesce node_state"
 
             coalesce_state = coalesce_states[0]
-            assert coalesce_state.status == RunStatus.COMPLETED
+            assert coalesce_state.status == NodeStateStatus.COMPLETED
 
         # === Audit Trail: Verify merged token has join_group_id ===
         merged_token_record = recorder.get_token(merged_token.token_id)
@@ -933,20 +933,24 @@ class TestRowProcessorCoalesce:
         enriched_a1 = TokenInfo(
             row_id=path_a1_token.row_id,
             token_id=path_a1_token.token_id,
-            row_data=_make_pipeline_row({
-                "text": "Document for nested processing",
-                "sentiment": "positive",
-            }),
+            row_data=_make_pipeline_row(
+                {
+                    "text": "Document for nested processing",
+                    "sentiment": "positive",
+                }
+            ),
             branch_name="path_a1",
         )
         # A2 adds entity extraction
         enriched_a2 = TokenInfo(
             row_id=path_a2_token.row_id,
             token_id=path_a2_token.token_id,
-            row_data=_make_pipeline_row({
-                "text": "Document for nested processing",
-                "entities": ["ACME", "2024"],
-            }),
+            row_data=_make_pipeline_row(
+                {
+                    "text": "Document for nested processing",
+                    "entities": ["ACME", "2024"],
+                }
+            ),
             branch_name="path_a2",
         )
 
@@ -978,10 +982,12 @@ class TestRowProcessorCoalesce:
         enriched_b = TokenInfo(
             row_id=path_b_token.row_id,
             token_id=path_b_token.token_id,
-            row_data=_make_pipeline_row({
-                "text": "Document for nested processing",
-                "category": "financial",
-            }),
+            row_data=_make_pipeline_row(
+                {
+                    "text": "Document for nested processing",
+                    "category": "financial",
+                }
+            ),
             branch_name="path_b",
         )
 
@@ -1711,6 +1717,7 @@ class TestCoalesceSelectBranchFailure:
         from sqlalchemy import func, select
 
         from elspeth.core.landscape.schema import token_outcomes_table
+
         with landscape_db.engine.connect() as conn:
             # Count outcomes per token_id - should never be > 1
             stmt = (

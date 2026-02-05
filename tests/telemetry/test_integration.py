@@ -21,7 +21,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
 from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
 from elspeth.contracts.events import (
     TelemetryEvent,
@@ -40,7 +40,7 @@ from elspeth.telemetry.events import (
     RunFinished,
     RunStarted,
 )
-from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
+from tests.conftest import _TestSinkBase, _TestSourceBase, _TestTransformBase, as_sink, as_source, as_transform
 
 if TYPE_CHECKING:
     pass
@@ -67,7 +67,7 @@ class MockTelemetryConfig:
     backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
 
     @property
-    def exporter_configs(self) -> tuple:
+    def exporter_configs(self) -> tuple[()]:
         return ()
 
 
@@ -163,19 +163,10 @@ class ListSource(_TestSourceBase):
             yield SourceRow.valid(row, contract=self._contract)
 
 
-class PassthroughTransform:
+class PassthroughTransform(_TestTransformBase):
     """Transform that passes through rows unchanged."""
 
     name = "passthrough"
-    input_schema = DynamicSchema
-    output_schema = DynamicSchema
-    plugin_version = "1.0.0"
-    determinism = Determinism.DETERMINISTIC
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    node_id: str | None = None
-    is_batch_aware = False
-    creates_tokens = False
-    _on_error: str | None = None
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         # Handle both PipelineRow and dict for test compatibility
@@ -184,20 +175,7 @@ class PassthroughTransform:
         row_dict = row.to_dict() if isinstance(row, PipelineRow) else row
         result_contract = row.contract if isinstance(row, PipelineRow) else None
 
-        return TransformResult.success(
-            row_dict,
-            success_reason={"action": "passthrough"},
-            contract=result_contract
-        )
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
+        return TransformResult.success(row_dict, success_reason={"action": "passthrough"}, contract=result_contract)
 
 
 class CollectingSink(_TestSinkBase):
@@ -259,7 +237,7 @@ class TestTelemetryEmittedAlongsideLandscape:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -288,7 +266,7 @@ class TestTelemetryEmittedAlongsideLandscape:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -332,7 +310,7 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -368,7 +346,7 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -410,7 +388,7 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[FailingTransform()],
+            transforms=[as_transform(FailingTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -448,7 +426,7 @@ class TestGranularityFiltering:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -476,7 +454,7 @@ class TestGranularityFiltering:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -501,7 +479,7 @@ class TestGranularityFiltering:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -536,7 +514,7 @@ class TestExporterFailureIsolation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -568,7 +546,7 @@ class TestExporterFailureIsolation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -595,7 +573,7 @@ class TestExporterFailureIsolation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -712,7 +690,7 @@ class TestTotalExporterFailure:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -756,7 +734,7 @@ class TestHighVolumeFlooding:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -795,7 +773,7 @@ class TestHighVolumeFlooding:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -808,7 +786,7 @@ class TestHighVolumeFlooding:
         sink2 = CollectingSink()
         config2 = PipelineConfig(
             source=as_source(source2),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink2)},
         )
         orchestrator2 = Orchestrator(landscape_db, telemetry_manager=manager_lifecycle)
@@ -836,7 +814,7 @@ class TestHighVolumeFlooding:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -869,7 +847,7 @@ class TestTelemetryManagerLifecycle:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -892,7 +870,7 @@ class TestTelemetryManagerLifecycle:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": as_sink(sink)},
         )
 

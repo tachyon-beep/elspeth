@@ -8,8 +8,16 @@ This test confirms that the schema validation bypass bug is fixed:
 Relates-To: P1-2026-01-21-schema-validator-ignores-dag-routing
 """
 
+from __future__ import annotations
 
-def test_schema_validation_end_to_end(tmp_path, plugin_manager):
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from elspeth.plugins.manager import PluginManager
+
+
+def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginManager) -> None:
     """Verify schemas are extracted from plugin instances and validation works.
 
     This test confirms the schema validation bypass bug is fixed:
@@ -134,7 +142,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     # The absence of crashes IS the test success criterion.
 
 
-def test_static_schema_validation(plugin_manager):
+def test_static_schema_validation(plugin_manager: PluginManager) -> None:
     """Verify static schemas are populated from plugin classes.
 
     This test uses plugins that declare schemas as class attributes

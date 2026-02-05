@@ -478,7 +478,9 @@ class TestRetryBehavior:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([{"id": "row_1", "value": 100}, {"id": "row_2", "value": 200}, {"id": "row_3", "value": 300}])  # Row 2 will fail
+                yield from self.wrap_rows(
+                    [{"id": "row_1", "value": 100}, {"id": "row_2", "value": 200}, {"id": "row_3", "value": 300}]
+                )  # Row 2 will fail
 
             def close(self) -> None:
                 pass

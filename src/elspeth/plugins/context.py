@@ -86,11 +86,11 @@ class PluginContext:
     # === Phase 3 Integration Points ===
     # Optional in Phase 2, populated by engine in Phase 3
     # Use string annotations to avoid import errors at runtime
-    landscape: "LandscapeRecorder | None" = None
-    tracer: "Tracer | None" = None
-    payload_store: "PayloadStore | None" = None
-    rate_limit_registry: "RateLimitRegistry | None" = None
-    concurrency_config: "RuntimeConcurrencyConfig | None" = None
+    landscape: LandscapeRecorder | None = None
+    tracer: Tracer | None = None
+    payload_store: PayloadStore | None = None
+    rate_limit_registry: RateLimitRegistry | None = None
+    concurrency_config: RuntimeConcurrencyConfig | None = None
 
     # Additional metadata
     node_id: str | None = field(default=None)
@@ -101,14 +101,14 @@ class PluginContext:
     # Used by RowReorderBuffer for FIFO ordering and audit attribution.
     # IMPORTANT: This is derivative state - the executor must keep it synchronized
     # with the authoritative token flowing through the pipeline.
-    token: "TokenInfo | None" = field(default=None)
+    token: TokenInfo | None = field(default=None)
 
     # === Schema Contract (Phase 3: Transform/Sink Integration) ===
     # Set by executor when processing transforms to enable contract-aware template
     # access (original header names). When transforms receive a plain dict (not
     # PipelineRow), they can still access the contract via ctx.contract.
     # This allows templates using {{ row["Original Header"] }} to resolve correctly.
-    contract: "SchemaContract | None" = field(default=None)
+    contract: SchemaContract | None = field(default=None)
 
     # === Phase 6: State & Call Recording ===
     # Set by executor to enable transforms to record external calls
@@ -120,8 +120,8 @@ class PluginContext:
 
     # === Phase 6: Audited Clients ===
     # Set by executor when processing LLM transforms
-    llm_client: "AuditedLLMClient | None" = None
-    http_client: "AuditedHTTPClient | None" = None
+    llm_client: AuditedLLMClient | None = None
+    http_client: AuditedHTTPClient | None = None
 
     # === Phase 6: Telemetry Callback ===
     # Callback to emit telemetry events for external calls.
@@ -207,7 +207,7 @@ class PluginContext:
                 return default
         return value
 
-    def start_span(self, name: str) -> AbstractContextManager["Span | None"]:
+    def start_span(self, name: str) -> AbstractContextManager[Span | None]:
         """Start an OpenTelemetry span.
 
         Returns nullcontext if tracer not configured.
@@ -222,15 +222,15 @@ class PluginContext:
 
     def record_call(
         self,
-        call_type: "CallType",
-        status: "CallStatus",
+        call_type: CallType,
+        status: CallStatus,
         request_data: dict[str, Any],
         response_data: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
         latency_ms: float | None = None,
         *,
         provider: str = "unknown",
-    ) -> "Call | None":
+    ) -> Call | None:
         """Record an external API call to the audit trail and emit telemetry.
 
         Provides a convenient way for plugins to record external calls
@@ -439,7 +439,7 @@ class PluginContext:
         token_id: str,
         transform_id: str,
         row: dict[str, Any] | PipelineRow,
-        error_details: "TransformErrorReason",
+        error_details: TransformErrorReason,
         destination: str,
     ) -> TransformErrorToken:
         """Record a transform processing error for audit trail.

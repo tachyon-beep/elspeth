@@ -188,7 +188,7 @@ class TestCheckpointDurability:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
                     pipeline_row = _make_pipeline_row(row)
-                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+                    yield SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -340,7 +340,7 @@ class TestCheckpointDurability:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
                     pipeline_row = _make_pipeline_row(row)
-                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+                    yield SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -645,7 +645,7 @@ class TestCheckpointDurability:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
                     pipeline_row = _make_pipeline_row(row)
-                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+                    yield SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -736,7 +736,7 @@ class TestCheckpointDurability:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
                     pipeline_row = _make_pipeline_row(row)
-                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+                    yield SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -843,7 +843,7 @@ class TestCheckpointDurability:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
                     pipeline_row = _make_pipeline_row(row)
-                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+                    yield SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -953,7 +953,7 @@ class TestCheckpointTimingInvariants:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
                     pipeline_row = _make_pipeline_row(row)
-                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+                    yield SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -1055,7 +1055,7 @@ class TestCheckpointTimingInvariants:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
                     pipeline_row = _make_pipeline_row(row)
-                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+                    yield SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass
@@ -1137,7 +1137,7 @@ class TestCheckpointTimingInvariants:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for row in self._data:
                     pipeline_row = _make_pipeline_row(row)
-                    yield SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+                    yield SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
 
             def close(self) -> None:
                 pass

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
-from typing import Any
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import httpx
@@ -56,12 +57,16 @@ def make_openrouter_response(content: dict[str, Any] | str) -> dict[str, Any] | 
     return content
 
 
+@contextmanager
 def mock_openrouter_http_responses(
     chaosllm_server,
-    responses: list[dict[str, Any] | str | httpx.Response],
-) -> Generator[Mock, None, None]:
+    responses: list[dict[str, Any] | str] | list[dict[str, Any] | str | httpx.Response],
+) -> Iterator[Mock]:
     """Mock HTTP client to return ChaosLLM-generated responses."""
-    return chaosllm_openrouter_http_responses(chaosllm_server, responses)
+    # Cast to the expected type for chaosllm_openrouter_http_responses
+    typed_responses = cast(list[dict[str, Any] | str | httpx.Response], responses)
+    with chaosllm_openrouter_http_responses(chaosllm_server, typed_responses) as mock_client:
+        yield mock_client
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:

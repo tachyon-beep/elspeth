@@ -78,7 +78,7 @@ class TestLangfuseIntegration:
         def mock_start_observation(**kwargs: Any):
             """Mock start_as_current_observation context manager."""
             obs = MagicMock()
-            obs_record = {"kwargs": kwargs, "updates": []}
+            obs_record: dict[str, Any] = {"kwargs": kwargs, "updates": []}
             captured_observations.append(obs_record)
 
             def capture_update(**update_kwargs: Any) -> None:

@@ -33,6 +33,8 @@ Exception Propagation:
 
 from __future__ import annotations
 
+__all__ = ["ExceptionResult", "RowWaiter", "SharedBatchAdapter", "WaiterKey"]
+
 import threading
 from typing import TYPE_CHECKING
 

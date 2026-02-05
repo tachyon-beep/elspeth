@@ -232,7 +232,7 @@ class TestAggregationCheckpointFixVerification:
             # Call the original
             return original_create_checkpoint(*args, **kwargs)
 
-        checkpoint_mgr.create_checkpoint = capture_create_checkpoint
+        checkpoint_mgr.create_checkpoint = capture_create_checkpoint  # type: ignore[method-assign]
 
         # Run pipeline with checkpointing enabled
         orchestrator = Orchestrator(

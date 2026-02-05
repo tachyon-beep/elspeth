@@ -11,7 +11,7 @@ Test plugins inherit from base classes (BaseTransform)
 because the processor uses isinstance() for type-safe plugin detection.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from elspeth.contracts import NodeType, PipelineRow, SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -157,7 +157,9 @@ class TestProcessorBatchTransforms:
         # The flush produces a NEW aggregated row that gets COMPLETED
         completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
         assert len(completed) == 1, f"Expected 1 completed row, got {len(completed)}"
-        assert completed[0].final_data.to_dict() == {"total": 6}
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"total": 6}
 
     def test_processor_batch_transform_without_aggregation_config(self) -> None:
         """Batch-aware transform without aggregation config uses single-row mode."""
@@ -233,7 +235,9 @@ class TestProcessorBatchTransforms:
 
         result = result_list[0]
         assert result.outcome == RowOutcome.COMPLETED
-        assert result.final_data.to_dict() == {"value": 10}  # Doubled, not summed
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"value": 10}  # Doubled, not summed
 
     def test_processor_buffers_restored_on_recovery(self) -> None:
         """Processor restores buffer state from checkpoint."""
@@ -420,7 +424,9 @@ class TestProcessorBatchTransforms:
 
         assert len(consumed) == 1, f"Expected 1 consumed, got {len(consumed)}"
         assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
-        assert completed[0].final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
 
     def test_batch_transform_receives_pipelinerow_objects(self) -> None:
         """Batch transforms must receive PipelineRow objects, not plain dicts.
@@ -542,7 +548,9 @@ class TestProcessorBatchTransforms:
 
         assert len(consumed) == 3, f"Expected 3 consumed rows, got {len(consumed)}"
         assert len(completed) == 1, f"Expected 1 completed row, got {len(completed)}"
-        assert completed[0].final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
 
 
 class TestProcessorDeaggregation:
@@ -587,7 +595,7 @@ class TestProcessorDeaggregation:
                 contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
                 return TransformResult.success_multi(
-                    output_rows,
+                    cast(list[dict[str, Any] | PipelineRow], output_rows),
                     success_reason={"action": "test"},
                     contract=contract,
                 )

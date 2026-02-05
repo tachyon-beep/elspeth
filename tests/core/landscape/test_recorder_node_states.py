@@ -184,7 +184,7 @@ class TestLandscapeRecorderNodeStates:
         completed = recorder.complete_node_state(
             state_id=state.state_id,
             status=NodeStateStatus.FAILED,
-            error={"message": "Validation failed", "code": "E001"},
+            error={"reason": "test_error", "message": "Validation failed"},
             duration_ms=5.0,
         )
 
@@ -487,7 +487,7 @@ class TestNodeStateIntegrityValidation:
         recorder.complete_node_state(
             state_id=state.state_id,
             status=NodeStateStatus.FAILED,
-            error={"message": "Something went wrong"},
+            error={"reason": "test_error", "message": "Something went wrong"},
             duration_ms=5.0,
         )
 
@@ -568,7 +568,7 @@ class TestNodeStateOrderingWithRetries:
         recorder.complete_node_state(
             state_id=state_0_attempt_1.state_id,
             status=NodeStateStatus.FAILED,
-            error={"message": "First failure"},
+            error={"reason": "test_error", "message": "First failure"},
             duration_ms=10.0,
         )
 

@@ -227,6 +227,21 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=c5f4c4f695cabe87
+  owner: architecture
+  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=3125065ec11fe578
+  owner: architecture
+  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/batch_adapter.py:R5:RowWaiter:wait:fp=98c907e643e5e178
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
 - key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:fp=52906cd002ae2775
   owner: architecture
   reason: hasattr for feature detection
@@ -577,6 +592,36 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: plugins/context.py:R5:PluginContext:get:fp=76de86ac35dafae4
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/context.py:R1:PluginContext:record_call:fp=5ec999dfff114a20
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/context.py:R5:PluginContext:record_call:fp=94971df001b1532e
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/context.py:R4:PluginContext:record_call:fp=4e105a1207a19d87
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/context.py:R5:PluginContext:record_validation_error:fp=27fe368832b3e2a9
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/context.py:R6:PluginContext:record_validation_error:fp=d20c868c67b376ce
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
 - key: plugins/validation.py:R5:PluginConfigValidator:validate_source_config:fp=3bd8f6558f2b54b2
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -687,6 +732,21 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: core/canonical.py:R5:_normalize_for_canonical:fp=67673a677c3127f2
+  owner: P1-2026-02-05-typecheck
+  reason: PipelineRow type detection for canonical JSON serialization after mypy typecheck
+  safety: isinstance() required to convert PipelineRow to dict for RFC8785 compliance
+  expires: null
+- key: core/canonical.py:R5:_normalize_for_canonical:fp=6528210ee55b1344
+  owner: P1-2026-02-05-typecheck
+  reason: Dict type detection for canonical JSON serialization after mypy typecheck
+  safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
+  expires: null
+- key: core/canonical.py:R5:_normalize_for_canonical:fp=08b99fa8c7162ddb
+  owner: P1-2026-02-05-typecheck
+  reason: List/tuple type detection for canonical JSON serialization after mypy typecheck
+  safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
+  expires: null
 - key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=b21022bce5ae4b44
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -1459,6 +1519,21 @@ allow_hits:
   reason: Optional lookup for original name - field may not have been in input contract
   safety: Fallback to output field's original_name is correct behavior for new fields
   expires: null
+- key: contracts/contract_propagation.py:R6:propagate_contract:fp=fbcdf96127213894
+  owner: architecture
+  reason: Type narrowing failure is silently skipped - non-primitive types aren't included in contract
+  safety: Field continues in data without contract tracking - intentional behavior
+  expires: null
+- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=b2e116f9ad91bb8f
+  owner: architecture
+  reason: Type resolution errors are logged and field is excluded from narrowed contract
+  safety: Contract narrowing continues without failed field - explicit logging
+  expires: null
+- key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=b77bb8f4e1cd3d1d
+  owner: architecture
+  reason: Optional lookup for original name - new fields from transforms may not have input mapping
+  safety: Fallback to output field's original_name is correct behavior for transform-added fields
+  expires: null
 - key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=d2da84f2bce50af4
   owner: refactor
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
@@ -1488,4 +1563,39 @@ allow_hits:
   owner: P1-2026-02-03
   reason: Tier-3 boundary - quarantined source_row.row may not be dict (malformed external data)
   safety: 'isinstance() check normalizes non-dict external data to {_raw: value} for audit consistency'
+  expires: null
+- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=9d7a59ec5d3f6186
+  owner: P1-2026-02-05-typecheck
+  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
+  safety: 'isinstance() check converts PipelineRow to dict for audit trail consistency'
+  expires: null
+- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=32173d2b108569cc
+  owner: P1-2026-02-05-typecheck
+  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
+  safety: 'isinstance() check required to handle union type from batch processing'
+  expires: null
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:_to_dict:fp=6ef2582894e98372
+  owner: P1-2026-02-05-typecheck
+  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
+  safety: 'isinstance() check converts PipelineRow to dict for transform output'
+  expires: null
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=3e656c030c37dc73
+  owner: P1-2026-02-05-typecheck
+  reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
+  safety: 'isinstance() check handles union type from transform output'
+  expires: null
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=ef616c0fabe452ce
+  owner: P1-2026-02-05-typecheck
+  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
+  safety: 'isinstance() check converts PipelineRow to dict for error recording'
+  expires: null
+- key: engine/executors.py:R5:AggregationExecutor:execute_flush:_to_dict_agg:fp=6843639153ff7b09
+  owner: P1-2026-02-05-typecheck
+  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
+  safety: 'isinstance() check converts PipelineRow to dict for aggregation output'
+  expires: null
+- key: engine/executors.py:R5:AggregationExecutor:execute_flush:fp=a4dfab975966217a
+  owner: P1-2026-02-05-typecheck
+  reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
+  safety: 'isinstance() check handles union type from aggregation output'
   expires: null

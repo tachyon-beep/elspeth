@@ -306,7 +306,7 @@ class TestTransformExecutorPipelineRow:
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.error(
-            reason={"reason": "test_failure"},
+            reason={"reason": "test_error"},
         )
 
         # Mock recorder
@@ -393,7 +393,6 @@ class TestTransformExecutorPipelineRow:
             assert isinstance(first_call_arg, dict), f"stable_hash should receive dict, got {type(first_call_arg)}"
 
 
-
 class TestGateExecutorPipelineRow:
     """Tests for GateExecutor with PipelineRow."""
 
@@ -401,6 +400,7 @@ class TestGateExecutorPipelineRow:
         """GateExecutor should pass PipelineRow to gate.evaluate()."""
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -431,7 +431,7 @@ class TestGateExecutorPipelineRow:
         mock_span_factory.gate_span.return_value = nullcontext()
 
         # Create executor with edge_map for continue routing
-        edge_map = {("gate_001", "continue"): "edge_001"}
+        edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
         executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
 
         # Create context
@@ -456,6 +456,7 @@ class TestGateExecutorPipelineRow:
         """GateExecutor should set ctx.contract from token.row_data.contract."""
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -493,7 +494,7 @@ class TestGateExecutorPipelineRow:
         mock_span_factory.gate_span.return_value = nullcontext()
 
         # Create executor with edge_map for continue routing
-        edge_map = {("gate_001", "continue"): "edge_001"}
+        edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
         executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
 
         # Create context - initially no contract
@@ -516,6 +517,7 @@ class TestGateExecutorPipelineRow:
         """GateExecutor should extract dict for Landscape recording."""
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -546,7 +548,7 @@ class TestGateExecutorPipelineRow:
         mock_span_factory.gate_span.return_value = nullcontext()
 
         # Create executor with edge_map for continue routing
-        edge_map = {("gate_001", "continue"): "edge_001"}
+        edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
         executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
 
         # Create context
@@ -571,6 +573,7 @@ class TestGateExecutorPipelineRow:
         """GateExecutor should create PipelineRow from result using correct contract."""
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -602,7 +605,7 @@ class TestGateExecutorPipelineRow:
         mock_span_factory.gate_span.return_value = nullcontext()
 
         # Create executor with edge_map for continue routing
-        edge_map = {("gate_001", "continue"): "edge_001"}
+        edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
         executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
 
         # Create context
@@ -626,6 +629,7 @@ class TestGateExecutorPipelineRow:
         """When GateResult has no contract, should use input token's contract."""
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -656,7 +660,7 @@ class TestGateExecutorPipelineRow:
         mock_span_factory.gate_span.return_value = nullcontext()
 
         # Create executor with edge_map for continue routing
-        edge_map = {("gate_001", "continue"): "edge_001"}
+        edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
         executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
 
         # Create context
@@ -678,6 +682,7 @@ class TestGateExecutorPipelineRow:
         """stable_hash should be called with dict, not PipelineRow."""
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -708,7 +713,7 @@ class TestGateExecutorPipelineRow:
         mock_span_factory.gate_span.return_value = nullcontext()
 
         # Create executor with edge_map
-        edge_map = {("gate_001", "continue"): "edge_001"}
+        edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
         executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
 
         # Create context
@@ -733,6 +738,7 @@ class TestGateExecutorPipelineRow:
         """Should crash if neither result nor input has contract (B6 fix)."""
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
+        from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -763,7 +769,7 @@ class TestGateExecutorPipelineRow:
         mock_span_factory.gate_span.return_value = nullcontext()
 
         # Create executor with edge_map
-        edge_map = {("gate_001", "continue"): "edge_001"}
+        edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
         executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
 
         # Create context
@@ -816,7 +822,7 @@ class TestSinkExecutorPipelineRow:
         mock_sink.name = "test_sink"
         mock_sink.node_id = "sink_001"
         mock_sink.write.return_value = ArtifactDescriptor(
-            artifact_type="csv",
+            artifact_type="file",
             path_or_uri="/output/test.csv",
             content_hash="abc123",
             size_bytes=100,
@@ -875,7 +881,7 @@ class TestSinkExecutorPipelineRow:
         mock_sink.name = "test_sink"
         mock_sink.node_id = "sink_001"
         mock_sink.write.return_value = ArtifactDescriptor(
-            artifact_type="csv",
+            artifact_type="file",
             path_or_uri="/output/test.csv",
             content_hash="abc123",
             size_bytes=100,
@@ -914,8 +920,9 @@ class TestSinkExecutorPipelineRow:
         call_kwargs = mock_recorder.begin_node_state.call_args[1]
         input_data = call_kwargs["input_data"]
         assert isinstance(input_data, dict), f"Expected dict for Landscape input_data, got {type(input_data)}"
-        assert not isinstance(input_data, PipelineRow), "Landscape should not receive PipelineRow objects"
-        assert input_data == {"value": "test"}
+        # PipelineRow subclasses dict, so type() check is needed, not isinstance()
+        assert type(input_data) is not PipelineRow, "Landscape should not receive PipelineRow objects"  # type: ignore[comparison-overlap, unreachable]
+        assert input_data == {"value": "test"}  # type: ignore[unreachable]
 
     def test_execute_sink_extracts_dict_for_landscape_output(self) -> None:
         """SinkExecutor should extract dict for Landscape output_data recording."""
@@ -933,7 +940,7 @@ class TestSinkExecutorPipelineRow:
         mock_sink.name = "test_sink"
         mock_sink.node_id = "sink_001"
         mock_sink.write.return_value = ArtifactDescriptor(
-            artifact_type="csv",
+            artifact_type="file",
             path_or_uri="/output/test.csv",
             content_hash="abc123",
             size_bytes=100,
@@ -974,8 +981,9 @@ class TestSinkExecutorPipelineRow:
         output_data = complete_calls[0][1]["output_data"]
         row_in_output = output_data["row"]
         assert isinstance(row_in_output, dict), f"Expected dict in output_data['row'], got {type(row_in_output)}"
-        assert not isinstance(row_in_output, PipelineRow), "Landscape output should not contain PipelineRow"
-        assert row_in_output == {"value": "test"}
+        # PipelineRow subclasses dict, so type() check is needed, not isinstance()
+        assert type(row_in_output) is not PipelineRow, "Landscape output should not contain PipelineRow"  # type: ignore[comparison-overlap, unreachable]
+        assert row_in_output == {"value": "test"}  # type: ignore[unreachable]
 
     def test_execute_sink_preserves_all_fields_in_dict(self) -> None:
         """Sink should receive all fields, including extras not in contract."""
@@ -995,7 +1003,7 @@ class TestSinkExecutorPipelineRow:
         mock_sink.name = "test_sink"
         mock_sink.node_id = "sink_001"
         mock_sink.write.return_value = ArtifactDescriptor(
-            artifact_type="csv",
+            artifact_type="file",
             path_or_uri="/output/test.csv",
             content_hash="abc123",
             size_bytes=100,
@@ -1091,8 +1099,9 @@ class TestAggregationExecutorPipelineRow:
         buffered = executor.get_buffered_rows(node_id)
         assert len(buffered) == 1
         assert isinstance(buffered[0], dict), f"Expected dict in buffer, got {type(buffered[0])}"
-        assert not isinstance(buffered[0], PipelineRow), "Buffer should not contain PipelineRow"
-        assert buffered[0] == {"value": "test"}
+        # PipelineRow subclasses dict, so type() check is needed, not isinstance()
+        assert type(buffered[0]) is not PipelineRow, "Buffer should not contain PipelineRow"  # type: ignore[comparison-overlap, unreachable]
+        assert buffered[0] == {"value": "test"}  # type: ignore[unreachable]
 
     def test_buffer_row_extracts_dict_from_pipeline_row(self) -> None:
         """buffer_row should call to_dict() on token.row_data."""
@@ -1410,5 +1419,6 @@ class TestAggregationExecutorPipelineRow:
         restored_rows = new_executor.get_buffered_rows(node_id)
         assert len(restored_rows) == 1
         assert isinstance(restored_rows[0], dict)
-        assert not isinstance(restored_rows[0], PipelineRow)
-        assert restored_rows[0] == {"value": "test"}
+        # PipelineRow subclasses dict, so type() check is needed, not isinstance()
+        assert type(restored_rows[0]) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
+        assert restored_rows[0] == {"value": "test"}  # type: ignore[unreachable]

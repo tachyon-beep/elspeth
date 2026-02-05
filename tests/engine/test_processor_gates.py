@@ -122,7 +122,9 @@ class TestRowProcessorGates:
         assert len(results) == 1
         result = results[0]
 
-        assert result.final_data.to_dict() == {"value": 42, "final": True}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"value": 42, "final": True}
         assert result.outcome == RowOutcome.COMPLETED
 
     def test_gate_route_to_sink(self) -> None:
@@ -207,7 +209,9 @@ class TestRowProcessorGates:
 
         assert result.outcome == RowOutcome.ROUTED
         assert result.sink_name == "high_values"
-        assert result.final_data.to_dict() == {"value": 150}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"value": 150}
 
     def test_gate_fork_returns_forked(self) -> None:
         """Gate forking returns forked outcome (linear pipeline mode)."""
@@ -313,11 +317,15 @@ class TestRowProcessorGates:
 
         # Parent has FORKED outcome
         parent = forked_results[0]
-        assert parent.final_data.to_dict() == {"value": 42}
+        parent_final_data = parent.final_data
+        assert isinstance(parent_final_data, PipelineRow)
+        assert parent_final_data.to_dict() == {"value": 42}
 
         # Children completed with original data (no transforms after fork)
         for child in completed_results:
-            assert child.final_data.to_dict() == {"value": 42}
+            child_final_data = child.final_data
+            assert isinstance(child_final_data, PipelineRow)
+            assert child_final_data.to_dict() == {"value": 42}
             assert child.token.branch_name in ("path_a", "path_b")
 
         # === P1: Audit trail verification for FORKED ===

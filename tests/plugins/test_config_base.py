@@ -424,4 +424,4 @@ class TestTransformDataConfig:
         from elspeth.plugins.config_base import TransformDataConfig
 
         with pytest.raises(ValidationError):
-            TransformDataConfig()  # Missing schema_config
+            TransformDataConfig()  # type: ignore[call-arg]  # Missing schema_config - testing runtime validation

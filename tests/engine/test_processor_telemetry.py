@@ -13,7 +13,7 @@ Tests verify:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 from unittest.mock import MagicMock
 
 from pydantic import ConfigDict
@@ -44,7 +44,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import GateResult, RoutingAction, TransformResult
 from elspeth.telemetry import TelemetryManager
-from tests.conftest import as_gate
+from tests.conftest import _TestSinkBase, _TestSourceBase, as_gate, as_sink, as_source, as_transform
 
 # =============================================================================
 # Test Fixtures
@@ -133,7 +133,7 @@ class MockTelemetryConfig:
         return None
 
     @property
-    def exporter_configs(self) -> tuple:
+    def exporter_configs(self) -> tuple[()]:
         return ()
 
 
@@ -276,7 +276,7 @@ class TestTransformCompletedTelemetry:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -302,7 +302,7 @@ class TestTransformCompletedTelemetry:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[FailingTransform()],
+            transforms=[as_transform(FailingTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -339,7 +339,7 @@ class TestTransformCompletedTelemetry:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform(), PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform()), as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -420,7 +420,7 @@ class TestTokenCompletedTelemetry:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[FailingTransform()],
+            transforms=[as_transform(FailingTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -440,7 +440,7 @@ class TestTokenCompletedTelemetry:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[FailingTransform()],
+            transforms=[as_transform(FailingTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -472,7 +472,7 @@ class TestNoTelemetryWithoutManager:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -498,7 +498,7 @@ class TestTelemetryEventOrdering:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[FailingTransform()],  # Will fail and quarantine
+            transforms=[as_transform(FailingTransform())],  # Will fail and quarantine
             sinks={"output": create_mock_sink()},
         )
 
@@ -521,7 +521,7 @@ class TestTelemetryEventOrdering:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -549,7 +549,7 @@ class BatchAwareTransformForTelemetry(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow | list[dict[str, Any]], ctx: Any) -> TransformResult:  # type: ignore[override]
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
         if isinstance(row, list):
@@ -595,13 +595,13 @@ class FailingBatchAwareTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow | list[dict[str, Any]], ctx: Any) -> TransformResult:  # type: ignore[override]
         if isinstance(row, list):
             # Batch mode - return error to simulate flush failure
-            return TransformResult.error({"reason": "intentional_batch_failure"})
+            return TransformResult.error({"reason": "intentional_failure"})
         else:
             # Single row mode - succeed (shouldn't be called in batch mode)
-            return TransformResult.success(row.to_dict())
+            return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
 
 class PassthroughBatchAwareTransform(BaseTransform):
@@ -620,7 +620,7 @@ class PassthroughBatchAwareTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow | list[dict[str, Any]], ctx: Any) -> TransformResult:  # type: ignore[override]
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
         if isinstance(row, list):
@@ -644,34 +644,29 @@ class PassthroughBatchAwareTransform(BaseTransform):
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
             return TransformResult.success_multi(
-                enriched_rows,
+                cast("list[dict[str, Any] | PipelineRow]", enriched_rows),
                 success_reason={"action": "batch_passthrough"},
                 contract=contract,
             )
         else:
             # Single row mode
             return TransformResult.success(
-                {**row, "batch_processed": False},
+                {**row.to_dict(), "batch_processed": False},
                 success_reason={"action": "passthrough"},
             )
 
 
-class TelemetryTestSource:
+class TelemetryTestSource(_TestSourceBase):
     """Simple test source for telemetry tests."""
 
     name = "telemetry_test_source"
     output_schema = DynamicSchema
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    node_id: str | None = None
-    determinism = Determinism.IO_READ
-    plugin_version = "1.0.0"
-    _on_validation_failure = "discard"
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
+        super().__init__()
         self._rows = rows
-        self.config = {"schema": {"mode": "observed"}}
 
         # PIPELINEROW MIGRATION: Generate contract for rows
         if rows:
@@ -697,33 +692,15 @@ class TelemetryTestSource:
         """Return the schema contract for this source."""
         return self._contract
 
-    def on_start(self, ctx: Any) -> None:
-        pass
 
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
-        return None
-
-
-class TelemetryTestSink:
+class TelemetryTestSink(_TestSinkBase):
     """Simple test sink for telemetry tests."""
 
     name = "telemetry_test_sink"
-    input_schema = DynamicSchema
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    node_id: str | None = None
-    determinism = Determinism.IO_WRITE
-    plugin_version = "1.0.0"
-    idempotent = True
 
     def __init__(self) -> None:
+        super().__init__()
         self.rows: list[dict[str, Any]] = []
-        self.config = {"schema": {"mode": "observed"}}
 
     def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
         for row in rows:
@@ -733,19 +710,6 @@ class TelemetryTestSink:
             size_bytes=0,
             content_hash="test123",
         )
-
-    def flush(self) -> None:
-        """Flush pending writes (no-op for memory sink)."""
-        pass
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
 
 
 class TestAggregationFlushTelemetry:
@@ -780,9 +744,9 @@ class TestAggregationFlushTelemetry:
 
         # Build graph
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregations={},
             gates=[],
             default_sink="output",
@@ -802,9 +766,9 @@ class TestAggregationFlushTelemetry:
         )
 
         config = PipelineConfig(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregation_settings={transform_node_id: agg_settings},
         )
 
@@ -848,9 +812,9 @@ class TestAggregationFlushTelemetry:
         sink = TelemetryTestSink()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregations={},
             gates=[],
             default_sink="output",
@@ -869,9 +833,9 @@ class TestAggregationFlushTelemetry:
         )
 
         config = PipelineConfig(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregation_settings={transform_node_id: agg_settings},
         )
 
@@ -915,9 +879,9 @@ class TestAggregationFlushTelemetry:
         sink = TelemetryTestSink()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregations={},
             gates=[],
             default_sink="output",
@@ -936,9 +900,9 @@ class TestAggregationFlushTelemetry:
         )
 
         config = PipelineConfig(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregation_settings={transform_node_id: agg_settings},
         )
 
@@ -995,9 +959,9 @@ class TestAggregationFlushTelemetry:
         sink = TelemetryTestSink()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregations={},
             gates=[],
             default_sink="output",
@@ -1016,9 +980,9 @@ class TestAggregationFlushTelemetry:
         )
 
         config = PipelineConfig(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregation_settings={transform_node_id: agg_settings},
         )
 
@@ -1071,9 +1035,9 @@ class TestAggregationFlushTelemetry:
         sink = TelemetryTestSink()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregations={},
             gates=[],
             default_sink="output",
@@ -1092,9 +1056,9 @@ class TestAggregationFlushTelemetry:
         )
 
         config = PipelineConfig(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregation_settings={transform_node_id: agg_settings},
         )
 
@@ -1145,9 +1109,9 @@ class TestAggregationFlushTelemetry:
         sink = TelemetryTestSink()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregations={},
             gates=[],
             default_sink="output",
@@ -1166,9 +1130,9 @@ class TestAggregationFlushTelemetry:
         )
 
         config = PipelineConfig(
-            source=source,
-            transforms=[transform],
-            sinks={"output": sink},
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
             aggregation_settings={transform_node_id: agg_settings},
         )
 

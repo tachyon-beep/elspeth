@@ -120,7 +120,8 @@ class TestPluginSystemIntegration:
             result = transform.process(source_row.row, ctx)
             assert result.status == "success"
             assert result.row is not None  # Success always has row
-            sink.write([result.row], ctx)  # write() takes list of rows
+            row_data = result.row if isinstance(result.row, dict) else result.row.to_dict()
+            sink.write([row_data], ctx)  # write() takes list of rows
 
         # Verify results
         # Values: 10*2=20, 50*2=100, 100*2=200

@@ -46,7 +46,7 @@ def test_pipeline_row_nested_access_demonstrates_bug():
                 source="inferred",
             )
         ],
-        mode="FIXED"
+        mode="FIXED",
     )
     contract_b = SchemaContract(
         fields=[
@@ -58,7 +58,7 @@ def test_pipeline_row_nested_access_demonstrates_bug():
                 source="inferred",
             )
         ],
-        mode="FIXED"
+        mode="FIXED",
     )
 
     # Merge contracts (what coalesce does now - WRONG for nested merge)
@@ -66,10 +66,7 @@ def test_pipeline_row_nested_access_demonstrates_bug():
     # merged_contract has fields: value_a, value_b (WRONG - should be path_a, path_b)
 
     # Nested merge creates this data shape:
-    nested_data = {
-        "path_a": {"value_a": "from_a"},
-        "path_b": {"value_b": "from_b"}
-    }
+    nested_data = {"path_a": {"value_a": "from_a"}, "path_b": {"value_b": "from_b"}}
 
     # Create PipelineRow with mismatched contract
     row = PipelineRow(nested_data, merged_contract)

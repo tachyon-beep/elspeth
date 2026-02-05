@@ -491,7 +491,7 @@ class TestCallReplayer:
         request_data = {"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}
 
         # Track which call index we're returning
-        call_sequence = [
+        call_sequence: list[dict[str, Any]] = [
             {
                 "call_id": "call_1",
                 "response": {"content": "Response 1 - first call"},
@@ -510,7 +510,7 @@ class TestCallReplayer:
             """Return the Nth call for duplicate request hashes."""
             idx = sequence_index if sequence_index < len(call_sequence) else len(call_sequence) - 1
             return Call(
-                call_id=call_sequence[idx]["call_id"],
+                call_id=str(call_sequence[idx]["call_id"]),
                 state_id="state_123",
                 call_index=idx,
                 call_type=CallType.LLM,
@@ -524,7 +524,8 @@ class TestCallReplayer:
             """Return response data based on call_id."""
             for call_info in call_sequence:
                 if call_info["call_id"] == call_id:
-                    return call_info["response"]
+                    response: dict[str, Any] = call_info["response"]
+                    return response
             return {}
 
         recorder.find_call_by_request_hash.side_effect = find_call_side_effect

@@ -26,7 +26,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.telemetry.events import RunStarted
-from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
+from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 from tests.telemetry.fixtures import MockTelemetryConfig, TelemetryTestExporter
 
@@ -97,7 +97,7 @@ class SimpleTransform:
             row_data = row.to_dict()
         else:
             row_data = row
-        return TransformResult.success(row_data, success_reason="passthrough")
+        return TransformResult.success(row_data, success_reason={"action": "passthrough"})
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -167,7 +167,7 @@ class TestOrchestratorWiresTelemetryToContext:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[SimpleTransform()],
+            transforms=[as_transform(SimpleTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -217,7 +217,7 @@ class TestOrchestratorWiresTelemetryToContext:
                     row_data = row.to_dict()
                 else:
                     row_data = row
-                return TransformResult.success(row_data, success_reason="passthrough")
+                return TransformResult.success(row_data, success_reason={"action": "passthrough"})
 
             def on_start(self, ctx: Any) -> None:
                 nonlocal captured_callback
@@ -232,7 +232,7 @@ class TestOrchestratorWiresTelemetryToContext:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[CallbackCapturingTransform()],
+            transforms=[as_transform(CallbackCapturingTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -275,7 +275,7 @@ class TestOrchestratorWiresTelemetryToContext:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[SimpleTransform()],
+            transforms=[as_transform(SimpleTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -310,7 +310,7 @@ class TestNoTelemetryWithoutManager:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[SimpleTransform()],
+            transforms=[as_transform(SimpleTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -345,7 +345,7 @@ class TestNoTelemetryWithoutManager:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[CallbackCapturingTransform()],
+            transforms=[as_transform(CallbackCapturingTransform())],
             sinks={"output": as_sink(sink)},
         )
 

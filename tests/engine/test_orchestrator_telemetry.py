@@ -27,6 +27,7 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.telemetry.events import PhaseChanged, RunFinished, RunStarted
+from tests.conftest import as_transform
 
 # =============================================================================
 # Test Fixtures
@@ -67,7 +68,7 @@ class MockTelemetryConfig:
         return None
 
     @property
-    def exporter_configs(self) -> tuple:
+    def exporter_configs(self) -> tuple[()]:
         return ()
 
 
@@ -180,7 +181,7 @@ class TestTelemetryEventEmission:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -204,7 +205,7 @@ class TestTelemetryEventEmission:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}, {"id": 2}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -230,7 +231,7 @@ class TestTelemetryEventEmission:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -254,7 +255,7 @@ class TestTelemetryEventEmission:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -276,7 +277,7 @@ class TestTelemetryDisabledByDefault:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -290,7 +291,7 @@ class TestTelemetryDisabledByDefault:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -331,7 +332,7 @@ class TestNoTelemetryOnLandscapeFailure:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -363,7 +364,7 @@ class TestNoTelemetryOnLandscapeFailure:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -424,7 +425,7 @@ class TestTelemetryOnRunFailure:
 
         config = PipelineConfig(
             source=failing_source,
-            transforms=[FailingTransform()],
+            transforms=[as_transform(FailingTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -458,7 +459,7 @@ class TestTelemetryEventContent:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -478,7 +479,7 @@ class TestTelemetryEventContent:
         # 3 rows
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}, {"id": 2}, {"id": 3}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -497,7 +498,7 @@ class TestTelemetryEventContent:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 
@@ -687,7 +688,7 @@ class TestTelemetryPartialStatus:
 
         config = PipelineConfig(
             source=create_mock_source([{"id": 1}, {"id": 2}]),
-            transforms=[PassthroughTransform()],
+            transforms=[as_transform(PassthroughTransform())],
             sinks={"output": create_mock_sink()},
         )
 

@@ -13,7 +13,7 @@ Additional tests for timeout/end-of-source flush error handling:
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -125,9 +125,7 @@ class TestAggregationTimeoutIntegration:
                     total = sum(r.get("value", 0) for r in rows)
                     output_row = {"id": rows[0].get("id"), "value": total, "count": len(rows)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(
-                        output_row, success_reason={"action": "test"}, contract=contract
-                    )
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 else:
                     # Single row mode - passthrough
                     return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
@@ -618,11 +616,13 @@ class TestEndOfSourceFlush:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Emit 3 rows, all will be buffered (count trigger is 100)
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
                 # Source completes - end-of-source flush should trigger
 
             def close(self) -> None:
@@ -672,7 +672,8 @@ class TestEndOfSourceFlush:
 
         source = as_source(FastSource())
         transform = as_transform(SingleModeAgg())
-        sink = as_sink(CollectorSink())
+        collector = CollectorSink()
+        sink = as_sink(collector)
 
         from elspeth.core.dag import ExecutionGraph
 
@@ -719,10 +720,10 @@ class TestEndOfSourceFlush:
         assert result.status == RunStatus.COMPLETED
 
         # Single mode should produce exactly one output row
-        assert len(sink.rows) == 1, f"Single mode should produce 1 row, got {len(sink.rows)}: {sink.rows}"
+        assert len(collector.rows) == 1, f"Single mode should produce 1 row, got {len(collector.rows)}: {collector.rows}"
 
         # Verify aggregated data
-        output = sink.rows[0]
+        output = collector.rows[0]
         assert output["total"] == 600, f"Expected total=600 (100+200+300), got {output}"
         assert output["count"] == 3, f"Expected count=3, got {output}"
 
@@ -760,11 +761,13 @@ class TestEndOfSourceFlush:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -787,7 +790,11 @@ class TestEndOfSourceFlush:
                     batch_total = sum(r.get("value", 0) for r in row)
                     enriched = [{**r, "batch_total": batch_total, "batch_size": len(row)} for r in row]
                     contract = create_observed_contract(enriched[0]) if enriched else None
-                    return TransformResult.success_multi(enriched, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success_multi(
+                        cast(list[dict[str, Any] | PipelineRow], enriched),
+                        success_reason={"action": "test"},
+                        contract=contract,
+                    )
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
@@ -814,7 +821,8 @@ class TestEndOfSourceFlush:
 
         source = as_source(FastSource())
         transform = as_transform(PassthroughAgg())
-        sink = as_sink(CollectorSink())
+        collector = CollectorSink()
+        sink = as_sink(collector)
 
         from elspeth.core.dag import ExecutionGraph
 
@@ -861,16 +869,16 @@ class TestEndOfSourceFlush:
         assert result.status == RunStatus.COMPLETED
 
         # Passthrough mode should produce 3 output rows (one per input row)
-        assert len(sink.rows) == 3, f"Passthrough mode should produce 3 rows, got {len(sink.rows)}"
+        assert len(collector.rows) == 3, f"Passthrough mode should produce 3 rows, got {len(collector.rows)}"
 
         # All rows should be enriched with batch data
-        for row in sink.rows:
+        for row in collector.rows:
             assert "batch_total" in row, f"Row should have batch_total: {row}"
             assert row["batch_total"] == 600  # 100+200+300
             assert row["batch_size"] == 3
 
         # Original values should be preserved
-        values = {r["value"] for r in sink.rows}
+        values = {r["value"] for r in collector.rows}
         assert values == {100, 200, 300}
 
     def test_end_of_source_transform_mode(
@@ -902,11 +910,13 @@ class TestEndOfSourceFlush:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -927,11 +937,12 @@ class TestEndOfSourceFlush:
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
                     # Transform mode: N inputs → 2 outputs (summary row + count row)
-                    output_rows = [
-                        {"type": "summary", "total": total},
+                    first_row: dict[str, Any] = {"type": "summary", "total": total}
+                    output_rows: list[dict[str, Any] | PipelineRow] = [
+                        first_row,
                         {"type": "count", "count": len(row)},
                     ]
-                    contract = create_observed_contract(output_rows[0])
+                    contract = create_observed_contract(first_row)
                     return TransformResult.success_multi(
                         output_rows,
                         success_reason={"action": "test"},
@@ -963,7 +974,8 @@ class TestEndOfSourceFlush:
 
         source = as_source(FastSource())
         transform = as_transform(TransformModeAgg())
-        sink = as_sink(CollectorSink())
+        collector = CollectorSink()
+        sink = as_sink(collector)
 
         from elspeth.core.dag import ExecutionGraph
 
@@ -1010,14 +1022,14 @@ class TestEndOfSourceFlush:
         assert result.status == RunStatus.COMPLETED
 
         # Transform mode should produce 2 output rows (3 inputs → 2 outputs)
-        assert len(sink.rows) == 2, f"Transform mode should produce 2 rows, got {len(sink.rows)}"
+        assert len(collector.rows) == 2, f"Transform mode should produce 2 rows, got {len(collector.rows)}"
 
         # Check outputs
-        types = {r["type"] for r in sink.rows}
+        types = {r["type"] for r in collector.rows}
         assert types == {"summary", "count"}
 
-        summary = next(r for r in sink.rows if r["type"] == "summary")
-        count_row = next(r for r in sink.rows if r["type"] == "count")
+        summary = next(r for r in collector.rows if r["type"] == "summary")
+        count_row = next(r for r in collector.rows if r["type"] == "count")
 
         assert summary["total"] == 600
         assert count_row["count"] == 3
@@ -1049,10 +1061,12 @@ class TestEndOfSourceFlush:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -1074,7 +1088,11 @@ class TestEndOfSourceFlush:
                     batch_total = sum(r.get("value", 0) for r in row)
                     enriched = [{**r, "batch_total": batch_total} for r in row]
                     contract = create_observed_contract(enriched[0]) if enriched else None
-                    return TransformResult.success_multi(enriched, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success_multi(
+                        cast(list[dict[str, Any] | PipelineRow], enriched),
+                        success_reason={"action": "test"},
+                        contract=contract,
+                    )
                 return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
@@ -1116,7 +1134,8 @@ class TestEndOfSourceFlush:
         source = as_source(FastSource())
         agg_transform = as_transform(PassthroughAgg())
         downstream = as_transform(DownstreamTransform())
-        sink = as_sink(CollectorSink())
+        collector = CollectorSink()
+        sink = as_sink(collector)
 
         from elspeth.core.dag import ExecutionGraph
 
@@ -1164,10 +1183,10 @@ class TestEndOfSourceFlush:
         assert result.status == RunStatus.COMPLETED
 
         # Should have 2 output rows
-        assert len(sink.rows) == 2, f"Expected 2 rows, got {len(sink.rows)}"
+        assert len(collector.rows) == 2, f"Expected 2 rows, got {len(collector.rows)}"
 
         # All rows should have batch_total from aggregation AND processed from downstream
-        for row in sink.rows:
+        for row in collector.rows:
             assert "batch_total" in row, f"Row missing batch_total: {row}"
             assert row["batch_total"] == 300  # 100+200
             assert row.get("processed") is True, f"Row missing processed flag: {row}"
@@ -1199,10 +1218,12 @@ class TestEndOfSourceFlush:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -1267,7 +1288,8 @@ class TestEndOfSourceFlush:
         source = as_source(FastSource())
         agg_transform = as_transform(SingleAgg())
         downstream = as_transform(DownstreamTransform())
-        sink = as_sink(CollectorSink())
+        collector = CollectorSink()
+        sink = as_sink(collector)
 
         from elspeth.core.dag import ExecutionGraph
 
@@ -1315,9 +1337,9 @@ class TestEndOfSourceFlush:
         assert result.status == RunStatus.COMPLETED
 
         # Single mode with downstream should produce 1 row
-        assert len(sink.rows) == 1, f"Expected 1 row, got {len(sink.rows)}"
+        assert len(collector.rows) == 1, f"Expected 1 row, got {len(collector.rows)}"
 
-        output = sink.rows[0]
+        output = collector.rows[0]
         # From aggregation:
         assert output["total"] == 300  # 100+200
         assert output["count"] == 2
@@ -1733,11 +1755,13 @@ class TestTimeoutFlushErrorHandling:
                 # Row 1: Gets buffered, marked BUFFERED
                 # Row 2: Gets buffered, marked BUFFERED
                 # Row 3: Triggers count flush (count=3) → flush fails
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -1901,10 +1925,12 @@ class TestTimeoutFlushErrorHandling:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                    ]
+                )
                 # Source completes → END_OF_SOURCE flush
 
             def close(self) -> None:
@@ -2081,11 +2107,13 @@ class TestTimeoutFlushErrorHandling:
                 # Row 2: Gets buffered, marked CONSUMED_IN_BATCH (non-flushing path)
                 # Row 3: Triggers count flush (count=3) → flush fails
                 # BUG: This token has NO outcome recorded!
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -2239,11 +2267,13 @@ class TestTimeoutFlushErrorHandling:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -2528,10 +2558,12 @@ class TestTimeoutFlushStepIndexing:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Emit rows that will be buffered (count trigger won't fire)
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                    ]
+                )
                 # Source completes - end-of-source flush triggers
 
             def close(self) -> None:
@@ -2679,11 +2711,13 @@ class TestExpectedOutputCountEnforcement:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -2731,7 +2765,8 @@ class TestExpectedOutputCountEnforcement:
 
         source = as_source(FastSource())
         transform = as_transform(SingleRowAgg())
-        sink = as_sink(SimpleSink())
+        simple_sink = SimpleSink()
+        sink = as_sink(simple_sink)
 
         from elspeth.core.dag import ExecutionGraph
 
@@ -2779,7 +2814,7 @@ class TestExpectedOutputCountEnforcement:
 
         # Should complete successfully since output count matches
         assert result.status == RunStatus.COMPLETED, f"Run should complete when output count matches: {result}"
-        assert len(sink.rows) == 1, f"Should have exactly 1 output row, got {len(sink.rows)}"
+        assert len(simple_sink.rows) == 1, f"Should have exactly 1 output row, got {len(simple_sink.rows)}"
 
     def test_expected_output_count_mismatch_raises_runtime_error(
         self,
@@ -2808,11 +2843,13 @@ class TestExpectedOutputCountEnforcement:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -2831,8 +2868,12 @@ class TestExpectedOutputCountEnforcement:
             def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return 2 rows instead of 1 - this violates expected_output_count=1
-                    output_rows = [{"part": 1, "total": sum(r.get("value", 0) for r in row)}, {"part": 2, "count": len(row)}]
-                    contract = create_observed_contract(output_rows[0])
+                    first_row: dict[str, Any] = {"part": 1, "total": sum(r.get("value", 0) for r in row)}
+                    output_rows: list[dict[str, Any] | PipelineRow] = [
+                        first_row,
+                        {"part": 2, "count": len(row)},
+                    ]
+                    contract = create_observed_contract(first_row)
                     return TransformResult.success_multi(
                         output_rows,
                         success_reason={"action": "test"},
@@ -2959,8 +3000,9 @@ class TestExpectedOutputCountEnforcement:
             def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return 2 rows - violates expected_output_count=1
-                    output_rows = [{"part": 1}, {"part": 2}]
-                    contract = create_observed_contract(output_rows[0])
+                    first_row: dict[str, Any] = {"part": 1}
+                    output_rows: list[dict[str, Any] | PipelineRow] = [first_row, {"part": 2}]
+                    contract = create_observed_contract(first_row)
                     return TransformResult.success_multi(
                         output_rows,
                         success_reason={"action": "test"},
@@ -3072,11 +3114,13 @@ class TestExpectedOutputCountEnforcement:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([
-                    {"id": 1, "value": 100},
-                    {"id": 2, "value": 200},
-                    {"id": 3, "value": 300},
-                ])
+                yield from self.wrap_rows(
+                    [
+                        {"id": 1, "value": 100},
+                        {"id": 2, "value": 200},
+                        {"id": 3, "value": 300},
+                    ]
+                )
 
             def close(self) -> None:
                 pass
@@ -3095,8 +3139,11 @@ class TestExpectedOutputCountEnforcement:
             def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     # Return N rows where N = len(input) - could be any number
-                    output_rows = [{"idx": i, "value": r.get("value", 0)} for i, r in enumerate(row)]
-                    contract = create_observed_contract(output_rows[0]) if output_rows else None
+                    output_rows: list[dict[str, Any] | PipelineRow] = [{"idx": i, "value": r.get("value", 0)} for i, r in enumerate(row)]
+                    first_row = output_rows[0] if output_rows else {}
+                    contract = (
+                        create_observed_contract(first_row if isinstance(first_row, dict) else first_row.to_dict()) if output_rows else None
+                    )
                     return TransformResult.success_multi(
                         output_rows,
                         success_reason={"action": "test"},
@@ -3128,7 +3175,8 @@ class TestExpectedOutputCountEnforcement:
 
         source = as_source(FastSource())
         transform = as_transform(VariableOutputAgg())
-        sink = as_sink(SimpleSink())
+        simple_sink = SimpleSink()
+        sink = as_sink(simple_sink)
 
         from elspeth.core.dag import ExecutionGraph
 
@@ -3177,4 +3225,4 @@ class TestExpectedOutputCountEnforcement:
         # Should complete successfully without validation
         assert result.status == RunStatus.COMPLETED, f"Run should complete when expected_output_count is None: {result}"
         # Variable output agg produces 3 rows (one per input)
-        assert len(sink.rows) == 3, f"Should have 3 output rows, got {len(sink.rows)}"
+        assert len(simple_sink.rows) == 3, f"Should have 3 output rows, got {len(simple_sink.rows)}"

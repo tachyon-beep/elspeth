@@ -72,7 +72,7 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
-        self.accept_row(row, ctx, self._process_row)
+        self.accept_row(_make_pipeline_row(row), ctx, self._process_row)
 
     def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         # Simple passthrough - just add a marker
@@ -338,9 +338,9 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
-        self.accept_row(row, ctx, self._process_row)
+        self.accept_row(_make_pipeline_row(row), ctx, self._process_row)
 
-    def _process_row(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         # Signal that processing has started
         self._processing_started.set()
         # Block until released

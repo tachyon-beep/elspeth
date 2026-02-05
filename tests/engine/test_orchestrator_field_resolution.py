@@ -19,7 +19,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.schema import runs_table
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.sources.csv_source import CSVSource
-from tests.conftest import _TestSinkBase
+from tests.conftest import _TestSinkBase, as_sink
 
 
 class TestFieldResolutionRecording:
@@ -74,7 +74,7 @@ class TestFieldResolutionRecording:
         config = PipelineConfig(
             source=source,
             transforms=[],
-            sinks={"default": sink},
+            sinks={"default": as_sink(sink)},
         )
 
         # Use helper to build graph
@@ -89,7 +89,7 @@ class TestFieldResolutionRecording:
         # Query the audit database for field resolution
         with db.engine.connect() as conn:
             row = conn.execute(select(runs_table.c.source_field_resolution_json).where(runs_table.c.run_id == result.run_id)).fetchone()
-
+            assert row is not None, "Run not found in database"
             resolution_json = row[0]
 
         # This is the key assertion - resolution must be recorded
@@ -158,7 +158,7 @@ class TestFieldResolutionRecording:
         config = PipelineConfig(
             source=source,
             transforms=[],
-            sinks={"default": sink},
+            sinks={"default": as_sink(sink)},
         )
 
         from tests.engine.orchestrator_test_helpers import build_production_graph
@@ -171,7 +171,7 @@ class TestFieldResolutionRecording:
         # Query the audit database for field resolution
         with db.engine.connect() as conn:
             row = conn.execute(select(runs_table.c.source_field_resolution_json).where(runs_table.c.run_id == result.run_id)).fetchone()
-
+            assert row is not None, "Run not found in database"
             resolution_json = row[0]
 
         # Even without normalization, CSVSource records an identity mapping
@@ -243,7 +243,7 @@ class TestFieldResolutionRecording:
         config = PipelineConfig(
             source=source,
             transforms=[],
-            sinks={"default": sink},
+            sinks={"default": as_sink(sink)},
         )
 
         from tests.engine.orchestrator_test_helpers import build_production_graph
@@ -256,7 +256,7 @@ class TestFieldResolutionRecording:
         # Query the audit database for field resolution
         with db.engine.connect() as conn:
             row = conn.execute(select(runs_table.c.source_field_resolution_json).where(runs_table.c.run_id == result.run_id)).fetchone()
-
+            assert row is not None, "Run not found in database"
             resolution_json = row[0]
 
         # KEY ASSERTION: Resolution must be recorded even for empty sources

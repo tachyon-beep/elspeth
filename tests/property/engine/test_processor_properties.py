@@ -151,13 +151,13 @@ row_value = st.one_of(
 )
 
 # Strategy for a single row - dict with string keys (RFC 8785 safe integers)
-single_row = st.fixed_dictionaries(
+single_row: st.SearchStrategy[dict[str, Any]] = st.fixed_dictionaries(
     {"id": st.integers(min_value=0, max_value=MAX_SAFE_INT)},
     optional={"value": row_value, "name": st.text(max_size=20), "flag": st.booleans()},
 )
 
 # Strategy for row that might trigger errors (RFC 8785 safe integers)
-row_with_possible_error = st.fixed_dictionaries(
+row_with_possible_error: st.SearchStrategy[dict[str, Any]] = st.fixed_dictionaries(
     {"id": st.integers(min_value=0, max_value=MAX_SAFE_INT), "fail": st.booleans()},
     optional={"value": row_value},
 )

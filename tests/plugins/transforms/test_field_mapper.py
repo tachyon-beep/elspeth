@@ -378,6 +378,8 @@ class TestFieldMapperContractPropagation:
 
         assert result.status == "success"
         assert result.contract is not None
+        assert result.row is not None
+        assert isinstance(result.row, dict)
 
         # Create PipelineRow with output contract
         output_row = PipelineRow(result.row, result.contract)

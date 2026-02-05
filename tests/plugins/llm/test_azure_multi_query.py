@@ -93,7 +93,7 @@ class TestSingleQueryProcessing:
 
     def test_process_single_query_renders_template(self, chaosllm_server) -> None:
         """Single query renders template with input fields and criterion."""
-        responses = [{"score": 85, "rationale": "Good diagnosis"}]
+        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "Good diagnosis"}]
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
             transform = AzureMultiQueryLLMTransform(make_config())
@@ -121,7 +121,7 @@ class TestSingleQueryProcessing:
 
     def test_process_single_query_parses_json_response(self, chaosllm_server) -> None:
         """Single query parses JSON and returns mapped fields."""
-        responses = [{"score": 85, "rationale": "Excellent assessment"}]
+        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "Excellent assessment"}]
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses):
             transform = AzureMultiQueryLLMTransform(make_config())
@@ -281,7 +281,7 @@ class TestRowProcessingWithPipelining:
     ) -> None:
         """Successful row emits results with all query outputs merged."""
         # 4 queries (2 case studies x 2 criteria)
-        responses = [
+        responses: list[dict[str, Any] | str] = [
             {"score": 85, "rationale": "CS1 diagnosis"},
             {"score": 90, "rationale": "CS1 treatment"},
             {"score": 75, "rationale": "CS2 diagnosis"},
@@ -322,7 +322,7 @@ class TestRowProcessingWithPipelining:
         chaosllm_server,
     ) -> None:
         """Output row preserves original input fields."""
-        responses = [
+        responses: list[dict[str, Any] | str] = [
             {"score": 85, "rationale": "R1"},
             {"score": 90, "rationale": "R2"},
             {"score": 75, "rationale": "R3"},
@@ -360,7 +360,7 @@ class TestRowProcessingWithPipelining:
         chaosllm_server,
     ) -> None:
         """All-or-nothing: if any query fails, entire row fails."""
-        responses = [
+        responses: list[dict[str, Any] | str] = [
             {"score": 85, "rationale": "ok"},
             {"score": 85, "rationale": "ok"},
             {"score": 85, "rationale": "ok"},
@@ -511,7 +511,7 @@ class TestMultiRowPipelining:
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
         created_state_ids: list[str] = []
 
         # Patch _get_llm_client to track state_ids
@@ -568,7 +568,7 @@ class TestMultiRowPipelining:
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
@@ -668,7 +668,7 @@ class TestSequentialMode:
         # Verify no executor created (sequential mode)
         assert transform._executor is None
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
@@ -713,7 +713,7 @@ class TestSequentialMode:
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
@@ -782,7 +782,7 @@ class TestPoolMetadataAuditIntegration:
         transform.connect_output(collector, max_pending=10)
 
         # 4 queries per row (2 case studies x 2 criteria)
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
@@ -850,7 +850,7 @@ class TestPoolMetadataAuditIntegration:
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
@@ -876,6 +876,8 @@ class TestPoolMetadataAuditIntegration:
             transform.close()
 
         _, result, _ = collector.results[0]
+        # Type narrow: result from batch processing should be TransformResult, not ExceptionResult
+        assert isinstance(result, TransformResult)
         assert result.context_after is not None
 
         # Verify query_ordering is present

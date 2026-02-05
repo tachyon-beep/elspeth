@@ -31,10 +31,10 @@ if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
 
 
-
-def _make_test_source_row(data: dict) -> SourceRow:
+def _make_test_source_row(data: dict[str, Any]) -> SourceRow:
     """Helper to create SourceRow with contract for mocked sources."""
     from elspeth.contracts import FieldContract, SchemaContract
+
     fields = tuple(
         FieldContract(
             normalized_name=key,
@@ -47,7 +47,6 @@ def _make_test_source_row(data: dict) -> SourceRow:
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return SourceRow.valid(data, contract=contract)
-
 
 
 class TestLifecycleHooks:

@@ -1,6 +1,7 @@
 # tests/plugins/llm/test_base.py
 """Tests for base LLM transform."""
 
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -22,7 +23,7 @@ from elspeth.plugins.llm.base import BaseLLMTransform, LLMConfig
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
-def wrap_in_pipeline_row(data: dict) -> PipelineRow:
+def wrap_in_pipeline_row(data: dict[str, Any]) -> PipelineRow:
     """Wrap dict in PipelineRow with FLEXIBLE contract for testing.
 
     Uses FLEXIBLE mode to allow access to any fields in the data.

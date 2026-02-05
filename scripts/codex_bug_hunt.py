@@ -31,7 +31,7 @@ def _is_python_file(path: Path) -> bool:
     return path.suffix == ".py" and not path.name.startswith("test_")
 
 
-def _build_prompt(file_path: Path, template: str, context: str) -> str:
+def _build_prompt(file_path: Path, template: str, context: str, extra_message: str | None = None) -> str:
     return (
         "You are a static analysis agent doing a deep bug audit.\n"
         f"Target file: {file_path}\n\n"
@@ -51,7 +51,9 @@ def _build_prompt(file_path: Path, template: str, context: str) -> str:
         "- If you find no credible bug, output one template with Summary set to\n"
         f"  'No concrete bug found in {file_path}', Severity 'trivial', Priority 'P3',\n"
         "  and Root Cause Hypothesis 'No bug identified'.\n"
-        "- Evidence should cite file paths and line numbers when possible.\n\n"
+        "- Evidence should cite file paths and line numbers when possible.\n"
+        + (f"\n⚠️  IMPORTANT CONTEXT:\n{extra_message}\n" if extra_message else "")
+        + "\n"
         "Bug Categories to Check:\n"
         "1. **Audit Trail Violations**:\n"
         "   - Missing payload recording for external API calls\n"
@@ -335,6 +337,7 @@ async def _run_batches(
     organize_by_priority: bool,
     bugs_open_dir: Path | None,
     deduplicate: bool,
+    extra_message: str | None = None,
 ) -> dict[str, int]:
     """Run analysis in batches. Returns statistics."""
     log_lock = asyncio.Lock()
@@ -361,7 +364,7 @@ async def _run_batches(
                 pbar.update(1)
                 continue
 
-            prompt = _build_prompt(file_path, prompt_template, context)
+            prompt = _build_prompt(file_path, prompt_template, context, extra_message)
             batch_files.append(file_path)
 
             task = asyncio.create_task(
@@ -601,6 +604,9 @@ Examples:
 
   # Organize outputs by priority
   %(prog)s --organize-by-priority
+
+  # Add extra context message (e.g., migration notes)
+  %(prog)s --extra-message "Please note recent PipelineRow migration - see docs/plans/..."
         """,
     )
     parser.add_argument(
@@ -692,6 +698,11 @@ Examples:
         default="docs/bugs/open",
         help="Directory to search for existing bugs (default: docs/bugs/open).",
     )
+    parser.add_argument(
+        "--extra-message",
+        default=None,
+        help="Additional context message to include in the analysis prompt (e.g., migration notes).",
+    )
 
     args = parser.parse_args()
 
@@ -758,6 +769,7 @@ Examples:
             organize_by_priority=args.organize_by_priority,
             bugs_open_dir=bugs_open_dir,
             deduplicate=args.deduplicate,
+            extra_message=args.extra_message,
         )
     )
 

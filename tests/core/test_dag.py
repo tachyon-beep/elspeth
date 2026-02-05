@@ -1472,9 +1472,9 @@ class TestCoalesceNodes:
 
         with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
             ExecutionGraph.from_plugin_instances(
-                source=source,
-                transforms=[gate],
-                sinks=sinks,
+                source=source,  # type: ignore[arg-type]
+                transforms=[gate],  # type: ignore[list-item]
+                sinks=sinks,  # type: ignore[arg-type]
                 aggregations={},
                 gates=[],
                 default_sink="output",

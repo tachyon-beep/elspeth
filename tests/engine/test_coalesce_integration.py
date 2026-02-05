@@ -89,7 +89,7 @@ class CollectSink(_TestSinkBase):
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
         # IMPORTANT: Must include schema for production graph builder
-        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}  # type: ignore[misc]
 
     def on_start(self, ctx: Any) -> None:
         pass

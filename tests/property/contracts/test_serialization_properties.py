@@ -19,17 +19,18 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import TransformErrorReason
 from elspeth.contracts.enums import RoutingKind, RoutingMode
+from elspeth.contracts.errors import ConfigGateReason, PluginGateReason, TransformSuccessReason
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.routing import RoutingAction
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from tests.property.conftest import id_strings, row_data
 
 # =============================================================================
@@ -85,7 +86,7 @@ config_gate_reasons = st.fixed_dictionaries(
 )
 
 # PluginGateReason: rule + matched_value
-plugin_gate_reasons = st.fixed_dictionaries(
+plugin_gate_reasons: st.SearchStrategy[dict[str, Any]] = st.fixed_dictionaries(
     {
         "rule": st.text(min_size=1, max_size=50),
         "matched_value": st.one_of(
@@ -127,7 +128,7 @@ transform_error_reasons = st.fixed_dictionaries(
 )
 
 # TransformSuccessReason dictionaries for TransformResult.success()
-success_reasons = st.fixed_dictionaries(
+success_reasons: st.SearchStrategy[dict[str, Any]] = st.fixed_dictionaries(
     {"action": st.sampled_from(["processed", "validated", "enriched", "passthrough"])},
     optional={
         "fields_modified": st.lists(st.text(min_size=1, max_size=30, alphabet="abcdefghijklmnopqrstuvwxyz_"), max_size=5),
@@ -343,7 +344,7 @@ class TestTransformResultJsonSerializationProperties:
     def test_transform_result_success_json_round_trip_preserves_row(
         self,
         data: dict[str, Any],
-        success_reason: dict[str, Any],
+        success_reason: TransformSuccessReason,
     ) -> None:
         """Property: TransformResult.success() JSON round-trip preserves row."""
         result = TransformResult.success(data, success_reason=success_reason)
@@ -395,7 +396,10 @@ class TestTransformResultJsonSerializationProperties:
         success_reason: dict[str, Any],
     ) -> None:
         """Property: TransformResult.success_multi() JSON round-trip preserves rows."""
-        result = TransformResult.success_multi(rows, success_reason=success_reason)
+        result = TransformResult.success_multi(
+            cast(list[dict[str, Any] | PipelineRow], rows),
+            success_reason=cast(TransformSuccessReason, success_reason),
+        )
 
         serialized = json.dumps(asdict(result))
         parsed = json.loads(serialized)
@@ -418,7 +422,7 @@ class TestRoutingActionJsonSerializationProperties:
     @settings(max_examples=100)
     def test_routing_action_continue_serializes_to_valid_json(
         self,
-        reason: dict[str, Any] | None,
+        reason: ConfigGateReason | PluginGateReason | None,
     ) -> None:
         """Property: RoutingAction.continue_() serializes to valid JSON."""
         action = RoutingAction.continue_(reason=reason)
@@ -434,7 +438,7 @@ class TestRoutingActionJsonSerializationProperties:
     @settings(max_examples=100)
     def test_routing_action_continue_json_round_trip_preserves_invariants(
         self,
-        reason: dict[str, Any] | None,
+        reason: ConfigGateReason | PluginGateReason | None,
     ) -> None:
         """Property: RoutingAction.continue_() JSON round-trip preserves invariants."""
         action = RoutingAction.continue_(reason=reason)
@@ -451,7 +455,7 @@ class TestRoutingActionJsonSerializationProperties:
     def test_routing_action_route_json_round_trip_preserves_destination(
         self,
         label: str,
-        reason: dict[str, Any] | None,
+        reason: ConfigGateReason | PluginGateReason | None,
     ) -> None:
         """Property: RoutingAction.route() JSON round-trip preserves destination."""
         action = RoutingAction.route(label, reason=reason)
@@ -468,7 +472,7 @@ class TestRoutingActionJsonSerializationProperties:
     def test_routing_action_fork_json_round_trip_preserves_paths(
         self,
         paths: list[str],
-        reason: dict[str, Any] | None,
+        reason: ConfigGateReason | PluginGateReason | None,
     ) -> None:
         """Property: RoutingAction.fork_to_paths() JSON round-trip preserves paths."""
         action = RoutingAction.fork_to_paths(paths, reason=reason)
@@ -488,7 +492,7 @@ class TestRoutingActionReasonSerializationProperties:
     @settings(max_examples=100)
     def test_routing_action_reason_json_round_trip(
         self,
-        reason: dict[str, Any] | None,
+        reason: ConfigGateReason | PluginGateReason | None,
     ) -> None:
         """Property: RoutingAction reason field JSON round-trips correctly."""
         action = RoutingAction.continue_(reason=reason)

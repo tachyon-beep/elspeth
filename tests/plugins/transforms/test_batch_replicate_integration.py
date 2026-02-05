@@ -6,10 +6,6 @@ without a contract, causing ValueError at processor.py:1826-1830 during token ex
 
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
-
 from elspeth.contracts import PipelineRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.plugins.context import PluginContext
@@ -27,10 +23,12 @@ def test_batch_replicate_returns_contract_with_multi_row_output():
     contract from the first output row.
     """
     # Create transform
-    transform = BatchReplicate({
-        "schema": {"mode": "observed"},
-        "copies_field": "copies",
-    })
+    transform = BatchReplicate(
+        {
+            "schema": {"mode": "observed"},
+            "copies_field": "copies",
+        }
+    )
 
     # Create input as list (batch-aware mode)
     rows = [
@@ -66,8 +64,7 @@ def test_batch_replicate_returns_contract_with_multi_row_output():
     # CRITICAL: Verify contract is provided
     # Without this, processor.py:1826-1830 would raise ValueError
     assert result.contract is not None, (
-        "BatchReplicate MUST provide contract for multi-row output. "
-        "Missing contract causes ValueError during token expansion in processor."
+        "BatchReplicate MUST provide contract for multi-row output. Missing contract causes ValueError during token expansion in processor."
     )
 
     # Verify contract is OBSERVED mode (correct for inferred fields)
@@ -78,23 +75,24 @@ def test_batch_replicate_returns_contract_with_multi_row_output():
     expected_fields = {"id", "copies", "copy_index"}
     contract_field_names = {fc.normalized_name for fc in result.contract.fields}
     assert contract_field_names == expected_fields, (
-        f"Contract should include all output fields. "
-        f"Expected {expected_fields}, got {contract_field_names}"
+        f"Contract should include all output fields. Expected {expected_fields}, got {contract_field_names}"
     )
 
     # Verify all fields are marked as inferred (OBSERVED mode pattern)
     for field in result.contract.fields:
         assert field.source == "inferred", f"Field {field.normalized_name} should be inferred"
-        assert field.python_type == object, f"Field {field.normalized_name} should have object type"
+        assert field.python_type is object, f"Field {field.normalized_name} should have object type"
 
 
 def test_batch_replicate_contract_empty_output():
     """BatchReplicate returns marker row for empty batch (not multi-row)."""
-    transform = BatchReplicate({
-        "schema": {"mode": "observed"},
-        "copies_field": "copies",
-        "default_copies": 1,
-    })
+    transform = BatchReplicate(
+        {
+            "schema": {"mode": "observed"},
+            "copies_field": "copies",
+            "default_copies": 1,
+        }
+    )
 
     # Empty batch
     ctx = PluginContext(run_id="test-run", config={})

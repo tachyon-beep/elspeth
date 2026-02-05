@@ -33,6 +33,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig, RunResult
 from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.null_source import NullSource
 from elspeth.plugins.transforms.passthrough import PassThrough
+from tests.conftest import as_transform
 
 
 class TestOrchestratorResumeRowProcessing:
@@ -421,7 +422,7 @@ class TestOrchestratorResumeRowProcessing:
         # Python's type system enforces this as a required keyword-only argument,
         # so we get TypeError before any runtime validation
         with pytest.raises(TypeError, match=r"payload_store"):
-            orchestrator.resume(resume_point, config, fixture_graph)
+            orchestrator.resume(resume_point, config, fixture_graph)  # type: ignore[call-arg]
 
     def test_resume_returns_run_result_with_status(
         self,
@@ -770,7 +771,7 @@ class TestOrchestratorResumeCleanup:
 
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[tracking_transform],
+            transforms=[as_transform(tracking_transform)],
             sinks={
                 "default": JSONSink(
                     {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
@@ -993,7 +994,7 @@ class TestOrchestratorResumeCleanup:
 
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[failing_transform],
+            transforms=[as_transform(failing_transform)],
             sinks={
                 "default": JSONSink(
                     {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}

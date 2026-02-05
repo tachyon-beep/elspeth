@@ -231,7 +231,7 @@ class TestNodeDetailPanelOptionalFields:
         """Transitioning between valid states should not crash."""
         from elspeth.tui.widgets.node_detail import NodeDetailPanel
 
-        initial_state: dict[str, Any] | None = make_valid_node_state()
+        initial_state: dict[str, Any] = make_valid_node_state()
         if initial_has_error:
             initial_state["error_json"] = json.dumps(
                 {
@@ -239,7 +239,7 @@ class TestNodeDetailPanelOptionalFields:
                 }
             )
 
-        updated_state: dict[str, Any] | None = make_valid_node_state()
+        updated_state: dict[str, Any] = make_valid_node_state()
         if updated_has_error:
             updated_state["error_json"] = json.dumps(
                 {

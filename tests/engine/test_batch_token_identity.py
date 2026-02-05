@@ -145,7 +145,7 @@ class TestBatchTokenIdentity:
         input_token_ids = []
         for i in range(3):
             pipeline_row = _make_pipeline_row({"value": (i + 1) * 10})  # 10, 20, 30
-            source_row = SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+            source_row = SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
             results = processor.process_row(
                 row_index=i,
                 source_row=source_row,
@@ -180,7 +180,9 @@ class TestBatchTokenIdentity:
         assert_output_token_distinct_from_inputs(output_token_id, input_token_ids)
 
         # Verify aggregation result
-        assert completed[0].final_data.to_dict()["total"] == 60  # 10 + 20 + 30
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict()["total"] == 60  # 10 + 20 + 30
 
     def test_triggering_token_not_reused(self) -> None:
         """The token that triggers the flush must NOT be reused as output.
@@ -231,7 +233,7 @@ class TestBatchTokenIdentity:
 
         # Process row 0 - buffered, returns CONSUMED_IN_BATCH
         pipeline_row_0 = _make_pipeline_row({"value": 10})
-        source_row_0 = SourceRow.valid(pipeline_row_0, contract=pipeline_row_0.contract)
+        source_row_0 = SourceRow.valid(pipeline_row_0.to_dict(), contract=pipeline_row_0.contract)
         results_0 = processor.process_row(
             row_index=0,
             source_row=source_row_0,
@@ -244,7 +246,7 @@ class TestBatchTokenIdentity:
 
         # Process row 1 - triggers flush
         pipeline_row_1 = _make_pipeline_row({"value": 20})
-        source_row_1 = SourceRow.valid(pipeline_row_1, contract=pipeline_row_1.contract)
+        source_row_1 = SourceRow.valid(pipeline_row_1.to_dict(), contract=pipeline_row_1.contract)
         results_1 = processor.process_row(
             row_index=1,
             source_row=source_row_1,
@@ -271,7 +273,9 @@ class TestBatchTokenIdentity:
         assert output_token_id != first_token_id, "Output token should not equal first buffered token either"
 
         # Verify output data is correct
-        assert completed[0].final_data.to_dict()["total"] == 30  # 10 + 20
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict()["total"] == 30  # 10 + 20
 
     def test_batch_members_correctly_recorded(self) -> None:
         """Batch members table should contain all input tokens.
@@ -325,7 +329,7 @@ class TestBatchTokenIdentity:
         input_token_ids = []
         for i in range(3):
             pipeline_row = _make_pipeline_row({"value": (i + 1) * 10})
-            source_row = SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
+            source_row = SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
             results = processor.process_row(
                 row_index=i,
                 source_row=source_row,

@@ -18,6 +18,7 @@ from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.engine.executors import GateOutcome
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
@@ -187,7 +188,7 @@ class TestTriggerTypeFallback:
         def mock_get_trigger_type(node_id: NodeID) -> TriggerType | None:
             return None
 
-        processor._aggregation_executor.get_trigger_type = mock_get_trigger_type
+        processor._aggregation_executor.get_trigger_type = mock_get_trigger_type  # type: ignore[method-assign]
 
         transform = BatchTransform(agg_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -205,7 +206,7 @@ class TestTriggerTypeFallback:
         assert results1[0].outcome == RowOutcome.CONSUMED_IN_BATCH
 
         # Force should_flush to return True for second row
-        processor._aggregation_executor.should_flush = lambda node_id: True
+        processor._aggregation_executor.should_flush = lambda node_id: True  # type: ignore[method-assign]
 
         # Process second row with forced flush
         results2 = processor.process_row(
@@ -537,20 +538,11 @@ class TestForkRoutingPaths:
             aggregation_settings={},
         )
 
-        # Create a mock GateOutcome with sink_name set
-        from dataclasses import dataclass
-
+        # Create a GateOutcome with sink_name set
         from elspeth.contracts.enums import RoutingKind
         from elspeth.contracts.routing import RoutingAction
         from elspeth.engine.tokens import TokenInfo
         from elspeth.plugins.results import GateResult
-
-        @dataclass
-        class MockGateOutcome:
-            result: GateResult
-            updated_token: TokenInfo
-            sink_name: str | None
-            child_tokens: list[TokenInfo]
 
         parent_token = TokenInfo(
             row_id="row1",
@@ -567,7 +559,7 @@ class TestForkRoutingPaths:
             ),
         )
 
-        outcome = MockGateOutcome(
+        outcome = GateOutcome(
             result=gate_result,
             updated_token=parent_token,
             sink_name="error_sink",
@@ -605,19 +597,10 @@ class TestForkRoutingPaths:
             aggregation_settings={},
         )
 
-        from dataclasses import dataclass
-
         from elspeth.contracts.enums import RoutingKind
         from elspeth.contracts.routing import RoutingAction
         from elspeth.engine.tokens import TokenInfo
         from elspeth.plugins.results import GateResult
-
-        @dataclass
-        class MockGateOutcome:
-            result: GateResult
-            updated_token: TokenInfo
-            sink_name: str | None
-            child_tokens: list[TokenInfo]
 
         parent_token = TokenInfo(
             row_id="row1",
@@ -634,7 +617,7 @@ class TestForkRoutingPaths:
             ),
         )
 
-        outcome = MockGateOutcome(
+        outcome = GateOutcome(
             result=gate_result,
             updated_token=parent_token,
             sink_name=None,
@@ -672,19 +655,10 @@ class TestForkRoutingPaths:
             aggregation_settings={},
         )
 
-        from dataclasses import dataclass
-
         from elspeth.contracts.enums import RoutingKind
         from elspeth.contracts.routing import RoutingAction
         from elspeth.engine.tokens import TokenInfo
         from elspeth.plugins.results import GateResult
-
-        @dataclass
-        class MockGateOutcome:
-            result: GateResult
-            updated_token: TokenInfo
-            sink_name: str | None
-            child_tokens: list[TokenInfo]
 
         parent_token = TokenInfo(
             row_id="row1",
@@ -716,7 +690,7 @@ class TestForkRoutingPaths:
             ),
         )
 
-        outcome = MockGateOutcome(
+        outcome = GateOutcome(
             result=gate_result,
             updated_token=parent_token,
             sink_name=None,
@@ -1101,7 +1075,7 @@ class TestErrorHandlingPaths:
 
         # Simulate a transform failure
         error_result = TransformResult.error(
-            reason={"error": "Test failure", "code": "TEST_001"},
+            reason={"reason": "test_error", "error": "Test failure"},
         )
 
         # TransformResult uses status literal, not is_error property

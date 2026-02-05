@@ -1261,7 +1261,7 @@ class AggregationExecutor:
         from elspeth.contracts.schema_contract import PipelineRow
 
         pipeline_rows: list[PipelineRow] = []
-        for row_dict, token in zip(buffered_rows, buffered_tokens):
+        for row_dict, token in zip(buffered_rows, buffered_tokens, strict=True):
             contract = token.row_data.contract
             if contract is None:
                 raise RuntimeError(

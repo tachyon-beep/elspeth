@@ -2,6 +2,7 @@
 """Tests for ChaosLLM MCP server."""
 
 import sqlite3
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -68,7 +69,7 @@ def temp_db(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def empty_analyzer(temp_db: Path) -> ChaosLLMAnalyzer:
+def empty_analyzer(temp_db: Path) -> Generator[ChaosLLMAnalyzer, None, None]:
     """Create analyzer with empty database."""
     analyzer = ChaosLLMAnalyzer(str(temp_db))
     yield analyzer
@@ -76,7 +77,7 @@ def empty_analyzer(temp_db: Path) -> ChaosLLMAnalyzer:
 
 
 @pytest.fixture
-def populated_analyzer(temp_db: Path) -> ChaosLLMAnalyzer:
+def populated_analyzer(temp_db: Path) -> Generator[ChaosLLMAnalyzer, None, None]:
     """Create analyzer with pre-populated test data."""
     conn = sqlite3.connect(str(temp_db))
 

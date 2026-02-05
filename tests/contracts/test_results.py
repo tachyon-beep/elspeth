@@ -16,6 +16,8 @@ NOTE: AcceptResult tests deleted in aggregation structural cleanup.
 Aggregation is now engine-controlled via batch-aware transforms.
 """
 
+from typing import Any
+
 import pytest
 
 from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo, TransformErrorReason
@@ -36,7 +38,7 @@ def _make_observed_contract() -> SchemaContract:
     return SchemaContract(mode="OBSERVED", fields=())
 
 
-def _wrap_dict_as_pipeline_row(data: dict) -> PipelineRow:
+def _wrap_dict_as_pipeline_row(data: dict[str, Any]) -> PipelineRow:
     """Wrap dict as PipelineRow with OBSERVED contract for tests."""
     return PipelineRow(data, _make_observed_contract())
 
@@ -46,7 +48,7 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_multi_row_success(self) -> None:
         """TransformResult.success_multi returns multiple rows."""
-        rows = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}]
+        rows: list[dict[str, Any] | PipelineRow] = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}]
         result = TransformResult.success_multi(rows, success_reason={"action": "test"})
 
         assert result.status == "success"

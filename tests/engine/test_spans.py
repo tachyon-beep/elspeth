@@ -61,10 +61,15 @@ class TestSpanFactory:
         tracer = provider.get_tracer("test")
         factory = SpanFactory(tracer=tracer)
 
+        from opentelemetry.sdk.trace import ReadableSpan
+
         with factory.run_span("run-001") as span:
+            # Type narrow: with a real tracer, span is SDK ReadableSpan (not NoOpSpan)
+            assert isinstance(span, ReadableSpan)
             assert span.name == "run"
 
         with factory.row_span("row-001", "token-001") as span:
+            assert isinstance(span, ReadableSpan)
             assert span.name == "row"
 
     def test_noop_span_interface(self) -> None:
@@ -795,11 +800,13 @@ class TestNodeIdOnSpans:
         assert len(spans) == 2
 
         # Both have same plugin.name
+        assert spans[0].attributes is not None
+        assert spans[1].attributes is not None
         assert spans[0].attributes.get("plugin.name") == "field_mapper"
         assert spans[1].attributes.get("plugin.name") == "field_mapper"
 
         # But different node.id - NOW DISTINGUISHABLE!
-        node_ids = {s.attributes.get("node.id") for s in spans}
+        node_ids = {s.attributes.get("node.id") for s in spans if s.attributes is not None}
         assert node_ids == {
             "transform_field_mapper_abc123_0",
             "transform_field_mapper_def456_1",

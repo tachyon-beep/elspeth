@@ -6,6 +6,7 @@ import pytest
 
 from elspeth.contracts import SourceRow
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID
 
 
 def _make_contract() -> SchemaContract:
@@ -57,7 +58,7 @@ class TestRowProcessorPipelineRow:
             recorder=recorder,
             span_factory=span_factory,
             run_id="run_001",
-            source_node_id="source_001",
+            source_node_id=NodeID("source_001"),
         )
 
         source_row = SourceRow.valid({"amount": 100}, contract=contract)
@@ -88,7 +89,7 @@ class TestRowProcessorPipelineRow:
             recorder=recorder,
             span_factory=span_factory,
             run_id="run_001",
-            source_node_id="source_001",
+            source_node_id=NodeID("source_001"),
         )
 
         source_row = SourceRow.valid({"amount": 100}, contract=contract)
@@ -124,7 +125,7 @@ class TestRowProcessorPipelineRow:
             recorder=recorder,
             span_factory=span_factory,
             run_id="run_001",
-            source_node_id="source_001",
+            source_node_id=NodeID("source_001"),
         )
 
         # SourceRow without contract
@@ -156,7 +157,7 @@ class TestRowProcessorExistingRow:
             recorder=recorder,
             span_factory=span_factory,
             run_id="run_001",
-            source_node_id="source_001",
+            source_node_id=NodeID("source_001"),
         )
 
         # PipelineRow for resume (row already exists in database)

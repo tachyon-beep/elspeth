@@ -196,6 +196,7 @@ class TestContractVerificationOnResume:
                 with db.engine.connect() as conn:
                     # Read the current JSON
                     result = conn.execute(runs_table.select().where(runs_table.c.run_id == run_id)).fetchone()
+                    assert result is not None
                     contract_json = result.schema_contract_json
 
                     # Modify the hash inside the JSON

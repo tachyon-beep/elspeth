@@ -43,7 +43,7 @@ class TestCSVSinkResumeSchemaValidation:
 
         # CLI would check this and exit with error
         assert validation.valid is False
-        assert "fixed mode" in validation.error_message
+        assert validation.error_message is not None and "fixed mode" in validation.error_message
         assert "id" in validation.missing_fields
         assert "name" in validation.missing_fields
 
@@ -98,7 +98,7 @@ class TestDatabaseSinkResumeSchemaValidation:
         validation = sink.validate_output_target()
 
         assert validation.valid is False
-        assert "fixed mode" in validation.error_message
+        assert validation.error_message is not None and "fixed mode" in validation.error_message
         sink.close()
 
     def test_resume_succeeds_on_matching_table_schema(self, tmp_path: Path):
@@ -153,7 +153,7 @@ class TestJSONLSinkResumeSchemaValidation:
         validation = sink.validate_output_target()
 
         assert validation.valid is False
-        assert "fixed mode" in validation.error_message
+        assert validation.error_message is not None and "fixed mode" in validation.error_message
 
     def test_resume_succeeds_on_matching_jsonl_schema(self, tmp_path: Path):
         """CLI resume should proceed when JSONL records match schema."""

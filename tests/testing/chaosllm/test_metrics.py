@@ -5,6 +5,7 @@ import json
 import sqlite3
 import threading
 import time
+from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -275,7 +276,7 @@ class TestRecordRequest:
     """Tests for record_request method."""
 
     @pytest.fixture
-    def recorder(self, tmp_path: Path) -> MetricsRecorder:
+    def recorder(self, tmp_path: Path) -> Generator[MetricsRecorder, None, None]:
         """Create a fresh recorder for each test."""
         db_path = tmp_path / "metrics.db"
         config = MetricsConfig(database=str(db_path))
@@ -359,7 +360,7 @@ class TestTimeseries:
     """Tests for time-series aggregation."""
 
     @pytest.fixture
-    def recorder(self, tmp_path: Path) -> MetricsRecorder:
+    def recorder(self, tmp_path: Path) -> Generator[MetricsRecorder, None, None]:
         """Create a fresh recorder for each test."""
         db_path = tmp_path / "metrics.db"
         config = MetricsConfig(database=str(db_path), timeseries_bucket_sec=1)
@@ -526,7 +527,7 @@ class TestReset:
     """Tests for reset method."""
 
     @pytest.fixture
-    def recorder(self, tmp_path: Path) -> MetricsRecorder:
+    def recorder(self, tmp_path: Path) -> Generator[MetricsRecorder, None, None]:
         """Create a fresh recorder for each test."""
         db_path = tmp_path / "metrics.db"
         config = MetricsConfig(database=str(db_path))
@@ -600,7 +601,7 @@ class TestGetStats:
     """Tests for get_stats method."""
 
     @pytest.fixture
-    def recorder(self, tmp_path: Path) -> MetricsRecorder:
+    def recorder(self, tmp_path: Path) -> Generator[MetricsRecorder, None, None]:
         """Create a fresh recorder for each test."""
         db_path = tmp_path / "metrics.db"
         config = MetricsConfig(database=str(db_path))
@@ -730,7 +731,7 @@ class TestSaveRunInfo:
     """Tests for save_run_info method."""
 
     @pytest.fixture
-    def recorder(self, tmp_path: Path) -> MetricsRecorder:
+    def recorder(self, tmp_path: Path) -> Generator[MetricsRecorder, None, None]:
         """Create a fresh recorder for each test."""
         db_path = tmp_path / "metrics.db"
         config = MetricsConfig(database=str(db_path))
@@ -790,7 +791,7 @@ class TestGetRequests:
     """Tests for get_requests method."""
 
     @pytest.fixture
-    def recorder(self, tmp_path: Path) -> MetricsRecorder:
+    def recorder(self, tmp_path: Path) -> Generator[MetricsRecorder, None, None]:
         """Create a fresh recorder for each test."""
         db_path = tmp_path / "metrics.db"
         config = MetricsConfig(database=str(db_path))

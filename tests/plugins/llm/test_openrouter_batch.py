@@ -13,8 +13,9 @@ Tests cover:
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
-from typing import Any
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import httpx
@@ -73,7 +74,7 @@ def _create_mock_response(
     status_code: int = 200,
     raw_body: str | None = None,
     headers: dict[str, str] | None = None,
-) -> Mock:
+) -> httpx.Response:
     """Create an httpx.Response using ChaosLLM response generation."""
     request = {
         "model": model,
@@ -104,20 +105,31 @@ def _create_mock_context(
     return ctx
 
 
+@contextmanager
 def mock_httpx_client(
     chaosllm_server,
     responses: list[httpx.Response] | httpx.Response | None = None,
     side_effect: Exception | None = None,
-) -> Generator[Mock, None, None]:
+) -> Iterator[Mock]:
     """Context manager to mock httpx.Client using ChaosLLM responses."""
     if responses is None and side_effect is None:
         responses = _create_mock_response(chaosllm_server)
-    normalized = responses if isinstance(responses, list) else [responses]
-    return chaosllm_openrouter_http_responses(
+    # Build list of responses, ensuring no None values
+    if responses is None:
+        # side_effect is provided, responses list not used
+        normalized: list[httpx.Response] = []
+    elif isinstance(responses, list):
+        normalized = responses
+    else:
+        normalized = [responses]
+    # Cast to the expected type for chaosllm_openrouter_http_responses
+    typed_responses = cast(list[dict[str, Any] | str | httpx.Response], normalized)
+    with chaosllm_openrouter_http_responses(
         chaosllm_server,
-        normalized,
+        typed_responses,
         side_effect=side_effect,
-    )
+    ) as mock_client:
+        yield mock_client
 
 
 class TestOpenRouterBatchConfig:

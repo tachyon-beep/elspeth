@@ -47,7 +47,8 @@ def _import_sink_class(class_path: str) -> type:
     import importlib
 
     module = importlib.import_module(module_path)
-    return getattr(module, class_name)
+    cls: type = getattr(module, class_name)
+    return cls
 
 
 class TestSinkProtocolCompliance:
@@ -64,6 +65,6 @@ class TestSinkProtocolCompliance:
     def test_has_required_attributes(self, class_path: str, config: dict[str, Any], expected_name: str) -> None:
         """All sinks must have name and input_schema attributes."""
         sink_class = _import_sink_class(class_path)
-        assert sink_class.name == expected_name
+        assert sink_class.name == expected_name  # type: ignore[attr-defined]
         sink = sink_class(config)
         assert hasattr(sink, "input_schema"), f"{sink_class.__name__} must have input_schema attribute"

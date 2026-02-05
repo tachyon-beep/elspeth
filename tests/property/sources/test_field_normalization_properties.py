@@ -47,7 +47,6 @@ class TestNormalizeFieldNameProperties:
         except ValueError:
             # Skip inputs that normalize to empty string
             assume(False)
-            return
 
         # Second normalization should be identical
         double_normalized = normalize_field_name(normalized)
@@ -127,7 +126,6 @@ class TestCollisionDetectionProperties:
             normalized_map = {h: normalize_field_name(h) for h in headers}
         except ValueError:
             assume(False)
-            return
 
         # Check if original order has collision
         has_collision_original = False
@@ -161,7 +159,6 @@ class TestCollisionDetectionProperties:
             normalized = [normalize_field_name(h) for h in headers]
         except ValueError:
             assume(False)
-            return
 
         # If normalized values are unique, should not raise
         if len(normalized) == len(set(normalized)):
@@ -189,7 +186,6 @@ class TestResolveFieldNamesProperties:
         except ValueError:
             # Collisions or empty normalizations are valid rejections
             assume(False)
-            return
 
         assert len(result.final_headers) == len(headers), f"Header count changed: {len(headers)} -> {len(result.final_headers)}"
         assert len(result.resolution_mapping) == len(headers), "Resolution mapping has wrong size"
@@ -210,7 +206,6 @@ class TestResolveFieldNamesProperties:
             )
         except ValueError:
             assume(False)
-            return
 
         for original in headers:
             assert original in result.resolution_mapping, f"Original header '{original}' missing from resolution_mapping"

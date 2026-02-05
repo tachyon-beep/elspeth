@@ -144,7 +144,7 @@ class TestRecordSecretResolutions:
         assert len(resolution_ids) == 3
 
         # Verify each has correct fingerprint
-        env_var_to_secret = {r["env_var_name"]: r["secret_value"] for r in resolutions}
+        env_var_to_secret: dict[str, str] = {str(r["env_var_name"]): str(r["secret_value"]) for r in resolutions}
         for row in rows:
             expected_fp = secret_fingerprint(env_var_to_secret[row.env_var_name], key=fingerprint_key)
             assert row.fingerprint == expected_fp

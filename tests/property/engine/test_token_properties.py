@@ -91,7 +91,6 @@ class TestForkIsolationProperties:
         # Get first key for mutation test
         if not children[0].row_data:
             assume(False)
-            return
 
         first_key = next(iter(children[0].row_data))
         original_values = [copy.deepcopy(c.row_data.get(first_key)) for c in children]

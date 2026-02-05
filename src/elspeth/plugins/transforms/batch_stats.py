@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -114,13 +115,29 @@ class BatchStats(BaseTransform):
         """
         if not rows:
             # Empty batch - should not happen in normal operation
+            result_data = {"count": 0, "sum": 0, "mean": None, "batch_empty": True}
+
+            # Create OBSERVED contract for transform mode (processor.py:712 requires it)
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in result_data
+            )
+            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
             return TransformResult.success(
-                {"count": 0, "sum": 0, "mean": None, "batch_empty": True},
+                result_data,
                 success_reason={
                     "action": "processed",
                     "fields_added": ["count", "sum", "mean", "batch_empty"],
                     "metadata": {"empty_batch": True},
                 },
+                contract=output_contract,
             )
 
         # Extract numeric values - enforce type contract
@@ -166,9 +183,24 @@ class BatchStats(BaseTransform):
         if self._group_by and rows and self._group_by in rows[0]:
             fields_added.append(self._group_by)
 
+        # Create OBSERVED contract from output fields for transform mode
+        # Aggregations in transform mode create new tokens (processor.py:712 requires contract)
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=object,  # OBSERVED mode - infer all as object type
+                required=False,
+                source="inferred",
+            )
+            for key in result
+        )
+        output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
         return TransformResult.success(
             result,
             success_reason={"action": "processed", "fields_added": fields_added},
+            contract=output_contract,
         )
 
     def close(self) -> None:

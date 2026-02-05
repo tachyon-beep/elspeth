@@ -161,11 +161,12 @@ class TestOpenRouterSentiment:
             assert 0 <= analysis["confidence"] <= 1, "Confidence out of range"
 
         # Verify expected sentiments
-        def get_sentiment(row: dict) -> str:
+        def get_sentiment(row: dict[str, Any]) -> str:
             analysis = row["sentiment_analysis"]
             if isinstance(analysis, str):
                 analysis = json.loads(analysis)
-            return analysis["sentiment"]
+            sentiment: str = analysis["sentiment"]
+            return sentiment
 
         sentiments = {int(row["id"]): get_sentiment(row) for row in rows}
         for row_id, expected in EXPECTED_SENTIMENTS.items():

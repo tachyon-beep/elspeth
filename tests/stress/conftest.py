@@ -47,7 +47,7 @@ def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        port = s.getsockname()[1]
+        port: int = s.getsockname()[1]
     return port
 
 
@@ -167,7 +167,7 @@ class ChaosLLMHTTPFixture:
         updates: dict[str, Any] = {}
 
         # Collect error injection updates
-        error_updates: dict[str, float] = {}
+        error_updates: dict[str, float | str] = {}
         if rate_limit_pct is not None:
             error_updates["rate_limit_pct"] = rate_limit_pct
         if capacity_529_pct is not None:

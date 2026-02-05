@@ -14,7 +14,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from elspeth.contracts import NodeType, RoutingMode, RunStatus
+from elspeth.contracts import NodeStateStatus, NodeType, RoutingMode, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -276,7 +276,7 @@ class TestSignedExportDeterminism:
             )
             recorder.complete_node_state(
                 state.state_id,
-                status=RunStatus.COMPLETED,
+                status=NodeStateStatus.COMPLETED,
                 output_data={"result": i * 20},
                 duration_ms=5.0,
             )

@@ -1070,6 +1070,7 @@ class TestConfigGateExecutor:
         )
 
         # Verify reason is recorded for audit trail
+        assert outcome.result.action.reason is not None
         reason = dict(outcome.result.action.reason)
         assert reason["condition"] == "row['score'] > 100"
         assert reason["result"] == "true"

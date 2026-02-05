@@ -1623,7 +1623,11 @@ class TestForkCoalescePipelineIntegration:
         # Update token with transformed data while preserving branch_name
         assert sentiment_result.row is not None
         # Test transforms don't set contracts, so manually wrap in PipelineRow
-        sentiment_pipeline_row = PipelineRow(sentiment_result.row, _make_source_row(sentiment_result.row).contract)
+        # Type narrowing: result.row is dict[str, Any] | PipelineRow, extract dict
+        sentiment_row_data = dict(sentiment_result.row) if isinstance(sentiment_result.row, PipelineRow) else sentiment_result.row
+        sentiment_contract = _make_source_row(sentiment_row_data).contract
+        assert sentiment_contract is not None  # _make_source_row always sets contract
+        sentiment_pipeline_row = PipelineRow(sentiment_row_data, sentiment_contract)
         sentiment_token_processed = TokenInfo(
             row_id=sentiment_token_updated.row_id,
             token_id=sentiment_token_updated.token_id,
@@ -1642,7 +1646,11 @@ class TestForkCoalescePipelineIntegration:
         # Update token with transformed data while preserving branch_name
         assert entity_result.row is not None
         # Test transforms don't set contracts, so manually wrap in PipelineRow
-        entity_pipeline_row = PipelineRow(entity_result.row, _make_source_row(entity_result.row).contract)
+        # Type narrowing: result.row is dict[str, Any] | PipelineRow, extract dict
+        entity_row_data = dict(entity_result.row) if isinstance(entity_result.row, PipelineRow) else entity_result.row
+        entity_contract = _make_source_row(entity_row_data).contract
+        assert entity_contract is not None  # _make_source_row always sets contract
+        entity_pipeline_row = PipelineRow(entity_row_data, entity_contract)
         entity_token_processed = TokenInfo(
             row_id=entity_token_updated.row_id,
             token_id=entity_token_updated.token_id,
@@ -2232,7 +2240,11 @@ class TestComplexDAGIntegration:
         assert sentiment_result.status == "success"
         assert sentiment_result.row is not None
         # Test transforms don't set contracts, so manually wrap in PipelineRow
-        sentiment_pipeline_row = PipelineRow(sentiment_result.row, _make_source_row(sentiment_result.row).contract)
+        # Type narrowing: result.row is dict[str, Any] | PipelineRow, extract dict
+        sentiment_row_data = dict(sentiment_result.row) if isinstance(sentiment_result.row, PipelineRow) else sentiment_result.row
+        sentiment_contract = _make_source_row(sentiment_row_data).contract
+        assert sentiment_contract is not None  # _make_source_row always sets contract
+        sentiment_pipeline_row = PipelineRow(sentiment_row_data, sentiment_contract)
         sentiment_token_processed = TokenInfo(
             row_id=sentiment_token_updated.row_id,
             token_id=sentiment_token_updated.token_id,
@@ -2250,7 +2262,11 @@ class TestComplexDAGIntegration:
         assert entity_result.status == "success"
         assert entity_result.row is not None
         # Test transforms don't set contracts, so manually wrap in PipelineRow
-        entity_pipeline_row = PipelineRow(entity_result.row, _make_source_row(entity_result.row).contract)
+        # Type narrowing: result.row is dict[str, Any] | PipelineRow, extract dict
+        entity_row_data = dict(entity_result.row) if isinstance(entity_result.row, PipelineRow) else entity_result.row
+        entity_contract = _make_source_row(entity_row_data).contract
+        assert entity_contract is not None  # _make_source_row always sets contract
+        entity_pipeline_row = PipelineRow(entity_row_data, entity_contract)
         entity_token_processed = TokenInfo(
             row_id=entity_token_updated.row_id,
             token_id=entity_token_updated.token_id,

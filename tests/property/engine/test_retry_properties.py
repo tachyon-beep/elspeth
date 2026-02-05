@@ -18,6 +18,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts.config import RuntimeRetryConfig
+from elspeth.contracts.engine import RetryPolicy
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from tests.property.conftest import valid_delays, valid_jitter, valid_max_attempts
 
@@ -124,7 +125,7 @@ class TestRuntimeRetryConfigFactoryProperties:
         This is a trust boundary - external policy config may have invalid values.
         The factory must coerce to valid values without crashing.
         """
-        policy = {
+        policy: RetryPolicy = {
             "max_attempts": max_attempts,
             "base_delay": base_delay,
             "max_delay": max_delay,
@@ -148,7 +149,7 @@ class TestRuntimeRetryConfigFactoryProperties:
 
     @given(policy=st.fixed_dictionaries({}))
     @settings(max_examples=10)
-    def test_from_policy_empty_dict_uses_defaults(self, policy: dict) -> None:
+    def test_from_policy_empty_dict_uses_defaults(self, policy: RetryPolicy) -> None:
         """Property: from_policy({}) uses sensible defaults."""
         config = RuntimeRetryConfig.from_policy(policy)
 
@@ -179,7 +180,7 @@ class TestRuntimeRetryConfigFactoryProperties:
         assume(max_delay >= 0.1)
         assume(jitter >= 0.0)
 
-        policy = {
+        policy: RetryPolicy = {
             "max_attempts": max_attempts,
             "base_delay": base_delay,
             "max_delay": max_delay,
@@ -202,7 +203,7 @@ class TestRuntimeRetryConfigCoercionProperties:
     @settings(max_examples=50)
     def test_negative_max_attempts_coerced_to_minimum(self, bad_max_attempts: int) -> None:
         """Property: Negative/zero max_attempts coerced to 1."""
-        policy = {"max_attempts": bad_max_attempts}
+        policy: RetryPolicy = {"max_attempts": bad_max_attempts}
         config = RuntimeRetryConfig.from_policy(policy)
 
         assert config.max_attempts >= 1, f"Bad max_attempts {bad_max_attempts} should coerce to >= 1, got {config.max_attempts}"
@@ -211,7 +212,7 @@ class TestRuntimeRetryConfigCoercionProperties:
     @settings(max_examples=50)
     def test_negative_base_delay_coerced_to_minimum(self, bad_base_delay: float) -> None:
         """Property: Negative/zero base_delay coerced to minimum."""
-        policy = {"base_delay": bad_base_delay}
+        policy: RetryPolicy = {"base_delay": bad_base_delay}
         config = RuntimeRetryConfig.from_policy(policy)
 
         assert config.base_delay >= 0.01, f"Bad base_delay {bad_base_delay} should coerce to >= 0.01, got {config.base_delay}"
@@ -220,7 +221,7 @@ class TestRuntimeRetryConfigCoercionProperties:
     @settings(max_examples=50)
     def test_negative_jitter_coerced_to_zero(self, bad_jitter: float) -> None:
         """Property: Negative jitter coerced to 0."""
-        policy = {"jitter": bad_jitter}
+        policy: RetryPolicy = {"jitter": bad_jitter}
         config = RuntimeRetryConfig.from_policy(policy)
 
         assert config.jitter >= 0.0, f"Bad jitter {bad_jitter} should coerce to >= 0.0, got {config.jitter}"

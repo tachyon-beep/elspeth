@@ -44,7 +44,7 @@ class TestTelemetryGranularityEnum:
     def test_is_string_enum(self) -> None:
         """TelemetryGranularity is a string enum for YAML/settings parsing."""
         assert isinstance(TelemetryGranularity.LIFECYCLE, str)
-        assert TelemetryGranularity.LIFECYCLE == "lifecycle"
+        assert TelemetryGranularity.LIFECYCLE.value == "lifecycle"
 
     def test_parse_from_string(self) -> None:
         """Can parse enum from string value."""
@@ -76,7 +76,7 @@ class TestBackpressureModeEnum:
     def test_is_string_enum(self) -> None:
         """BackpressureMode is a string enum for YAML/settings parsing."""
         assert isinstance(BackpressureMode.BLOCK, str)
-        assert BackpressureMode.BLOCK == "block"
+        assert BackpressureMode.BLOCK.value == "block"
 
     def test_parse_from_string(self) -> None:
         """Can parse enum from string value."""

@@ -14,7 +14,7 @@ the WP-09 specific verification requirements.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import text
@@ -1582,7 +1582,7 @@ class TestGateRuntimeErrors:
         # With default 0, condition "0 > 5" is false
         assert outcome_missing.result.action.kind.value == "continue"
         # Check that the raw evaluation result (captured in reason) shows "false"
-        assert outcome_missing.result.action.reason["result"] == "false"
+        assert cast(dict[str, str], outcome_missing.result.action.reason)["result"] == "false"
 
         # Test 2: Present optional field with value > 5 - should evaluate to true
         token_present = TokenInfo(
@@ -1610,7 +1610,7 @@ class TestGateRuntimeErrors:
 
         # With value 10, condition "10 > 5" is true
         assert outcome_present.result.action.kind.value == "continue"
-        assert outcome_present.result.action.reason["result"] == "true"
+        assert cast(dict[str, str], outcome_present.result.action.reason)["result"] == "true"
 
         # Test 3: Present optional field with value <= 5 - should evaluate to false
         token_low = TokenInfo(
@@ -1638,7 +1638,7 @@ class TestGateRuntimeErrors:
 
         # With value 3, condition "3 > 5" is false
         assert outcome_low.result.action.kind.value == "continue"
-        assert outcome_low.result.action.reason["result"] == "false"
+        assert cast(dict[str, str], outcome_low.result.action.reason)["result"] == "false"
 
         # Verify all node states are completed (not failed)
         with db.engine.connect() as conn:

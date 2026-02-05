@@ -383,7 +383,7 @@ class TestValidationErrorWithContract:
         record = ValidationErrorWithContract.from_violation(violation)
 
         with pytest.raises(AttributeError):
-            record.violation_type = "other"  # type: ignore[misc]
+            record.violation_type = "other"  # type: ignore[assignment,misc]
 
     def test_unknown_violation_type_raises(self) -> None:
         """Unknown violation type raises ValueError."""

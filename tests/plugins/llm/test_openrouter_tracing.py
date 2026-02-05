@@ -316,7 +316,7 @@ class TestLangfuseSpanCreation:
         @contextmanager
         def mock_start_observation(**kwargs: Any):
             obs = MagicMock()
-            obs_record = {"kwargs": kwargs, "updates": []}
+            obs_record: dict[str, Any] = {"kwargs": kwargs, "updates": []}
             captured_observations.append(obs_record)
             obs.update = lambda **uk: obs_record["updates"].append(uk)
             yield obs
@@ -421,7 +421,7 @@ class TestMultiQueryLangfuseSpanCreation:
         @contextmanager
         def mock_start_observation(**kwargs: Any):
             obs = MagicMock()
-            obs_record = {"kwargs": kwargs, "updates": []}
+            obs_record: dict[str, Any] = {"kwargs": kwargs, "updates": []}
             captured_observations.append(obs_record)
             obs.update = lambda **uk: obs_record["updates"].append(uk)
             yield obs

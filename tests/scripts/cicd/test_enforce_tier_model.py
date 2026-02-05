@@ -381,6 +381,7 @@ class TestAllowlistMatching:
 
         matched = allowlist.match(finding)
         assert matched is not None
+        assert isinstance(matched, AllowlistEntry)
         assert matched.key == entry.key
         assert entry.matched is True
 

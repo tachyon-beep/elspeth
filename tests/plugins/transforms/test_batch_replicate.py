@@ -271,7 +271,7 @@ class TestBatchReplicateSchemaContract:
         output_schema = transform.output_schema
         # Dynamic schemas accept any fields
         validated = output_schema.model_validate({"id": 1, "copy_index": 0})
-        assert validated.copy_index == 0
+        assert validated.copy_index == 0  # type: ignore[attr-defined]
 
     def test_output_schema_accepts_copy_index_field(self) -> None:
         """Output schema validation passes for rows with copy_index."""

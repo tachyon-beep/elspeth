@@ -37,7 +37,7 @@ from tests.property.conftest import json_primitives
 
 # Valid JSON object responses
 valid_json_objects = st.dictionaries(
-    keys=st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L",))),
+    keys=st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=["L"])),
     values=json_primitives,
     min_size=0,  # Empty object {} is valid
     max_size=10,

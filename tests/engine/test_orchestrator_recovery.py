@@ -94,14 +94,14 @@ class TestOrchestratorResume:
                 original_name="id",
                 python_type=int,
                 required=True,
-                source="test_fixture",
+                source="inferred",
             ),
             FieldContract(
                 normalized_name="value",
                 original_name="value",
                 python_type=int,
                 required=True,
-                source="test_fixture",
+                source="inferred",
             ),
         )
         schema_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
@@ -292,7 +292,7 @@ class TestOrchestratorResume:
         Uses manual node IDs matching the failed_run_with_batch fixture
         to ensure checkpoint/resume compatibility.
         """
-        from elspeth.contracts.types import SinkName
+        from elspeth.contracts.types import NodeID, SinkName
 
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -312,7 +312,7 @@ class TestOrchestratorResume:
 
         # Manually populate ID maps that from_plugin_instances() normally creates
         # Maps sink_name (from PipelineConfig) -> node_id (in graph)
-        graph._sink_id_map = {SinkName("default"): "sink"}
+        graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         graph._default_sink = "default"
 
         return graph

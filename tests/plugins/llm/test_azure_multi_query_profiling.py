@@ -52,9 +52,9 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
     return PipelineRow(data, contract)
 
 
-def make_mock_llm_response(score: int, rationale: str, delay_ms: float = 0) -> Mock:
+def make_mock_llm_response(score: int, rationale: str, delay_ms: float = 0) -> tuple[dict[str, Any], float] | dict[str, Any]:
     """Create a ChaosLLM payload with optional artificial delay."""
-    payload = {"score": score, "rationale": rationale}
+    payload: dict[str, Any] = {"score": score, "rationale": rationale}
     return (payload, delay_ms) if delay_ms > 0 else payload
 
 
@@ -73,7 +73,7 @@ class TestLoadScenarios:
 
         def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
             """Simulate LLM response with 50ms latency."""
-            return make_mock_llm_response(
+            return make_mock_llm_response(  # type: ignore[return-value]
                 score=85 + (call_index % 10),
                 rationale=f"Response {call_index}",
                 delay_ms=50,
@@ -157,7 +157,7 @@ class TestLoadScenarios:
             """Run test with given pool_size, return (elapsed_time, total_calls)."""
 
             def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
-                return make_mock_llm_response(
+                return make_mock_llm_response(  # type: ignore[return-value]
                     score=85,
                     rationale=f"Response {call_index}",
                     delay_ms=50,
@@ -237,7 +237,7 @@ class TestLoadScenarios:
 
         def response_factory(_call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
             # Return small responses (shouldn't accumulate much memory)
-            return make_mock_llm_response(
+            return make_mock_llm_response(  # type: ignore[return-value]
                 score=85,
                 rationale="Short response",
                 delay_ms=10,
@@ -366,7 +366,7 @@ class TestLoadScenarios:
         """Verify LLM client caching works correctly."""
 
         def response_factory(call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
-            return make_mock_llm_response(score=85, rationale=f"Response {call_index}")
+            return make_mock_llm_response(score=85, rationale=f"Response {call_index}")  # type: ignore[return-value]
 
         with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
             _mock_client,
@@ -707,7 +707,7 @@ class TestProfilingInstrumentation:
             """Simulate variable query latency."""
             delay = random.uniform(20, 80)
             query_times.append(delay)
-            return make_mock_llm_response(score=85, rationale="OK", delay_ms=delay)
+            return make_mock_llm_response(score=85, rationale="OK", delay_ms=delay)  # type: ignore[return-value]
 
         with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
             _mock_client,
@@ -770,7 +770,7 @@ class TestProfilingInstrumentation:
 
         def response_factory(_call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
             # Instant responses to isolate batch processing overhead
-            return make_mock_llm_response(score=85, rationale="OK", delay_ms=0)
+            return make_mock_llm_response(score=85, rationale="OK", delay_ms=0)  # type: ignore[return-value]
 
         with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
             _mock_client,

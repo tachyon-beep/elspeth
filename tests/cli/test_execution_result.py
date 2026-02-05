@@ -15,7 +15,7 @@ class TestExecutionResult:
         """ExecutionResult should be importable from contracts."""
         result: ExecutionResult = {
             "run_id": "run-123",
-            "status": "completed",
+            "status": RunStatus.COMPLETED,
             "rows_processed": 100,
         }
         # Assert all required fields
@@ -27,7 +27,7 @@ class TestExecutionResult:
         """ExecutionResult should accept all fields."""
         result: ExecutionResult = {
             "run_id": "run-456",
-            "status": "completed",
+            "status": RunStatus.COMPLETED,
             "rows_processed": 1000,
             "rows_succeeded": 990,
             "rows_failed": 10,
@@ -90,7 +90,7 @@ class TestExecutionResultEdgeCases:
         """ExecutionResult with only required fields is valid."""
         result: ExecutionResult = {
             "run_id": "minimal-run",
-            "status": "completed",
+            "status": RunStatus.COMPLETED,
             "rows_processed": 0,
         }
         assert result["run_id"] == "minimal-run"
@@ -100,7 +100,7 @@ class TestExecutionResultEdgeCases:
         """ExecutionResult can represent failed runs."""
         result: ExecutionResult = {
             "run_id": "failed-run",
-            "status": "failed",
+            "status": RunStatus.FAILED,
             "rows_processed": 50,
             "rows_succeeded": 45,
             "rows_failed": 5,
@@ -112,7 +112,7 @@ class TestExecutionResultEdgeCases:
         """Zero duration is valid (fast pipeline)."""
         result: ExecutionResult = {
             "run_id": "fast-run",
-            "status": "completed",
+            "status": RunStatus.COMPLETED,
             "rows_processed": 1,
             "duration_seconds": 0.0,
         }

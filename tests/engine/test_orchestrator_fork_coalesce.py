@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import SourceRow
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.types import CoalesceName
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
@@ -371,7 +372,9 @@ class TestCoalesceWiring:
         ):
             mock_processor = MagicMock()
             mock_processor.process_row.return_value = [coalesced_result]
-            mock_processor.token_manager.create_initial_token.return_value = MagicMock(row_id="row_1", token_id="t1", row_data=_make_pipeline_row({"value": 1}))
+            mock_processor.token_manager.create_initial_token.return_value = MagicMock(
+                row_id="row_1", token_id="t1", row_data=_make_pipeline_row({"value": 1})
+            )
             mock_processor_cls.return_value = mock_processor
 
             mock_sink_executor = MagicMock()
@@ -756,8 +759,8 @@ class TestCoalesceWiring:
         # forker gate is at pipeline index 2 (after 2 transforms)
         # coalesce_step = len(transforms) + len(gates) + coalesce_index
         #               = 2 + 1 + 0 = 3
-        assert "merge_results" in step_map
-        assert step_map["merge_results"] == 3
+        assert CoalesceName("merge_results") in step_map
+        assert step_map[CoalesceName("merge_results")] == 3
 
 
 class TestCoalesceStepMapCalculation:

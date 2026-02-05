@@ -134,6 +134,7 @@ def _normalize_for_canonical(data: Any) -> Any:
     # Handle PipelineRow - convert to dict before processing
     # Import here to avoid circular dependency
     from elspeth.contracts.schema_contract import PipelineRow
+
     if isinstance(data, PipelineRow):
         data = data.to_dict()
 

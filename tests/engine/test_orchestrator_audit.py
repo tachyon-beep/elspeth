@@ -1151,7 +1151,7 @@ class TestNodeMetadataFromPlugin:
             source=as_source(source),
             transforms=[],  # No regular transforms, only aggregation
             sinks={"default": as_sink(sink)},
-            aggregations={"test_agg": (batch_transform, agg_settings)},
+            aggregations={"test_agg": (as_transform(batch_transform), agg_settings)},
             gates=[],
             default_sink="default",
         )
@@ -1164,7 +1164,8 @@ class TestNodeMetadataFromPlugin:
         batch_transform.node_id = agg_node_id
 
         # Build aggregation_settings dict for orchestrator
-        aggregation_settings = {agg_node_id: agg_settings}
+        # PipelineConfig expects dict[str, ...] not dict[NodeID, ...]
+        aggregation_settings: dict[str, AggregationSettings] = {str(agg_node_id): agg_settings}
 
         config = PipelineConfig(
             source=as_source(source),

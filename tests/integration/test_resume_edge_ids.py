@@ -46,9 +46,9 @@ class SimpleGate(BaseGate):
         """Route even IDs to sink_a, odd IDs to sink_b."""
         row_id = row.get("id", 0)
         if row_id % 2 == 0:
-            return GateResult(row=row, action=RoutingAction.route("route_to:sink_a"))
+            return GateResult(row=row.to_dict(), action=RoutingAction.route("route_to:sink_a"))
         else:
-            return GateResult(row=row, action=RoutingAction.route("route_to:sink_b"))
+            return GateResult(row=row.to_dict(), action=RoutingAction.route("route_to:sink_b"))
 
     def on_start(self, ctx: PluginContext) -> None:
         pass

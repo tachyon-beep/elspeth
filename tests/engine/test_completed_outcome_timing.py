@@ -37,6 +37,7 @@ from elspeth.contracts import (
     SourceRow,
 )
 from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -81,7 +82,7 @@ def _build_graph(config: PipelineConfig) -> ExecutionGraph:
         prev = node_id
 
     # Add sink
-    sink_node_id = "sink_default"
+    sink_node_id = NodeID("sink_default")
     graph.add_node(
         sink_node_id,
         node_type=NodeType.SINK,
@@ -92,7 +93,7 @@ def _build_graph(config: PipelineConfig) -> ExecutionGraph:
 
     # Set internal mappings
     graph._sink_id_map = {SinkName("default"): sink_node_id}
-    graph._transform_id_map = {i: f"transform_{i}" for i in range(len(config.transforms))}
+    graph._transform_id_map = {i: NodeID(f"transform_{i}") for i in range(len(config.transforms))}
     graph._config_gate_id_map = {}
     graph._route_resolution_map = {}
     graph._default_sink = "default"

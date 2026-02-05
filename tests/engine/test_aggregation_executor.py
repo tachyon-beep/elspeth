@@ -804,7 +804,27 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": "batch-123",
-                "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "93577787f8ffd7ee", "fields": [{"normalized_name": "name", "original_name": "name", "python_type": "object", "required": False, "source": "observed"}, {"normalized_name": "score", "original_name": "score", "python_type": "object", "required": False, "source": "observed"}]},
+                "contract": {
+                    "mode": "OBSERVED",
+                    "locked": True,
+                    "version_hash": "93577787f8ffd7ee",
+                    "fields": [
+                        {
+                            "normalized_name": "name",
+                            "original_name": "name",
+                            "python_type": "object",
+                            "required": False,
+                            "source": "observed",
+                        },
+                        {
+                            "normalized_name": "score",
+                            "original_name": "score",
+                            "python_type": "object",
+                            "required": False,
+                            "source": "observed",
+                        },
+                    ],
+                },
                 "elapsed_age_seconds": 0.0,  # Required in v2.0 format
                 "count_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
                 "condition_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
@@ -889,7 +909,20 @@ class TestAggregationExecutorCheckpoint:
                     for i in range(4)
                 ],
                 "batch_id": "batch-123",
-                "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "acaff3625e64c8a6", "fields": [{"normalized_name": "value", "original_name": "value", "python_type": "object", "required": False, "source": "observed"}]},
+                "contract": {
+                    "mode": "OBSERVED",
+                    "locked": True,
+                    "version_hash": "acaff3625e64c8a6",
+                    "fields": [
+                        {
+                            "normalized_name": "value",
+                            "original_name": "value",
+                            "python_type": "object",
+                            "required": False,
+                            "source": "observed",
+                        }
+                    ],
+                },
                 "elapsed_age_seconds": 0.0,  # Required in v2.0 format
                 "count_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
                 "condition_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
@@ -1057,7 +1090,20 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": batch.batch_id,
-                "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "acaff3625e64c8a6", "fields": [{"normalized_name": "value", "original_name": "value", "python_type": "object", "required": False, "source": "observed"}]},
+                "contract": {
+                    "mode": "OBSERVED",
+                    "locked": True,
+                    "version_hash": "acaff3625e64c8a6",
+                    "fields": [
+                        {
+                            "normalized_name": "value",
+                            "original_name": "value",
+                            "python_type": "object",
+                            "required": False,
+                            "source": "observed",
+                        }
+                    ],
+                },
                 "elapsed_age_seconds": 0.0,  # Required in v2.0 format
                 "count_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
                 "condition_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
@@ -1598,7 +1644,7 @@ class TestAggregationExecutorCheckpoint:
         self,
         real_landscape_db,
         test_id: str,
-        checkpoint_node_data: dict,
+        checkpoint_node_data: dict[str, Any],
         error_pattern: str,
     ) -> None:
         """Restore crashes with clear error on invalid checkpoint formats.
