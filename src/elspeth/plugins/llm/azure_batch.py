@@ -400,10 +400,12 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            # Propagate success_reason from batch result
+            # Propagate success_reason AND contract from batch result
+            # Contract is critical for downstream transforms to access LLM-added fields
             return TransformResult.success(
                 result.rows[0],
                 success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
+                contract=result.contract,
             )
         elif result.status == "error":
             return result

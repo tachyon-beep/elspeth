@@ -35,11 +35,23 @@ class DatabaseOps:
             return list(result.fetchall())
 
     def execute_insert(self, stmt: Executable) -> None:
-        """Execute insert statement."""
+        """Execute insert statement.
+
+        Raises:
+            ValueError: If zero rows are affected (Tier-1 audit integrity violation)
+        """
         with self._db.connection() as conn:
-            conn.execute(stmt)
+            result = conn.execute(stmt)
+            if result.rowcount == 0:
+                raise ValueError("execute_insert: zero rows affected - audit write failed (missing parent row or constraint violation)")
 
     def execute_update(self, stmt: Executable) -> None:
-        """Execute update statement."""
+        """Execute update statement.
+
+        Raises:
+            ValueError: If zero rows are affected (Tier-1 audit integrity violation)
+        """
         with self._db.connection() as conn:
-            conn.execute(stmt)
+            result = conn.execute(stmt)
+            if result.rowcount == 0:
+                raise ValueError("execute_update: zero rows affected - target row does not exist (audit data corruption)")

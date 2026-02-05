@@ -568,24 +568,23 @@ class PipelineRow:
             key: Field name (original or normalized)
 
         Returns:
-            True if field is in the contract AND exists in actual row data.
-            Returns False if field is not in the contract, even if it exists
-            in the underlying data (use to_dict() for raw access).
+            True if field is accessible via __getitem__ AND exists in actual row data.
+            For FLEXIBLE/OBSERVED contracts, includes extra fields present in data.
+            For FIXED contracts, only includes fields in the contract.
 
         Note:
-            The contract defines which fields are accessible via PipelineRow.
-            In FLEXIBLE mode with declared fields, extras pass validation but
-            are NOT added to the contract, so they are NOT accessible via
-            PipelineRow (only via to_dict()). This enforces contract-based
-            access control.
+            This must align with __getitem__ semantics: if 'key in row' returns True,
+            then row[key] must NOT raise KeyError. This consistency is critical for
+            gate expressions that check membership before accessing fields.
         """
         try:
             resolved = self._contract.resolve_name(key)
             return resolved in self._data
         except KeyError:
-            # Field not in contract - not accessible via PipelineRow
-            # Even if it exists in _data, contract defines accessibility
-            return False
+            # For FLEXIBLE/OBSERVED mode: allow access to extra fields in data not in contract
+            # This mirrors __getitem__ fallback logic for extra-field access
+            # For FIXED mode: resolve_name raises KeyError which we caught, return False
+            return self._contract.mode in ("FLEXIBLE", "OBSERVED") and key in self._data
 
     def to_dict(self) -> dict[str, Any]:
         """Export raw data (normalized keys) for serialization.
