@@ -722,7 +722,8 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Merge all results into output row
         # row is already a dict at this point (converted from PipelineRow in _process_row)
-        output = dict(row)
+        # Shallow copy to avoid mutating the input row
+        output = row.copy()
         for result in results:
             # Check for row presence: successful results should always have a row,
             # but TransformResult supports multi-output scenarios where row may be

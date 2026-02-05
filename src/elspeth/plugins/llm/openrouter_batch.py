@@ -463,7 +463,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
             if isinstance(result, Exception):
                 # Unexpected exception (httpx transport errors caught in as_completed loop)
-                output_row = dict(rows[idx])
+                output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
                     "reason": "unexpected_exception",
@@ -474,7 +474,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
             elif "error" in result:
                 # Row-level error from _process_single_row
-                output_row = dict(rows[idx])
+                output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = result["error"]
                 output_rows.append(output_row)

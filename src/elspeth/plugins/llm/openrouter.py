@@ -632,7 +632,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             # 7. Build output row (OUR CODE - let exceptions crash)
-            output = dict(row_data)
+            output = row_data.copy()
             output[self._response_field] = content
             output[f"{self._response_field}_usage"] = usage
             output[f"{self._response_field}_template_hash"] = rendered.template_hash

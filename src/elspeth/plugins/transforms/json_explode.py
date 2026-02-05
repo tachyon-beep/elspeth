@@ -147,7 +147,7 @@ class JSONExplode(BaseTransform):
 
         # Handle empty array - return single row, not multi
         if len(array_value) == 0:
-            output = dict(base)
+            output = base.copy()
             output[self._output_field] = None
             if self._include_index:
                 output["item_index"] = None
@@ -174,7 +174,7 @@ class JSONExplode(BaseTransform):
         # Explode array into multiple rows
         output_rows: list[dict[str, Any] | PipelineRow] = []
         for i, item in enumerate(array_value):
-            output = dict(base)
+            output = base.copy()
             output[self._output_field] = item
             if self._include_index:
                 output["item_index"] = i

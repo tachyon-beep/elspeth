@@ -343,7 +343,7 @@ class BaseLLMTransform(BaseTransform):
             )
 
         # 5. Build output row (OUR CODE - let exceptions crash)
-        output = dict(row_data)
+        output = row_data.copy()
         output[self._response_field] = response.content
         output[f"{self._response_field}_model"] = response.model
         output[f"{self._response_field}_usage"] = response.usage
