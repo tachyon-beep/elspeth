@@ -52,6 +52,7 @@ class TestOrchestratorPayloadStoreRequirement:
             output_schema = MinimalSchema
 
             def __init__(self) -> None:
+                super().__init__()
                 self.load_called = False
 
             def on_start(self, ctx: Any) -> None:
@@ -117,6 +118,7 @@ class TestOrchestratorPayloadStoreRequirement:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -133,6 +135,7 @@ class TestOrchestratorPayloadStoreRequirement:
             name = "output"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.rows_written: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -298,6 +301,7 @@ class TestOrchestratorPayloadStoreIntegration:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -331,6 +335,7 @@ class TestOrchestratorPayloadStoreIntegration:
             name = "output"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:

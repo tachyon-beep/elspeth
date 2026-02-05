@@ -100,6 +100,7 @@ class TestOrchestratorCheckpointing:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -126,6 +127,7 @@ class TestOrchestratorCheckpointing:
             name = "collect"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -197,6 +199,7 @@ class TestOrchestratorCheckpointing:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -223,6 +226,7 @@ class TestOrchestratorCheckpointing:
             name = "collect"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -285,6 +289,7 @@ class TestOrchestratorCheckpointing:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -311,6 +316,7 @@ class TestOrchestratorCheckpointing:
             name = "collect"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -383,6 +389,7 @@ class TestOrchestratorCheckpointing:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -411,6 +418,7 @@ class TestOrchestratorCheckpointing:
             name = "good_sink"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -562,6 +570,7 @@ class TestOrchestratorCheckpointing:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -588,6 +597,7 @@ class TestOrchestratorCheckpointing:
             name = "collect"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -644,6 +654,7 @@ class TestOrchestratorCheckpointing:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -670,6 +681,7 @@ class TestOrchestratorCheckpointing:
             name = "collect"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:

@@ -606,7 +606,7 @@ class TestEndOfSourceFlush:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -752,7 +752,7 @@ class TestEndOfSourceFlush:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -901,7 +901,7 @@ class TestEndOfSourceFlush:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -1052,7 +1052,7 @@ class TestEndOfSourceFlush:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -1209,7 +1209,7 @@ class TestEndOfSourceFlush:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -1743,7 +1743,7 @@ class TestTimeoutFlushErrorHandling:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -1916,7 +1916,7 @@ class TestTimeoutFlushErrorHandling:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -2094,7 +2094,7 @@ class TestTimeoutFlushErrorHandling:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -2258,7 +2258,7 @@ class TestTimeoutFlushErrorHandling:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -2548,7 +2548,7 @@ class TestTimeoutFlushStepIndexing:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -2702,7 +2702,7 @@ class TestExpectedOutputCountEnforcement:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -2834,7 +2834,7 @@ class TestExpectedOutputCountEnforcement:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -3105,7 +3105,7 @@ class TestExpectedOutputCountEnforcement:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass

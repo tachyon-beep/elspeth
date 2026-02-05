@@ -89,3 +89,19 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/design/subsystems/06-token-lifecycle.md`
+
+## Resolution
+
+**Fixed in:** 2026-02-05
+**Beads issue:** elspeth-rapid-uqe5 (closed)
+
+**Fix:** Added parent relationship validation to `explain()`:
+- After fetching token parents, validates consistency between token metadata and token_parents table
+- If token has `fork_group_id`, `join_group_id`, or `expand_group_id` set but `parents` list is empty, raises `ValueError`
+- Error message identifies which type of group ID is set and explains the audit integrity violation
+- Per Data Manifesto: Missing lineage links are audit corruption and must crash immediately
+
+**Evidence:**
+- `src/elspeth/core/landscape/lineage.py:168-188`: Added validation check after `get_token_parents()`
+- `tests/core/landscape/test_lineage.py:604-658`: Added test that simulates corruption (token with fork_group_id but no parents)
+- All 15 lineage tests pass

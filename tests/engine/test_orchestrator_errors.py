@@ -45,6 +45,7 @@ class TestOrchestratorErrorHandling:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -149,6 +150,7 @@ class TestOrchestratorSourceQuarantineValidation:
             output_schema = RowSchema
 
             def __init__(self) -> None:
+                super().__init__()
                 self.load_called = False
                 # Track the quarantine destination for validation
                 self._on_validation_failure = "nonexistent_quarantine_sink"
@@ -240,6 +242,7 @@ class TestOrchestratorQuarantineMetrics:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -593,6 +596,7 @@ class TestQuarantineDestinationRuntimeValidation:
             output_schema = RowSchema
 
             def __init__(self) -> None:
+                super().__init__()
                 # This passes init validation - "quarantine" sink exists
                 self._on_validation_failure = "quarantine"
 
@@ -706,6 +710,7 @@ class TestQuarantineDestinationRuntimeValidation:
             output_schema = RowSchema
 
             def __init__(self) -> None:
+                super().__init__()
                 self._on_validation_failure = "quarantine"
 
             def on_start(self, ctx: Any) -> None:

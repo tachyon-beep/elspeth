@@ -530,6 +530,47 @@ class TestTrackOperationContextManager:
         assert op is not None
         assert op.status == "pending"
 
+    def test_track_operation_on_base_exception_marks_failed(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        plugin_context: PluginContext,
+    ) -> None:
+        """BUG #10: track_operation marks operation as failed on BaseException.
+
+        System interrupts like KeyboardInterrupt and SystemExit are BaseException
+        subclasses, not Exception subclasses. Without explicit BaseException handling,
+        these interrupts would leave status="completed" (the initial value), causing
+        the audit trail to incorrectly record interrupted operations as successful.
+
+        This test verifies that BaseException (KeyboardInterrupt, SystemExit) is caught
+        and properly marks the operation as "failed" before re-raising.
+        """
+        operation_id = ""
+        with (
+            pytest.raises(KeyboardInterrupt),
+            track_operation(
+                recorder=recorder,
+                run_id=run_id,
+                node_id=source_node_id,
+                operation_type="source_load",
+                ctx=plugin_context,
+            ) as handle,
+        ):
+            operation_id = handle.operation.operation_id
+            raise KeyboardInterrupt()  # Simulate Ctrl+C
+
+        # Operation should be marked as failed, not completed
+        op = recorder.get_operation(operation_id)
+        assert op is not None
+        assert op.status == "failed", (
+            "KeyboardInterrupt should mark operation as failed, not completed. "
+            "Without BaseException handling, status remains 'completed' (initial value)."
+        )
+        # KeyboardInterrupt() with no message has empty string representation
+        assert op.error_message == ""
+
     def test_track_operation_records_duration(
         self,
         recorder: LandscapeRecorder,

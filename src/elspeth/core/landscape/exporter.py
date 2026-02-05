@@ -243,6 +243,9 @@ class LandscapeExporter:
                 "completed_at": operation.completed_at.isoformat() if operation.completed_at else None,
                 "duration_ms": operation.duration_ms,
                 "error_message": operation.error_message,
+                # BUG #9: Add payload reference fields
+                "input_data_ref": operation.input_data_ref,
+                "output_data_ref": operation.output_data_ref,
             }
 
             # External calls for this operation
@@ -259,6 +262,11 @@ class LandscapeExporter:
                     "request_hash": call.request_hash,
                     "response_hash": call.response_hash,
                     "latency_ms": call.latency_ms,
+                    # BUG #9: Add payload references, error, and timestamp
+                    "request_ref": call.request_ref,
+                    "response_ref": call.response_ref,
+                    "error_json": call.error_json,
+                    "created_at": call.created_at.isoformat() if call.created_at else None,
                 }
 
         # === Bug 76r fix: Pre-load all row-related data with batch queries ===
@@ -349,6 +357,11 @@ class LandscapeExporter:
                             "duration_ms": None,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": None,
+                            # BUG #9: Add context, error, and success reason fields
+                            "context_before_json": state.context_before_json,
+                            "context_after_json": None,  # OPEN states don't have after context
+                            "error_json": None,  # OPEN states aren't failed
+                            "success_reason_json": None,  # OPEN states aren't completed
                         }
                     elif isinstance(state, NodeStatePending):
                         yield {
@@ -365,6 +378,11 @@ class LandscapeExporter:
                             "duration_ms": state.duration_ms,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": state.completed_at.isoformat(),
+                            # BUG #9: Add context, error, and success reason fields
+                            "context_before_json": state.context_before_json,
+                            "context_after_json": state.context_after_json,
+                            "error_json": None,  # PENDING states aren't failed
+                            "success_reason_json": None,  # PENDING states aren't completed yet
                         }
                     elif isinstance(state, NodeStateCompleted):
                         yield {
@@ -381,6 +399,11 @@ class LandscapeExporter:
                             "duration_ms": state.duration_ms,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": state.completed_at.isoformat(),
+                            # BUG #9: Add context, error, and success reason fields
+                            "context_before_json": state.context_before_json,
+                            "context_after_json": state.context_after_json,
+                            "error_json": None,  # COMPLETED states aren't failed
+                            "success_reason_json": state.success_reason_json,
                         }
                     else:  # NodeStateFailed
                         yield {
@@ -397,6 +420,11 @@ class LandscapeExporter:
                             "duration_ms": state.duration_ms,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": state.completed_at.isoformat(),
+                            # BUG #9: Add context, error, and success reason fields
+                            "context_before_json": state.context_before_json,
+                            "context_after_json": state.context_after_json,
+                            "error_json": state.error_json,
+                            "success_reason_json": None,  # FAILED states aren't completed
                         }
 
                     # Routing events for this state (from pre-loaded dict)
@@ -411,6 +439,9 @@ class LandscapeExporter:
                             "ordinal": event.ordinal,
                             "mode": event.mode.value,
                             "reason_hash": event.reason_hash,
+                            # BUG #9: Add payload reference and timestamp
+                            "reason_ref": event.reason_ref,
+                            "created_at": event.created_at.isoformat() if event.created_at else None,
                         }
 
                     # External calls for this state (from pre-loaded dict)
@@ -427,6 +458,11 @@ class LandscapeExporter:
                             "request_hash": call.request_hash,
                             "response_hash": call.response_hash,
                             "latency_ms": call.latency_ms,
+                            # BUG #9: Add payload references, error, and timestamp
+                            "request_ref": call.request_ref,
+                            "response_ref": call.response_ref,
+                            "error_json": call.error_json,
+                            "created_at": call.created_at.isoformat() if call.created_at else None,
                         }
 
         # Batches

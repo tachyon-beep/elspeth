@@ -91,6 +91,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
         output_schema = _TestSchema
 
         def __init__(self, data: list[dict[str, Any]]) -> None:
+            super().__init__()
             self._data = data
 
         def on_start(self, ctx: Any) -> None:
@@ -108,6 +109,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
         name = "test_sink"
 
         def __init__(self) -> None:
+            super().__init__()
             self.received_rows: list[dict[str, Any]] = []
 
         def on_start(self, ctx: Any) -> None:

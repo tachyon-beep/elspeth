@@ -155,7 +155,8 @@ class BatchReplicate(BaseTransform):
 
             # Create copies of this row
             for copy_idx in range(copies):
-                output = dict(row)  # Shallow copy preserves original data
+                # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
+                output = row.to_dict()  # Shallow copy preserves original data
                 if self._include_copy_index:
                     output["copy_index"] = copy_idx
                 output_rows.append(output)

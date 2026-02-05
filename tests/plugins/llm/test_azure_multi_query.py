@@ -895,3 +895,47 @@ class TestPoolMetadataAuditIntegration:
             assert isinstance(entry["submit_index"], int)
             assert isinstance(entry["complete_index"], int)
             assert isinstance(entry["buffer_wait_ms"], float)
+
+
+def test_azure_multi_query_with_pipeline_row(mock_context, mock_client):
+    """Verify AzureMultiQueryLLMTransform works with PipelineRow inputs."""
+    from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+
+    transform = AzureMultiQueryLLMTransform(
+        {
+            "schema": {"mode": "observed"},
+            "queries": [
+                {"prompt": "Query: {{ text }}", "output_key": "result"},
+            ],
+            "deployment_name": "gpt-4",
+            "endpoint": "https://test.openai.azure.com",
+            "api_key": "test-key",
+        }
+    )
+
+    # Create PipelineRow input (simulates what engine passes)
+    fields = (
+        FieldContract(
+            normalized_name="text",
+            original_name="text",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    contract = SchemaContract(mode="FIXED", fields=fields, locked=True)
+    pipeline_row = PipelineRow({"text": "test input"}, contract)
+
+    # Mock LLM response
+    mock_client.return_value.chat.completions.create.return_value = Mock(
+        choices=[Mock(message=Mock(content="test response"))],
+        usage={"prompt_tokens": 10, "completion_tokens": 20},
+        model="gpt-4",
+    )
+
+    # Process should work with PipelineRow (uses row.to_dict() internally)
+    result = transform.process(pipeline_row, mock_context)
+
+    assert result.status == "success"
+    assert "result" in result.row
+    assert result.row["result"] == "test response"

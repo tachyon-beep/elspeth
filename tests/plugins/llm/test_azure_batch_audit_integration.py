@@ -453,3 +453,43 @@ def test_missing_result_gets_call_record(real_landscape_db) -> None:
     # Verify error contains "result_not_found"
     error = json.loads(error_call.error_json)
     assert error["reason"] == "result_not_found"
+
+
+def test_azure_batch_with_pipeline_row_inputs(mock_context):
+    """Verify AzureBatchLLMTransform works with PipelineRow inputs from engine."""
+    from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+    from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
+
+    transform = AzureBatchLLMTransform(
+        {
+            "schema": {"mode": "observed"},
+            "prompt": "Process: {{ text }}",
+            "response_field": "llm_response",
+            "deployment_name": "gpt-4",
+            "endpoint": "https://test.openai.azure.com",
+            "api_key": "test-key",
+        }
+    )
+
+    # Create PipelineRow inputs (simulates what engine passes to batch transforms)
+    fields = (
+        FieldContract(
+            normalized_name="text",
+            original_name="text",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    contract = SchemaContract(mode="FIXED", fields=fields, locked=True)
+
+    rows = [
+        PipelineRow({"text": "input 1"}, contract),
+        PipelineRow({"text": "input 2"}, contract),
+    ]
+
+    # Accept batch should work with PipelineRow list (uses row.to_dict() internally)
+    # This tests the pattern is correct without needing full Azure integration
+    batch_id = transform.accept_batch(rows, mock_context)
+    assert batch_id is not None
+    assert isinstance(batch_id, str)

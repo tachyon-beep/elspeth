@@ -375,12 +375,14 @@ class TestSourceContractIntegration:
         pipeline_row = rows[0].to_pipeline_row()
         assert pipeline_row["id"] == 1
 
-        # Extra fields passed validation but are not in the contract
-        # They exist in the underlying data but can't be accessed via PipelineRow
-        assert "name" not in pipeline_row
-        assert "extra_field" not in pipeline_row
+        # FLEXIBLE mode allows access to extra fields in data not in contract
+        # This is the key difference from FIXED mode: extras are accessible
+        assert "name" in pipeline_row
+        assert pipeline_row["name"] == "Alice"
+        assert "extra_field" in pipeline_row
+        assert pipeline_row["extra_field"] == "bonus_data"
 
-        # The underlying data still has the extras (can access via to_dict)
+        # The underlying data contains all fields (same as to_dict)
         raw_data = pipeline_row.to_dict()
         assert raw_data["name"] == "Alice"
         assert raw_data["extra_field"] == "bonus_data"

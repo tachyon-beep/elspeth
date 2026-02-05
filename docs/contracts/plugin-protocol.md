@@ -1,10 +1,8 @@
 # ELSPETH Plugin Protocol Contract
 
-> **Status:** FINAL (v1.6)
-> **Last Updated:** 2026-01-20
+> **Status:** FINAL (v1.7)
+> **Last Updated:** 2026-02-05
 > **Authority:** This document is the master reference for all plugin interactions.
-
-> ⚠️ **Implementation Status:** Features in v1.5 (multi-row output, `creates_tokens`, aggregation output modes) are **specified but not yet implemented**. See [`docs/plans/completed/2026-01-19-multi-row-output.md`](../plans/completed/2026-01-19-multi-row-output.md) for the implementation plan.
 
 ## Overview
 
@@ -96,18 +94,27 @@ parsed = datetime.fromisoformat(row["date"])  # 💥 ValueError - WRAP THIS
 
 ```python
 # THEIR DATA value caused the error → WRAP AND HANDLE
-def process(self, row, ctx):
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     try:
         result = row["value"] / row["divisor"]  # User's divisor=0
     except ZeroDivisionError:
-        return TransformResult.error({"reason": "division_by_zero", "field": "divisor"})
-    return TransformResult.success({"result": result})
+        return TransformResult.error(
+            {"reason": "division_by_zero", "field": "divisor"},
+            retryable=False,
+        )
+    return TransformResult.success(
+        {"result": result},
+        success_reason={"action": "calculated"},
+    )
 
 # OUR CODE caused the error → LET IT CRASH
-def process(self, row, ctx):
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     # If _batch_count is 0, that's MY bug - I should have initialized it
     average = self._total / self._batch_count  # Let it crash!
-    return TransformResult.success({"average": average})
+    return TransformResult.success(
+        {"average": average},
+        success_reason={"action": "averaged"},
+    )
 ```
 
 #### Coercion Rules by Plugin Type
@@ -250,7 +257,7 @@ def __init__(self, config: dict[str, Any]) -> None:
     Validate config here - fail fast if misconfigured.
     """
 
-def load(self, ctx: PluginContext) -> Iterator[dict[str, Any]]:
+def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
     """Yield rows from the source.
 
     MAY BLOCK internally waiting for data (satellite downlink, API polling).
@@ -258,7 +265,20 @@ def load(self, ctx: PluginContext) -> Iterator[dict[str, Any]]:
     Iterator exhausts when source has no more data.
 
     Returns:
-        Iterator yielding row dicts matching output_schema
+        Iterator yielding SourceRow instances - either SourceRow.valid() for
+        valid rows or SourceRow.quarantined() for invalid rows.
+
+    Example:
+        try:
+            validated = self._schema_contract.validate(row)
+            yield SourceRow.valid(validated, contract=self._schema_contract)
+        except ValidationError as e:
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=row,
+                    error=str(e),
+                    destination=self._on_validation_failure,
+                )
     """
 
 def close(self) -> None:
@@ -309,6 +329,56 @@ on_complete(ctx)        ← Finalization
 close()                 ← Release resources
 ```
 
+#### SourceRow Contract
+
+```python
+@dataclass
+class SourceRow:
+    row: Any  # dict for valid rows, Any for quarantined (may be malformed)
+    is_quarantined: bool
+    quarantine_error: str | None
+    quarantine_destination: str | None
+    contract: SchemaContract | None  # Enables to_pipeline_row() conversion
+
+    @classmethod
+    def valid(cls, row: dict[str, Any], contract: SchemaContract | None = None) -> SourceRow:
+        """Create a valid source row.
+
+        Args:
+            row: Validated row data
+            contract: Optional schema contract for the row (enables to_pipeline_row())
+
+        Returns:
+            SourceRow with is_quarantined=False
+        """
+        ...
+
+    @classmethod
+    def quarantined(cls, row: Any, error: str, destination: str) -> SourceRow:
+        """Create a quarantined row result.
+
+        Args:
+            row: The original row data (may be non-dict for malformed data)
+            error: The validation error message
+            destination: The sink name to route this row to
+        """
+        ...
+
+    def to_pipeline_row(self) -> PipelineRow:
+        """Convert to PipelineRow for processing.
+
+        Raises:
+            ValueError: If row is quarantined or has no contract
+        """
+        ...
+```
+
+**Usage:**
+- Valid rows: `SourceRow.valid(row_dict)` or `SourceRow.valid(row_dict, contract=schema_contract)`
+- Invalid rows: `SourceRow.quarantined(row_data, error_message, destination_sink)`
+- The `contract` parameter is optional but enables downstream conversion to PipelineRow
+- Quarantined rows never have contracts
+
 #### Audit Records
 
 - `on_start` called timestamp
@@ -354,12 +424,12 @@ class JSONExplode(BaseTransform):
     creates_tokens = True  # Engine creates new tokens for each output row
     # ...
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         items = row["items"]  # Trust: source validated this is a list
-        return TransformResult.success_multi([
-            {**row, "item": item, "item_index": i}
-            for i, item in enumerate(items)
-        ])
+        return TransformResult.success_multi(
+            [{**row.to_dict(), "item": item, "item_index": i} for i, item in enumerate(items)],
+            success_reason={"action": "exploded", "output_count": len(items)},
+        )
 ```
 
 **Invariants:**
@@ -378,20 +448,29 @@ Transforms can declare `is_batch_aware = True` to receive batched rows when used
 ```python
 class SummaryTransform(BaseTransform):
     name = "summary"
-    is_batch_aware = True  # Engine will pass list[dict] when used at aggregation node
+    is_batch_aware = True  # Engine may pass aggregated data when used at aggregation node
     # ... other attrs ...
 
     def process(
         self,
-        row: dict[str, Any] | list[dict[str, Any]],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
-        if isinstance(row, list):
+        # When used in aggregation, engine buffers rows and passes aggregated data
+        # For this example, assume row contains aggregated batch metadata
+        if "batch_rows" in row:
             # Batch mode: aggregate the rows
-            total = sum(r["value"] for r in row)
-            return TransformResult.success({"total": total, "count": len(row)})
+            batch_rows = row["batch_rows"]
+            total = sum(r["value"] for r in batch_rows)
+            return TransformResult.success(
+                {"total": total, "count": len(batch_rows)},
+                success_reason={"action": "aggregated", "batch_size": len(batch_rows)},
+            )
         # Single row mode
-        return TransformResult.success(row)
+        return TransformResult.success(
+            row.to_dict(),
+            success_reason={"action": "passthrough"},
+        )
 ```
 
 **How it works:**
@@ -432,14 +511,23 @@ transforms:
 
 ```python
 # PROCESSING ERROR - legitimate, uses on_error routing
-def process(self, row: dict, ctx: PluginContext) -> TransformResult:
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     if row["quantity"] == 0:
-        return TransformResult.error({"reason": "division_by_zero"})
-    return TransformResult.success({"unit_price": row["total"] / row["quantity"]})
+        return TransformResult.error(
+            {"reason": "division_by_zero", "field": "quantity"},
+            retryable=False,
+        )
+    return TransformResult.success(
+        {"unit_price": row["total"] / row["quantity"]},
+        success_reason={"action": "calculated_unit_price"},
+    )
 
 # TRANSFORM BUG - crashes, does NOT use on_error routing
-def process(self, row: dict, ctx: PluginContext) -> TransformResult:
-    return TransformResult.success({"value": row["nonexistent"]})  # KeyError = BUG
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    return TransformResult.success(
+        {"value": row["nonexistent"]},  # KeyError = BUG
+        success_reason={"action": "processed"},
+    )
 ```
 
 #### Required Methods
@@ -450,22 +538,25 @@ def __init__(self, config: dict[str, Any]) -> None:
 
 def process(
     self,
-    row: dict[str, Any] | list[dict[str, Any]],
+    row: PipelineRow,
     ctx: PluginContext,
 ) -> TransformResult:
-    """Process row(s).
+    """Process a single row.
 
-    For non-batch-aware transforms (is_batch_aware=False):
-    - `row` is always a single dict
-    - MUST be a pure function for DETERMINISTIC transforms
-
-    For batch-aware transforms (is_batch_aware=True):
-    - `row` may be a list[dict] when used at aggregation nodes
-    - Should handle both single dict and list[dict] cases
+    Args:
+        row: Input row as PipelineRow (immutable, supports dual-name access)
+        ctx: Plugin context
 
     Returns:
-        TransformResult.success(row) - processed row(s)
+        TransformResult.success(row, success_reason={...}) - processed row
+        TransformResult.success_multi(rows, success_reason={...}) - multiple output rows
         TransformResult.error(reason, retryable=bool) - processing failed
+
+    Notes:
+        - For batch-aware transforms (is_batch_aware=True), the engine may buffer
+          rows and call this with aggregated data when used in aggregation nodes
+        - PipelineRow is immutable and supports both normalized and original field names
+        - MUST be a pure function for DETERMINISTIC transforms
 
     Exception handling:
         - Data validation errors → return TransformResult.error()
@@ -492,15 +583,26 @@ def on_complete(self, ctx: PluginContext) -> None:
 @dataclass
 class TransformResult:
     status: Literal["success", "error"]
-    row: dict[str, Any] | None           # Single output row (mutually exclusive with rows)
-    rows: list[dict[str, Any]] | None    # Multi-row output (mutually exclusive with row)
-    reason: dict[str, Any] | None        # Error details or None (success)
-    retryable: bool = False              # Can this operation be retried?
+    row: dict[str, Any] | PipelineRow | None           # Single output row (mutually exclusive with rows)
+    rows: list[dict[str, Any] | PipelineRow] | None    # Multi-row output (mutually exclusive with row)
+    reason: TransformErrorReason | None                # Error details or None (success)
+    retryable: bool = False                            # Can this operation be retried?
+
+    # Success metadata - REQUIRED for success results, None for error results
+    success_reason: TransformSuccessReason | None
 
     # Audit fields (set by executor, NOT by plugin)
     input_hash: str | None
     output_hash: str | None
     duration_ms: float | None
+
+    # Context snapshot for audit trail (optional)
+    # Contains operational metadata like pool stats, ordering info
+    context_after: dict[str, Any] | None
+
+    # Schema contract for output (optional)
+    # Enables conversion to PipelineRow via to_pipeline_row()/to_pipeline_rows()
+    contract: SchemaContract | None
 
     @property
     def is_multi_row(self) -> bool:
@@ -511,36 +613,66 @@ class TransformResult:
     def has_output_data(self) -> bool:
         """True if this result has any output data (single or multi-row)."""
         return self.row is not None or self.rows is not None
+
+    def to_pipeline_row(self) -> PipelineRow:
+        """Convert single-row success result to PipelineRow."""
+        ...
+
+    def to_pipeline_rows(self) -> list[PipelineRow]:
+        """Convert multi-row success result to list of PipelineRows."""
+        ...
 ```
 
 **Invariants:**
-- `status == "success"` requires `has_output_data == True`
+- `status == "success"` requires `has_output_data == True` AND `success_reason is not None`
 - `row` and `rows` are mutually exclusive (exactly one is set on success)
 - `status == "error"` requires `reason is not None`
+- If `success_reason` is missing on success, `__post_init__` will crash (plugin bug)
 
 **Factory methods:**
 
 ```python
-TransformResult.success(row)                    # Success with single output row
-TransformResult.success_multi(rows)             # Success with multiple output rows
-TransformResult.error(reason, retryable=False)  # Failure
+# REQUIRED: success_reason parameter (keyword-only)
+TransformResult.success(
+    row,
+    success_reason={"action": "processed"},
+    context_after=None,  # Optional operational metadata
+    contract=None,       # Optional schema contract for to_pipeline_row()
+)
+
+TransformResult.success_multi(
+    rows,
+    success_reason={"action": "split", "count": len(rows)},
+    context_after=None,  # Optional operational metadata
+    contract=None,       # Optional schema contract for to_pipeline_rows()
+)
+
+TransformResult.error(
+    reason={"reason": "invalid_data", "field": "amount"},
+    retryable=False,
+    context_after=None,  # Optional operational metadata from partial execution
+)
 ```
 
 **Multi-row usage:**
 
 ```python
 # Deaggregation: 1 input → N outputs
-def process(self, row, ctx) -> TransformResult:
-    items = row["items"]
-    return TransformResult.success_multi([
-        {**row, "item": item} for item in items
-    ])
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    items = row["items"]  # Trust: source validated this is a list
+    return TransformResult.success_multi(
+        [{**row.to_dict(), "item": item, "item_index": i} for i, item in enumerate(items)],
+        success_reason={"action": "exploded", "output_count": len(items)},
+    )
 
 # Aggregation passthrough: N inputs → N enriched outputs
-def process(self, rows: list[dict], ctx) -> TransformResult:
-    return TransformResult.success_multi([
-        {**r, "batch_size": len(rows)} for r in rows
-    ])
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    # When is_batch_aware=True and used in aggregation, engine may pass aggregated data
+    rows = row if isinstance(row, list) else [row]
+    return TransformResult.success_multi(
+        [{**r, "batch_size": len(rows)} for r in rows],
+        success_reason={"action": "batch_enriched", "batch_size": len(rows)},
+    )
 ```
 
 #### Lifecycle
@@ -619,7 +751,22 @@ def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescr
     """
 
 def flush(self) -> None:
-    """Flush any buffered data.
+    """Ensure all buffered writes are durable.
+
+    MUST guarantee that when this method returns:
+    - All data passed to write() is persisted
+    - Data survives process crash
+    - Data survives power loss (for file/block storage)
+
+    This method MUST block until durability is guaranteed.
+
+    For file-based sinks: Call file.flush() + os.fsync(file.fileno())
+    For database sinks: Call connection.commit()
+    For async sinks: Await flush completion
+
+    This is called by the orchestrator BEFORE creating checkpoints.
+    If this method returns successfully, the checkpoint system assumes
+    all data is durable and will NOT replay these writes on resume.
 
     Called periodically and before on_complete().
     """
@@ -869,13 +1016,13 @@ def __init__(self, config: dict[str, Any]) -> None:
 
 def evaluate(
     self,
-    row: dict[str, Any],
+    row: PipelineRow,
     ctx: PluginContext,
 ) -> GateResult:
     """Evaluate a row and decide routing.
 
     Args:
-        row: Input row matching input_schema
+        row: Input row as PipelineRow (immutable, supports dual-name access)
         ctx: Plugin context
 
     Returns:
@@ -907,6 +1054,19 @@ class GateResult:
     row: dict[str, Any]        # Row data (may be modified)
     action: RoutingAction      # Where the token goes
 
+    # Schema contract for output (optional)
+    # Enables conversion to PipelineRow via to_pipeline_row()
+    contract: SchemaContract | None
+
+    # Audit fields (set by executor, NOT by plugin)
+    input_hash: str | None
+    output_hash: str | None
+    duration_ms: float | None
+
+    def to_pipeline_row(self) -> PipelineRow:
+        """Convert to PipelineRow for downstream processing."""
+        ...
+
 # RoutingAction options:
 RoutingAction.continue_()              # Continue to next node in pipeline
 RoutingAction.route("sink_name")       # Route to named sink
@@ -937,17 +1097,16 @@ class SafetyGate(BaseGate):
         from mycompany.ml import SafetyClassifier
         self._model = SafetyClassifier.load()
 
-    def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+    def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
         # Complex analysis that can't be a config expression
         score = self._model.predict(row["content"])
 
         if score > self._threshold:
             # Add audit metadata before routing
-            row["safety_score"] = score
-            row["flagged_at"] = ctx.run_started_at.isoformat()
-            return GateResult(row=row, action=RoutingAction.route("review_queue"))
+            modified_row = {**row.to_dict(), "safety_score": score, "flagged_at": ctx.run_started_at.isoformat()}
+            return GateResult(row=modified_row, action=RoutingAction.route("review_queue"))
 
-        return GateResult(row=row, action=RoutingAction.continue_())
+        return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
 
     def close(self) -> None:
         if self._model:
@@ -1384,6 +1543,7 @@ Plugins make calls; the engine throttles them.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.7 | 2026-02-05 | **CRITICAL UPDATES**: (1) `TransformResult.success()` requires `success_reason` parameter (keyword-only, crashes if missing), (2) Row type changed from `dict[str, Any]` to `PipelineRow` in Transform/Gate signatures, (3) Added `context_after` field for operational metadata, (4) Added `contract` field and `to_pipeline_row()` methods on all result types, (5) Enhanced `flush()` documentation with durability guarantees, (6) Updated `SourceRow` to document `contract` parameter and `to_pipeline_row()` method, (7) Fixed `load()` return type to `Iterator[SourceRow]` |
 | 1.6 | 2026-01-20 | Gate documentation: clarified two approaches (config expressions AND plugin gates via `BaseGate`), added `GateResult` contract, plugin gate lifecycle, when-to-use guidance |
 | 1.5 | 2026-01-19 | Multi-row output: `creates_tokens` attribute, `TransformResult.success_multi()`, `rows` field, aggregation `output_mode` (passthrough/transform), `BUFFERED` and `EXPANDED` outcomes |
 | 1.4 | 2026-01-19 | Batch-aware transforms (`is_batch_aware`), structural aggregation (engine owns buffers), crash recovery for batches |

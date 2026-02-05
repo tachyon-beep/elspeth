@@ -180,6 +180,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -332,6 +333,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -637,6 +639,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -728,6 +731,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -835,6 +839,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -945,6 +950,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -1047,6 +1053,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -1129,6 +1136,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:

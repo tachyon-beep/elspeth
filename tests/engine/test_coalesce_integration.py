@@ -797,7 +797,7 @@ class TestCoalesceTimeoutIntegration:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
 
             def on_start(self, ctx: Any) -> None:
                 pass

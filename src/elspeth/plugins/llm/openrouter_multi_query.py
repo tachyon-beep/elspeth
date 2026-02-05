@@ -1087,7 +1087,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
         # Merge all results into output row
-        output = dict(row)
+        # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
+        output = row.to_dict()
         for result in results:
             # Check for row presence: successful results should always have a row,
             # but TransformResult supports multi-output scenarios where row may be

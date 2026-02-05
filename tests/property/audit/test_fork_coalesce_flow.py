@@ -155,6 +155,7 @@ class _ListSource(_TestSourceBase):
     output_schema = _CoalesceTestSchema
 
     def __init__(self, data: list[dict[str, Any]]) -> None:
+        super().__init__()
         self._data = data
 
     def on_start(self, ctx: Any) -> None:

@@ -107,6 +107,7 @@ class _ListSource(_TestSourceBase):
         schema: type | None = None,
         source_name: str = "list_source",
     ) -> None:
+        super().__init__()
         self._data = data
         self.name = source_name
         if schema is not None:
@@ -321,6 +322,7 @@ class TestEngineIntegration:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -459,6 +461,7 @@ class TestEngineIntegration:
             output_schema = NumberSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -588,6 +591,7 @@ class TestEngineIntegration:
             output_schema = NumberSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -719,6 +723,7 @@ class TestNoSilentAuditLoss:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -815,6 +820,7 @@ class TestNoSilentAuditLoss:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -899,6 +905,7 @@ class TestNoSilentAuditLoss:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -1060,6 +1067,7 @@ class TestAuditTrailCompleteness:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -2397,6 +2405,7 @@ class TestComplexDAGIntegration:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -2634,6 +2643,7 @@ class TestRetryIntegration:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -2791,6 +2801,7 @@ class TestRetryIntegration:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -3439,6 +3450,7 @@ class TestErrorRecovery:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -3555,6 +3567,7 @@ class TestErrorRecovery:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:

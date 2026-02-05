@@ -49,6 +49,11 @@ EXTERNAL_CALL_PLUGINS: dict[str, dict[str, Any]] = {
         "client_type": "AuditedHTTPClient",
         "pattern": "on_start_capture",
     },
+    "src/elspeth/plugins/transforms/web_scrape.py": {
+        "class": "WebScrapeTransform",
+        "client_type": "AuditedHTTPClient",
+        "pattern": "ctx_passthrough",
+    },
 }
 
 # Plugins that are EXEMPT from telemetry (with reason)

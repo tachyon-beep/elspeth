@@ -1,11 +1,13 @@
 """Tests for WebScrapeTransform plugin."""
 
+from typing import Any
 from unittest.mock import Mock
 
 import httpx
 import pytest
 import respx
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.plugins.transforms.web_scrape_errors import (
@@ -13,6 +15,22 @@ from elspeth.plugins.transforms.web_scrape_errors import (
     RateLimitError,
     ServerError,
 )
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 @pytest.fixture
@@ -60,7 +78,7 @@ def test_web_scrape_success_markdown(mock_ctx):
         }
     )
 
-    result = transform.process({"url": "https://example.com/page"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     assert "# Title" in result.row["page_content"]
@@ -89,7 +107,7 @@ def test_web_scrape_404_returns_error(mock_ctx):
         }
     )
 
-    result = transform.process({"url": "https://example.com/missing"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/missing"}), mock_ctx)
 
     assert result.status == "error"
     assert "NotFoundError" in result.reason["error_type"]
@@ -115,7 +133,7 @@ def test_web_scrape_500_raises_for_retry(mock_ctx):
     )
 
     with pytest.raises(ServerError) as exc_info:
-        transform.process({"url": "https://example.com/error"}, mock_ctx)
+        transform.process(_make_pipeline_row({"url": "https://example.com/error"}), mock_ctx)
 
     assert exc_info.value.retryable is True
     assert "500" in str(exc_info.value)
@@ -140,7 +158,7 @@ def test_web_scrape_429_raises_for_retry(mock_ctx):
     )
 
     with pytest.raises(RateLimitError) as exc_info:
-        transform.process({"url": "https://example.com/throttled"}, mock_ctx)
+        transform.process(_make_pipeline_row({"url": "https://example.com/throttled"}), mock_ctx)
 
     assert exc_info.value.retryable is True
     assert "429" in str(exc_info.value)
@@ -161,7 +179,7 @@ def test_web_scrape_invalid_scheme_returns_error(mock_ctx):
         }
     )
 
-    result = transform.process({"url": "file:///etc/passwd"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "ftp://example.com/file"}), mock_ctx)
 
     assert result.status == "error"
     assert "SSRFBlockedError" in result.reason["error_type"]
@@ -184,7 +202,7 @@ def test_web_scrape_private_ip_returns_error(mock_ctx):
     )
 
     # Use http://localhost which should be blocked after hostname resolution
-    result = transform.process({"url": "http://127.0.0.1/admin"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "http://169.254.169.254/metadata"}), mock_ctx)
 
     assert result.status == "error"
     assert "SSRFBlockedError" in result.reason["error_type"]
@@ -211,7 +229,7 @@ def test_web_scrape_text_format(mock_ctx):
         }
     )
 
-    result = transform.process({"url": "https://example.com/page"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     # Text format should not include markdown
@@ -249,7 +267,7 @@ def test_web_scrape_strips_script_tags(mock_ctx):
         }
     )
 
-    result = transform.process({"url": "https://example.com/page"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     assert "alert" not in result.row["page_content"]
@@ -277,7 +295,7 @@ def test_web_scrape_payload_storage(mock_ctx):
         }
     )
 
-    result = transform.process({"url": "https://example.com/page"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     # Check payload hashes were stored and are valid SHA-256 hashes
@@ -314,7 +332,7 @@ def test_web_scrape_timeout_raises_network_error(mock_ctx):
     )
 
     with pytest.raises(NetworkError) as exc_info:
-        transform.process({"url": "https://example.com/slow"}, mock_ctx)
+        transform.process(_make_pipeline_row({"url": "https://example.com/slow"}), mock_ctx)
 
     assert exc_info.value.retryable is True
     assert "timeout" in str(exc_info.value).lower()
@@ -339,7 +357,7 @@ def test_web_scrape_connection_error_raises_network_error(mock_ctx):
     )
 
     with pytest.raises(NetworkError) as exc_info:
-        transform.process({"url": "https://example.com/unreachable"}, mock_ctx)
+        transform.process(_make_pipeline_row({"url": "https://example.com/unreachable"}), mock_ctx)
 
     assert exc_info.value.retryable is True
     assert "connection" in str(exc_info.value).lower()
@@ -363,7 +381,7 @@ def test_web_scrape_403_returns_error(mock_ctx):
         }
     )
 
-    result = transform.process({"url": "https://example.com/forbidden"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/forbidden"}), mock_ctx)
 
     assert result.status == "error"
     assert "ForbiddenError" in result.reason["error_type"]
@@ -388,8 +406,52 @@ def test_web_scrape_401_returns_error(mock_ctx):
         }
     )
 
-    result = transform.process({"url": "https://example.com/unauthorized"}, mock_ctx)
+    result = transform.process(_make_pipeline_row({"url": "https://example.com/unauthorized"}), mock_ctx)
 
     assert result.status == "error"
     assert "UnauthorizedError" in result.reason["error_type"]
     assert "401" in result.reason["error"]
+
+
+@respx.mock
+def test_web_scrape_with_pipeline_row(mock_ctx):
+    """Test that web_scrape works correctly with PipelineRow input."""
+    from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+
+    html_content = "<html><body><h1>Test</h1></body></html>"
+    respx.get("https://example.com/test").mock(return_value=httpx.Response(200, text=html_content))
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing PipelineRow compatibility",
+            },
+        }
+    )
+
+    # Create PipelineRow input (simulates what engine passes to transforms)
+    fields = (
+        FieldContract(
+            normalized_name="url",
+            original_name="url",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    contract = SchemaContract(mode="FIXED", fields=fields, locked=True)
+    pipeline_row = PipelineRow({"url": "https://example.com/test"}, contract)
+
+    # Process should work with PipelineRow (uses row.to_dict() internally)
+    result = transform.process(pipeline_row, mock_ctx)
+
+    assert result.status == "success"
+    assert "# Test" in result.row["page_content"]
+    assert result.row["page_fingerprint"] is not None
+    assert result.row["fetch_status"] == 200

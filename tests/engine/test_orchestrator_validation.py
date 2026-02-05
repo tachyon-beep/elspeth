@@ -76,6 +76,7 @@ class TestTransformErrorSinkValidation:
             output_schema = InputSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
                 self.load_called = False
 
@@ -153,6 +154,7 @@ class TestTransformErrorSinkValidation:
             output_schema = InputSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
@@ -232,6 +234,7 @@ class TestTransformErrorSinkValidation:
             output_schema = InputSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
@@ -300,6 +303,7 @@ class TestTransformErrorSinkValidation:
             output_schema = InputSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
@@ -368,6 +372,7 @@ class TestTransformErrorSinkValidation:
             output_schema = InputSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
@@ -452,6 +457,7 @@ class TestTransformErrorSinkValidation:
             output_schema = InputSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:

@@ -53,6 +53,7 @@ class TestOrchestrator:
             output_schema = InputSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -134,6 +135,7 @@ class TestOrchestrator:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -211,6 +213,7 @@ class TestOrchestratorMultipleTransforms:
             output_schema = NumberSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -302,6 +305,7 @@ class TestOrchestratorEmptyPipeline:
             output_schema = ValueSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:

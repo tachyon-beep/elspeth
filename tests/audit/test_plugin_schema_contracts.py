@@ -82,6 +82,17 @@ TRANSFORM_CONFIGS: dict[str, dict[str, Any] | None] = {
         "schema": {"mode": "observed"},
         "mapping": {"old_name": "new_name"},
     },
+    "web_scrape": {
+        # Requires url_field, content_field, fingerprint_field, http config
+        "schema": {"mode": "observed"},
+        "url_field": "url",
+        "content_field": "content",
+        "fingerprint_field": "fingerprint",
+        "http": {
+            "abuse_contact": "test@example.com",
+            "scraping_reason": "Testing schema contracts",
+        },
+    },
     # Azure transforms require valid Azure credentials
     "azure_content_safety": None,
     "azure_prompt_shield": None,

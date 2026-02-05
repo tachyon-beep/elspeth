@@ -59,6 +59,7 @@ class TestOrchestratorProgress:
             output_schema = ValueSchema
 
             def __init__(self, count: int) -> None:
+                super().__init__()
                 self._count = count
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:

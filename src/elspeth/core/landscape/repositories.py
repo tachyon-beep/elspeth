@@ -300,6 +300,16 @@ class NodeStateRepository:
         status = NodeStateStatus(row.status)
 
         if status == NodeStateStatus.OPEN:
+            # BUG #6: OPEN states must have NULL completion fields
+            # Operations haven't finished yet, so output_hash, completed_at, and duration_ms
+            # must all be NULL. Non-NULL values indicate corrupted audit data.
+            if row.output_hash is not None:
+                raise ValueError(f"OPEN state {row.state_id} has non-NULL output_hash - audit integrity violation")
+            if row.completed_at is not None:
+                raise ValueError(f"OPEN state {row.state_id} has non-NULL completed_at - audit integrity violation")
+            if row.duration_ms is not None:
+                raise ValueError(f"OPEN state {row.state_id} has non-NULL duration_ms - audit integrity violation")
+
             return NodeStateOpen(
                 state_id=row.state_id,
                 token_id=row.token_id,
@@ -319,6 +329,13 @@ class NodeStateRepository:
                 raise ValueError(f"PENDING state {row.state_id} has NULL duration_ms - audit integrity violation")
             if row.completed_at is None:
                 raise ValueError(f"PENDING state {row.state_id} has NULL completed_at - audit integrity violation")
+
+            # BUG #6: PENDING states must have NULL output_hash
+            # Batch processing is in progress, no output available yet.
+            # Non-NULL output_hash contradicts PENDING status.
+            if row.output_hash is not None:
+                raise ValueError(f"PENDING state {row.state_id} has non-NULL output_hash - audit integrity violation")
+
             return NodeStatePending(
                 state_id=row.state_id,
                 token_id=row.token_id,

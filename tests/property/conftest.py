@@ -244,6 +244,7 @@ class ListSource(_TestSourceBase):
     output_schema = PropertyTestSchema
 
     def __init__(self, data: list[dict[str, Any]]) -> None:
+        super().__init__()
         self._data = data
 
     def on_start(self, ctx: Any) -> None:

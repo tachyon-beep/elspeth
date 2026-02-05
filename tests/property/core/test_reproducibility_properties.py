@@ -8,8 +8,8 @@ Grade Hierarchy Properties:
 - Grade ordering is meaningful (higher = more reproducible)
 
 Determinism Classification Properties:
-- DETERMINISTIC, SEEDED, IO_READ, IO_WRITE → FULL_REPRODUCIBLE
-- EXTERNAL_CALL, NON_DETERMINISTIC → REPLAY_REPRODUCIBLE
+- DETERMINISTIC, SEEDED → FULL_REPRODUCIBLE
+- IO_READ, IO_WRITE, EXTERNAL_CALL, NON_DETERMINISTIC → REPLAY_REPRODUCIBLE
 
 Degradation Properties:
 - REPLAY_REPRODUCIBLE → ATTRIBUTABLE_ONLY (after purge)
@@ -57,14 +57,14 @@ reproducible_determinism = st.sampled_from(
     [
         Determinism.DETERMINISTIC,
         Determinism.SEEDED,
-        Determinism.IO_READ,
-        Determinism.IO_WRITE,
     ]
 )
 
-# Determinism values that require replay
+# Determinism values that require replay (need to capture runtime data)
 non_reproducible_determinism = st.sampled_from(
     [
+        Determinism.IO_READ,
+        Determinism.IO_WRITE,
         Determinism.EXTERNAL_CALL,
         Determinism.NON_DETERMINISTIC,
     ]
@@ -184,8 +184,8 @@ class TestDeterminismClassificationProperties:
     """Property tests for determinism → grade classification logic.
 
     The classification used by compute_grade():
-    - {DETERMINISTIC, SEEDED, IO_READ, IO_WRITE} → FULL_REPRODUCIBLE
-    - {EXTERNAL_CALL, NON_DETERMINISTIC} → REPLAY_REPRODUCIBLE
+    - {DETERMINISTIC, SEEDED} → FULL_REPRODUCIBLE
+    - {IO_READ, IO_WRITE, EXTERNAL_CALL, NON_DETERMINISTIC} → REPLAY_REPRODUCIBLE
     """
 
     @given(determinisms=reproducible_lists)
@@ -193,8 +193,8 @@ class TestDeterminismClassificationProperties:
     def test_reproducible_determinism_yields_full_grade(self, determinisms: list[Determinism]) -> None:
         """Property: Reproducible determinism values yield FULL_REPRODUCIBLE.
 
-        DETERMINISTIC, SEEDED, IO_READ, IO_WRITE can all be re-executed
-        with identical results (SEEDED needs the seed captured).
+        DETERMINISTIC and SEEDED can be re-executed with identical results
+        (SEEDED needs the seed captured beforehand).
         """
         with LandscapeDB.in_memory() as db:
             run_id = _create_run(db)
@@ -207,8 +207,9 @@ class TestDeterminismClassificationProperties:
     def test_non_reproducible_determinism_yields_replay_grade(self, determinisms: list[Determinism]) -> None:
         """Property: Any non-reproducible determinism yields REPLAY_REPRODUCIBLE.
 
-        EXTERNAL_CALL (LLM, APIs) and NON_DETERMINISTIC require recorded
-        responses to replay - they can't be re-executed deterministically.
+        IO_READ, IO_WRITE, EXTERNAL_CALL, and NON_DETERMINISTIC require
+        recorded runtime data to replay - they can't be re-executed from
+        scratch with identical results.
         """
         with LandscapeDB.in_memory() as db:
             run_id = _create_run(db)

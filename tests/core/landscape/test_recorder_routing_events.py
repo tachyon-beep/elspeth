@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from elspeth.contracts import NodeType, RoutingMode, RoutingSpec
+from elspeth.contracts.errors import PluginGateReason
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -223,7 +224,7 @@ class TestLandscapeRecorderRouting:
                 input_data={},
             )
 
-            reason = {"rule": "value > 1000", "matched_value": True}
+            reason: PluginGateReason = {"rule": "value > 1000", "matched_value": True}
             event = recorder.record_routing_event(
                 state_id=state.state_id,
                 edge_id=edge.edge_id,
@@ -308,7 +309,7 @@ class TestLandscapeRecorderRouting:
                 input_data={},
             )
 
-            reason = {"rule": "fork_to_paths", "matched_value": "path_a,path_b"}
+            reason: PluginGateReason = {"rule": "fork_to_paths", "matched_value": "path_a,path_b"}
             events = recorder.record_routing_events(
                 state_id=state.state_id,
                 routes=[

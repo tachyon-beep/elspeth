@@ -169,6 +169,19 @@ def explain(
     # TIER 1 TRUST: token_parents is audit data - crash on any anomaly
     parent_tokens: list[Token] = []
     parents = recorder.get_token_parents(token_id)
+
+    # Validate parent relationships consistency
+    # If token has fork_group_id, join_group_id, or expand_group_id, it MUST have parents
+    has_group_id = token.fork_group_id or token.join_group_id or token.expand_group_id
+    if has_group_id and not parents:
+        group_type = "fork" if token.fork_group_id else ("join" if token.join_group_id else "expand")
+        group_id = token.fork_group_id or token.join_group_id or token.expand_group_id
+        raise ValueError(
+            f"Audit integrity violation: token '{token_id}' has {group_type}_group_id='{group_id}' "
+            f"but no parent relationships in token_parents table. Tokens with group IDs must have "
+            f"parent lineage recorded. This indicates missing {group_type} metadata or audit corruption."
+        )
+
     for parent in parents:
         parent_token = recorder.get_token(parent.parent_token_id)
         if parent_token is None:

@@ -139,6 +139,15 @@ def track_operation(
         error_msg = str(e)
         original_exception = e
         raise
+    except BaseException as e:
+        # Catch system interrupts (KeyboardInterrupt, SystemExit, etc.)
+        # These are NOT Exception subclasses, so they bypass the above handler.
+        # Without this, interrupted operations would be recorded as "completed".
+        # BUG #10: Must come AFTER except Exception (more specific handlers first).
+        status = "failed"
+        error_msg = str(e)
+        original_exception = e
+        raise
     finally:
         duration_ms = (time.perf_counter() - start_time) * 1000
         try:

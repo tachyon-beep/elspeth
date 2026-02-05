@@ -197,7 +197,8 @@ class WebScrapeTransform(BaseTransform):
         response_processed_hash = ctx.payload_store.store(content.encode())
 
         # Enrich row with scraped data
-        output = dict(row)
+        # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
+        output = row.to_dict()
         output[self._content_field] = content
         output[self._fingerprint_field] = fingerprint
         output["fetch_status"] = response.status_code

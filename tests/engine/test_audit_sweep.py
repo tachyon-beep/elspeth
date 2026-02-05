@@ -198,6 +198,7 @@ class _ListSource(_TestSourceBase):
     output_schema = _ValueSchema
 
     def __init__(self, data: list[dict[str, Any]]) -> None:
+        super().__init__()
         self._data = data
 
         # Create schema contract from output_schema
@@ -699,6 +700,7 @@ class TestAuditSweepForkCoalesce:
             output_schema = _ValueSchema
 
             def __init__(self) -> None:
+                super().__init__()
                 # Create schema contract from output_schema
                 from elspeth.contracts.transform_contract import create_output_contract_from_schema
 
