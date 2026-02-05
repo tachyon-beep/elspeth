@@ -21,6 +21,7 @@ import httpx
 from pydantic import Field
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.security import validate_ip, validate_url_scheme
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.http import AuditedHTTPClient
@@ -130,7 +131,7 @@ class WebScrapeTransform(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-    def process(self, row: dict[str, Any] | Any, ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow | dict[str, Any], ctx: PluginContext) -> TransformResult:
         """Fetch URL and enrich row with content and fingerprint.
 
         Args:
@@ -198,7 +199,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Enrich row with scraped data
         # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
-        output = row.to_dict()
+        output = row.to_dict() if isinstance(row, PipelineRow) else dict(row)
         output[self._content_field] = content
         output[self._fingerprint_field] = fingerprint
         output["fetch_status"] = response.status_code

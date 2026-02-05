@@ -1038,7 +1038,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
     def _process_single_row_internal(
         self,
-        row: dict[str, Any],
+        row: PipelineRow | dict[str, Any],
         state_id: str,
     ) -> TransformResult:
         """Internal row processing with explicit state_id.
@@ -1052,13 +1052,16 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         Returns:
             TransformResult with all query results merged, or error
         """
+        # Convert row to dict for internal processing
+        row_dict = row.to_dict() if isinstance(row, PipelineRow) else row
+
         # Execute all queries (parallel or sequential)
         # P3-2026-02-02: Parallel mode returns pool context for audit trail
         pool_context: dict[str, Any] | None = None
         if self._executor is not None:
-            results, pool_context = self._execute_queries_parallel(row, state_id)
+            results, pool_context = self._execute_queries_parallel(row_dict, state_id)
         else:
-            results = self._execute_queries_sequential(row, state_id)
+            results = self._execute_queries_sequential(row_dict, state_id)
 
         # Check for failures (all-or-nothing for this row)
         failed = [(spec, r) for spec, r in zip(self._query_specs, results, strict=True) if r.status != "success"]
@@ -1088,7 +1091,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Merge all results into output row
         # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
-        output = row.to_dict()
+        output = row_dict.copy()
         for result in results:
             # Check for row presence: successful results should always have a row,
             # but TransformResult supports multi-output scenarios where row may be

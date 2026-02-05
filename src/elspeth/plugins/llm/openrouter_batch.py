@@ -744,8 +744,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         )
 
         # 7. Build output row (OUR CODE - let exceptions crash)
-        # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
-        output = row.to_dict()
+        # row is already a dict (converted by caller on line 442)
+        output: dict[str, Any] = dict(row)
         output[self._response_field] = content
         output[f"{self._response_field}_usage"] = usage
         output[f"{self._response_field}_template_hash"] = rendered.template_hash
