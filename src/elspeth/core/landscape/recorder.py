@@ -1492,6 +1492,12 @@ class LandscapeRecorder:
         reason_hash = stable_hash(reason) if reason else None
         timestamp = now()
 
+        # Auto-persist reason to payload store if available and ref not provided
+        # This enables exported audit trails to explain routing decisions
+        if reason is not None and reason_ref is None and self._payload_store is not None:
+            reason_bytes = canonical_json(reason).encode("utf-8")
+            reason_ref = self._payload_store.store(reason_bytes)
+
         event = RoutingEvent(
             event_id=event_id,
             state_id=state_id,
@@ -1543,6 +1549,13 @@ class LandscapeRecorder:
         timestamp = now()
         events = []
 
+        # Auto-persist shared reason to payload store if available
+        # All events in the fork will reference the same reason payload
+        reason_ref = None
+        if reason is not None and self._payload_store is not None:
+            reason_bytes = canonical_json(reason).encode("utf-8")
+            reason_ref = self._payload_store.store(reason_bytes)
+
         with self._db.connection() as conn:
             for ordinal, route in enumerate(routes):
                 event_id = generate_id()
@@ -1554,7 +1567,7 @@ class LandscapeRecorder:
                     ordinal=ordinal,
                     mode=route.mode,  # Already RoutingMode enum from RoutingSpec
                     reason_hash=reason_hash,
-                    reason_ref=None,
+                    reason_ref=reason_ref,
                     created_at=timestamp,
                 )
 
@@ -1567,6 +1580,7 @@ class LandscapeRecorder:
                         ordinal=event.ordinal,
                         mode=event.mode.value,  # Store string in DB
                         reason_hash=event.reason_hash,
+                        reason_ref=event.reason_ref,
                         created_at=event.created_at,
                     )
                 )
