@@ -289,7 +289,7 @@ class TestRowProcessingWithPipelining:
         ]
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
-            row = {
+            row_data = {
                 "cs1_bg": "case1 bg",
                 "cs1_sym": "case1 sym",
                 "cs1_hist": "case1 hist",
@@ -297,7 +297,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_sym": "case2 sym",
                 "cs2_hist": "case2 hist",
             }
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(_make_pipeline_row(row_data), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -330,7 +330,7 @@ class TestRowProcessingWithPipelining:
         ]
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses):
-            row = {
+            row_data = {
                 "cs1_bg": "bg1",
                 "cs1_sym": "sym1",
                 "cs1_hist": "hist1",
@@ -339,7 +339,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "hist2",
                 "original_field": "preserved",
             }
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(_make_pipeline_row(row_data), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -463,7 +463,7 @@ class TestMultiRowPipelining:
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, [response]):
                 for i in range(3):
-                    row = {
+                    row_data = {
                         "row_id": f"row-{i}",
                         "cs1_bg": f"r{i}",
                         "cs1_sym": f"r{i}",
@@ -480,7 +480,7 @@ class TestMultiRowPipelining:
                         state_id=f"state-{i}",
                         token=token,
                     )
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(_make_pipeline_row(row_data), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -526,7 +526,7 @@ class TestMultiRowPipelining:
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
-                    row = {
+                    row_data = {
                         "cs1_bg": f"r{i}",
                         "cs1_sym": f"r{i}",
                         "cs1_hist": f"r{i}",
@@ -542,7 +542,7 @@ class TestMultiRowPipelining:
                         state_id=f"batch-{i:03d}",
                         token=token,
                     )
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(_make_pipeline_row(row_data), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -573,7 +573,7 @@ class TestMultiRowPipelining:
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
-                    row = {
+                    row_data = {
                         "cs1_bg": f"r{i}",
                         "cs1_sym": f"r{i}",
                         "cs1_hist": f"r{i}",
@@ -589,7 +589,7 @@ class TestMultiRowPipelining:
                         state_id=f"batch-{i:03d}",
                         token=token,
                     )
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(_make_pipeline_row(row_data), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -672,7 +672,7 @@ class TestSequentialMode:
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row = {
+                row_data = {
                     "cs1_bg": "r1",
                     "cs1_sym": "r1",
                     "cs1_hist": "r1",
@@ -688,7 +688,7 @@ class TestSequentialMode:
                     state_id="batch-seq-001",
                     token=token,
                 )
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(_make_pipeline_row(row_data), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -718,7 +718,7 @@ class TestSequentialMode:
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
-                    row = {
+                    row_data = {
                         "cs1_bg": f"r{i}",
                         "cs1_sym": f"r{i}",
                         "cs1_hist": f"r{i}",
@@ -734,7 +734,7 @@ class TestSequentialMode:
                         state_id=f"batch-seq-{i:03d}",
                         token=token,
                     )
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(_make_pipeline_row(row_data), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -786,7 +786,7 @@ class TestPoolMetadataAuditIntegration:
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row = {
+                row_data = {
                     "cs1_bg": "bg1",
                     "cs1_sym": "sym1",
                     "cs1_hist": "hist1",
@@ -802,7 +802,7 @@ class TestPoolMetadataAuditIntegration:
                     state_id="state-pool-001",
                     token=token,
                 )
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(_make_pipeline_row(row_data), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -854,7 +854,7 @@ class TestPoolMetadataAuditIntegration:
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row = {
+                row_data = {
                     "cs1_bg": "bg1",
                     "cs1_sym": "sym1",
                     "cs1_hist": "hist1",
@@ -870,7 +870,7 @@ class TestPoolMetadataAuditIntegration:
                     state_id="state-ordering-001",
                     token=token,
                 )
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(_make_pipeline_row(row_data), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -897,45 +897,5 @@ class TestPoolMetadataAuditIntegration:
             assert isinstance(entry["buffer_wait_ms"], float)
 
 
-def test_azure_multi_query_with_pipeline_row(mock_context, mock_client):
-    """Verify AzureMultiQueryLLMTransform works with PipelineRow inputs."""
-    from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-
-    transform = AzureMultiQueryLLMTransform(
-        {
-            "schema": {"mode": "observed"},
-            "queries": [
-                {"prompt": "Query: {{ text }}", "output_key": "result"},
-            ],
-            "deployment_name": "gpt-4",
-            "endpoint": "https://test.openai.azure.com",
-            "api_key": "test-key",
-        }
-    )
-
-    # Create PipelineRow input (simulates what engine passes)
-    fields = (
-        FieldContract(
-            normalized_name="text",
-            original_name="text",
-            python_type=str,
-            required=True,
-            source="declared",
-        ),
-    )
-    contract = SchemaContract(mode="FIXED", fields=fields, locked=True)
-    pipeline_row = PipelineRow({"text": "test input"}, contract)
-
-    # Mock LLM response
-    mock_client.return_value.chat.completions.create.return_value = Mock(
-        choices=[Mock(message=Mock(content="test response"))],
-        usage={"prompt_tokens": 10, "completion_tokens": 20},
-        model="gpt-4",
-    )
-
-    # Process should work with PipelineRow (uses row.to_dict() internally)
-    result = transform.process(pipeline_row, mock_context)
-
-    assert result.status == "success"
-    assert "result" in result.row
-    assert result.row["result"] == "test response"
+# Removed test_azure_multi_query_with_pipeline_row - duplicate of existing accept() API tests
+# The transform raises NotImplementedError for process() and directs to accept() API
