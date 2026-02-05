@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
@@ -45,7 +45,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import GateProtocol, TransformProtocol
+from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, TransformProtocol
 
 
 def _extract_dict(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
@@ -460,7 +460,7 @@ class RowProcessor:
         """
         return self._aggregation_executor.execute_flush(
             node_id=node_id,
-            transform=transform,
+            transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
             ctx=ctx,
             step_in_pipeline=step_in_pipeline,
             trigger_type=TriggerType.TIMEOUT,
@@ -512,7 +512,7 @@ class RowProcessor:
         # Execute flush with the specified trigger type
         result, buffered_tokens, _batch_id = self._aggregation_executor.execute_flush(
             node_id=node_id,
-            transform=transform,
+            transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
             ctx=ctx,
             step_in_pipeline=audit_step,
             trigger_type=trigger_type,
@@ -834,7 +834,7 @@ class RowProcessor:
             # Execute flush with full audit recording
             result, buffered_tokens, batch_id = self._aggregation_executor.execute_flush(
                 node_id=node_id,
-                transform=transform,
+                transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
                 ctx=ctx,
                 step_in_pipeline=step,
                 trigger_type=trigger_type,
