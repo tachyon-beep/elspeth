@@ -9,132 +9,157 @@ This directory contains all open bugs organized by the subsystem they affect. Th
 
 ```
 open/
-├── cli/                      # Command-line interface (0 P1, 0 P2, 0 P3)
-├── contracts/                # Contract validation (0 P1, 0 P2, 0 P3)
-├── core-canonical/           # Canonicalization (0 P1, 0 P2, 0 P3)
-├── core-checkpoint/          # Checkpointing/recovery (0 P1, 0 P2, 0 P3)
-├── core-config/              # Configuration system (0 P1, 0 P2, 0 P3)
-├── core-dag/                 # DAG validation, graph construction (0 P1, 0 P2, 0 P3)
-├── core-landscape/           # Audit trail, recovery, verifier (0 P1, 0 P2, 0 P3)
-├── core-logging/             # Logging/telemetry output (0 P1, 0 P2, 0 P3)
-├── core-rate-limit/          # Rate limiters (0 P1, 0 P2, 0 P3)
-├── core-retention/           # Retention/purge (0 P1, 0 P2, 0 P3)
-├── core-security/            # Secret handling (0 P1, 0 P2, 0 P3)
-├── engine-coalesce/          # Fork/join/merge logic (0 P1, 0 P2, 0 P3) - EMPTY
-├── engine-executors/         # Executor flow (0 P1, 0 P2, 0 P3)
-├── engine-expression-parser/ # Expression parsing (0 P1, 0 P2, 0 P3)
-├── engine-orchestrator/      # Pipeline execution, routing (0 P1, 0 P2, 0 P3)
-├── engine-pooling/           # Pooling infrastructure (0 P1, 1 P2, 1 P3)
-├── engine-processor/         # Token management, outcomes (0 P1, 0 P2, 0 P3)
-├── engine-retry/             # Retry logic (0 P1, 0 P2, 0 P3)
-├── engine-spans/             # Observability, tracing (0 P1, 0 P2, 1 P3)
-├── engine-tokens/            # Token lineage (0 P1, 0 P2, 0 P3)
-├── engine-triggers/          # Trigger evaluation (0 P1, 0 P2, 0 P3)
-├── mcp/                      # MCP tooling (0 P1, 0 P2, 0 P3)
-├── plugins-azure/            # Azure plugin pack (0 P1, 0 P2, 0 P3)
-├── plugins-llm/              # Base LLM transforms (0 P1, 0 P2, 0 P3)
-├── plugins-sinks/            # Sink implementations (0 P1, 0 P2, 0 P3)
-├── plugins-sources/          # Source implementations (0 P1, 0 P2, 0 P3)
-└── plugins-transforms/       # Transform implementations (0 P1, 0 P2, 0 P3)
+├── cli/                      # Command-line interface (0 P1, 2 P2, 1 P3)
+├── contracts/                # Contract validation (5 P1, 11 P2, 0 P3)
+├── core-canonical/           # Canonicalization (0 P1, 1 P2, 0 P3)
+├── core-checkpoint/          # Checkpointing/recovery (2 P1, 0 P2, 0 P3)
+├── core-config/              # Configuration system (1 P1, 2 P2, 0 P3)
+├── core-dag/                 # DAG validation, graph construction (1 P1, 0 P2, 0 P3)
+├── core-landscape/           # Audit trail, recovery, verifier (10 P1, 6 P2, 0 P3)
+├── core-logging/             # Logging/telemetry output (0 P1, 0 P2, 1 P3)
+├── core-rate-limit/          # Rate limiters (0 P1, 1 P2, 0 P3)
+├── core-retention/           # Retention/purge (1 P1, 0 P2, 0 P3)
+├── core-security/            # Secret handling (1 P1, 0 P2, 0 P3)
+├── cross-cutting/            # Multi-subsystem issues (EMPTY after cleanup)
+├── engine-coalesce/          # Fork/join/merge logic (1 P1, 0 P2, 0 P3)
+├── engine-executors/         # Executor flow (2 P1, 1 P2, 0 P3)
+├── engine-expression-parser/ # Expression parsing (0 P1, 1 P2, 0 P3)
+├── engine-orchestrator/      # Pipeline execution, routing (4 P1, 2 P2, 0 P3)
+├── engine-pooling/           # Pooling infrastructure (1 P1, 4 P2, 2 P3)
+├── engine-processor/         # Token management, outcomes (1 P1, 0 P2, 0 P3)
+├── engine-retry/             # Retry logic (EMPTY after cleanup)
+├── engine-spans/             # Observability, tracing (0 P1, 7 P2, 3 P3)
+├── engine-tokens/            # Token lineage (0 P1, 1 P2, 0 P3)
+├── engine-triggers/          # Trigger evaluation (1 P1, 0 P2, 0 P3)
+├── mcp/                      # MCP tooling (1 P1, 1 P2, 0 P3)
+├── plugins-azure/            # Azure plugin pack (3 P1, 3 P2, 0 P3)
+├── plugins-llm/              # Base LLM transforms (6 P1, 11 P2, 2 P3)
+├── plugins-sinks/            # Sink implementations (3 P1, 0 P2, 1 P3)
+├── plugins-sources/          # Source implementations (1 P1, 6 P2, 1 P3)
+├── plugins-transforms/       # Transform implementations (6 P1, 16 P2, 2 P3)
+└── testing/                  # Testing infrastructure (EMPTY after cleanup)
 ```
 
 ## Bug Counts by Subsystem
 
 | Subsystem | P1 Bugs | P2 Bugs | P3 Bugs | Total | Notes |
 |-----------|---------|---------|---------|-------|-------|
-| **core-landscape** | 0 | 0 | 0 | 0 | — |
-| **engine-orchestrator** | 0 | 0 | 0 | 0 | — |
-| **contracts** | 0 | 0 | 0 | 0 | — |
-| **plugins-llm** | 0 | 0 | 0 | 0 | — |
-| **engine-coalesce** | 0 | 0 | 0 | 0 | Fork/join timeouts (all fixed) |
-| **core-checkpoint** | 0 | 0 | 0 | 0 | — |
-| **core-config** | 0 | 0 | 0 | 0 | — |
-| **engine-pooling** | 0 | 1 | 1 | 2 | Pooling/batching |
-| **engine-processor** | 0 | 0 | 0 | 0 | — |
-| **engine-retry** | 0 | 0 | 0 | 0 | — |
-| **engine-spans** | 0 | 0 | 1 | 1 | Observability spans |
-| **core-rate-limit** | 0 | 0 | 0 | 0 | — |
-| **plugins-sinks** | 0 | 0 | 0 | 0 | — |
-| **cli** | 0 | 0 | 0 | 0 | — |
-| **core-dag** | 0 | 0 | 0 | 0 | — |
-| **core-payload** | 0 | 0 | 0 | 0 | Payload storage (all fixed) |
-| **core-retention** | 0 | 0 | 0 | 0 | — |
-| **core-security** | 0 | 0 | 0 | 0 | — |
-| **engine-executors** | 0 | 0 | 0 | 0 | — |
-| **mcp** | 0 | 0 | 0 | 0 | — |
-| **plugins-azure** | 0 | 0 | 0 | 0 | — |
-| **core-canonical** | 0 | 0 | 0 | 0 | — |
-| **core-logging** | 0 | 0 | 0 | 0 | — |
-| **engine-expression-parser** | 0 | 0 | 0 | 0 | — |
-| **engine-tokens** | 0 | 0 | 0 | 0 | — |
-| **engine-triggers** | 0 | 0 | 0 | 0 | — |
-| **plugins-sources** | 0 | 0 | 0 | 0 | — |
-| **plugins-transforms** | 0 | 0 | 0 | 0 | — |
-| **TOTAL** | **0** | **1** | **2** | **3** | All bugs organized |
+| **plugins-transforms** | 6 | 16 | 2 | 24 | Transform config, field mapping, batch stats |
+| **plugins-llm** | 6 | 11 | 2 | 19 | Azure/OpenRouter transforms, HTTP clients |
+| **contracts** | 5 | 11 | 0 | 16 | Schema contracts, type normalization |
+| **core-landscape** | 10 | 6 | 0 | 16 | Audit trail, repositories, payload store |
+| **engine-spans** | 0 | 7 | 3 | 10 | Telemetry, exporters |
+| **plugins-sources** | 1 | 6 | 1 | 8 | CSV/JSON sources, field normalization |
+| **engine-pooling** | 1 | 4 | 2 | 7 | Batching, pooling infrastructure |
+| **plugins-azure** | 3 | 3 | 0 | 6 | Azure blob source/sink |
+| **engine-orchestrator** | 4 | 2 | 0 | 6 | Resume, aggregation, export |
+| **plugins-sinks** | 3 | 0 | 1 | 4 | CSV/JSON/Database sinks |
+| **cli** | 0 | 2 | 1 | 3 | CLI commands |
+| **core-config** | 1 | 2 | 0 | 3 | Configuration, gate normalization |
+| **engine-executors** | 2 | 1 | 0 | 3 | Transform/gate/sink execution |
+| **core-checkpoint** | 2 | 0 | 0 | 2 | Checkpoint serialization, recovery |
+| **mcp** | 1 | 1 | 0 | 2 | MCP server |
+| **core-canonical** | 0 | 1 | 0 | 1 | Canonical JSON |
+| **core-dag** | 1 | 0 | 0 | 1 | DAG validation |
+| **core-logging** | 0 | 0 | 1 | 1 | Logging |
+| **core-rate-limit** | 0 | 1 | 0 | 1 | Rate limiting |
+| **core-retention** | 1 | 0 | 0 | 1 | Payload purge |
+| **core-security** | 1 | 0 | 0 | 1 | Secret loading |
+| **engine-coalesce** | 1 | 0 | 0 | 1 | Fork/join execution |
+| **engine-expression-parser** | 0 | 1 | 0 | 1 | Expression parsing |
+| **engine-processor** | 1 | 0 | 0 | 1 | Token processing |
+| **engine-tokens** | 0 | 1 | 0 | 1 | Token management |
+| **engine-triggers** | 1 | 0 | 0 | 1 | Trigger evaluation |
+| **TOTAL** | **51** | **76** | **13** | **140** | After 2026-02-05 validation |
+
+## Priority Distribution
+
+| Priority | Count | Percentage | Description |
+|----------|-------|------------|-------------|
+| **P1** | 51 | 36% | Major bugs - audit/data integrity issues |
+| **P2** | 76 | 54% | Moderate bugs - functionality gaps |
+| **P3** | 13 | 9% | Minor bugs - quality/UX issues |
+
+## 2026-02-05 Validation Summary
+
+**Changes made during validation:**
+- **Removed 64 false positives**: Bug tickets with "no bug found" or "no concrete bug found" in analysis
+- **Downgraded 3 P1 bugs to P2**: Severity was inflated (functionality gaps, not audit integrity)
+  - `pluginconfigvalidator-rejects-openrouter-batc` - Validator missing plugins (P1 -> P2)
+  - `openrouter-batch-drops-api-v1-from-base-ur` - Wrong endpoint (P1 -> P2)
+  - `nullsourceschema-treated-as-explicit-schema` - Resume validation (P1 -> P2)
+- **No duplicates found**: Verified against docs/bugs/closed/
+
+**Bug count changes:**
+- Original from triage: 203 bugs
+- After removing false positives: 139 bugs
+- After severity corrections: 140 bugs (51 P1, 76 P2, 13 P3)
 
 ## Recommended Fix Order
 
-### Phase 1: Critical Data Integrity (P1 - Fix This Sprint)
-- None (no open P1s as of 2026-02-01).
+### Phase 1: Critical Audit/Data Integrity (P1 - Fix This Sprint)
 
-Note: P1s closed during RC1 bug hunt:
-- **engine-coalesce/P1-2026-01-30-require-all-timeout-ignored** - Fixed with require_all timeout handling
-- **core-payload/P1-2026-01-31-payload-store-path-traversal** - Fixed with hash validation + containment
-- **cli/P1-2026-01-31-settings-path-missing-silent-fallback** - Already fixed in commit 8ab8fb36
-- **engine-orchestrator/P1-2026-01-31-quarantine-outcome-before-durability** - Fixed in commit e039498b
-- **core-dag/P1-2026-01-31-gate-drops-computed-schema-guarantees** - Fixed in commit 08cec258
+**Hotspots requiring immediate attention:**
+- **core-landscape/** (10 P1): Repository validation, payload persistence, reproducibility grading
+- **plugins-transforms/** (6 P1): Field mapping contracts, capacity errors, config validation
+- **plugins-llm/** (6 P1): HTTP/LLM call recording, NaN validation, output key collisions
+- **contracts/** (5 P1): Schema contract locking, type normalization, routing validation
+- **engine-orchestrator/** (4 P1): Resume contract inference, quarantine hashing, aggregation triggers
 
-### Phase 2: Audit Trail Completeness (Fix This Sprint/Next)
-- **core-landscape/** - Exporter completeness, verifier correctness
-- **contracts/** - Schema compatibility and enum validation
-- **engine-orchestrator/** - Cleanup error surfacing + output canonical validation
-- **plugins-llm/** - Azure/OpenRouter call recording and retry semantics
+### Phase 2: Functional Gaps (P2 - Fix Next Sprint)
 
-### Phase 3: Quality & Observability (Next Sprint)
-- **engine-spans/** - Span naming/metadata issues
-- **engine-pooling/** - Pool stats + batching examples
-- **core-logging/** - JSON log output consistency
+**Focus areas:**
+- **plugins-transforms/** (16 P2): Config validation, contract propagation
+- **contracts/** (11 P2): Schema handling, header modes, error contracts
+- **plugins-llm/** (11 P2): Batch transforms, tracing, response validation
+- **engine-spans/** (7 P2): Telemetry filtering, exporter configuration
+
+### Phase 3: Quality & Polish (P3 - Backlog)
+
+- Observability improvements (engine-spans)
+- CLI error messages
+- Minor validation gaps
+- UX improvements
 
 ## Subsystem Ownership
 
 ### CORE Subsystem
 **Owner:** Systems architect
 **Files:** `src/elspeth/core/`
-- `landscape/` - export, verifier, run repository
-- `checkpoint/` - resume + checkpoint format
-- `dag.py` - edge compatibility + coalesce validation
-- `payload_store.py` - path traversal + required payload storage
-- `rate_limit/` - atomicity + stale counters
+- `landscape/` - Repositories, recorder, exporter, verifier
+- `checkpoint/` - Resume, checkpoint serialization
+- `dag.py` - Schema contract propagation
+- `payload_store.py` - Integrity checking
+- `rate_limit/` - Thread safety
+- `security/` - Key vault integration
 
 ### ENGINE Subsystem
 **Owner:** Pipeline execution expert
 **Files:** `src/elspeth/engine/`
-- `coalesce_executor.py` - timeouts + branch handling
-- `orchestrator.py` - cleanup + quarantine durability ordering
-- `executors.py` - config gate missing-edge handling
-- `processor.py` - token span + outcome handling
+- `orchestrator/` - Resume contract handling, aggregation
+- `executors.py` - Contract propagation, hash error handling
+- `coalesce_executor.py` - Late arrival handling
+- `processor.py` - Deaggregation with PipelineRow
+- `triggers.py` - Condition latching
 
 ### PLUGINS Subsystem
 **Owner:** Plugin developer
 **Files:** `src/elspeth/plugins/`
-- `llm/` - multi-query output semantics, call recording
-- `transforms/` - call_index allocation
-- `sinks/` - schema validation, payload size issues
+- `llm/` - Azure/OpenRouter transforms, multi-query
+- `transforms/` - FieldMapper contracts, batch stats
+- `sinks/` - CSV/JSON/Database output handling
+- `sources/` - CSV/JSON parsing, field normalization
+- `azure/` - Blob source/sink handling
 
-## Verification Status
+### CONTRACTS Subsystem
+**Owner:** Data architect
+**Files:** `src/elspeth/contracts/`
+- Schema contracts, type normalization
+- Routing contracts, audit contracts
+- Transform output contracts
 
-**Open bugs (as of 2026-02-01): 0 P1, 1 P2, 2 P3 = 3 total.**
+## Reports
 
-**Triage updates (2026-02-01):**
-- Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).
-- Moved `P3-2026-01-21-verifier-ignore-order-hides-drift.md` to closed (Phase 1 implemented).
-- Normalized four misfiled bugs into subsystem folders with standard filenames.
-- Verified all remaining P1s; closed two that are now fixed (`P1-2026-01-30-payload-store-optional`, `P1-2026-01-31-sink-flush-failure-leaves-open-states`).
-- Closed `P2-2026-01-22-coalesce-timeout-failures-unrecorded` (fixed coalesce failure recording).
-- Closed `P3-2026-01-22-engine-artifacts-legacy-shim` (removed legacy re-export).
-- Closed `P3-2026-01-31-payload-store-legacy-reexport` (removed legacy re-export).
-- Closed `P3-2026-01-31-rowresult-legacy-accessors` (removed legacy accessors).
-
-**Reports:**
-- Original verification: `docs/bugs/VERIFICATION-REPORT-2026-01-25.md`
-- Pending verification: `docs/bugs/VERIFICATION-REPORT-PENDING-2026-01-25.md`
+- **Validation Report:** `docs/bugs/BUG-VALIDATION-REPORT-2026-02-05.md`
+- **Original Triage Report:** `docs/bugs/BUG-TRIAGE-REPORT-2026-02-05.md`
+- **Historical verification:** `docs/bugs/VERIFICATION-REPORT-2026-01-25.md`
