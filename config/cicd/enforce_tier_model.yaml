@@ -1599,6 +1599,21 @@ allow_hits:
   reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
   safety: 'isinstance() check handles union type from aggregation output'
   expires: null
+- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=dd2b7a10d16b6570
+  owner: P1-2026-02-05-schema-evolution
+  reason: Optional method check for schema evolution - transforms optionally implement get_transform_adds_fields()
+  safety: hasattr() with callable() check ensures method exists and is callable before invocation
+  expires: null
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=80f4b2eb31815f95
+  owner: P1-2026-02-05-schema-evolution
+  reason: Internal boundary - PipelineRow vs dict discrimination for contract propagation
+  safety: 'isinstance() converts PipelineRow to dict for propagate_contract() call'
+  expires: null
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=c38a7ce82fed6778
+  owner: P1-2026-02-05-schema-evolution
+  reason: Internal boundary - PipelineRow vs dict discrimination for token update
+  safety: 'isinstance() converts PipelineRow to dict when creating new token'
+  expires: null
 - key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=8a81618a9255abb2
   owner: architecture
   reason: HTTP response headers - external system boundary, content-type may be missing

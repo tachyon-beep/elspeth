@@ -381,8 +381,9 @@ class TransformExecutor:
             if result.row is not None:
                 output_data_with_pipe = result.row
             else:
-                # result.rows is guaranteed non-None by has_output_data check above
-                output_data_with_pipe = result.rows  # type: ignore[assignment]
+                # has_output_data check above guarantees rows is not None when row is None
+                assert result.rows is not None, "has_output_data guarantees rows when row is None"
+                output_data_with_pipe = result.rows
 
             # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
             def _to_dict(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
@@ -401,6 +402,33 @@ class TransformExecutor:
                 success_reason=result.success_reason,
                 context_after=result.context_after,
             )
+
+            # Record schema evolution if transform adds fields
+            # Transforms signal field addition via get_transform_adds_fields() method
+            # When True, compute evolved contract and record to audit trail
+            if (
+                result.row is not None
+                and hasattr(transform, "get_transform_adds_fields")
+                and callable(transform.get_transform_adds_fields)
+                and transform.get_transform_adds_fields()
+            ):
+                from elspeth.contracts.contract_propagation import propagate_contract
+
+                # Compute evolved contract: input contract + fields added by transform
+                input_contract = token.row_data.contract
+                row_dict = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
+                evolved_contract = propagate_contract(
+                    input_contract=input_contract,
+                    output_row=row_dict,
+                    transform_adds_fields=True,
+                )
+
+                # Record to landscape for audit completeness
+                self._recorder.update_node_output_contract(
+                    run_id=ctx.run_id,
+                    node_id=transform.node_id,
+                    contract=evolved_contract,
+                )
 
             # Update token with new PipelineRow, preserving all lineage metadata
             # For multi-row results, keep original row_data (engine will expand tokens later)
@@ -877,9 +905,9 @@ class GateExecutor:
 
             elif destination == "fork":
                 # Fork to multiple paths - fork_to guaranteed by GateSettings.validate_fork_consistency()
-                # (Pydantic validation ensures fork_to is not None when routes include "fork")
-                # Local binding for type narrowing (mypy can't see Pydantic validation)
-                fork_branches: list[str] = gate_config.fork_to  # type: ignore[assignment]
+                # Pydantic validation ensures fork_to is not None when routes include "fork"
+                assert gate_config.fork_to is not None, "Pydantic validation guarantees fork_to when routes include 'fork'"
+                fork_branches: list[str] = gate_config.fork_to
 
                 if token_manager is None:
                     raise RuntimeError(

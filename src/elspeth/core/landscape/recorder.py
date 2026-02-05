@@ -486,20 +486,20 @@ class LandscapeRecorder:
         node_id: str,
         contract: SchemaContract,
     ) -> None:
-        """Update a node's output_contract after first-row inference.
+        """Update a node's output_contract after first-row inference or schema evolution.
 
-        Called when a source infers schema from the first valid row during
-        OBSERVED mode. The contract is set during node registration but is
-        None at that point for dynamic sources.
+        Called in two scenarios:
+        1. Source infers schema from first valid row during OBSERVED mode
+        2. Transform adds fields during execution (schema evolution)
 
         Args:
             run_id: Run containing the node
-            node_id: Node to update (typically the source node)
-            contract: SchemaContract with inferred fields (should be locked)
+            node_id: Node to update (source or transform node)
+            contract: SchemaContract with inferred/evolved fields
 
         Note:
             This is the complement to update_run_contract() for node-level contracts.
-            Used for sources that discover schema during load() rather than from config.
+            Used for dynamic schema discovery and transform schema evolution.
         """
         audit_record = ContractAuditRecord.from_contract(contract)
         output_contract_json = audit_record.to_json()

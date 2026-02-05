@@ -21,8 +21,10 @@ from tests.conftest import (
     _TestSchema,
     _TestSinkBase,
     _TestSourceBase,
+    _TestTransformBase,
     as_sink,
     as_source,
+    as_transform,
 )
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
@@ -458,6 +460,132 @@ class TestOrchestratorContractRecording:
 
             assert source_node is not None
             assert source_node.output_contract_json is not None
+
+    def test_transform_schema_evolution_updates_contract(self, payload_store) -> None:
+        """Transform adding fields during execution should have updated contract recorded.
+
+        Edge case: When a transform adds fields to the pipeline, the orchestrator
+        should record the evolved contract (input fields + added fields) to the
+        nodes table as the transform's output_contract_json.
+
+        This verifies that schema evolution is tracked in the audit trail.
+        """
+        from elspeth.contracts import TransformResult
+
+        db = LandscapeDB.in_memory()
+
+        # Source provides base fields
+        test_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="ID",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+                FieldContract(
+                    normalized_name="name",
+                    original_name="Name",
+                    python_type=str,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+        class BaseSource(_TestSourceBase):
+            name = "base_source"
+            output_schema = _TestSchema
+
+            def __init__(self, contract: SchemaContract) -> None:
+                super().__init__()
+                self._contract = contract
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "name": "Alice"}, contract=self._contract)
+
+            def get_schema_contract(self) -> SchemaContract | None:
+                return self._contract
+
+        class EnrichTransform(_TestTransformBase):
+            """Transform that adds a 'score' field."""
+
+            name = "enrich_transform"
+
+            def process(self, row: Any, ctx: Any) -> TransformResult:
+                # Add new field
+                output = {**row.to_dict(), "score": 95.5}
+                return TransformResult.success(
+                    output,
+                    success_reason={"action": "enriched"},
+                )
+
+            def get_transform_adds_fields(self) -> bool:
+                return True  # Signal that this transform adds fields
+
+        class CollectSink(_TestSinkBase):
+            name = "collect"
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.results: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                from elspeth.contracts import ArtifactDescriptor
+
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+        source = BaseSource(contract=test_contract)
+        transform = EnrichTransform()
+        sink = CollectSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
+        )
+        graph = build_production_graph(config, default_sink="default")
+        orchestrator = Orchestrator(db)
+
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        assert result.rows_processed == 1
+        assert sink.results == [{"id": 1, "name": "Alice", "score": 95.5}]
+
+        # Verify transform node has evolved output contract
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import nodes_table
+
+        with db.engine.connect() as conn:
+            transform_node = conn.execute(
+                select(nodes_table).where((nodes_table.c.run_id == result.run_id) & (nodes_table.c.plugin_name == "enrich_transform"))
+            ).fetchone()
+
+            assert transform_node is not None
+            assert transform_node.output_contract_json is not None
+
+            # Parse and verify evolved contract
+            import json
+
+            contract_data = json.loads(transform_node.output_contract_json)
+            assert len(contract_data["fields"]) == 3  # id, name, score
+
+            # Verify all fields present
+            field_names = {f["normalized_name"] for f in contract_data["fields"]}
+            assert "id" in field_names
+            assert "name" in field_names
+            assert "score" in field_names  # New field added by transform
+
+            # Verify new field details
+            score_field = next(f for f in contract_data["fields"] if f["normalized_name"] == "score")
+            assert score_field["python_type"] == "float"
+            assert score_field["source"] == "inferred"
+            assert score_field["required"] is False  # Inferred fields are not required
 
 
 class TestOrchestratorSecretResolutions:
