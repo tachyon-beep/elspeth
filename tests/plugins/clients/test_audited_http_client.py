@@ -1024,3 +1024,266 @@ class TestAuditedHTTPClient:
         # Verify we can decode it back to original binary data
         decoded = base64.b64decode(recorded_body["_binary"])
         assert decoded == binary_data, "Decoded binary data doesn't match original"
+
+
+class TestAuditedHTTPClientGet:
+    """Tests for AuditedHTTPClient.get() method."""
+
+    def _create_mock_recorder(self) -> MagicMock:
+        """Create a mock LandscapeRecorder."""
+        import itertools
+
+        recorder = MagicMock()
+        recorder.record_call = MagicMock()
+        counter = itertools.count()
+        recorder.allocate_call_index.side_effect = lambda _: next(counter)
+        return recorder
+
+    def test_successful_get_records_to_audit_trail(self) -> None:
+        """Successful HTTP GET is recorded to audit trail with full response body."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+            timeout=30.0,
+        )
+
+        # Mock httpx.Client with HTML response
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/html"}
+        mock_response.content = b"<html><body>Content</body></html>"
+        mock_response.text = "<html><body>Content</body></html>"
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.get("https://example.com/page")
+
+        # Verify response
+        assert response.status_code == 200
+        assert response.text == "<html><body>Content</body></html>"
+
+        # Verify audit record
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["state_id"] == "state_123"
+        assert call_kwargs["call_index"] == 0
+        assert call_kwargs["call_type"] == CallType.HTTP
+        assert call_kwargs["status"] == CallStatus.SUCCESS
+        assert call_kwargs["request_data"]["method"] == "GET"
+        assert call_kwargs["request_data"]["url"] == "https://example.com/page"
+        assert call_kwargs["request_data"]["params"] is None
+        assert call_kwargs["response_data"]["status_code"] == 200
+        assert call_kwargs["response_data"]["body"] == "<html><body>Content</body></html>"
+        assert call_kwargs["latency_ms"] > 0
+
+    def test_get_with_query_params(self) -> None:
+        """GET with query params records params in audit trail and passes to httpx."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b'{"result": "ok"}'
+        mock_response.json.return_value = {"result": "ok"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.get("https://api.example.com/search", params={"q": "test", "limit": 10})
+
+        # Verify response
+        assert response.status_code == 200
+
+        # Verify params were passed to httpx
+        mock_client.get.assert_called_once()
+        call_args = mock_client.get.call_args
+        assert call_args[0][0] == "https://api.example.com/search"
+        assert call_args[1]["params"] == {"q": "test", "limit": 10}
+
+        # Verify params were recorded in audit trail
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["request_data"]["params"] == {"q": "test", "limit": 10}
+
+    def test_get_with_base_url(self) -> None:
+        """GET with base_url prepends base to path correctly."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+            base_url="https://api.example.com",
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.get("/v1/resource")
+
+        # Verify full URL was recorded
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/resource"
+
+        # Verify httpx was called with full URL
+        mock_client.get.assert_called_once()
+        actual_url = mock_client.get.call_args[0][0]
+        assert actual_url == "https://api.example.com/v1/resource"
+
+    def test_get_failed_call_records_error(self) -> None:
+        """Failed HTTP GET call records error details."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.side_effect = httpx.ConnectError("Connection refused")
+            mock_client_class.return_value = mock_client
+
+            with pytest.raises(httpx.ConnectError):
+                client.get("https://example.com/page")
+
+        # Verify error was recorded
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["error"]["type"] == "ConnectError"
+        assert "Connection refused" in call_kwargs["error"]["message"]
+
+    def test_get_auth_headers_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GET requests fingerprint auth headers in audit trail."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+            headers={"Authorization": "Bearer secret-token"},
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.get("https://api.example.com/resource")
+
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_headers = call_kwargs["request_data"]["headers"]
+
+        # Auth header should be fingerprinted
+        assert "Authorization" in recorded_headers
+        assert "Bearer secret-token" not in recorded_headers["Authorization"]
+        assert recorded_headers["Authorization"].startswith("<fingerprint:")
+
+    def test_get_json_response_recorded_as_dict(self) -> None:
+        """GET with JSON response records parsed dict."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b'{"items": [1, 2, 3]}'
+        mock_response.json.return_value = {"items": [1, 2, 3]}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.get("https://api.example.com/data")
+
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["response_data"]["body"] == {"items": [1, 2, 3]}
+
+    def test_get_4xx_response_recorded_as_error(self) -> None:
+        """GET with 4xx response is recorded with ERROR status."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 404
+        mock_response.headers = {"content-type": "text/plain"}
+        mock_response.content = b"Not Found"
+        mock_response.text = "Not Found"
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.get("https://example.com/missing")
+
+        # Response is still returned
+        assert response.status_code == 404
+
+        # Verify ERROR status was recorded
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["response_data"]["status_code"] == 404
+        assert call_kwargs["error"]["type"] == "HTTPError"
+        assert call_kwargs["error"]["status_code"] == 404

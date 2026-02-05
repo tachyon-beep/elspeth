@@ -1599,3 +1599,28 @@ allow_hits:
   reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
   safety: 'isinstance() check handles union type from aggregation output'
   expires: null
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=8a81618a9255abb2
+  owner: architecture
+  reason: HTTP response headers - external system boundary, content-type may be missing
+  safety: Defaults to empty string - safe fallback for content type detection
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R6:AuditedHTTPClient:get:fp=0483d2eb46a536d9
+  owner: architecture
+  reason: JSON parsing of HTTP response body - logs error and continues with raw text
+  safety: Response body still captured in audit trail as text
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=00b54adb0b6fded9
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+  safety: Logged and continues - telemetry is non-critical to request processing
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=37f4a9f331643031
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+  safety: Logged and continues - telemetry is non-critical to request processing
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=7cdca5ca08f6bc55
+  owner: architecture
+  reason: httpx Client.get() method call - this is the external HTTP call itself
+  safety: Response is fully recorded to audit trail with error handling
+  expires: '2026-05-02'
