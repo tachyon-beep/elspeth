@@ -510,6 +510,7 @@ class _TestSourceBase:
     def __init__(self) -> None:
         """Initialize test source with empty config."""
         self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
+        self._schema_contract: SchemaContract | None = None  # Track contract for audit trail
 
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
         """Wrap plain dicts in SourceRow.valid() as required by source protocol."""
@@ -528,6 +529,11 @@ class _TestSourceBase:
                 for key in row
             )
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+            # Store first contract for audit trail (needed for resume)
+            if self._schema_contract is None:
+                self._schema_contract = contract
+
             yield SourceRow.valid(row, contract=contract)
 
     def on_start(self, ctx: Any) -> None:
@@ -549,13 +555,13 @@ class _TestSourceBase:
         """
         return None
 
-    def get_schema_contract(self) -> Any:
+    def get_schema_contract(self) -> "SchemaContract | None":
         """Return schema contract for audit trail.
 
-        Test sources don't have contracts by default, so return None.
-        Override in test classes that need to provide contracts.
+        Returns the contract created from the first row processed.
+        This is needed for resume operations to work correctly.
         """
-        return None
+        return self._schema_contract
 
 
 class CallbackSource(_TestSourceBase):

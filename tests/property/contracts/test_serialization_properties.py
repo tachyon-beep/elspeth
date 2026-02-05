@@ -48,6 +48,32 @@ def _wrap_dict_as_pipeline_row(data: dict[str, Any]) -> PipelineRow:
     return PipelineRow(data, _make_observed_contract())
 
 
+def _token_to_dict(token: TokenInfo) -> dict[str, Any]:
+    """Convert TokenInfo to dict, handling PipelineRow serialization.
+
+    This is needed because TokenInfo.row_data is now PipelineRow (not dict),
+    and dataclasses.asdict() doesn't know how to serialize custom classes.
+    We manually convert PipelineRow to dict before calling asdict().
+
+    Args:
+        token: TokenInfo instance to serialize
+
+    Returns:
+        Dictionary with row_data as plain dict
+    """
+    # Convert token to dict, handling PipelineRow -> dict conversion
+    # asdict() will crash on PipelineRow, so we manually build the dict.
+    return {
+        "row_id": token.row_id,
+        "token_id": token.token_id,
+        "row_data": token.row_data.to_dict() if isinstance(token.row_data, PipelineRow) else token.row_data,
+        "branch_name": token.branch_name,
+        "fork_group_id": token.fork_group_id,
+        "join_group_id": token.join_group_id,
+        "expand_group_id": token.expand_group_id,
+    }
+
+
 # =============================================================================
 # Strategies for serialization testing
 # =============================================================================
@@ -247,8 +273,8 @@ class TestTokenInfoJsonSerializationProperties:
         """Property: TokenInfo serializes to valid JSON."""
         token = TokenInfo(row_id=row_id, token_id=token_id, row_data=_wrap_dict_as_pipeline_row(data))
 
-        # asdict + json.dumps should not raise
-        serialized = json.dumps(asdict(token))
+        # _token_to_dict + json.dumps should not raise
+        serialized = json.dumps(_token_to_dict(token))
 
         # Result should be valid JSON
         parsed = json.loads(serialized)
@@ -269,7 +295,7 @@ class TestTokenInfoJsonSerializationProperties:
         """Property: TokenInfo JSON round-trip preserves identity fields."""
         token = TokenInfo(row_id=row_id, token_id=token_id, row_data=_wrap_dict_as_pipeline_row(data))
 
-        serialized = json.dumps(asdict(token))
+        serialized = json.dumps(_token_to_dict(token))
         parsed = json.loads(serialized)
 
         assert parsed["row_id"] == row_id
@@ -307,7 +333,7 @@ class TestTokenInfoJsonSerializationProperties:
             expand_group_id=expand_group_id,
         )
 
-        serialized = json.dumps(asdict(token))
+        serialized = json.dumps(_token_to_dict(token))
         parsed = json.loads(serialized)
 
         assert parsed["branch_name"] == branch_name

@@ -156,6 +156,7 @@ class TestResumeIdempotence:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()  # Initialize base class (sets _schema_contract)
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
@@ -313,6 +314,33 @@ class TestResumeIdempotence:
             label="continue",
             mode=RoutingMode.MOVE,
         )
+
+        # Record schema contract (needed for resume)
+        # The source would have recorded this after the first valid row
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        source_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                ),
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+        recorder.update_run_contract(run_id, source_contract)
+        recorder.update_node_output_contract(run_id, "source", source_contract)
 
         # Create all 5 rows with payloads
         row_ids = []

@@ -13,6 +13,7 @@ class TestPluginSystemIntegration:
     def test_full_plugin_workflow(self) -> None:
         """Test source -> transform -> sink workflow."""
         from elspeth.contracts import ArtifactDescriptor, SourceRow
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.plugins import (
             BaseSink,
             BaseSource,
@@ -38,8 +39,22 @@ class TestPluginSystemIntegration:
             output_schema = InputSchema
 
             def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+                # Create schema contract for output
+                contract = SchemaContract(
+                    mode="FIXED",
+                    fields=(
+                        FieldContract(
+                            normalized_name="value",
+                            original_name="value",
+                            python_type=int,
+                            required=True,
+                            source="declared",
+                        ),
+                    ),
+                    locked=True,
+                )
                 for v in self.config["values"]:
-                    yield SourceRow.valid({"value": v})
+                    yield SourceRow.valid({"value": v}, contract=contract)
 
             def close(self) -> None:
                 pass
@@ -115,9 +130,10 @@ class TestPluginSystemIntegration:
         MemorySink.collected = []  # Reset
 
         for source_row in source.load(ctx):
-            # Extract row data from SourceRow for transform
+            # Convert SourceRow to PipelineRow for transform processing
             assert source_row.row is not None
-            result = transform.process(source_row.row, ctx)
+            pipeline_row = source_row.to_pipeline_row()
+            result = transform.process(pipeline_row, ctx)
             assert result.status == "success"
             assert result.row is not None  # Success always has row
             row_data = result.row if isinstance(result.row, dict) else result.row.to_dict()
