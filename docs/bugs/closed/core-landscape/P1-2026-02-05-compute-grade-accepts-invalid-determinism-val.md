@@ -88,3 +88,19 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`, `docs/design/architecture.md`
+
+## Resolution
+
+**Fixed in:** 2026-02-05
+**Beads issue:** elspeth-rapid-l4yk (closed)
+
+**Fix:** Added Tier-1 enum validation to `compute_grade()`:
+- Fetches all distinct determinism values for the run
+- Validates each value against the `Determinism` enum
+- Raises `ValueError` with clear message on invalid or NULL values
+- Per Data Manifesto: "Bad data in the audit trail = crash immediately"
+
+**Evidence:**
+- `src/elspeth/core/landscape/reproducibility.py:39-96`: Added validation loop that crashes on invalid determinism values
+- `tests/core/landscape/test_reproducibility.py:158-193`: Added `TestComputeGradeValidation::test_compute_grade_crashes_on_invalid_determinism_value` test
+- All 554 landscape tests pass

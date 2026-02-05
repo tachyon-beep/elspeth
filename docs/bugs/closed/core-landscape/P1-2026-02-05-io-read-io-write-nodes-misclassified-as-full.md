@@ -89,3 +89,19 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`, `docs/design/architecture.md`
+
+## Resolution
+
+**Fixed in:** 2026-02-05
+**Beads issue:** elspeth-rapid-y5tk (closed)
+
+**Fix:** Reclassified IO_READ and IO_WRITE as replay-required determinism values:
+- Added `Determinism.IO_READ.value` and `Determinism.IO_WRITE.value` to the `non_reproducible` set
+- Updated docstring to reflect that only DETERMINISTIC and SEEDED count as fully reproducible
+- Per determinism contract: IO operations are external/side-effectful and require capture/replay
+
+**Evidence:**
+- `src/elspeth/core/landscape/reproducibility.py:71-76`: IO_READ and IO_WRITE added to `non_reproducible` set
+- `src/elspeth/core/landscape/reproducibility.py:39-48`: Updated docstring to clarify only DETERMINISTIC/SEEDED are fully reproducible
+- `tests/core/landscape/test_reproducibility.py:195-258`: Added two new tests verifying IO nodes grade as REPLAY_REPRODUCIBLE
+- All 554 landscape tests pass

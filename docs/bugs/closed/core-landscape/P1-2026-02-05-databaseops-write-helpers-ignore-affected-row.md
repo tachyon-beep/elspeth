@@ -89,3 +89,18 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+## Resolution
+
+**Fixed in:** 2026-02-05
+**Beads issue:** elspeth-rapid-ozvq (closed)
+
+**Fix:** Added rowcount validation to `DatabaseOps` write helpers:
+- `execute_insert()`: Raises `ValueError` if `rowcount == 0` (missing parent row or constraint violation)
+- `execute_update()`: Raises `ValueError` if `rowcount == 0` (target row does not exist - audit corruption)
+- Per Data Manifesto: "Bad data in the audit trail = crash immediately"
+
+**Evidence:**
+- `src/elspeth/core/landscape/_database_ops.py:37-62`: Added rowcount checks to both execute methods
+- `tests/core/landscape/test_database_ops.py:96-147`: Added `TestDatabaseOpsTier1Validation` with tests for zero-row and valid updates
+- All 556 landscape tests pass
