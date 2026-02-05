@@ -1,8 +1,8 @@
-# Bug Report: normalize_type_for_contract misses pandas.NA and NumPy NaT missing-value sentinels
+# Bug Report: Missing-value sentinels (pd.NA, np.datetime64("NaT")) not normalized to `type(None)`
 
 ## Summary
 
-- Missing-value sentinels (`pd.NA`, `np.datetime64("NaT")`) are not normalized to `type(None)`, causing contract inference crashes and allowing missing datetimes to pass as valid types.
+- `normalize_type_for_contract()` treats `pd.NA` as an unsupported type and treats `np.datetime64("NaT")` as a valid `datetime`, which can crash first-row contract inference and allow missing datetimes to pass type checks.
 
 ## Severity
 
@@ -12,12 +12,12 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: Unknown
+- Commit/branch: RC2.3-pipeline-row @ 1c70074ef3b71e4fe85d4f926e52afeca50197ab
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
@@ -38,50 +38,50 @@
 
 ## Expected Behavior
 
-- Missing-value sentinels (`pd.NA`, `np.datetime64("NaT")`) normalize to `type(None)` so optional-field handling works and required fields can be flagged as missing.
+- `pd.NA` and `np.datetime64("NaT")` should normalize to `type(None)` so missing-value handling aligns with canonical policy and optional/required field checks behave correctly.
 
 ## Actual Behavior
 
-- `pd.NA` raises `TypeError` as an unsupported type, which can crash first-row contract inference.
-- `np.datetime64("NaT")` is normalized to `datetime`, allowing missing datetime values to pass type checks as if valid.
+- `pd.NA` raises `TypeError` as “Unsupported type,” which can crash first-row inference.
+- `np.datetime64("NaT")` normalizes to `datetime`, so missing datetimes can pass type validation.
 
 ## Evidence
 
-- `src/elspeth/contracts/type_normalization.py:57-76` only handles `pd.NaT` and normalizes all `np.datetime64` to `datetime`, with no `pd.NA` or `np.isnat()` handling.
-- `src/elspeth/contracts/type_normalization.py:80-88` raises `TypeError` for unsupported types, which includes `pd.NA` (NAType).
+- `src/elspeth/contracts/type_normalization.py:54-76` handles `pd.NaT` and all `np.datetime64` as `datetime`, with no `pd.NA` or `np.isnat()` handling.
+- `src/elspeth/contracts/type_normalization.py:80-88` raises `TypeError` for unsupported types, which includes `pd.NA`.
 - `src/elspeth/contracts/contract_builder.py:84-95` calls `with_field()` during first-row inference without catching `TypeError`, so `pd.NA` can crash inference.
-- `src/elspeth/core/canonical.py:44-100` documents that intentional missing values are `None/pd.NA/NaT`, so contract normalization should accept them.
+- `docs/design/architecture.md:421-424` documents `None/pd.NA/NaT` as intentional missing values, implying they should be normalized to `None`.
 
 ## Impact
 
-- User-facing impact: Pipelines can crash on first-row inference when missing values are represented as `pd.NA`.
-- Data integrity / security impact: Missing datetime values represented as `np.datetime64("NaT")` can be treated as valid datetimes, weakening required-field enforcement.
-- Performance or cost impact: N/A
+- User-facing impact: Observed/flexible schema inference can crash on first row if missing values are represented as `pd.NA`.
+- Data integrity / security impact: Missing datetimes represented as `np.datetime64("NaT")` can be treated as valid datetimes, weakening required-field enforcement.
+- Performance or cost impact: Potential pipeline aborts and retries from avoidable inference crashes.
 
 ## Root Cause Hypothesis
 
-- `normalize_type_for_contract()` does not recognize `pd.NA` or `np.datetime64("NaT")` as missing-value sentinels, despite the canonical policy that these represent missing data.
+- `normalize_type_for_contract()` does not recognize `pd.NA` or `np.datetime64("NaT")` as missing-value sentinels, despite the canonical missing-value policy.
 
 ## Proposed Fix
 
-- Code changes (modules/files): Update `src/elspeth/contracts/type_normalization.py` to return `type(None)` for `value is pd.NA` and for `isinstance(value, np.datetime64) and np.isnat(value)` before the generic `np.datetime64` path.
+- Code changes (modules/files): Update `src/elspeth/contracts/type_normalization.py` to return `type(None)` for `value is pd.NA` and for `isinstance(value, np.datetime64) and np.isnat(value)` before the generic `np.datetime64` branch.
 - Config or schema changes: None.
 - Tests to add/update: Add unit tests in `tests/contracts/test_type_normalization.py` for `pd.NA` and `np.datetime64("NaT")` normalization to `type(None)`.
-- Risks or migration steps: Low risk; aligns with existing canonical missing-value policy.
+- Risks or migration steps: None.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `src/elspeth/core/canonical.py:44-100`
-- Observed divergence: Canonical policy treats `pd.NA/NaT` as missing, but contract normalization rejects `pd.NA` and treats NumPy `NaT` as a valid datetime type.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `docs/design/architecture.md:421-424`
+- Observed divergence: Canonical policy treats `pd.NA/NaT` as intentional missing values, but contract normalization rejects `pd.NA` and treats NumPy `NaT` as a valid `datetime`.
 - Reason (if known): Missing sentinel handling not implemented in `normalize_type_for_contract()`.
-- Alignment plan or decision needed: Add missing-sentinel checks to match canonical policy.
+- Alignment plan or decision needed: Normalize missing sentinels to `type(None)` to match canonical policy.
 
 ## Acceptance Criteria
 
 - `normalize_type_for_contract(pd.NA)` returns `type(None)`.
 - `normalize_type_for_contract(np.datetime64("NaT"))` returns `type(None)`.
 - First-row contract inference no longer crashes on `pd.NA`.
-- New unit tests pass.
+- Missing datetimes no longer pass type checks as valid `datetime` values.
 
 ## Tests
 
@@ -91,4 +91,4 @@
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `src/elspeth/core/canonical.py`
+- Related design docs: `docs/design/architecture.md`

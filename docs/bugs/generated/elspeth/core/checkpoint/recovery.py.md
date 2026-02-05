@@ -2,7 +2,7 @@
 
 ## Summary
 
-- `RecoveryManager.get_unprocessed_rows()` ignores `checkpoint.aggregation_state_json`, so rows already buffered and restored from the checkpoint are still treated as “unprocessed” and re-run, causing duplicate buffering and duplicate downstream outputs.
+- `RecoveryManager.get_unprocessed_rows()` ignores `checkpoint.aggregation_state_json`, so rows already buffered and restored from the checkpoint are still treated as unprocessed and re-run, causing duplicate buffering and duplicate downstream outputs.
 
 ## Severity
 
@@ -12,12 +12,12 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: 7a155997ad574d2a10fa3838dd0079b0d67574ff / RC2.3-pipeline-row
+- Commit/branch: 1c70074ef3b71e4fe85d4f926e52afeca50197ab (branch unknown)
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
@@ -49,8 +49,8 @@
 ## Evidence
 
 - `src/elspeth/core/checkpoint/recovery.py:271-384` — `get_unprocessed_rows()` computes unprocessed rows solely from token outcomes, with no filtering by `checkpoint.aggregation_state_json`.
-- `src/elspeth/engine/executors.py:1464-1543` — aggregation checkpoint state includes buffered tokens with `row_id` and token data, meaning buffered rows can be restored from checkpoint state.
-- `src/elspeth/engine/orchestrator/core.py:1689-1745` — resume restores `aggregation_state` into the processor and then processes `unprocessed_rows` from payloads, so restored buffered tokens and reprocessed rows can both be present.
+- `src/elspeth/engine/executors.py:1489-1565` — aggregation checkpoint state includes buffered tokens with `row_id`, meaning buffered rows can be restored from checkpoint state.
+- `src/elspeth/engine/orchestrator/core.py:1704-1783` — resume restores `aggregation_state` and then processes `unprocessed_rows` from payloads, so restored buffered tokens and reprocessed rows can both be present.
 
 ## Impact
 
@@ -64,13 +64,10 @@
 
 ## Proposed Fix
 
-- Code changes (modules/files):
-  - `src/elspeth/core/checkpoint/recovery.py`: Parse `checkpoint.aggregation_state_json`, collect buffered `row_id`s from each node’s `tokens` list, and exclude those row IDs from the `unprocessed` set before returning.
+- Code changes (modules/files): `src/elspeth/core/checkpoint/recovery.py` — parse `checkpoint.aggregation_state_json`, collect buffered `row_id`s from each node’s `tokens` list, and exclude those row IDs from the `unprocessed` set before returning.
 - Config or schema changes: None.
-- Tests to add/update:
-  - Add a recovery test that builds a checkpoint with non-empty aggregation buffers and verifies buffered rows are excluded from `get_unprocessed_rows()` when `aggregation_state_json` includes them.
-- Risks or migration steps:
-  - Ensure exclusion is limited to rows present in checkpoint state to avoid skipping genuinely unprocessed rows when no buffer state was captured.
+- Tests to add/update: Add a recovery test that builds a checkpoint with non-empty aggregation buffers and verifies buffered rows are excluded from `get_unprocessed_rows()` when `aggregation_state_json` includes them.
+- Risks or migration steps: Ensure exclusion is limited to rows present in checkpoint state to avoid skipping genuinely unprocessed rows when no buffer state was captured.
 
 ## Architectural Deviations
 

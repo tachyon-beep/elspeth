@@ -1,8 +1,8 @@
-# Bug Report: Observed Schema Silently Accepts Non-List `fields` Values
+# Bug Report: Observed schema silently accepts non-list `fields` values
 
 ## Summary
 
-- In `mode: observed`, `SchemaConfig.from_dict()` ignores any `fields` value that is not a non-empty list, allowing invalid configs (e.g., `fields: "id: int"` or a dict) to pass without error and dropping the user’s explicit schema intent.
+- `SchemaConfig.from_dict()` in observed mode ignores `fields` when it is a string or dict, silently accepting invalid config instead of raising a validation error.
 
 ## Severity
 
@@ -12,20 +12,20 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: 3aa2fa93d8ebd2650c7f3de23b318b60498cd81c (branch: RC2.3-pipeline-row)
+- Commit/branch: 1c70074ef3b71e4fe85d4f926e52afeca50197ab (branch `RC2.3-pipeline-row`)
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
-- Data set or fixture: Minimal schema config dict
+- Data set or fixture: Unknown
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: Static analysis agent doing a deep bug audit for `/home/john/elspeth-rapid/src/elspeth/contracts/schema.py`
+- Goal or task prompt: Static analysis deep bug audit for `src/elspeth/contracts/schema.py`
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -33,56 +33,56 @@
 
 ## Steps To Reproduce
 
-1. Call `SchemaConfig.from_dict({"mode": "observed", "fields": "id: int"})`.
-2. Observe that no exception is raised and the returned config is treated as observed (no explicit fields).
+1. Run `SchemaConfig.from_dict({"mode": "observed", "fields": "id: int"})`.
+2. Run `SchemaConfig.from_dict({"mode": "observed", "fields": {"id": "int"}})`.
 
 ## Expected Behavior
 
-- `SchemaConfig.from_dict()` should reject any `fields` value for `mode: observed` that is not `None` or an empty list, raising a `ValueError` for non-list values.
+- Both calls should raise `ValueError` because observed schemas cannot include explicit field definitions of any type.
 
 ## Actual Behavior
 
-- Non-list `fields` values are silently ignored in observed mode, resulting in an observed schema with `fields=None` and no error.
+- Both calls return a valid `SchemaConfig(mode="observed", fields=None, ...)` with no error, silently ignoring the invalid `fields` value.
 
 ## Evidence
 
-- `src/elspeth/contracts/schema.py:324-334` only raises when `fields_value` is a non-empty list; non-list values bypass validation and return an observed schema with `fields=None`.
+- `SchemaConfig.from_dict` only rejects `fields` in observed mode when it is a non-empty list, so other types bypass validation. See `src/elspeth/contracts/schema.py:324-334` where `fields_value` is checked only for `list` and `len > 0`.
+- Empirical check: calling `SchemaConfig.from_dict` with `fields` as a string or dict returns a schema without raising (verified in local Python REPL using `PYTHONPATH=src`).
 
 ## Impact
 
-- User-facing impact: Misconfigured pipelines can silently bypass intended schema enforcement.
-- Data integrity / security impact: Invalid or malformed rows can flow without validation, weakening audit guarantees.
-- Performance or cost impact: None direct.
+- User-facing impact: Invalid configuration is silently accepted, making it easy to think a schema is defined when it is actually ignored.
+- Data integrity / security impact: Pipeline runs in observed mode (no schema enforcement), weakening contract validation and audit guarantees.
+- Performance or cost impact: None known.
 
 ## Root Cause Hypothesis
 
-- The observed-mode branch only checks `isinstance(fields_value, list)` and `len > 0`, leaving non-list types unvalidated.
+- Observed-mode validation only blocks non-empty lists of fields and does not enforce type checking on other `fields` values, so invalid inputs slip through.
 
 ## Proposed Fix
 
-- Code changes (modules/files): Tighten observed-mode validation in `src/elspeth/contracts/schema.py` to reject any non-`None` `fields` value that is not an empty list.
+- Code changes (modules/files): `src/elspeth/contracts/schema.py` — in observed mode, treat any non-`None` `fields` value as invalid unless it is an empty list; reject strings/dicts with a clear `ValueError`.
 - Config or schema changes: None.
-- Tests to add/update: Add tests in `tests/contracts/test_schema_config.py` for observed mode with `fields` as a string and as a dict, asserting `ValueError`.
-- Risks or migration steps: Low; this only rejects invalid configs that were previously (incorrectly) accepted.
+- Tests to add/update: `tests/contracts/test_schema_config.py` — add tests asserting `SchemaConfig.from_dict({"mode": "observed", "fields": "id: int"})` and `fields` as dict both raise `ValueError`.
+- Risks or migration steps: None; this is stricter validation of clearly invalid configurations.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `src/elspeth/contracts/schema.py:252-265` (observed schemas accept anything but do not define explicit field types).
-- Observed divergence: Non-list `fields` values are accepted and effectively ignored, despite being explicit field definitions.
-- Reason (if known): Missing type validation for `fields` in observed mode.
-- Alignment plan or decision needed: Enforce `fields is None or []` for observed mode; reject all other types.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `src/elspeth/contracts/schema.py:324-334` (documented rule: observed schemas cannot have explicit field definitions).
+- Observed divergence: Non-list `fields` values bypass validation in observed mode.
+- Reason (if known): Unknown.
+- Alignment plan or decision needed: Enforce type validation for `fields` in observed mode (raise on any non-`None` and non-empty list).
 
 ## Acceptance Criteria
 
-- `SchemaConfig.from_dict()` raises `ValueError` when `mode: observed` and `fields` is a non-list (e.g., string or dict).
-- Existing schema tests pass, with new tests covering the invalid observed-mode `fields` types.
+- Observed mode raises `ValueError` for any non-`None` `fields` value that is not an empty list, including strings and dicts.
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/contracts/test_schema_config.py`
-- New tests required: yes, observed-mode `fields` non-list validation cases.
+- Suggested tests to run: `.venv/bin/python -m pytest tests/contracts/test_schema_config.py -k observed`
+- New tests required: yes, add cases for `fields` as string and dict in observed mode.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: Unknown
+- Related design docs: `docs/plans/2026-02-02-unified-schema-contracts-design.md`

@@ -1,8 +1,8 @@
-# Bug Report: Optional Float Fields Downgrade to `any` in Output Contracts
+# Bug Report: Optional Float Fields Lose Type Enforcement in Transform Output Contracts
 
 ## Summary
 
-- Optional float fields created via schema config are mapped to `object` in output contracts, so type validation is skipped for those fields.
+- Optional float fields created via `create_schema_from_config()` become `python_type=object` in the output `SchemaContract`, so type mismatches are never flagged.
 
 ## Severity
 
@@ -12,20 +12,20 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: RC2.3-pipeline-row @ 3aa2fa93
-- OS: unknown
-- Python version: unknown
+- Commit/branch: Unknown
+- OS: Unknown
+- Python version: Unknown
 - Config profile / env vars: N/A
-- Data set or fixture: SchemaConfig with optional float field (e.g., `score: float?`)
+- Data set or fixture: SchemaConfig with an optional float field (required=False)
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: Static analysis deep bug audit of `src/elspeth/contracts/transform_contract.py`
+- Goal or task prompt: You are a static analysis agent doing a deep bug audit. Target file: /home/john/elspeth-rapid/src/elspeth/contracts/transform_contract.py
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -33,60 +33,60 @@
 
 ## Steps To Reproduce
 
-1. Create a schema with an optional float field via config, e.g., `SchemaConfig(mode="fixed", fields=["score: float?"])` and build it with `create_schema_from_config`.
-2. Call `create_output_contract_from_schema` on the resulting schema class.
-3. Validate output `{"score": "not-a-float"}` against the contract.
+1. Create a `SchemaConfig` with a float field marked `required=False` and build a schema with `create_schema_from_config()` (this produces `FiniteFloat | None`).
+2. Call `create_output_contract_from_schema()` on the resulting schema class.
+3. Observe the field’s `python_type` is `object` instead of `float`, and a non-float value passes `SchemaContract.validate()` without a `TypeMismatchViolation`.
 
 ## Expected Behavior
 
-- The contract should record `score` as `float`, and non-float values should produce a type mismatch violation (unless `None`).
+- Optional float fields should retain `python_type=float` (while still allowing `None`), so non-float values are flagged by contract validation.
 
 ## Actual Behavior
 
-- The contract records `score` as `object`, so type validation is skipped and invalid types pass.
+- Optional float fields are treated as `python_type=object`, which skips type validation entirely.
 
 ## Evidence
 
-- `src/elspeth/contracts/transform_contract.py:45-60` shows `_get_python_type` only recognizes primitives and falls back to `object` for unknown types, including `Annotated` inside `Optional`.
-- `src/elspeth/plugins/schema_factory.py:28-36` defines `FiniteFloat` as `Annotated[float, ...]`, and `src/elspeth/plugins/schema_factory.py:145-151` wraps optional fields as `base_type | None`, producing `Optional[Annotated[float, ...]]`.
-- `src/elspeth/contracts/schema_contract.py:235-238` skips type validation when `python_type is object`.
+- `src/elspeth/contracts/transform_contract.py:33-60` — `_get_python_type()` only maps primitive types and does not unwrap `Annotated` inside a `Union`; it returns `object` for unknown union members.
+- `src/elspeth/plugins/schema_factory.py:23-35, 107-115, 133-150` — float fields use `FiniteFloat = Annotated[float, Field(...)]` and optional fields are built as `base_type | None`, yielding `Annotated[float, ...] | None`.
+- `src/elspeth/contracts/schema_contract.py:214-238` — `python_type is object` explicitly skips type validation.
 
 ## Impact
 
-- User-facing impact: Transform outputs with optional float fields can silently emit non-float values without violations.
-- Data integrity / security impact: Violates Tier 2 expectations; incorrect types can propagate into the audit trail and downstream sinks.
-- Performance or cost impact: None.
+- User-facing impact: Transform outputs with optional float fields can silently emit non-float values without contract violations.
+- Data integrity / security impact: Audit trail contract claims type safety but allows arbitrary values for optional float fields, weakening type integrity guarantees.
+- Performance or cost impact: Unknown
 
 ## Root Cause Hypothesis
 
-- `_get_python_type` does not unwrap `typing.Annotated` when it appears inside `Union`/`Optional`, so optional floats become `object` and lose type enforcement.
+- `_get_python_type()` in `src/elspeth/contracts/transform_contract.py` does not unwrap `Annotated` types inside `Union`/`Optional`, so `Annotated[float, ...] | None` resolves to `object` instead of `float`.
 
 ## Proposed Fix
 
-- Code changes (modules/files): Update `src/elspeth/contracts/transform_contract.py` `_get_python_type` to unwrap `Annotated` types (including inside unions) before `_TYPE_MAP` checks.
-- Config or schema changes: None.
-- Tests to add/update: Add a test in `tests/contracts/test_transform_contract.py` to ensure optional float fields derived from config produce `python_type=float` and reject non-float values.
-- Risks or migration steps: Low risk; tighter validation may surface existing invalid data that previously passed.
+- Code changes (modules/files): Update `_get_python_type()` in `src/elspeth/contracts/transform_contract.py` to unwrap `Annotated` types (including within `Union`) before mapping to `_TYPE_MAP`.
+- Config or schema changes: None
+- Tests to add/update: Add a test in `tests/contracts/test_transform_contract.py` that builds a schema via `create_schema_from_config()` with `field_type="float"` and `required=False`, then asserts `python_type is float` and `validate_output_against_contract` flags a non-float.
+- Risks or migration steps: Low risk; change only affects contract type extraction.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md` Data Manifesto (Tier 2: transforms must not accept wrong types).
-- Observed divergence: Optional float fields are treated as `any`, disabling type enforcement.
-- Reason (if known): Missing `Annotated` unwrapping logic in `_get_python_type`.
-- Alignment plan or decision needed: Implement `Annotated` unwrapping and add regression tests.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md` (Three-Tier Trust Model: transforms should not accept wrong types; schema contracts must enforce expected types)
+- Observed divergence: Optional float fields in transform output schemas are treated as `any`, allowing wrong types without violations.
+- Reason (if known): Missing `Annotated` unwrapping in `_get_python_type()` when `Optional` is used.
+- Alignment plan or decision needed: Add `Annotated` handling in `_get_python_type()` and add a test covering schema_factory-created optional float fields.
 
 ## Acceptance Criteria
 
-- Optional float fields in output contracts are recorded as `float`.
-- Non-float values for optional float fields yield type mismatch violations.
-- Added regression test passes.
+- Optional float fields created via `create_schema_from_config()` produce `FieldContract.python_type is float`.
+- `validate_output_against_contract()` reports `TypeMismatchViolation` for non-float values in those fields.
+- New regression test passes.
 
 ## Tests
 
 - Suggested tests to run: `.venv/bin/python -m pytest tests/contracts/test_transform_contract.py`
-- New tests required: yes, test optional float contract typing from config-generated schemas.
+- New tests required: yes, add an optional-float schema_factory contract extraction test.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `docs/plans/completed/2026-02-02-phase3-transform-sink-integration.md`
+- Related design docs: `CLAUDE.md` (Three-Tier Trust Model)

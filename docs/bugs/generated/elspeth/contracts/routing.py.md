@@ -1,31 +1,31 @@
-# Bug Report: No concrete bug found in /home/john/elspeth-rapid/src/elspeth/contracts/routing.py
+# Bug Report: RoutingAction Accepts Non-Enum `mode`, Causing Uncaught TypeError and OPEN NodeState
 
 ## Summary
 
-- No concrete bug found in /home/john/elspeth-rapid/src/elspeth/contracts/routing.py
+- `RoutingAction.__post_init__` does not validate that `mode` is a `RoutingMode` enum, so `RoutingAction.route(..., mode="move")` succeeds; later `record_routing_event` builds a `RoutingEvent` that strictly validates enums and raises `TypeError`, which is **not** caught by `GateExecutor`, leaving the node_state OPEN and routing_events missing.
 
 ## Severity
 
-- Severity: trivial
-- Priority: P3
+- Severity: major
+- Priority: P1
 
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
-- Related run/issue ID: Unknown
+- Date: 2026-02-04
+- Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: RC2.3-pipeline-row @ 3aa2fa93
-- OS: Unknown
-- Python version: Unknown
-- Config profile / env vars: Unknown
-- Data set or fixture: Unknown
+- Commit/branch: 1c70074e (RC2.3-pipeline-row)
+- OS: unknown
+- Python version: unknown
+- Config profile / env vars: N/A
+- Data set or fixture: Any pipeline with a gate plugin returning `RoutingAction.route(..., mode="move")` (string mode)
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: Static analysis deep bug audit of /home/john/elspeth-rapid/src/elspeth/contracts/routing.py
+- Goal or task prompt: static analysis deep bug audit of /home/john/elspeth-rapid/src/elspeth/contracts/routing.py
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -33,55 +33,69 @@
 
 ## Steps To Reproduce
 
-1. Unknown
-2. Unknown
+1. Implement a gate plugin that returns `RoutingAction.route("review", mode="move")` (string, not `RoutingMode.MOVE`).
+2. Run any pipeline that executes this gate.
+3. Observe the run crash during routing event recording and inspect the audit DB: the gate `node_state` remains OPEN and no `routing_events` are recorded for the decision.
 
 ## Expected Behavior
 
-- Unknown
+- Invalid `mode` types are rejected at `RoutingAction` construction time (within gate evaluation), so `GateExecutor` can mark the node_state as FAILED with a clear error and no OPEN node_states remain.
 
 ## Actual Behavior
 
-- Unknown
+- `RoutingAction` accepts `mode="move"` because `__post_init__` only checks copy/move invariants and not type.
+- `LandscapeRecorder.record_routing_event()` builds a `RoutingEvent` that validates `mode` and raises `TypeError`.
+- `GateExecutor` does not catch `TypeError`, so the node_state is left OPEN and routing events are not recorded.
 
 ## Evidence
 
-- Reviewed `src/elspeth/contracts/routing.py:1-170` for routing invariants, factory validation, and contract types; no concrete defect identified.
+- `RoutingAction.__post_init__` has invariant checks but **no enum type validation** for `mode`.
+  `src/elspeth/contracts/routing.py:63-83`
+- `RoutingEvent.__post_init__` enforces enum type and raises `TypeError` on non-enum.
+  `src/elspeth/contracts/audit.py:324-327` and `_validate_enum` at `src/elspeth/contracts/audit.py:31-39`
+- `GateExecutor.execute_gate()` only catches `MissingEdgeError`, `RuntimeError`, and `ValueError`, **not** `TypeError`.
+  `src/elspeth/engine/executors.py:628-709`
 
 ## Impact
 
-- User-facing impact: Unknown
-- Data integrity / security impact: Unknown
-- Performance or cost impact: Unknown
+- User-facing impact: Pipeline crashes during gate routing when a plugin passes a string `mode`.
+- Data integrity / security impact: Audit trail integrity violation—node_state remains OPEN with no terminal status or routing_events, violating “no silent drops / complete audit trail.”
+- Performance or cost impact: Run aborts; potential re-run cost.
 
 ## Root Cause Hypothesis
 
-- No bug identified
+- `RoutingAction` does not validate `mode` is a `RoutingMode` enum. Invalid values (e.g., `"move"`) pass through and trigger a `TypeError` inside `RoutingEvent` construction, which is not caught in `GateExecutor`, leaving OPEN node_states.
 
 ## Proposed Fix
 
-- Code changes (modules/files): None (no bug identified)
-- Config or schema changes: None (no bug identified)
-- Tests to add/update: None (no bug identified)
-- Risks or migration steps: None (no bug identified)
+- Code changes (modules/files):
+  - `src/elspeth/contracts/routing.py`: add strict enum validation in `RoutingAction.__post_init__` (e.g., `if not isinstance(self.mode, RoutingMode): raise TypeError(...)`) so invalid modes fail during gate evaluation and are recorded as node_state failures.
+- Config or schema changes: None.
+- Tests to add/update:
+  - `tests/contracts/test_routing.py`: add test that `RoutingAction.route("x", mode="move")` raises `TypeError`.
+  - Optional: test for `RoutingAction(kind=..., mode="move")` raising `TypeError`.
+- Risks or migration steps:
+  - Any plugins passing string `mode` must be fixed to pass `RoutingMode` enums (intentional strictness per audit rules).
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): Unknown
-- Observed divergence: Unknown
-- Reason (if known): Unknown
-- Alignment plan or decision needed: Unknown
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:32` (“wrong type = crash” for audit-trail data)
+- Observed divergence: `RoutingAction` allows non-enum `mode` values to proceed past contract boundaries, leading to unhandled type errors and incomplete audit state.
+- Reason (if known): Missing enum type validation in `RoutingAction.__post_init__`.
+- Alignment plan or decision needed: Enforce `RoutingMode` type at `RoutingAction` construction.
 
 ## Acceptance Criteria
 
-- Unknown
+- Constructing `RoutingAction` with non-`RoutingMode` `mode` raises immediately.
+- A gate that returns invalid `RoutingAction` triggers a FAILED node_state (not OPEN) with a recorded error.
+- No OPEN node_states are left due to invalid routing action types.
 
 ## Tests
 
-- Suggested tests to run: Unknown
-- New tests required: no (no bug identified)
+- Suggested tests to run: `.venv/bin/python -m pytest tests/contracts/test_routing.py`
+- New tests required: yes, add explicit invalid-mode tests.
 
 ## Notes / Links
 
-- Related issues/PRs: Unknown
-- Related design docs: Unknown
+- Related issues/PRs: N/A
+- Related design docs: `CLAUDE.md` (Data Manifesto: type violations must crash).

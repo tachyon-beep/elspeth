@@ -1,8 +1,8 @@
-# Bug Report: Aggregation Batch-Aware Check Masks Contract Violations
+# Bug Report: Aggregation validation hides missing `is_batch_aware` attribute with `getattr`
 
 ## Summary
 
-- `instantiate_plugins_from_config()` uses `getattr(..., False)` for `is_batch_aware`, which hides missing required attributes on system-owned transforms and violates the defensive programming prohibition.
+- Aggregation validation uses `getattr(..., False)` on a system-owned transform, masking a missing `is_batch_aware` attribute (interface violation) as a configuration error.
 
 ## Severity
 
@@ -12,20 +12,20 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: 3aa2fa93d8ebd2650c7f3de23b318b60498cd81c (branch `RC2.3-pipeline-row`)
-- OS: unknown
-- Python version: unknown
+- Commit/branch: RC2.3-pipeline-row @ e0060836
+- OS: Unknown
+- Python version: Unknown
 - Config profile / env vars: N/A
 - Data set or fixture: Unknown
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: Static analysis deep bug audit for `src/elspeth/cli_helpers.py`
+- Goal or task prompt: Static analysis bug audit for `src/elspeth/cli_helpers.py`
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -33,61 +33,59 @@
 
 ## Steps To Reproduce
 
-1. Register a transform that does not expose `is_batch_aware` (e.g., mistakenly not inheriting `BaseTransform`) and reference it in an `aggregations` config.
-2. Run `elspeth validate` or `elspeth run` to instantiate plugins.
-3. Observe the error message indicating `is_batch_aware=False` rather than a protocol/attribute failure.
+1. Register or configure a transform that does not define `is_batch_aware` (e.g., forgets to subclass `BaseTransform`).
+2. Reference that transform in `aggregations` and run a CLI path that calls `instantiate_plugins_from_config`.
 
 ## Expected Behavior
 
-- Direct access to `transform.is_batch_aware` should surface an `AttributeError` (or explicit protocol violation) if the attribute is missing.
+- The missing `is_batch_aware` attribute should surface as an interface violation (AttributeError or explicit protocol error), signaling a system bug.
 
 ## Actual Behavior
 
-- `getattr(transform, "is_batch_aware", False)` treats a missing attribute as `False` and raises a misleading configuration error.
+- The code treats the missing attribute as `False` and raises a ValueError about `is_batch_aware=False`, masking the real contract violation.
 
 ## Evidence
 
-- Defensive `getattr` in aggregation check: `src/elspeth/cli_helpers.py:54`
-- `is_batch_aware` is a required attribute on transforms: `src/elspeth/plugins/protocols.py:142-195`
-- `BaseTransform` defines `is_batch_aware` for all system transforms: `src/elspeth/plugins/base.py:71-74`
-- Defensive attribute access is explicitly запрещен: `CLAUDE.md:918-920`
+- `src/elspeth/cli_helpers.py:54` uses `getattr(transform, "is_batch_aware", False)` in aggregation validation.
+- `src/elspeth/plugins/protocols.py:192` defines `is_batch_aware` as a required TransformProtocol attribute.
+- `CLAUDE.md:918` prohibits defensive patterns like `getattr` that hide system-owned bugs.
 
 ## Impact
 
-- User-facing impact: Misleading error messages when a transform violates the protocol, making debugging harder.
-- Data integrity / security impact: Low; this is a bug-hiding pattern that weakens contract enforcement.
+- User-facing impact: Misleading error message that points to configuration instead of a plugin interface bug.
+- Data integrity / security impact: None directly; pipeline fails fast but with incorrect diagnosis.
 - Performance or cost impact: None.
 
 ## Root Cause Hypothesis
 
-- Use of defensive `getattr(..., False)` on system-owned plugin attributes, which masks contract violations instead of surfacing them.
+- Defensive programming pattern (`getattr` with a default) is used on system-owned plugin objects, which violates the no-bug-hiding rule and masks interface violations.
 
 ## Proposed Fix
 
-- Code changes (modules/files): Replace `getattr(transform, "is_batch_aware", False)` with direct `transform.is_batch_aware` access and retain the ValueError only for explicit `False` values in `src/elspeth/cli_helpers.py`.
+- Code changes (modules/files): In `src/elspeth/cli_helpers.py`, access `transform.is_batch_aware` directly and let AttributeError surface; keep the ValueError only for the explicit `False` case.
 - Config or schema changes: None.
-- Tests to add/update: Add a unit test that registers a transform missing `is_batch_aware` and asserts that instantiation fails with an attribute/protocol error rather than a misleading ValueError.
+- Tests to add/update: Add a unit test that injects a transform missing `is_batch_aware` and asserts that plugin instantiation fails with an interface violation rather than a config error.
 - Risks or migration steps: None.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:918-920`
-- Observed divergence: Defensive `getattr` used on system-owned transform attributes.
-- Reason (if known): Likely intended to guard against missing attributes, but this violates the “no defensive programming” rule.
-- Alignment plan or decision needed: Use direct attribute access to surface contract violations and maintain policy compliance.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:918`
+- Observed divergence: `getattr(..., False)` hides missing attributes on system-owned plugins.
+- Reason (if known): Unknown.
+- Alignment plan or decision needed: Remove defensive attribute access and rely on explicit attributes per protocol.
 
 ## Acceptance Criteria
 
-- Aggregation instantiation uses direct `transform.is_batch_aware` access.
-- Missing `is_batch_aware` raises a protocol/attribute error rather than “is_batch_aware=False”.
-- Non-batch-aware transforms still yield the current ValueError with an accurate message.
+- Aggregation validation raises a clear interface violation when `is_batch_aware` is missing.
+- Aggregation validation still raises a ValueError when `is_batch_aware` is present and `False`.
+- No defensive attribute access remains in the aggregation validation path.
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/ -k cli_helpers`
-- New tests required: yes, add a unit test that exercises missing `is_batch_aware` on aggregation instantiation.
+- Suggested tests to run: `.venv/bin/python -m pytest tests/cli/test_cli_helpers.py -k instantiate_plugins_from_config`
+- New tests required: yes, add a test covering missing `is_batch_aware`.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `CLAUDE.md` (defensive programming prohibition)
+- Related design docs: `CLAUDE.md:918`

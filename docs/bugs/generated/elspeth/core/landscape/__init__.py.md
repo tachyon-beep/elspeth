@@ -12,20 +12,20 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: Unknown
-- OS: unknown
-- Python version: unknown
+- Commit/branch: 1c70074e (RC2.3-pipeline-row)
+- OS: Unknown
+- Python version: Unknown
 - Config profile / env vars: N/A
 - Data set or fixture: Unknown
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: Deep bug audit for `src/elspeth/core/landscape/__init__.py`
+- Goal or task prompt: Static analysis deep bug audit for `src/elspeth/core/landscape/__init__.py`
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -46,13 +46,13 @@
 
 ## Evidence
 
-- Reviewed `src/elspeth/core/landscape/__init__.py` lines 1-150; file only re-exports symbols and defines `__all__`, with no execution logic or state mutation paths to audit.
+- Reviewed `src/elspeth/core/landscape/__init__.py` for export/import inconsistencies and integration gaps; no concrete defects identified.
 
 ## Impact
 
-- User-facing impact: None identified
-- Data integrity / security impact: None identified
-- Performance or cost impact: None identified
+- User-facing impact: Unknown
+- Data integrity / security impact: Unknown
+- Performance or cost impact: Unknown
 
 ## Root Cause Hypothesis
 
@@ -60,28 +60,31 @@
 
 ## Proposed Fix
 
-- Code changes (modules/files): None
-- Config or schema changes: None
-- Tests to add/update: None
-- Risks or migration steps: None
+- Code changes (modules/files):
+  - Unknown
+- Config or schema changes: Unknown
+- Tests to add/update:
+  - Unknown
+- Risks or migration steps:
+  - Unknown
 
 ## Architectural Deviations
 
 - Spec or doc reference (e.g., docs/design/architecture.md#L...): Unknown
-- Observed divergence: None identified
+- Observed divergence: Unknown
 - Reason (if known): Unknown
-- Alignment plan or decision needed: N/A
+- Alignment plan or decision needed: Unknown
 
 ## Acceptance Criteria
 
-- No issues detected in `src/elspeth/core/landscape/__init__.py` after review.
+- Unknown
 
 ## Tests
 
-- Suggested tests to run: N/A
-- New tests required: no
+- Suggested tests to run: Unknown
+- New tests required: no, description: Unknown
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `CLAUDE.md`
+- Related design docs: N/A

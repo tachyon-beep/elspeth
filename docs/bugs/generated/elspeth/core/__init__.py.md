@@ -12,12 +12,12 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: Unknown
+- Commit/branch: 1c70074e (RC2.3-pipeline-row)
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
@@ -25,7 +25,7 @@
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: You are a static analysis agent doing a deep bug audit. Target file: /home/john/elspeth-rapid/src/elspeth/core/__init__.py
+- Goal or task prompt: Static analysis deep bug audit of `/home/john/elspeth-rapid/src/elspeth/core/__init__.py`
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -34,6 +34,7 @@
 ## Steps To Reproduce
 
 1. Unknown
+2. Unknown
 
 ## Expected Behavior
 
@@ -45,7 +46,9 @@
 
 ## Evidence
 
-- Reviewed `src/elspeth/core/__init__.py` lines 1-67; file contains only explicit re-exports and an `__all__` list that matches imported symbols. No contract, audit, or state-handling logic is present to audit for the specified bug categories.
+- `src/elspeth/core/__init__.py:1` shows a module-level docstring and only re-exports, with no operational logic.
+- `src/elspeth/core/__init__.py:4` through `src/elspeth/core/__init__.py:48` contain import re-exports only.
+- `src/elspeth/core/__init__.py:50` through `src/elspeth/core/__init__.py:85` define `__all__` without functional code paths.
 
 ## Impact
 
@@ -59,13 +62,10 @@
 
 ## Proposed Fix
 
-- Code changes (modules/files):
-  - Unknown
-- Config or schema changes: Unknown
-- Tests to add/update:
-  - Unknown
-- Risks or migration steps:
-  - Unknown
+- Code changes (modules/files): None
+- Config or schema changes: None
+- Tests to add/update: None
+- Risks or migration steps: None
 
 ## Architectural Deviations
 
@@ -81,7 +81,7 @@
 ## Tests
 
 - Suggested tests to run: Unknown
-- New tests required: Unknown
+- New tests required: no, N/A
 
 ## Notes / Links
 

@@ -1,31 +1,31 @@
-# Bug Report: Bytes Canonicalization Collides With User Dicts Using `__bytes__`
+# Bug Report: Canonicalization Crashes on Zero‑Dimensional NumPy Arrays
 
 ## Summary
 
-- Bytes are normalized to a dict with `{"__bytes__": "<b64>"}`, which is indistinguishable from user data that already contains the same dict shape, producing identical canonical JSON and hashes.
+- Canonical JSON normalization assumes `np.ndarray.tolist()` is iterable and crashes on 0‑D arrays (scalar arrays), raising `TypeError` instead of normalizing to a JSON‑safe primitive.
 
 ## Severity
 
-- Severity: major
-- Priority: P1
+- Severity: minor
+- Priority: P2
 
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: 7a155997ad574d2a10fa3838dd0079b0d67574ff (RC2.3-pipeline-row)
+- Commit/branch: RC2.3-pipeline-row @ 1c70074e
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
-- Data set or fixture: In-memory values `b"abc"` and `{"__bytes__": "YWJj"}`
+- Data set or fixture: synthetic `np.array(5)` scalar array in row/config
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: Static analysis deep bug audit of `/home/john/elspeth-rapid/src/elspeth/core/canonical.py`
+- Goal or task prompt: static analysis deep bug audit of `/home/john/elspeth-rapid/src/elspeth/core/canonical.py`
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -33,59 +33,61 @@
 
 ## Steps To Reproduce
 
-1. Call `canonical_json(b"abc")`.
-2. Call `canonical_json({"__bytes__": "YWJj"})`.
-3. Compare results of `stable_hash` for both inputs.
+1. Call `canonical_json(np.array(5))` or `stable_hash({"x": np.array(5)})`.
+2. `_normalize_value` hits the `np.ndarray` branch and executes `[_normalize_value(x) for x in obj.tolist()]`.
 
 ## Expected Behavior
 
-- Different canonical JSON and hashes for distinct input types, or a hard error when user data uses reserved markers that would collide.
+- Zero‑dimensional arrays are normalized to a JSON‑safe primitive (e.g., `5`), consistent with the stated “numpy types to primitives” policy.
 
 ## Actual Behavior
 
-- `canonical_json(b"abc")` and `canonical_json({"__bytes__": "YWJj"})` produce identical canonical JSON and identical `stable_hash` values.
+- `np.array(5).tolist()` returns a scalar, so the list comprehension raises `TypeError: 'int' object is not iterable`, aborting canonicalization and hashing.
 
 ## Evidence
 
-- Bytes are normalized into a dict wrapper at `src/elspeth/core/canonical.py:108-110`, and hashing is based on canonical JSON at `src/elspeth/core/canonical.py:140-173`.
-- Reproduction (observed): `canonical_json(b"abc") == canonical_json({"__bytes__":"YWJj"}) == '{"__bytes__":"YWJj"}'` and `stable_hash(b"abc") == stable_hash({"__bytes__":"YWJj"})`.
+- `src/elspeth/core/canonical.py:75-89`
+  The `np.ndarray` branch assumes `obj.tolist()` is iterable and immediately list‑comprehends over it, which fails for 0‑D arrays.
 
 ## Impact
 
-- User-facing impact: Audit trail cannot distinguish a raw bytes payload from a dict that happens to use the `__bytes__` key, creating ambiguous lineage.
-- Data integrity / security impact: Non-cryptographic collision in canonicalization undermines “traceable to source data” guarantees; different inputs can map to the same audit hash.
-- Performance or cost impact: None.
+- User-facing impact: Pipeline runs can crash during hashing when a plugin emits a scalar `np.ndarray` (common in NumPy‑heavy code paths).
+- Data integrity / security impact: Audit trail hash generation fails, preventing payload persistence and breaking determinism guarantees.
+- Performance or cost impact: Run failures require manual intervention/retries; wasted compute.
 
 ## Root Cause Hypothesis
 
-- `_normalize_value` encodes bytes into a plain dict with a common key name and there is no reserved-key enforcement or disambiguation, making the canonical representation non-injective for bytes vs user dicts.
+- `_normalize_value` treats all `np.ndarray` values as iterable collections, but NumPy scalar arrays (`shape == ()`) return a scalar from `tolist()`, causing a `TypeError`.
 
 ## Proposed Fix
 
-- Code changes (modules/files): In `src/elspeth/core/canonical.py`, introduce a reserved-marker strategy that is enforced. Options include wrapping bytes in a dedicated internal wrapper type and emitting a tagged JSON object while rejecting any user dicts that contain the reserved marker (raise `ValueError`), ensuring no ambiguous shapes are accepted.
+- Code changes (modules/files):
+  - Detect zero‑dimensional arrays in `src/elspeth/core/canonical.py` and normalize via `obj.item()` (or `obj.tolist()` without iteration) before recursion.
 - Config or schema changes: None.
-- Tests to add/update: Add a unit test in `tests/core/test_canonical.py` that asserts either (a) bytes and `{"__bytes__": "..."}`
-  produce different canonical JSON/hashes, or (b) user dicts containing the reserved marker raise `ValueError`.
-- Risks or migration steps: This is a breaking change for data that already uses the reserved marker key; enforce the reservation explicitly and document it.
+- Tests to add/update:
+  - Add unit tests in `tests/core/test_canonical.py` verifying `canonical_json(np.array(5))` and `canonical_json(np.array(3.14))` succeed and produce canonical primitives.
+- Risks or migration steps:
+  - Low risk; only affects normalization of 0‑D arrays.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md#L15-L19` (audit trail must be traceable; no inference).
-- Observed divergence: Canonicalization is not injective for bytes vs dicts using the same wrapper key, allowing ambiguous audit hashes.
-- Reason (if known): Convenience encoding without reserved-key enforcement.
-- Alignment plan or decision needed: Reserve and enforce marker keys (or use a distinct tagging strategy) to guarantee unambiguous canonicalization.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md` “Canonical JSON - Two‑Phase with RFC 8785” (normalize numpy types to primitives).
+- Observed divergence: Zero‑dimensional NumPy arrays are not normalized to primitives and instead crash.
+- Reason (if known): Missing special case for `np.ndarray` with `ndim == 0`.
+- Alignment plan or decision needed: Add scalar array handling to align with stated normalization policy.
 
 ## Acceptance Criteria
 
-- `stable_hash(b"abc")` differs from `stable_hash({"__bytes__":"YWJj"})`, or `canonical_json({"__bytes__":"YWJj"})` raises a `ValueError` due to reserved-key collision.
-- New unit test covers the collision case and passes.
+- `canonical_json(np.array(5))` returns `"5"` (or equivalent canonical numeric JSON) without error.
+- `stable_hash({"x": np.array(5)})` completes deterministically.
+- New tests for 0‑D arrays pass.
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/core/test_canonical.py`
-- New tests required: yes, add a collision-resistance test for bytes vs dict marker.
+- Suggested tests to run: `.venv/bin/python -m pytest tests/core/test_canonical.py -k "numpy_array"`
+- New tests required: yes, add 0‑D NumPy array normalization tests.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `CLAUDE.md`
+- Related design docs: `CLAUDE.md` (Canonical JSON section)

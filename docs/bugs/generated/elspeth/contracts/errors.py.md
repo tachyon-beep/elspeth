@@ -1,8 +1,8 @@
-# Bug Report: Backwards-Compat Alias in Coalesce Failure Schema Violates No-Legacy Policy and Creates Ambiguous Audit Payloads
+# Bug Report: TransformErrorReason Contract Omits Fields Emitted by Contract-Violation Helpers
 
 ## Summary
 
-- `CoalesceFailureReason` defines `branches_arrived` as a backwards-compat alias of `actual_branches`, violating the no-legacy policy and allowing coalesce failure payloads to omit the canonical field.
+- `ContractViolation.to_error_reason()` and `violations_to_error_reason()` emit fields that are not declared in `TransformErrorReason`, creating a schema/contract mismatch for transform error payloads.
 
 ## Severity
 
@@ -12,12 +12,12 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: 3aa2fa93d8ebd2650c7f3de23b318b60498cd81c / RC2.3-pipeline-row
+- Commit/branch: `e0060836d4bb129f1a37656d85e548ae81db8887` on `RC2.3-pipeline-row`
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
@@ -25,7 +25,7 @@
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: Static analysis deep bug audit of `src/elspeth/contracts/errors.py`
+- Goal or task prompt: Static analysis deep bug audit for `src/elspeth/contracts/errors.py`
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -33,59 +33,65 @@
 
 ## Steps To Reproduce
 
-1. Run a pipeline that triggers a coalesce failure (e.g., `select_branch_not_arrived`).
-2. Inspect the recorded coalesce failure payload in the audit trail.
+1. Create a `TypeMismatchViolation` and call `to_error_reason()`.
+2. Create multiple violations and call `violations_to_error_reason([...])`.
+3. Compare returned keys to `TransformErrorReason` fields.
 
 ## Expected Behavior
 
-- Coalesce failure payloads should use a single canonical field for arrived branches (e.g., `actual_branches`) with no backwards-compat alias.
+- The `TransformErrorReason` schema should declare all fields produced by `ContractViolation.to_error_reason()` and `violations_to_error_reason()` (e.g., `violation_type`, `original_field`, `expected_type`, `actual_type`, `actual_value`, `count`, `violations`) so the contract matches actual payloads.
 
 ## Actual Behavior
 
-- The contract includes `branches_arrived` as a backwards-compat alias, and coalesce failure payloads are recorded with `branches_arrived` (not `actual_branches`), creating ambiguity and violating the no-legacy policy.
+- `TransformErrorReason` omits several fields produced by contract-violation helpers, so the documented schema does not match emitted error payloads.
 
 ## Evidence
 
-- `src/elspeth/contracts/errors.py:22` defines `CoalesceFailureReason` and includes a backwards-compat alias.
-- `src/elspeth/contracts/errors.py:34` explicitly declares `branches_arrived` as “backwards compat.”
-- `src/elspeth/engine/coalesce_executor.py:350` records error payloads using `branches_arrived`, not `actual_branches`.
+- `TransformErrorReason` fields do not include `violation_type`, `original_field`, `expected_type`, `actual_type`, `actual_value`, `count`, or `violations`. See `src/elspeth/contracts/errors.py:270-360`.
+- `ContractViolation.to_error_reason()` emits `violation_type` and `original_field`. See `src/elspeth/contracts/errors.py:598-610`.
+- `TypeMismatchViolation.to_error_reason()` emits `expected_type`, `actual_type`, `actual_value`. See `src/elspeth/contracts/errors.py:685-700`.
+- `violations_to_error_reason()` emits `count` and `violations`. See `src/elspeth/contracts/errors.py:760-803`.
 
 ## Impact
 
-- User-facing impact: Audit consumers relying on the canonical field may see missing data or need to special-case the alias.
-- Data integrity / security impact: Audit schema ambiguity undermines strict auditability and violates the no-legacy policy.
-- Performance or cost impact: Minimal, but increases maintenance and audit query complexity.
+- User-facing impact: Audit error payloads may include fields that the declared schema does not acknowledge, causing confusion for plugin authors and reviewers.
+- Data integrity / security impact: Potential loss of structured error context if future validation or serialization enforces the declared schema.
+- Performance or cost impact: None.
 
 ## Root Cause Hypothesis
 
-- `CoalesceFailureReason` deliberately retains a backwards-compat alias, which is prohibited by the project’s no-legacy policy and enables non-canonical payloads.
+- The contract-violation helpers evolved to include richer fields, but `TransformErrorReason` was not updated to reflect those fields.
 
 ## Proposed Fix
 
-- Code changes (modules/files): Remove `branches_arrived` from `CoalesceFailureReason` and standardize on `actual_branches` in the contract; update producers to emit `actual_branches` only.
+- Code changes (modules/files):
+  - Add `NotRequired` fields to `TransformErrorReason` for `violation_type`, `original_field`, `expected_type`, `actual_type`, `actual_value`, `count`, and `violations` in `src/elspeth/contracts/errors.py`.
+  - Update the `TransformErrorReason` docstring to document these contract-violation-specific fields.
 - Config or schema changes: None.
-- Tests to add/update: Add a contract test asserting coalesce failure payloads include `actual_branches` and do not include `branches_arrived`.
-- Risks or migration steps: Update any consumers or queries that currently read `branches_arrived`.
+- Tests to add/update:
+  - Add a test asserting that the `TransformErrorReason` contract includes the contract-violation fields (or add a mypy/alignment check if one exists).
+- Risks or migration steps:
+  - Low risk; only expands the schema contract with optional fields.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:841`
-- Observed divergence: Backwards-compat alias field is present in a core contract.
-- Reason (if known): Retention of legacy field name for compatibility.
-- Alignment plan or decision needed: Remove alias and update all call sites to the canonical field.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): Unknown
+- Observed divergence: Schema contract for transform error payloads is incomplete relative to emitted data.
+- Reason (if known): Likely overlooked during contract-violation helper additions.
+- Alignment plan or decision needed: Update `TransformErrorReason` to include all emitted fields.
 
 ## Acceptance Criteria
 
-- `branches_arrived` is removed from `CoalesceFailureReason`.
-- Coalesce failure payloads record `actual_branches` consistently.
-- Tests verify the canonical field and absence of the alias.
+- `TransformErrorReason` includes all fields emitted by `ContractViolation.to_error_reason()` and `violations_to_error_reason()`.
+- Documentation in `TransformErrorReason` reflects these fields.
+- Contract-violation error payloads are accepted without schema mismatch.
 
 ## Tests
 
-- Suggested tests to run: Unknown.
-- New tests required: Yes, contract-level test for coalesce failure payload keys.
+- Suggested tests to run: `.venv/bin/python -m pytest tests/contracts/test_contract_violation_error.py`
+- New tests required: yes, add a schema alignment test for `TransformErrorReason` fields.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `CLAUDE.md:841`
+- Related design docs: Unknown

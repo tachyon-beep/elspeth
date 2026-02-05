@@ -1,27 +1,27 @@
-# Bug Report: Missing Tier‑1 Validation of Audit Record Fields Allows Invalid Schema Modes
+# Bug Report: ContractAuditRecord JSON Is Not Deterministic After Contract Merges
 
 ## Summary
 
-- `ContractAuditRecord.from_json()` and `to_schema_contract()` accept unvalidated `mode` values from the audit trail, allowing corrupted or invalid modes (e.g., `"fixed"`) to bypass FIXED‑mode enforcement without crashing, violating Tier‑1 “crash on any anomaly.”
+- `ContractAuditRecord.to_json()` claims deterministic serialization, but field ordering is inherited from `SchemaContract.fields`, which can be non-deterministic after merges, yielding different JSON strings for identical contracts.
 
 ## Severity
 
-- Severity: major
-- Priority: P1
+- Severity: minor
+- Priority: P2
 
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: Unknown
+- Commit/branch: RC2.3-pipeline-row @ 1c70074ef3b71e4fe85d4f926e52afeca50197ab
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
-- Data set or fixture: Crafted audit record JSON with invalid `mode` value (e.g., `"fixed"`)
+- Data set or fixture: In-memory SchemaContract merge (no external data)
 
 ## Agent Context (if relevant)
 
@@ -33,60 +33,63 @@
 
 ## Steps To Reproduce
 
-1. Create a JSON string for `ContractAuditRecord` with `mode` set to `"fixed"` (lowercase) and a matching `version_hash` computed from a `SchemaContract(mode="fixed", ...)` instance.
-2. Call `ContractAuditRecord.from_json(json_str)` and then `to_schema_contract()`.
-3. Call `SchemaContract.validate()` on a row containing extra fields.
+1. In two separate Python processes with different `PYTHONHASHSEED` values, create two `SchemaContract` instances with overlapping fields, then call `SchemaContract.merge()` to produce a merged contract.
+2. Build `ContractAuditRecord.from_contract(merged_contract)` and call `to_json()` in each process.
+3. Compare the JSON strings; the `fields` array order differs even though the contract is semantically identical.
 
 ## Expected Behavior
 
-- Restoring from audit JSON should raise immediately on invalid `mode` values (Tier‑1: crash on any anomaly). The contract should not be constructed.
+- `ContractAuditRecord.to_json()` should emit the same canonical JSON for identical contracts regardless of field insertion order or hash seed.
 
 ## Actual Behavior
 
-- The invalid `mode` value is accepted and propagated into `SchemaContract`. FIXED‑mode extra‑field checks are skipped because `self.mode == "FIXED"` is false, allowing extra fields through silently.
+- The `fields` array order follows `SchemaContract.fields`, which is non-deterministic when built from set iteration in `SchemaContract.merge()`, leading to different JSON strings for the same contract.
 
 ## Evidence
 
-- `ContractAuditRecord.from_json()` accepts `mode` directly from JSON with no validation. `src/elspeth/contracts/contract_records.py:155-179`
-- `ContractAuditRecord.to_schema_contract()` passes `mode=self.mode` directly into `SchemaContract` with no validation. `src/elspeth/contracts/contract_records.py:181-211`
-- `SchemaContract.validate()` only enforces extra‑field rejection when `mode == "FIXED"`. Any other value silently disables the check. `src/elspeth/contracts/schema_contract.py:262-273`
-- Tier‑1 policy requires crashing on invalid enum values from the audit trail. `CLAUDE.md:25-32`
+- `ContractAuditRecord.from_contract()` preserves `contract.fields` order and `to_json()` serializes `[f.to_dict() for f in self.fields]` without ordering. `src/elspeth/contracts/contract_records.py#L118-L151`
+- `SchemaContract.merge()` builds `all_names` from a set union and iterates it directly, then uses `tuple(merged_fields.values())`, which depends on that set iteration order. `src/elspeth/contracts/schema_contract.py#L424-L476`
+- Design plan explicitly states contract audit JSON should be deterministic via canonical JSON. `docs/plans/completed/2026-02-03-phase5-audit-trail-integration.md#L566-L583`
 
 ## Impact
 
-- User-facing impact: Resume/explain paths can accept invalid schema modes and mis-validate rows.
-- Data integrity / security impact: Audit trail integrity is weakened; FIXED‑mode protections can be bypassed without detection.
-- Performance or cost impact: None expected.
+- User-facing impact: Audit records for identical contracts can differ between runs, making diffs and audits noisy or misleading.
+- Data integrity / security impact: Violates the determinism guarantee for audit records, undermining reproducibility expectations.
+- Performance or cost impact: None.
 
 ## Root Cause Hypothesis
 
-- `ContractAuditRecord.from_json()` and `to_schema_contract()` do not validate `mode` (and related enum fields like `source`) against allowed literals, and `SchemaContract` does not enforce runtime validation either.
+- `ContractAuditRecord` does not impose a stable field ordering before serialization, and `SchemaContract.merge()` yields non-deterministic field order due to set iteration.
 
 ## Proposed Fix
 
-- Code changes (modules/files): `src/elspeth/contracts/contract_records.py` add explicit validation that `mode` is one of `{"FIXED","FLEXIBLE","OBSERVED"}` before constructing `SchemaContract`; validate `source` is one of `{"declared","inferred"}` and `locked/required` are `bool`.
+- Code changes (modules/files):
+  - `src/elspeth/contracts/contract_records.py`: Sort fields by `normalized_name` (or a deterministic key) in `from_contract()` or `to_json()` before serialization.
 - Config or schema changes: None.
-- Tests to add/update: Add unit tests for `ContractAuditRecord.from_json()`/`to_schema_contract()` rejecting invalid `mode` and `source` values.
-- Risks or migration steps: None, except existing corrupted audit records will now raise (intended Tier‑1 behavior).
+- Tests to add/update:
+  - Add a test where two contracts with identical fields but different order produce identical `to_json()` output.
+  - Add a test for merged contracts to ensure deterministic JSON across field order changes.
+- Risks or migration steps:
+  - Low risk; only affects serialization order in audit records.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:25-32` (Tier‑1 audit data must crash on invalid enum/type values).
-- Observed divergence: Invalid `mode` values from the audit trail are accepted and used.
-- Reason (if known): Missing explicit validation in audit record restoration.
-- Alignment plan or decision needed: Add strict enum/type validation in `ContractAuditRecord` restoration path.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `docs/plans/completed/2026-02-03-phase5-audit-trail-integration.md#L566-L583`
+- Observed divergence: Deterministic serialization is claimed, but field ordering is not stabilized before JSON generation.
+- Reason (if known): Field ordering is inherited from `SchemaContract.fields`, which can be non-deterministic after merges.
+- Alignment plan or decision needed: Enforce stable ordering in `ContractAuditRecord` serialization path.
 
 ## Acceptance Criteria
 
-- Restoring a contract audit record with invalid `mode` or `source` raises a `ValueError` (or equivalent) before constructing `SchemaContract`.
-- FIXED‑mode enforcement cannot be bypassed by malformed audit records.
+- Identical contracts always serialize to identical JSON strings from `ContractAuditRecord.to_json()` regardless of field order or merge path.
+- Tests covering differing field order pass.
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/unit/test_contract_records.py`
-- New tests required: yes, add cases for invalid `mode` and `source` during `ContractAuditRecord.from_json()`/`to_schema_contract()`.
+- Suggested tests to run: `.venv/bin/python -m pytest tests/contracts/test_contract_records.py -v`
+- New tests required: yes, add deterministic ordering tests for `ContractAuditRecord.to_json()`.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `CLAUDE.md` Tier‑1 trust model (lines 25‑32)
+- Related design docs: `docs/plans/completed/2026-02-03-phase5-audit-trail-integration.md`

@@ -1,31 +1,31 @@
-# Bug Report: Batch trigger_type not enforced as TriggerType enum (Tier-1 audit integrity gap)
+# Bug Report: Batch `trigger_type` Bypasses `TriggerType` Enum Validation
 
 ## Summary
 
-- `Batch.trigger_type` is typed as `str | None` and never validated against `TriggerType`, so invalid values from the audit DB can flow into the contract without crashing, violating Tier-1 audit integrity rules.
+- `Batch.trigger_type` is declared as `str | None` and never validated, so invalid trigger types can be loaded from the audit DB without crashing, violating Tier 1 audit integrity.
 
 ## Severity
 
 - Severity: major
-- Priority: P2
+- Priority: P1
 
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: RC2.3-pipeline-row @ 3aa2fa93d8ebd2650c7f3de23b318b60498cd81c
+- Commit/branch: `e0060836d4bb129f1a37656d85e548ae81db8887` on `RC2.3-pipeline-row`
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
-- Data set or fixture: Unknown
+- Data set or fixture: N/A (contract-only)
 
 ## Agent Context (if relevant)
 
-- Goal or task prompt: Static audit of `/home/john/elspeth-rapid/src/elspeth/contracts/audit.py` for deep bug detection
+- Goal or task prompt: Static analysis deep bug audit of `src/elspeth/contracts/audit.py`
 - Model/version: Codex (GPT-5)
 - Tooling and permissions (sandbox/approvals): read-only sandbox
 - Determinism details (seed, run ID): N/A
@@ -33,158 +33,147 @@
 
 ## Steps To Reproduce
 
-1. Insert or update a `batches` row with `trigger_type='typo'` (or any value not in `TriggerType`) in the audit DB.
-2. Call `BatchRepository.load()` or `Recorder.get_batch()` and observe the `Batch.trigger_type` value.
+1. Instantiate `Batch` with `trigger_type="not_a_trigger"` (or stub a DB row with that value and pass it through `BatchRepository.load`).
+2. Observe that no exception is raised and the invalid value is accepted.
 
 ## Expected Behavior
 
-- The load should fail (or convert) if `trigger_type` is not a valid `TriggerType` enum, per Tier-1 audit rules.
+- Invalid `trigger_type` values should crash immediately (TypeError/ValueError), and the field should be typed as `TriggerType | None`.
 
 ## Actual Behavior
 
-- The invalid string is accepted and stored in the `Batch` contract instance without error.
+- Any string is accepted for `trigger_type`, allowing invalid values to pass silently into the audit model.
 
 ## Evidence
 
-- `Batch.trigger_type` is declared as `str | None` and only `status` is validated. `src/elspeth/contracts/audit.py:329-349`
-- Repository loads `trigger_type` from DB without conversion. `src/elspeth/core/landscape/repositories.py:250-263`
-- `TriggerType` enum exists for `batches.trigger_type`. `src/elspeth/contracts/enums.py:57-74`
+- `Batch.trigger_type` is typed as `str | None` with no validation; only `status` is validated. `src/elspeth/contracts/audit.py:330`, `src/elspeth/contracts/audit.py:343`, `src/elspeth/contracts/audit.py:347`
+- `BatchRepository.load` passes `row.trigger_type` through without conversion or validation. `src/elspeth/core/landscape/repositories.py:250`, `src/elspeth/core/landscape/repositories.py:260`
+- `TriggerType` enum exists and is defined for `batches.trigger_type`. `src/elspeth/contracts/enums.py:60`
 
 ## Impact
 
-- User-facing impact: Audit exports and explain tooling can surface invalid trigger types, confusing operators.
-- Data integrity / security impact: Violates Tier-1 rule “invalid enum value = crash,” allowing corrupted audit data to be treated as valid.
-- Performance or cost impact: Negligible.
+- User-facing impact: Audit exports may contain invalid trigger types, confusing analysts or tooling.
+- Data integrity / security impact: Violates Tier 1 rule (“invalid enum value = crash”), allowing silent corruption of audit trail.
+- Performance or cost impact: None.
 
 ## Root Cause Hypothesis
 
-- The `Batch` contract does not model `trigger_type` as `TriggerType` and lacks enum validation, so repository values pass through unchecked.
+- The audit contract defines `trigger_type` as a raw string instead of `TriggerType`, and no validation is performed on load.
 
 ## Proposed Fix
 
-- Code changes (modules/files):
-  - Update `Batch.trigger_type` to `TriggerType | None` and validate in `__post_init__`. `src/elspeth/contracts/audit.py`
-  - Convert `row.trigger_type` to `TriggerType` in `BatchRepository.load()` (or ensure caller only passes enums). `src/elspeth/core/landscape/repositories.py`
-- Config or schema changes: None (column already stores the enum string values).
-- Tests to add/update:
-  - Unit test: invalid `trigger_type` raises on `Batch` construction or repository load.
-  - Unit test: valid `TriggerType` values round-trip.
-- Risks or migration steps:
-  - If any existing DB rows contain invalid trigger_type strings, this will surface immediately (desired Tier-1 crash).
-
-## Architectural Deviations
-
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:25-32`
-- Observed divergence: Tier-1 rule requires crashing on invalid enum values, but `trigger_type` accepts arbitrary strings.
-- Reason (if known): Unknown.
-- Alignment plan or decision needed: Enforce enum type at contract boundary; convert on load.
-
-## Acceptance Criteria
-
-- Loading a batch with invalid `trigger_type` raises immediately.
-- Valid `TriggerType` values load without errors and remain typed as enums in the contract.
-
-## Tests
-
-- Suggested tests to run: `.venv/bin/python -m pytest tests/ -k "batch_trigger_type"`
-- New tests required: yes, contract/repository validation test for `trigger_type`.
-
-## Notes / Links
-
-- Related issues/PRs: N/A
-- Related design docs: N/A
----
-# Bug Report: TokenOutcome allows is_terminal/outcome mismatch (buffered can be treated as terminal)
-
-## Summary
-
-- `TokenOutcome` validates only that `is_terminal` is a bool, not that it matches `RowOutcome.is_terminal`, allowing inconsistent audit records (e.g., `BUFFERED` with `is_terminal=True`) to pass without crashing.
-
-## Severity
-
-- Severity: major
-- Priority: P2
-
-## Reporter
-
-- Name or handle: Codex
-- Date: 2026-02-03
-- Related run/issue ID: N/A
-
-## Environment
-
-- Commit/branch: RC2.3-pipeline-row @ 3aa2fa93d8ebd2650c7f3de23b318b60498cd81c
-- OS: unknown
-- Python version: unknown
-- Config profile / env vars: N/A
-- Data set or fixture: Unknown
-
-## Agent Context (if relevant)
-
-- Goal or task prompt: Static audit of `/home/john/elspeth-rapid/src/elspeth/contracts/audit.py` for deep bug detection
-- Model/version: Codex (GPT-5)
-- Tooling and permissions (sandbox/approvals): read-only sandbox
-- Determinism details (seed, run ID): N/A
-- Notable tool calls or steps: code review only
-
-## Steps To Reproduce
-
-1. Insert a `token_outcomes` row with `outcome='buffered'` and `is_terminal=1` (or `outcome='completed'` and `is_terminal=0`).
-2. Call `TokenOutcomeRepository.load()` or `Recorder.get_token_outcome()` for that token.
-
-## Expected Behavior
-
-- The load should fail because `is_terminal` must match `RowOutcome.is_terminal` for Tier-1 audit integrity.
-
-## Actual Behavior
-
-- The inconsistent record is accepted and returned, and `get_token_outcome()` can prefer a non-terminal outcome as terminal because it orders by `is_terminal`.
-
-## Evidence
-
-- `TokenOutcome.__post_init__` only checks bool type and does not enforce consistency with `RowOutcome.is_terminal`. `src/elspeth/contracts/audit.py:568-598`
-- Repository converts `outcome` to `RowOutcome` and `is_terminal` to bool but does not cross-check them. `src/elspeth/core/landscape/repositories.py:467-503`
-- `get_token_outcome()` prefers `is_terminal` in ordering, so mismatched data changes observed outcome. `src/elspeth/core/landscape/recorder.py:2855-2874`
-
-## Impact
-
-- User-facing impact: Explain output and lineage queries can report a buffered token as terminal or miss a true terminal outcome.
-- Data integrity / security impact: Violates Tier-1 audit guarantees; inconsistent terminal flags undermine the “exactly one terminal state” invariant.
-- Performance or cost impact: Negligible.
-
-## Root Cause Hypothesis
-
-- The audit contract does not enforce the semantic constraint `is_terminal == outcome.is_terminal`.
-
-## Proposed Fix
-
-- Code changes (modules/files):
-  - In `TokenOutcome.__post_init__`, raise if `self.is_terminal != self.outcome.is_terminal`. `src/elspeth/contracts/audit.py`
+- Code changes (modules/files): Update `src/elspeth/contracts/audit.py:343` to use `TriggerType | None` and validate in `__post_init__`; update `src/elspeth/core/landscape/repositories.py:260` to convert `row.trigger_type` to `TriggerType` when not `None`.
 - Config or schema changes: None.
-- Tests to add/update:
-  - Unit test: `TokenOutcome` raises on mismatched outcome/is_terminal.
-  - Repository test: `TokenOutcomeRepository.load()` rejects inconsistent DB rows.
-- Risks or migration steps:
-  - Any corrupted rows will surface immediately and stop execution (intended for Tier-1 integrity).
+- Tests to add/update: Adjust `tests/engine/test_aggregation_audit.py` to expect enums (or `.value` only in serialization) and add a test asserting invalid trigger types raise on load.
+- Risks or migration steps: Update any serialization/exporters to emit `trigger_type.value` if they currently assume a string.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:25-32`
-- Observed divergence: Tier-1 rule requires crashing on invalid values, but semantic mismatch passes silently.
-- Reason (if known): Unknown.
-- Alignment plan or decision needed: Enforce semantic validation at contract boundary.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:25`
+- Observed divergence: Audit data with invalid enum values does not crash immediately.
+- Reason (if known): Contract uses `str` instead of enum and omits validation.
+- Alignment plan or decision needed: Enforce `TriggerType` enum in audit contracts and repository conversions.
 
 ## Acceptance Criteria
 
-- Loading a token outcome with mismatched `is_terminal` and `outcome` raises immediately.
-- `get_token_outcome()` can no longer return buffered outcomes as terminal due to inconsistent flags.
+- Loading or constructing a `Batch` with an invalid `trigger_type` raises, and valid values round-trip as `TriggerType`.
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/ -k "token_outcome_is_terminal"`
-- New tests required: yes, contract/repository validation test for outcome/terminal consistency.
+- Suggested tests to run: `.venv/bin/python -m pytest tests/engine/test_aggregation_audit.py -k trigger_type`
+- New tests required: yes, add invalid trigger type validation test.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: N/A
+- Related design docs: `CLAUDE.md:25`
+---
+# Bug Report: Operation Status/Type Not Validated in Audit Contract
+
+## Summary
+
+- `Operation.operation_type` and `Operation.status` are plain string Literals with no runtime validation, so invalid values can be loaded from the audit DB without crashing.
+
+## Severity
+
+- Severity: major
+- Priority: P2
+
+## Reporter
+
+- Name or handle: Codex
+- Date: 2026-02-04
+- Related run/issue ID: N/A
+
+## Environment
+
+- Commit/branch: `e0060836d4bb129f1a37656d85e548ae81db8887` on `RC2.3-pipeline-row`
+- OS: unknown
+- Python version: unknown
+- Config profile / env vars: N/A
+- Data set or fixture: N/A (contract-only)
+
+## Agent Context (if relevant)
+
+- Goal or task prompt: Static analysis deep bug audit of `src/elspeth/contracts/audit.py`
+- Model/version: Codex (GPT-5)
+- Tooling and permissions (sandbox/approvals): read-only sandbox
+- Determinism details (seed, run ID): N/A
+- Notable tool calls or steps: code review only
+
+## Steps To Reproduce
+
+1. Instantiate `Operation(operation_type="bad_type", status="oops", ...)`.
+2. Observe that no exception is raised and the invalid values are accepted.
+
+## Expected Behavior
+
+- Invalid `operation_type`/`status` values should crash immediately when constructing or loading `Operation` objects.
+
+## Actual Behavior
+
+- Any string value is accepted for these fields; no validation exists at the contract layer.
+
+## Evidence
+
+- `Operation.operation_type` and `Operation.status` are declared as Literal strings with no validation. `src/elspeth/contracts/audit.py:622`, `src/elspeth/contracts/audit.py:625`, `src/elspeth/contracts/audit.py:627`
+- `get_operation` returns `Operation` using raw DB values without validation. `src/elspeth/core/landscape/recorder.py:2557`, `src/elspeth/core/landscape/recorder.py:2561`, `src/elspeth/core/landscape/recorder.py:2564`
+- The operations schema explicitly documents allowed values, but contract does not enforce them. `src/elspeth/core/landscape/schema.py:231`, `src/elspeth/core/landscape/schema.py:234`
+
+## Impact
+
+- User-facing impact: Audit reads may show invalid operation states without any error, reducing confidence in audit output.
+- Data integrity / security impact: Tier 1 audit integrity rule (“invalid enum value = crash”) is violated for operations data.
+- Performance or cost impact: None.
+
+## Root Cause Hypothesis
+
+- Audit contract lacks enums or validation for `Operation` fields that are constrained in the schema.
+
+## Proposed Fix
+
+- Code changes (modules/files): Add `__post_init__` validation in `src/elspeth/contracts/audit.py:601` to enforce allowed values, or introduce `OperationStatus`/`OperationType` enums in `src/elspeth/contracts/enums.py` and use `_validate_enum`.
+- Config or schema changes: None.
+- Tests to add/update: Add a contract validation test for invalid operation status/type.
+- Risks or migration steps: If introducing enums, update recorder and any callers to pass enums or `.value`.
+
+## Architectural Deviations
+
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:25`
+- Observed divergence: Audit data does not crash on invalid operation status/type.
+- Reason (if known): No validation in `Operation` contract for constrained string values.
+- Alignment plan or decision needed: Enforce allowed values at contract layer per Tier 1 requirements.
+
+## Acceptance Criteria
+
+- Constructing or loading an `Operation` with invalid `operation_type` or `status` raises immediately.
+
+## Tests
+
+- Suggested tests to run: `.venv/bin/python -m pytest tests/core/landscape -k operation`
+- New tests required: yes, add invalid operation status/type validation test.
+
+## Notes / Links
+
+- Related issues/PRs: N/A
+- Related design docs: `CLAUDE.md:25`

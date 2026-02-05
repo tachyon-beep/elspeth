@@ -1,8 +1,8 @@
-# Bug Report: resolve_headers masks missing SchemaContract fields in ORIGINAL mode
+# Bug Report: resolve_headers masks contract corruption in ORIGINAL mode
 
 ## Summary
 
-- In ORIGINAL mode, `resolve_headers` falls back to normalized names if `SchemaContract.get_field()` returns `None`, silently hiding internal contract corruption instead of crashing.
+- `resolve_headers()` silently falls back to normalized names when a contract lookup fails, masking internal contract corruption instead of crashing as required by the Tier 1 trust model.
 
 ## Severity
 
@@ -12,16 +12,16 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: 3aa2fa93d8ebd2650c7f3de23b318b60498cd81c (RC2.3-pipeline-row)
-- OS: Unknown
-- Python version: Unknown
+- Commit/branch: 1c70074ef3b71e4fe85d4f926e52afeca50197ab (RC2.3-pipeline-row)
+- OS: unknown
+- Python version: unknown
 - Config profile / env vars: N/A
-- Data set or fixture: None
+- Data set or fixture: Unknown
 
 ## Agent Context (if relevant)
 
@@ -33,60 +33,62 @@
 
 ## Steps To Reproduce
 
-1. Construct a valid `SchemaContract` with at least one field.
-2. Corrupt its `_by_normalized` index (e.g., `object.__setattr__(contract, "_by_normalized", {})`) so `get_field()` returns `None` for a known field.
-3. Call `resolve_headers(contract=contract, mode=HeaderMode.ORIGINAL, custom_mapping=None)`.
-4. Observe that the missing field silently falls back to its normalized name.
+1. Create a valid `SchemaContract` with fields and then corrupt its `_by_normalized` index (e.g., remove an entry) to simulate internal inconsistency.
+2. Call `resolve_headers(contract=contract, mode=HeaderMode.ORIGINAL, custom_mapping=None)`.
+3. Observe that the missing field silently falls back to its normalized name instead of raising.
 
 ## Expected Behavior
 
-- `resolve_headers` should raise (or crash) if a contract field lookup fails, because contracts are system-owned data and must be pristine.
+- When `contract` is provided, any missing field lookup should raise immediately (crash) because this indicates internal data corruption (Tier 1 data) and should never be silently masked.
 
 ## Actual Behavior
 
-- `resolve_headers` silently uses the normalized name when `contract.get_field()` returns `None`, masking internal corruption and emitting incorrect headers.
+- `resolve_headers()` uses `contract.get_field(name)` and falls back to `name` when it returns `None`, hiding internal contract inconsistencies.
 
 ## Evidence
 
-- `resolve_headers` uses `contract.get_field()` and falls back to the normalized name on `None`: `src/elspeth/contracts/header_modes.py:96`, `src/elspeth/contracts/header_modes.py:97`.
-- This is a bug-hiding defensive pattern disallowed for system-owned data: `CLAUDE.md:918`, `CLAUDE.md:920`.
+- Defensive fallback in `resolve_headers()` when `contract.get_field()` returns `None`. `src/elspeth/contracts/header_modes.py:94-98`
+- `SchemaContract.get_field()` returns `None` on missing field via `.get()`, enabling the silent fallback path. `src/elspeth/contracts/schema_contract.py:139-148`
 
 ## Impact
 
-- User-facing impact: Output headers in ORIGINAL mode may silently revert to normalized names, breaking external handoff expectations.
-- Data integrity / security impact: Hides internal contract corruption, undermining audit integrity guarantees.
+- User-facing impact: Headers can silently revert to normalized names in ORIGINAL mode, producing incorrect output headers without any error signal.
+- Data integrity / security impact: Masks internal contract corruption or bugs, violating Tier 1 “crash on anomaly” and audit integrity requirements.
 - Performance or cost impact: None.
 
 ## Root Cause Hypothesis
 
-- Defensive fallback in `resolve_headers` treats missing contract fields as acceptable, contrary to the full-trust contract invariant.
+- `resolve_headers()` uses a bug-hiding fallback (`field.original_name if field else name`) for Tier 1 contract data, contrary to the “no defensive programming” and “crash on corruption” standards.
 
 ## Proposed Fix
 
-- Code changes (modules/files): Update `resolve_headers` in `src/elspeth/contracts/header_modes.py` to raise when `contract.get_field(name)` returns `None` instead of falling back to `name`.
-- Config or schema changes: None.
-- Tests to add/update: Add a unit test that corrupts the contract index and asserts `resolve_headers(..., mode=ORIGINAL)` raises.
-- Risks or migration steps: This will cause a hard failure if contract indices are corrupted; this is intended per auditability rules.
+- Code changes (modules/files):
+  - `src/elspeth/contracts/header_modes.py`: Replace the fallback with a hard failure when `contract.get_field(name)` returns `None`, or build the mapping directly from `contract.fields` to avoid nullable lookups entirely.
+- Config or schema changes: None
+- Tests to add/update:
+  - Add a unit test in `tests/contracts/test_header_modes.py` that simulates contract index corruption (e.g., mutating `_by_normalized`) and asserts `resolve_headers()` raises.
+- Risks or migration steps:
+  - Raises earlier on contract corruption; expected and aligned with Tier 1 requirements.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md:918`, `CLAUDE.md:920`.
-- Observed divergence: Defensive fallback (`field.original_name if field else name`) masks system-owned data corruption instead of crashing.
-- Reason (if known): Likely added for convenience/robustness, but conflicts with audit integrity rules.
-- Alignment plan or decision needed: Enforce hard failure on missing contract fields in ORIGINAL mode.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `CLAUDE.md#L29-L32` (Tier 1 crash-on-anomaly) and `CLAUDE.md#L918-L920` (no defensive programming patterns).
+- Observed divergence: `resolve_headers()` suppresses a missing field in a Tier 1 contract by falling back to normalized names instead of crashing.
+- Reason (if known): Unknown
+- Alignment plan or decision needed: Remove fallback and enforce crash-on-anomaly for contract lookups.
 
 ## Acceptance Criteria
 
-- `resolve_headers` raises an error if `contract.get_field(name)` returns `None`.
-- Existing tests for NORMALIZED/ORIGINAL/CUSTOM modes still pass.
-- New test covering corrupted contract index passes (asserts raise).
+- `resolve_headers()` raises when a contract lookup fails in ORIGINAL mode.
+- Added test fails on old behavior and passes after fix.
+- No changes to behavior for NORMALIZED or CUSTOM modes.
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/contracts/test_header_modes.py -v`
-- New tests required: yes, add a test for missing/invalid contract field lookup in ORIGINAL mode.
+- Suggested tests to run: `.venv/bin/python -m pytest tests/contracts/test_header_modes.py`
+- New tests required: yes, add a test asserting failure on contract inconsistency.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `CLAUDE.md` (Prohibition on defensive programming)
+- Related design docs: CLAUDE.md (Tier 1 trust model; defensive programming prohibition)

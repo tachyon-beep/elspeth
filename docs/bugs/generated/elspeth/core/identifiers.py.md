@@ -12,12 +12,12 @@
 ## Reporter
 
 - Name or handle: Codex
-- Date: 2026-02-03
+- Date: 2026-02-04
 - Related run/issue ID: N/A
 
 ## Environment
 
-- Commit/branch: 7a155997ad574d2a10fa3838dd0079b0d67574ff (RC2.3-pipeline-row)
+- Commit/branch: 1c70074e (RC2.3-pipeline-row)
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
@@ -46,7 +46,7 @@
 
 ## Evidence
 
-- Reviewed identifier validation logic and error paths in `src/elspeth/core/identifiers.py:13` through `src/elspeth/core/identifiers.py:30`; no protocol, validation, or trust-tier violations observed.
+- Reviewed identifier validation logic and error paths in `src/elspeth/core/identifiers.py:13-31`; no protocol, validation, or trust-tier violations observed.
 
 ## Impact
 
