@@ -1168,8 +1168,6 @@ class TestRowProcessorCoalesce:
             name="test_coalesce",
             branches=["fast", "slow"],
             policy="first",
-            strategy="overwrite",
-            primary_branch="fast",
         )
         coalesce_executor.register_coalesce(coalesce_settings, coalesce_node.node_id)
 

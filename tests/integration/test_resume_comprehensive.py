@@ -1306,6 +1306,9 @@ class TestResumeComprehensive:
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
+        # Create a minimal schema contract for the run record
+        schema_contract_json, schema_contract_hash = self._create_schema_contract([("id", int), ("location", str)])
+
         with db.engine.begin() as conn:
             # Create run with unsupported schema
             conn.execute(
@@ -1317,6 +1320,8 @@ class TestResumeComprehensive:
                     canonical_version="v1",
                     status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
 

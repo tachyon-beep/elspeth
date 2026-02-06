@@ -205,7 +205,6 @@ class TestAggregationCheckpointFixVerification:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
             checkpoint=checkpoint_settings,
         )
 

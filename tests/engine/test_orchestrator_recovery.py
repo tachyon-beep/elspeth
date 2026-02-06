@@ -179,8 +179,30 @@ class TestOrchestratorResume:
             recorder.add_batch_member(batch.batch_id, token.token_id, ordinal=i)
             original_members.append(token.token_id)
 
-        # Checkpoint with aggregation state
-        agg_state = {"buffer": [0, 100, 200], "sum": 300, "count": 3}
+        # Checkpoint with aggregation state matching production format
+        # (see AggregationExecutor.get_checkpoint_state() in executors.py)
+        agg_state = {
+            "agg_node": {
+                "tokens": [
+                    {
+                        "token_id": token.token_id,
+                        "row_id": rows[i].row_id,
+                        "branch_name": None,
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
+                        "row_data": {"id": i, "value": i * 100},
+                        "contract_version": "test",
+                    }
+                    for i, token in enumerate(tokens)
+                ],
+                "batch_id": batch.batch_id,
+                "elapsed_age_seconds": 0.0,
+                "count_fire_offset": None,
+                "condition_fire_offset": None,
+            },
+            "_version": "2.0",
+        }
         checkpoint_manager.create_checkpoint(
             run_id=run.run_id,
             token_id=tokens[-1].token_id,

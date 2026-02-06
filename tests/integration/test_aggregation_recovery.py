@@ -37,6 +37,20 @@ def _make_contract(data: dict[str, Any]) -> SchemaContract:
     return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
+def _create_test_schema_contract() -> SchemaContract:
+    """Create a minimal schema contract for test run creation."""
+    field_contracts = (
+        FieldContract(
+            normalized_name="test_field",
+            original_name="test_field",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    return SchemaContract(fields=field_contracts, mode="FIXED", locked=True)
+
+
 class TestAggregationRecoveryIntegration:
     """End-to-end test for aggregation crash recovery."""
 
@@ -83,6 +97,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"aggregation": {"trigger": {"count": 3}}},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         # Register nodes using raw SQL to avoid schema_config requirement
@@ -178,6 +193,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"aggregations": ["sum", "count"]},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         # Register multiple aggregation nodes
@@ -250,6 +266,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"test": "order_preservation"},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         self._register_nodes_raw(db, run.run_id)
@@ -307,6 +324,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"test": "retry_validation"},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         self._register_nodes_raw(db, run.run_id)
@@ -434,6 +452,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"aggregation": {"trigger": {"timeout_seconds": 60}}},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         self._register_nodes_raw(db, run.run_id)

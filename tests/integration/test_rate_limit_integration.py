@@ -354,6 +354,7 @@ class TestAuditedClientRateLimiting:
             mock_response.headers = {"content-type": "application/json"}
             mock_response.json.return_value = {"result": "ok"}
             mock_response.content = b'{"result": "ok"}'
+            mock_response.text = '{"result": "ok"}'
 
             with patch("httpx.Client") as mock_client_class:
                 mock_client_instance = MagicMock()

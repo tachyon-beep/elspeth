@@ -1026,12 +1026,10 @@ class TestNodeMetadataFromPlugin:
             transforms=[
                 TransformSettings(
                     plugin="passthrough",
-                    name="path_a",
                     options={"schema": {"mode": "observed"}},
                 ),
                 TransformSettings(
                     plugin="passthrough",
-                    name="path_b",
                     options={"schema": {"mode": "observed"}},
                 ),
             ],
