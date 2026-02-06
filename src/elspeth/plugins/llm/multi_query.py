@@ -187,6 +187,55 @@ class CriterionConfig(PluginConfig):
         }
 
 
+def validate_multi_query_key_collisions(
+    case_studies: list[CaseStudyConfig],
+    criteria: list[CriterionConfig],
+    output_mapping: dict[str, OutputFieldConfig],
+) -> None:
+    """Validate no duplicate names or reserved suffix collisions.
+
+    Shared validation for both Azure and OpenRouter multi-query configs.
+
+    Checks:
+    1. No duplicate case_study names
+    2. No duplicate criterion names
+    3. No output_mapping suffixes that collide with reserved LLM suffixes
+
+    Raises:
+        ValueError: If duplicates or collisions are detected.
+    """
+    from elspeth.plugins.llm import LLM_AUDIT_SUFFIXES, LLM_GUARANTEED_SUFFIXES
+
+    # Check for duplicate case_study names
+    case_study_names: set[str] = set()
+    for cs in case_studies:
+        if cs.name in case_study_names:
+            raise ValueError(f"Duplicate case_study name: '{cs.name}'. Each case_study must have a unique name.")
+        case_study_names.add(cs.name)
+
+    # Check for duplicate criterion names
+    criterion_names: set[str] = set()
+    for crit in criteria:
+        if crit.name in criterion_names:
+            raise ValueError(f"Duplicate criterion name: '{crit.name}'. Each criterion must have a unique name.")
+        criterion_names.add(crit.name)
+
+    # Build set of reserved suffixes (strip leading underscore for comparison)
+    reserved_suffixes = set()
+    for suffix in LLM_GUARANTEED_SUFFIXES + LLM_AUDIT_SUFFIXES:
+        if suffix:  # Skip empty string
+            # Reserved suffixes are stored as "_usage", we compare against "usage"
+            reserved_suffixes.add(suffix.lstrip("_"))
+
+    # Check output_mapping suffixes don't collide with reserved suffixes
+    for json_field, field_config in output_mapping.items():
+        if field_config.suffix in reserved_suffixes:
+            raise ValueError(
+                f"Output mapping '{json_field}' has suffix '{field_config.suffix}' that collides with reserved LLM suffix '_{field_config.suffix}'. "
+                f"Reserved suffixes: {sorted('_' + s for s in reserved_suffixes)}"
+            )
+
+
 class MultiQueryConfig(AzureOpenAIConfig):
     """Configuration for multi-query LLM transform.
 
@@ -244,47 +293,8 @@ class MultiQueryConfig(AzureOpenAIConfig):
 
     @model_validator(mode="after")
     def validate_no_output_key_collisions(self) -> MultiQueryConfig:
-        """Validate no duplicate names or reserved suffix collisions.
-
-        Checks:
-        1. No duplicate case_study names
-        2. No duplicate criterion names
-        3. No output_mapping suffixes that collide with reserved LLM suffixes
-
-        Raises:
-            ValueError: If duplicates or collisions are detected.
-        """
-        from elspeth.plugins.llm import LLM_AUDIT_SUFFIXES, LLM_GUARANTEED_SUFFIXES
-
-        # Check for duplicate case_study names
-        case_study_names: set[str] = set()
-        for cs in self.case_studies:
-            if cs.name in case_study_names:
-                raise ValueError(f"Duplicate case_study name: '{cs.name}'. Each case_study must have a unique name.")
-            case_study_names.add(cs.name)
-
-        # Check for duplicate criterion names
-        criterion_names: set[str] = set()
-        for crit in self.criteria:
-            if crit.name in criterion_names:
-                raise ValueError(f"Duplicate criterion name: '{crit.name}'. Each criterion must have a unique name.")
-            criterion_names.add(crit.name)
-
-        # Build set of reserved suffixes (strip leading underscore for comparison)
-        reserved_suffixes = set()
-        for suffix in LLM_GUARANTEED_SUFFIXES + LLM_AUDIT_SUFFIXES:
-            if suffix:  # Skip empty string
-                # Reserved suffixes are stored as "_usage", we compare against "usage"
-                reserved_suffixes.add(suffix.lstrip("_"))
-
-        # Check output_mapping suffixes don't collide with reserved suffixes
-        for json_field, field_config in self.output_mapping.items():
-            if field_config.suffix in reserved_suffixes:
-                raise ValueError(
-                    f"Output mapping '{json_field}' has suffix '{field_config.suffix}' that collides with reserved LLM suffix '_{field_config.suffix}'. "
-                    f"Reserved suffixes: {sorted('_' + s for s in reserved_suffixes)}"
-                )
-
+        """Validate no duplicate names or reserved suffix collisions."""
+        validate_multi_query_key_collisions(self.case_studies, self.criteria, self.output_mapping)
         return self
 
     def build_json_schema(self) -> dict[str, Any]:

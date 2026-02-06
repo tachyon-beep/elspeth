@@ -2662,11 +2662,14 @@ class LandscapeRecorder:
                 payload_bytes = self._payload_store.retrieve(row.source_data_ref)
                 source_data = json.loads(payload_bytes.decode("utf-8"))
                 payload_available = True
-            except (KeyError, json.JSONDecodeError, OSError):
-                # Payload has been purged or is corrupted
-                # KeyError: raised by PayloadStore when content not found
-                # JSONDecodeError: content corrupted
-                # OSError: filesystem issues
+            except KeyError:
+                # Payload purged by retention policy — expected, continue without data
+                pass
+            except json.JSONDecodeError as e:
+                # Tier 1 violation: payload store data is OUR data — corruption is catastrophic
+                raise AuditIntegrityError(f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): {e}") from e
+            except OSError:
+                # Infrastructure issue (NFS timeout, disk full) — payload unavailable
                 pass
 
         return RowLineage(

@@ -851,6 +851,18 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                         "query": spec.output_prefix,
                     }
                 )
+            except LLMClientError as e:
+                # In concurrent mode, retryable errors are re-raised for pool retry.
+                # In sequential mode (no pool), return error result directly.
+                result = TransformResult.error(
+                    {
+                        "reason": "llm_call_failed",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "query": spec.output_prefix,
+                    },
+                    retryable=e.retryable,
+                )
             results.append(result)
 
         return results

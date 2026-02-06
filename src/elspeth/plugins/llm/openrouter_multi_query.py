@@ -20,7 +20,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
@@ -38,6 +38,7 @@ from elspeth.plugins.llm.multi_query import (
     OutputFieldType,
     QuerySpec,
     ResponseFormat,
+    validate_multi_query_key_collisions,
 )
 from elspeth.plugins.llm.openrouter import OpenRouterConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -127,6 +128,12 @@ class OpenRouterMultiQueryConfig(OpenRouterConfig):
         # Pydantic will handle nested OutputFieldConfig parsing
         return v
 
+    @model_validator(mode="after")
+    def validate_no_output_key_collisions(self) -> OpenRouterMultiQueryConfig:
+        """Validate no duplicate names or reserved suffix collisions."""
+        validate_multi_query_key_collisions(self.case_studies, self.criteria, self.output_mapping)
+        return self
+
     def build_json_schema(self) -> dict[str, Any]:
         """Build JSON Schema for structured outputs.
 
@@ -183,6 +190,7 @@ class OpenRouterMultiQueryConfig(OpenRouterConfig):
                     output_prefix=f"{case_study.name}_{criterion.name}",
                     criterion_data=criterion.to_template_data(),
                     case_study_data=case_study.to_template_data(),
+                    max_tokens=criterion.max_tokens,
                 )
                 specs.append(spec)
 
