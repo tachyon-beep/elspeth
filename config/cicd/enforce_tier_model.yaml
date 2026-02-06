@@ -667,37 +667,37 @@ allow_hits:
   reason: List/tuple type detection for canonical JSON serialization after mypy typecheck
   safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
   expires: null
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=b21022bce5ae4b44
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=a77de18447c39dcc
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=2dbaef3d2189ec0e
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=9b050e479c87531a
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=3329fe9a9ff2907c
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=158bf417c4c20d08
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=2caaa0ed3e80c93d
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=b52c68ef4953caf0
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=4c82651700a318da
+- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=37264ee6291aad91
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=a567787320bb6fd2
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=6912052c5d86f9ea
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=5a5eaf7c81eba810
+- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=23fcb143873b4a0f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1622,7 +1622,7 @@ allow_hits:
   reason: User YAML config boundary - http_config is parsed from pipeline settings
   safety: Defaults to 30s timeout - safe fallback for optional config field
   expires: '2026-05-02'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=7a098a79b0ab4c1c
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=1b3fc36e4105e10d
   owner: architecture
   reason: Framework-boundary type narrowing — transforms list contains both TransformProtocol and GateProtocol instances despite type annotation. GateProtocol does not define _on_error, so isinstance is required to skip gates when adding divert edges.
   safety: Gates skipped cleanly — only TransformProtocol instances get _on_error checked. Existing isinstance pattern at dag.py line 456.
