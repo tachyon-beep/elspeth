@@ -162,7 +162,7 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=b3932582c641646a
+- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=d1d4c7a6b6f8a842
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -217,21 +217,6 @@ allow_hits:
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=bc381d6f3c2f5d86
-  owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=396a8ccc489108fa
-  owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/batch_adapter.py:R5:RowWaiter:wait:fp=bed870f986057b4c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=c5f4c4f695cabe87
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
@@ -273,16 +258,6 @@ allow_hits:
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=54c52809564ace0e
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=73d24c2eb13fa354
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=70613cbf12ca791a
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -402,42 +377,42 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_token_from_step:fp=f9f576369fb2a80c
+- key: engine/processor.py:R5:RowProcessor:process_token_from_step:fp=36466e127d51a869
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=74da7278f2cb1c0e
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=bd2be8e57cbe05de
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=48f4f3c8fff819bf
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=43ed76be1967a768
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_row:fp=49d443d12e1962a7
+- key: engine/processor.py:R5:RowProcessor:process_row:fp=ea95301f83e1a565
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_existing_row:fp=40cddc7a1550b030
+- key: engine/processor.py:R5:RowProcessor:process_existing_row:fp=aae546c8b5e5a4f2
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_token:fp=a88725b377a478cc
+- key: engine/processor.py:R5:RowProcessor:process_token:fp=171d6f0a8b69c69c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=574df1063b332b31
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=c63d6a7263caca87
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=58948623baba0d2d
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=156d0063c4158f68
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -537,7 +512,7 @@ allow_hits:
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/base.py:R1:BaseGate:__init__:fp=cecb5eb7253054e9
+- key: plugins/base.py:R1:BaseGate:__init__:fp=d557713317a8b557
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -545,36 +520,6 @@ allow_hits:
 - key: plugins/utils.py:R5:get_nested_field:fp=65234e1b71a7a0fc
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:get:fp=ab17023175eb4cca
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R1:PluginContext:record_call:fp=3e9eca30bfcffe92
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:record_call:fp=6ab86c709d93073c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R4:PluginContext:record_call:fp=70f274fa3e2192ad
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:record_validation_error:fp=46053f6afc6c7dc7
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R6:PluginContext:record_validation_error:fp=483e7c019079d998
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/context.py:R5:PluginContext:get:fp=76de86ac35dafae4
@@ -703,16 +648,6 @@ allow_hits:
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: core/canonical.py:R5:_normalize_value:fp=848a6c78692ac91c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_for_canonical:fp=b41e99aaaac28e6f
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_for_canonical:fp=ea371ddf450dd487
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1007,12 +942,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=5371f749c44a2970
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=a199581bdd0dadd9
+- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=f513c50d96f3295a
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1032,17 +962,17 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=767241e2894a4d87
+- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=bc395c6a768847b9
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=dc1e25c4da82f75a
+- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=ae444b17b823e17a
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=71ff908610dc6040
+- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=cf5a7341961534e0
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1339,13 +1269,13 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=2300432a3c93d6b5
+- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=58a69ae36bfd1f89
   owner: bugfix
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl to prevent credentials
     leaking to audit trail
   safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
   expires: null
-- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=e2fada7e3814d17c
+- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=2598c89700a4b6b1
   owner: bugfix
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl to prevent tokens leaking
     to audit trail
@@ -1360,11 +1290,6 @@ allow_hits:
   owner: bugfix
   reason: Compile-time type fallback - provides Exception type when azure.core not installed
   safety: Not a runtime error handler; _get_client() will raise ImportError before this path executes
-  expires: null
-- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=e374074061336f86
-  owner: bugfix
-  reason: Configuration validation - checking if route label exists in route_resolution_map
-  safety: Returns None which is explicitly handled - raises MissingEdgeError with proper node_state completion
   expires: null
 - key: engine/executors.py:R1:GateExecutor:execute_gate:fp=4107d16f9b5cfad7
   owner: bugfix
@@ -1381,47 +1306,47 @@ allow_hits:
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Code reviewed - legitimate pattern; else branch handles unexpected types via str() conversion
   expires: '2026-05-02'
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=144b982455015cdd
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=6da358fbc674d735
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=eadbd60f34631b56
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=88448fd740364e24
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=be81cd93cb344eb8
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=4134c33898370a29
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=78786e1b624bdeaa
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=0a516787233a14be
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=972c4cb5cfe0ab58
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=1e6dc332e2ef9699
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=88448fd740364e24
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=ecfef5a461fab47d
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=e93fecfe027866a4
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=efa2d1bce6b292b8
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=b735272e46d7837b
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=858ee1fdd29fc79a
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=0a516787233a14be
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=7c53c74396aa56f7
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
@@ -1551,16 +1476,6 @@ allow_hits:
   reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
   safety: Exhaustive isinstance() chain with else branch; required for polymorphic serialization
   expires: null
-- key: contracts/contract_propagation.py:R6:propagate_contract:fp=4b95d3836f318d93
-  owner: P1-2026-02-03
-  reason: Intentional skip of non-primitive types during contract inference (dict, list)
-  safety: Field is silently skipped in contract (not an error) - data still flows, just untracked
-  expires: null
-- key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=9636ed57716986de
-  owner: architecture
-  reason: Optional lookup for original name - field may not have been in input contract
-  safety: Fallback to output field's original_name is correct behavior for new fields
-  expires: null
 - key: contracts/contract_propagation.py:R6:propagate_contract:fp=fbcdf96127213894
   owner: architecture
   reason: Type narrowing failure is silently skipped - non-primitive types aren't included in contract
@@ -1596,16 +1511,6 @@ allow_hits:
   reason: JSON Schema "format" field is optional per spec - external data at trust boundary
   safety: Missing format defaults to None, falls through to plain str return - correct behavior
   expires: null
-- key: contracts/schema_contract.py:R6:PipelineRow:__contains__:fp=1dfd54f632390fe2
-  owner: bugfix
-  reason: Standard Python __contains__ pattern - resolve_name() raises KeyError for unknown fields
-  safety: Returns False for fields not in contract - explicit result, not silent masking
-  expires: null
-- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=7f596eb3e5eb2722
-  owner: P1-2026-02-03
-  reason: Tier-3 boundary - quarantined source_row.row may not be dict (malformed external data)
-  safety: 'isinstance() check normalizes non-dict external data to {_raw: value} for audit consistency'
-  expires: null
 - key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=9d7a59ec5d3f6186
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
@@ -1625,11 +1530,6 @@ allow_hits:
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
   safety: 'isinstance() check handles union type from transform output'
-  expires: null
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=ef616c0fabe452ce
-  owner: P1-2026-02-05-typecheck
-  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
-  safety: 'isinstance() check converts PipelineRow to dict for error recording'
   expires: null
 - key: engine/executors.py:R5:AggregationExecutor:execute_flush:_to_dict_agg:fp=6843639153ff7b09
   owner: P1-2026-02-05-typecheck
@@ -1727,3 +1627,69 @@ allow_hits:
   reason: Framework-boundary type narrowing — transforms list contains both TransformProtocol and GateProtocol instances despite type annotation. GateProtocol does not define _on_error, so isinstance is required to skip gates when adding divert edges.
   safety: Gates skipped cleanly — only TransformProtocol instances get _on_error checked. Existing isinstance pattern at dag.py line 456.
   expires: '2026-05-06'
+
+- key: engine/processor.py:R5:_extract_dict:fp=f5a5a4fa3692668f
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=4af3f7c99c832786
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/checkpoint.py:R5:ResumePoint:__post_init__:fp=06723188787bab6d
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/results.py:R5:_extract_dict_from_row:fp=81b80a123b326124
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/checkpoint/serialization.py:R5:CheckpointEncoder:default:fp=72cffac7b9b4f871
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=d35d4e11d243b198
+  owner: bugfix
+  reason: Tier-3 boundary validation - rejects NaN/Infinity for audit integrity
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=6bbc05c2197b1800
+  owner: bugfix
+  reason: Tier-3 boundary validation - rejects NaN/Infinity for audit integrity
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=346fe02f62559967
+  owner: bugfix
+  reason: Tier-3 boundary validation - rejects NaN/Infinity for audit integrity
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/checkpoint/serialization.py:R5:_restore_types:fp=69bdc2211c2b6e0e
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/checkpoint/serialization.py:R5:_restore_types:fp=4d05c5da68423665
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/checkpoint/recovery.py:R1:RecoveryManager:get_unprocessed_rows:fp=65210095de7dbbac
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/checkpoint/recovery.py:R1:RecoveryManager:get_unprocessed_rows:fp=df131016147e1edf
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/orchestrator/export.py:R1:reconstruct_schema_from_json:fp=64bce9b651db0fad
+  owner: bugfix
+  reason: JSON Schema field access - external data at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
