@@ -509,9 +509,7 @@ class TestOrchestratorTelemetryWiringContract:
 
         # CONTRACT: telemetry_emit must NOT be the default no-op lambda
         callback_name = getattr(captured_callback, "__name__", str(captured_callback))
-        assert callback_name != "<lambda>", (
-            f"ctx.telemetry_emit is still the default no-op lambda. Got: {captured_callback}"
-        )
+        assert callback_name != "<lambda>", f"ctx.telemetry_emit is still the default no-op lambda. Got: {captured_callback}"
 
     def test_orchestrator_emits_lifecycle_telemetry(
         self,

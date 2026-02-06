@@ -1,7 +1,8 @@
-# IMPORTANT: Scans ALL files by design, not just staged/changed files.
-# This ensures ALL files pass CI/CD checks, not just the ones you edited.
-# DO NOT change this behavior - it catches existing issues that must be fixed.
-# Hooks are CHECK-ONLY - they do NOT auto-fix or modify files.
+# Hooks scan the FULL codebase (pass_filenames: false), not just staged files.
+# This ensures ALL files pass the same checks as CI, not just files you edited.
+# The types: [python] filter acts as a trigger gate — hooks only run when at
+# least one Python file is staged, but then check the entire scope.
+# Hooks are CHECK-ONLY — they do NOT auto-fix or modify files.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -18,11 +19,14 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.0
     hooks:
-      # Linter - check only, no auto-fix
+      # Linter - scans full codebase, check only (no --fix)
       - id: ruff
-      # Formatter - check only, no auto-format
+        args: [src/, tests/, scripts/, examples/]
+        pass_filenames: false
+      # Formatter - scans full codebase, check only (no reformat)
       - id: ruff-format
-        args: [--check]
+        args: [--check, src/, tests/, scripts/, examples/]
+        pass_filenames: false
 
   - repo: local
     hooks:
@@ -35,7 +39,14 @@ repos:
 
       - id: enforce-tier-model
         name: Enforce Tier Model
-        entry: .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model.yaml
+        entry: .venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model.yaml --exclude "**/__pycache__/*"
         language: system
         types: [python]
-        pass_filenames: true
+        pass_filenames: false
+
+      - id: check-contracts
+        name: Check Contracts
+        entry: .venv/bin/python -m scripts.check_contracts
+        language: system
+        types: [python]
+        pass_filenames: false

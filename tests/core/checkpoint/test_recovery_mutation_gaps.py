@@ -44,6 +44,7 @@ def _create_test_schema_contract() -> tuple[str, str]:
     audit_record = ContractAuditRecord.from_contract(contract)
     return audit_record.to_json(), contract.version_hash()
 
+
 if TYPE_CHECKING:
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.landscape import LandscapeDB

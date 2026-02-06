@@ -55,12 +55,12 @@ jobs:
       - name: Check code style (ruff)
         run: |
           source .venv/bin/activate
-          ruff check src/ tests/
+          ruff check src/ tests/ scripts/ examples/
 
       - name: Check formatting (ruff format)
         run: |
           source .venv/bin/activate
-          ruff format --check src/ tests/
+          ruff format --check src/ tests/ scripts/ examples/
 
       - name: Type check (mypy)
         run: |

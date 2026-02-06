@@ -1216,11 +1216,7 @@ class TestOrchestratorResumeMissingContract:
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[PassThrough({"schema": {"mode": "observed"}})],
-            sinks={
-                "default": JSONSink(
-                    {"path": str(output_path), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
-                )
-            },
+            sinks={"default": JSONSink({"path": str(output_path), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"})},
         )
 
         # Act & Assert: Should raise OrchestrationInvariantError

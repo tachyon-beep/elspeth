@@ -106,18 +106,14 @@ class TestSinkProtocolCompliance:
     """Parametrized protocol compliance tests for all sink plugins."""
 
     @pytest.mark.parametrize("class_path,config_factory,expected_name", SINK_CONFIGS)
-    def test_has_required_class_attributes(
-        self, class_path: str, config_factory: Any, expected_name: str
-    ) -> None:
+    def test_has_required_class_attributes(self, class_path: str, config_factory: Any, expected_name: str) -> None:
         """All sinks must have name class attribute."""
         sink_class = _import_sink_class(class_path)
         # Direct attribute access - crash on missing (our code, our bug)
         assert sink_class.name == expected_name  # type: ignore[attr-defined]
 
     @pytest.mark.parametrize("class_path,config_factory,expected_name", SINK_CONFIGS)
-    def test_has_required_instance_attributes(
-        self, class_path: str, config_factory: Any, expected_name: str
-    ) -> None:
+    def test_has_required_instance_attributes(self, class_path: str, config_factory: Any, expected_name: str) -> None:
         """All sinks must have input_schema, idempotent, supports_resume attributes after instantiation."""
         sink_class = _import_sink_class(class_path)
         sink = sink_class(config_factory())
@@ -134,9 +130,7 @@ class TestSinkProtocolCompliance:
         sink.close()
 
     @pytest.mark.parametrize("class_path,config_factory,expected_name", SINK_CONFIGS)
-    def test_write_empty_batch_returns_descriptor(
-        self, class_path: str, config_factory: Any, expected_name: str
-    ) -> None:
+    def test_write_empty_batch_returns_descriptor(self, class_path: str, config_factory: Any, expected_name: str) -> None:
         """write() with empty list should return ArtifactDescriptor without error."""
         sink_class = _import_sink_class(class_path)
         sink = sink_class(config_factory())
@@ -146,9 +140,7 @@ class TestSinkProtocolCompliance:
         result = sink.write([], mock_ctx)
 
         # Verify return type - direct attribute access, crash on wrong type
-        assert isinstance(
-            result, ArtifactDescriptor
-        ), f"write() must return ArtifactDescriptor, got {type(result)}"
+        assert isinstance(result, ArtifactDescriptor), f"write() must return ArtifactDescriptor, got {type(result)}"
         # Verify required fields exist (our code, crash on missing)
         _ = result.content_hash
         _ = result.size_bytes
@@ -157,9 +149,7 @@ class TestSinkProtocolCompliance:
         sink.close()
 
     @pytest.mark.parametrize("class_path,config_factory,expected_name", SINK_CONFIGS)
-    def test_write_with_data_returns_descriptor_with_valid_hash(
-        self, class_path: str, config_factory: Any, expected_name: str
-    ) -> None:
+    def test_write_with_data_returns_descriptor_with_valid_hash(self, class_path: str, config_factory: Any, expected_name: str) -> None:
         """write() with actual data should return ArtifactDescriptor with valid hash."""
         sink_class = _import_sink_class(class_path)
         sink = sink_class(config_factory())
@@ -177,9 +167,7 @@ class TestSinkProtocolCompliance:
 
         # Content hash should be non-empty hex string
         assert result.content_hash, "content_hash should not be empty"
-        assert all(
-            c in "0123456789abcdef" for c in result.content_hash
-        ), "content_hash should be hex string"
+        assert all(c in "0123456789abcdef" for c in result.content_hash), "content_hash should be hex string"
 
         # Size should be positive (we wrote data)
         assert result.size_bytes > 0 or expected_name == "database"  # DB uses payload_size
@@ -188,9 +176,7 @@ class TestSinkProtocolCompliance:
         sink.close()
 
     @pytest.mark.parametrize("class_path,config_factory,expected_name", SINK_CONFIGS)
-    def test_flush_method_callable(
-        self, class_path: str, config_factory: Any, expected_name: str
-    ) -> None:
+    def test_flush_method_callable(self, class_path: str, config_factory: Any, expected_name: str) -> None:
         """All sinks must have callable flush() method."""
         sink_class = _import_sink_class(class_path)
         sink = sink_class(config_factory())
@@ -202,9 +188,7 @@ class TestSinkProtocolCompliance:
         sink.close()
 
     @pytest.mark.parametrize("class_path,config_factory,expected_name", SINK_CONFIGS)
-    def test_close_method_callable_and_idempotent(
-        self, class_path: str, config_factory: Any, expected_name: str
-    ) -> None:
+    def test_close_method_callable_and_idempotent(self, class_path: str, config_factory: Any, expected_name: str) -> None:
         """All sinks must have callable close() method that is idempotent."""
         sink_class = _import_sink_class(class_path)
         sink = sink_class(config_factory())
@@ -214,9 +198,7 @@ class TestSinkProtocolCompliance:
         sink.close()  # Second close - should not raise (idempotency)
 
     @pytest.mark.parametrize("class_path,config_factory,expected_name", SINK_CONFIGS)
-    def test_lifecycle_hooks_exist(
-        self, class_path: str, config_factory: Any, expected_name: str
-    ) -> None:
+    def test_lifecycle_hooks_exist(self, class_path: str, config_factory: Any, expected_name: str) -> None:
         """All sinks must have on_start() and on_complete() lifecycle hooks."""
         sink_class = _import_sink_class(class_path)
         sink = sink_class(config_factory())
@@ -232,9 +214,7 @@ class TestSinkProtocolCompliance:
         sink.close()
 
     @pytest.mark.parametrize("class_path,config_factory,expected_name", SINK_CONFIGS)
-    def test_resume_methods_exist(
-        self, class_path: str, config_factory: Any, expected_name: str
-    ) -> None:
+    def test_resume_methods_exist(self, class_path: str, config_factory: Any, expected_name: str) -> None:
         """All sinks must have configure_for_resume() and validate_output_target() methods."""
         sink_class = _import_sink_class(class_path)
         sink = sink_class(config_factory())

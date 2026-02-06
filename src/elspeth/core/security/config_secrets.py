@@ -81,10 +81,7 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
     # Audit recording requires ELSPETH_FINGERPRINT_KEY to compute secret fingerprints.
     # Without it, secrets would be fetched but audit recording would fail later,
     # leaving secret resolution events unrecorded (violates auditability standard).
-    fingerprint_key_available = (
-        os.environ.get("ELSPETH_FINGERPRINT_KEY")
-        or "ELSPETH_FINGERPRINT_KEY" in config.mapping
-    )
+    fingerprint_key_available = os.environ.get("ELSPETH_FINGERPRINT_KEY") or "ELSPETH_FINGERPRINT_KEY" in config.mapping
     if not fingerprint_key_available:
         raise SecretLoadError(
             "ELSPETH_FINGERPRINT_KEY is required when loading secrets from Key Vault.\n"

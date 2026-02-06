@@ -241,9 +241,7 @@ class TestErrorHandling:
         assert "prod-vault.vault.azure.net" in error_msg
         assert "DefaultAzureCredential" in error_msg
 
-    def test_error_message_includes_vault_url_and_secret_name(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_error_message_includes_vault_url_and_secret_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Error messages include vault URL and secret name for debugging."""
         from azure.core.exceptions import HttpResponseError
 
@@ -275,9 +273,7 @@ class TestErrorHandling:
         assert "debug-secret-name" in error_msg
         assert "DEBUG_KEY" in error_msg
 
-    def test_missing_fingerprint_key_fails_before_keyvault_call(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_fingerprint_key_fails_before_keyvault_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing ELSPETH_FINGERPRINT_KEY causes SecretLoadError before any Key Vault call.
 
         P1-2026-02-05: Without fingerprint key, audit recording would fail later,
@@ -325,9 +321,7 @@ class TestErrorHandling:
         # CRITICAL: Key Vault was never called - we failed BEFORE the fetch
         assert not keyvault_called, "Key Vault should NOT be called when fingerprint key is missing"
 
-    def test_fingerprint_key_in_mapping_allows_keyvault_load(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_fingerprint_key_in_mapping_allows_keyvault_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When ELSPETH_FINGERPRINT_KEY is in mapping, secrets load normally.
 
         This tests the case where the fingerprint key itself is loaded from Key Vault.
@@ -369,9 +363,7 @@ class TestErrorHandling:
         assert os.environ["ELSPETH_FINGERPRINT_KEY"] == "fingerprint-key-from-vault"
         assert os.environ["MY_API_KEY"] == "value-for-my-api-key-secret"
 
-    def test_fingerprint_key_in_env_allows_keyvault_load(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_fingerprint_key_in_env_allows_keyvault_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When ELSPETH_FINGERPRINT_KEY is already in environment, secrets load normally."""
         # Set fingerprint key in environment
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "env-fingerprint-key")
@@ -402,9 +394,7 @@ class TestErrorHandling:
         # Fingerprint key unchanged
         assert os.environ["ELSPETH_FINGERPRINT_KEY"] == "env-fingerprint-key"
 
-    def test_azure_sdk_not_installed_shows_helpful_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_azure_sdk_not_installed_shows_helpful_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ImportError produces helpful installation guidance."""
         # P1-2026-02-05: Fingerprint key required for audit recording
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")

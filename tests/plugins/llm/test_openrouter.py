@@ -1061,7 +1061,9 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.reason is not None
         assert result.reason["reason"] == "empty_choices"
 
-    def test_null_content_from_content_filtering_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+    def test_null_content_from_content_filtering_emits_error(
+        self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server
+    ) -> None:
         """Null content (content filtering) returns error instead of passing None through.
 
         P0-05: When OpenRouter returns null content due to content filtering,

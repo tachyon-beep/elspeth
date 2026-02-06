@@ -68,8 +68,6 @@ class _NormalizedScoreSchema(PluginSchema):
     score: float
 
 
-
-
 # =============================================================================
 # Audit Trail Verification Helpers
 # =============================================================================

@@ -628,12 +628,10 @@ class TestCheckpointManager:
         restored_datetime = restored["node-001"]["tokens"][0]["row_data"]["created_at"]
 
         assert isinstance(restored_datetime, datetime), (
-            f"Expected datetime, got {type(restored_datetime).__name__}. "
-            "Checkpoint serialization must preserve datetime type fidelity."
+            f"Expected datetime, got {type(restored_datetime).__name__}. Checkpoint serialization must preserve datetime type fidelity."
         )
         assert restored_datetime == test_datetime, (
-            f"Expected {test_datetime}, got {restored_datetime}. "
-            "Checkpoint round-trip must preserve datetime value exactly."
+            f"Expected {test_datetime}, got {restored_datetime}. Checkpoint round-trip must preserve datetime value exactly."
         )
 
     def test_checkpoint_with_nested_datetime_in_aggregation_state(

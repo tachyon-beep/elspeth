@@ -74,10 +74,7 @@ def _reject_nan_infinity(obj: Any) -> Any:
     """
     if isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
-            raise ValueError(
-                f"Cannot serialize non-finite float: {obj}. "
-                "Use None for missing values, not NaN/Infinity."
-            )
+            raise ValueError(f"Cannot serialize non-finite float: {obj}. Use None for missing values, not NaN/Infinity.")
     elif isinstance(obj, dict):
         for v in obj.values():
             _reject_nan_infinity(v)

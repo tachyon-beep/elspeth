@@ -51,6 +51,5 @@ class ResumePoint:
         """
         if self.aggregation_state is not None and not isinstance(self.aggregation_state, dict):
             raise ValueError(
-                f"aggregation_state must be dict or None, got {type(self.aggregation_state).__name__}: "
-                f"{self.aggregation_state!r}"
+                f"aggregation_state must be dict or None, got {type(self.aggregation_state).__name__}: {self.aggregation_state!r}"
             )
