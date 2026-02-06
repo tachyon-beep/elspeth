@@ -73,7 +73,7 @@ class PluginContext:
     - Utility methods (get config values, start spans)
 
     Example:
-        def process(self, row: dict, ctx: PluginContext) -> TransformResult:
+        def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
             threshold = ctx.get("threshold", default=0.5)
             with ctx.start_span("my_operation"):
                 result = do_work(row, threshold)

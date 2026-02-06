@@ -352,10 +352,35 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_transforms:fp=cd0aed37bc95ede0
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=3a46e6d721a48c54
   owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern; collects all cleanup errors then raises
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=bc733d58d7a87142
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=ddfad7d688f5dbcd
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=13f9a961832ad7c3
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=017ea2dfe807fb8c
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=9f0ff17bd961104d
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
 - key: engine/orchestrator/validation.py:R5:validate_route_destinations:fp=b681c5049ba16d78
   owner: architecture
@@ -367,60 +392,15 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish for _on_error access
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=94666d4e17fa8976
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=ed4e24e044b1e83f
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=107dcbeb763150d7
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=94e459c5bae290db
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=e9d4ffc968b59f65
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=13afa5ac17f69b11
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=7fcd1ec2e01b59e2
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=520ab405a68261c6
+- key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=9c87cd77adede138
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_process_resumed_rows:fp=689615e3530d103b
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_process_resumed_rows:fp=0dacb2142b54f7d7
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_process_resumed_rows:fp=33ac3a4720492bf1
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_process_resumed_rows:fp=6e35b8e1b5415425
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
 - key: engine/processor.py:R5:RowProcessor:process_token_from_step:fp=f9f576369fb2a80c
   owner: architecture
