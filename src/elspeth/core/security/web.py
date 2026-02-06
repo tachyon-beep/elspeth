@@ -229,6 +229,12 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
             ip_list = future.result(timeout=timeout)
         except FuturesTimeoutError as e:
             raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from e
+        except (SSRFBlockedError, NetworkError):
+            raise  # Re-raise our own exception types unchanged
+        except Exception as e:
+            # Unexpected exceptions from DNS resolution (UnicodeError, OSError, etc.)
+            # are external system failures — wrap as NetworkError
+            raise NetworkError(f"DNS resolution failed: {hostname}: {e}") from e
 
     if not ip_list:
         raise NetworkError(f"DNS resolution returned no addresses: {hostname}")

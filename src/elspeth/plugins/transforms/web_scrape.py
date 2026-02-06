@@ -160,8 +160,9 @@ class WebScrapeTransform(BaseTransform):
         # Validate URL and pin resolved IP (SSRF prevention with DNS rebinding defense)
         try:
             safe_request = validate_url_for_ssrf(url)
-        except (SSRFBlockedError, SSRFNetworkError) as e:
-            # Security violations and DNS failures are non-retryable
+        except (SSRFBlockedError, SSRFNetworkError, TypeError) as e:
+            # Security violations, DNS failures, and invalid url types (e.g. None)
+            # are non-retryable
             return TransformResult.error(
                 {
                     "reason": "validation_failed",
