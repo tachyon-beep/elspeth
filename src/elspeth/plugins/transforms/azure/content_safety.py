@@ -31,6 +31,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, is_capacity_error
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.azure.errors import MalformedResponseError
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -384,6 +385,17 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                     },
                     retryable=True,
                 )
+            except MalformedResponseError as e:
+                # Malformed API response — fail CLOSED, non-retryable
+                # (response structure won't improve on retry)
+                return TransformResult.error(
+                    {
+                        "reason": "api_error",
+                        "error_type": "malformed_response",
+                        "message": str(e),
+                    },
+                    retryable=False,
+                )
 
             # Check thresholds
             violation = self._check_thresholds(analysis)
@@ -472,17 +484,17 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         response.raise_for_status()
 
         # Parse response into category -> severity mapping
-        # Azure API responses are external data (Tier 3: Zero Trust) - wrap parsing
+        # Azure API responses are external data (Tier 3: Zero Trust) — validate immediately
         try:
             data = response.json()
-            # Initialize all categories to 0 (safe) - Azure only returns categories
-            # where content was detected, missing = no harmful content
-            result: dict[str, int] = {
-                "hate": 0,
-                "violence": 0,
-                "sexual": 0,
-                "self_harm": 0,
-            }
+        except Exception as e:
+            raise MalformedResponseError(f"Invalid JSON in Content Safety response: {e}") from e
+
+        try:
+            # Initialize all expected categories to 0 (safe)
+            _EXPECTED_CATEGORIES = {"hate", "violence", "sexual", "self_harm"}
+            result: dict[str, int] = dict.fromkeys(_EXPECTED_CATEGORIES, 0)
+
             for item in data["categoriesAnalysis"]:
                 azure_category = item["category"]
                 internal_name = _AZURE_CATEGORY_MAP.get(azure_category)
@@ -494,14 +506,29 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                         f"Known categories: {sorted(_AZURE_CATEGORY_MAP.keys())}. "
                         f"Update _AZURE_CATEGORY_MAP to handle this category."
                     )
+                if not isinstance(item["severity"], int):
+                    raise MalformedResponseError(f"severity for {azure_category!r} must be int, got {type(item['severity']).__name__}")
                 result[internal_name] = item["severity"]
+
+            # Fail CLOSED: verify all expected categories were returned by Azure.
+            # If Azure changes to only returning flagged categories, absent ones
+            # would silently default to 0 (safe) — that's a fail-open path.
+            returned_categories = {
+                _AZURE_CATEGORY_MAP[item["category"]] for item in data["categoriesAnalysis"] if item["category"] in _AZURE_CATEGORY_MAP
+            }
+            missing = _EXPECTED_CATEGORIES - returned_categories
+            if missing:
+                raise MalformedResponseError(
+                    f"Azure Content Safety response missing expected categories: "
+                    f"{sorted(missing)}. Returned: {sorted(returned_categories)}. "
+                    f"Cannot assess content safety without all categories."
+                )
 
             return result
 
         except (KeyError, TypeError) as e:
-            # Malformed response - the HTTP call was recorded as SUCCESS by AuditedHTTPClient
-            # (because we got a 200), but the response is unusable at the application level
-            raise httpx.RequestError(f"Malformed API response: {e}") from e
+            # Malformed response structure — non-retryable
+            raise MalformedResponseError(f"Malformed Content Safety response: {e}") from e
 
     def _check_thresholds(
         self,

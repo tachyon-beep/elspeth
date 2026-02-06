@@ -1137,45 +1137,107 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R9:AzureContentSafety:_process_row:fp=5555041200ea3e5a
+# === content_safety.py (Azure API response is Tier 3 — zero trust) ===
+- key: plugins/transforms/azure/content_safety.py:R9:AzureContentSafety:_process_row:fp=b18b4272385d82ff
   owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
+  reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=0dacc878bc4c9b55
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=8404ee8567c3b226
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
+  reason: Tier 3 boundary — validates row field is str before sending to Azure API
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_get_fields_to_scan:fp=6756f72f855a6bcf
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_get_fields_to_scan:fp=9bb006a32eb07a28
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
+  reason: Tier 2 row filtering — isinstance selects str fields for content scanning
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_get_fields_to_scan:fp=71955a9599f4811d
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_get_fields_to_scan:fp=1617ec4ae04857b6
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
+  reason: Tier 2 row filtering — isinstance selects str fields for content scanning
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R9:AzurePromptShield:_process_row:fp=53ca96c9e5bd68ae
+- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_analyze_content:fp=9cbec0737e033ad0
   owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
+  reason: Tier 3 boundary — .get() on Azure API response to check unknown categories
+  safety: Unknown categories logged, only mapped categories used. MalformedResponseError raised if expected categories missing.
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_analyze_content:fp=132e9c8653a9a14b
+  owner: architecture
+  reason: Tier 3 boundary — validates severity type from Azure API response is int
+  safety: MalformedResponseError raised if type wrong, caught as non-retryable error
+  expires: '2026-05-02'
+# === prompt_shield.py (Azure API response is Tier 3 — zero trust) ===
+- key: plugins/transforms/azure/prompt_shield.py:R9:AzurePromptShield:_process_row:fp=5555041200ea3e5a
+  owner: architecture
+  reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=994ee6025b37edd8
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=69fe83d9ba6aa6e9
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
+  reason: Tier 3 boundary — validates row field is str before sending to Azure API
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_get_fields_to_scan:fp=95ab058500cceed9
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_get_fields_to_scan:fp=6756f72f855a6bcf
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
+  reason: Tier 2 row filtering — isinstance selects str fields for scanning
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_get_fields_to_scan:fp=ac5127fa4ed39379
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_get_fields_to_scan:fp=71955a9599f4811d
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
+  reason: Tier 2 row filtering — isinstance selects str fields for scanning
   safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=5ebfe1bb3a77f354
+  owner: architecture
+  reason: Tier 3 boundary — validates Azure response structure before parsing
+  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=ec7bffed1b84a52f
+  owner: architecture
+  reason: Tier 3 boundary — .get() on Azure API response to extract userPromptAnalysis
+  safety: MalformedResponseError raised if field missing or wrong type
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=9e2efc70e9c2a9dc
+  owner: architecture
+  reason: Tier 3 boundary — validates userPromptAnalysis is dict from Azure response
+  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=3b3f342da93a70a8
+  owner: architecture
+  reason: Tier 3 boundary — .get() on Azure response to extract attackDetected field
+  safety: MalformedResponseError raised if field missing or wrong type
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=c841d2c305e52b38
+  owner: architecture
+  reason: Tier 3 boundary — validates attackDetected is bool from Azure response
+  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=40253c1ac93c9dee
+  owner: architecture
+  reason: Tier 3 boundary — .get() on Azure response to extract documentsAnalysis
+  safety: MalformedResponseError raised if field missing or wrong type
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=f580cd433ba3ceaa
+  owner: architecture
+  reason: Tier 3 boundary — validates documentsAnalysis is list from Azure response
+  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=7253081edf54b8ad
+  owner: architecture
+  reason: Tier 3 boundary — validates each document entry is dict from Azure response
+  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=6fc4cb2a3c9fe209
+  owner: architecture
+  reason: Tier 3 boundary — .get() on document dict to extract attackDetected
+  safety: MalformedResponseError raised if field missing or wrong type
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=decde02c66d672a3
+  owner: architecture
+  reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
+  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
   expires: '2026-05-02'
 - key: tui/screens/explain_screen.py:R6:ExplainScreen:_load_node_state:fp=ea0af175990905a8
   owner: architecture

@@ -30,18 +30,10 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, is_capacity_error
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.azure.errors import MalformedResponseError
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
-
-
-class MalformedResponseError(Exception):
-    """Raised when Azure API returns a response with invalid structure or types.
-
-    This is distinct from network errors (httpx.RequestError) - malformed responses
-    indicate the API returned something we can't safely interpret, which won't
-    improve on retry. Used to fail CLOSED on security-critical transforms.
-    """
 
 
 class AzurePromptShieldConfig(TransformDataConfig):
@@ -457,35 +449,25 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         # Validate userPromptAnalysis structure
         user_prompt_analysis = data.get("userPromptAnalysis") if isinstance(data, dict) else None
         if not isinstance(user_prompt_analysis, dict):
-            raise MalformedResponseError(
-                f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}"
-            )
+            raise MalformedResponseError(f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}")
 
         user_attack = user_prompt_analysis.get("attackDetected")
         if not isinstance(user_attack, bool):
-            raise MalformedResponseError(
-                f"userPromptAnalysis.attackDetected must be bool, got {type(user_attack).__name__}"
-            )
+            raise MalformedResponseError(f"userPromptAnalysis.attackDetected must be bool, got {type(user_attack).__name__}")
 
         # Validate documentsAnalysis structure
         documents_analysis = data.get("documentsAnalysis")
         if not isinstance(documents_analysis, list):
-            raise MalformedResponseError(
-                f"documentsAnalysis must be list, got {type(documents_analysis).__name__}"
-            )
+            raise MalformedResponseError(f"documentsAnalysis must be list, got {type(documents_analysis).__name__}")
 
         # Validate each document entry and check for attacks
         doc_attack = False
         for i, doc in enumerate(documents_analysis):
             if not isinstance(doc, dict):
-                raise MalformedResponseError(
-                    f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}"
-                )
+                raise MalformedResponseError(f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}")
             attack_detected = doc.get("attackDetected")
             if not isinstance(attack_detected, bool):
-                raise MalformedResponseError(
-                    f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}"
-                )
+                raise MalformedResponseError(f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}")
             if attack_detected:
                 doc_attack = True
 

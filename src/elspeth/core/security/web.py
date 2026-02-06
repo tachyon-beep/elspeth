@@ -109,9 +109,14 @@ def _validate_ip_address(ip_str: str) -> None:
         ip_str: IP address string (IPv4 or IPv6)
 
     Raises:
-        SSRFBlockedError: If IP is in a blocked range
+        SSRFBlockedError: If IP is in a blocked range or unparseable (fail-closed)
     """
-    ip = ipaddress.ip_address(ip_str)
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError as e:
+        # Fail CLOSED: if we can't parse the IP (e.g. zone-scoped IPv6 like
+        # "fe80::1%eth0"), block the request rather than allowing it through.
+        raise SSRFBlockedError(f"Unparseable IP address: {ip_str!r}: {e}") from e
     for blocked in BLOCKED_IP_RANGES:
         if ip in blocked:
             raise SSRFBlockedError(f"Blocked IP range: {ip_str} in {blocked}")

@@ -683,9 +683,9 @@ class TestContentSafetyBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "api_error"
-            assert result.reason["error_type"] == "network_error"
+            assert result.reason["error_type"] == "malformed_response"
             assert "malformed" in result.reason["message"].lower()
-            assert result.retryable is True
+            assert result.retryable is False
         finally:
             transform.close()
 
@@ -730,15 +730,16 @@ class TestContentSafetyBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "api_error"
-            assert result.retryable is True
+            assert result.reason["error_type"] == "malformed_response"
+            assert result.retryable is False
         finally:
             transform.close()
 
-    def test_missing_categories_treated_as_safe(self, mock_httpx_client: MagicMock) -> None:
-        """Missing categories in API response default to severity 0 (safe)."""
+    def test_missing_categories_rejected_fail_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Missing expected categories in API response are rejected (fail-closed)."""
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
-        # Only returns Hate category
+        # Only returns Hate category — missing Violence, Sexual, SelfHarm
         mock_response = _create_mock_http_response(
             {
                 "categoriesAnalysis": [
@@ -770,11 +771,15 @@ class TestContentSafetyBatchProcessing:
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
-            # Should pass since missing categories default to 0, which is below threshold 2
+            # Fail CLOSED: missing categories are rejected, not silently treated as safe
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
-            assert result.status == "success"
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["error_type"] == "malformed_response"
+            assert "missing expected categories" in result.reason["message"].lower()
+            assert result.retryable is False
         finally:
             transform.close()
 
@@ -1047,9 +1052,7 @@ class TestContentSafetyFailsClosed:
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
             # Must fail closed — unknown category = reject content
-            assert result.status == "error", (
-                "Unknown category must fail CLOSED (error), not pass through as success"
-            )
+            assert result.status == "error", "Unknown category must fail CLOSED (error), not pass through as success"
             assert result.reason is not None
             assert "unknown_category" in result.reason["reason"]
         finally:

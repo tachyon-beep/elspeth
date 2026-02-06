@@ -39,6 +39,7 @@ from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.web_scrape_errors import (
     ForbiddenError,
+    InvalidURLError,
     NetworkError,
     NotFoundError,
     RateLimitError,
@@ -283,6 +284,9 @@ class WebScrapeTransform(BaseTransform):
                 raise RateLimitError(f"HTTP 429: {url}")
             elif 500 <= response.status_code < 600:
                 raise ServerError(f"HTTP {response.status_code}: {url}")
+            elif 300 <= response.status_code < 400:
+                # Unresolved redirect (e.g. 3xx without Location header) — treat as error
+                raise InvalidURLError(f"Unresolved redirect HTTP {response.status_code}: {url} (missing or empty Location header)")
 
             return response
 
@@ -290,6 +294,16 @@ class WebScrapeTransform(BaseTransform):
             raise NetworkError(f"Timeout fetching {safe_request.original_url}: {e}") from e
         except httpx.ConnectError as e:
             raise NetworkError(f"Connection error fetching {safe_request.original_url}: {e}") from e
+        except SSRFBlockedError as e:
+            # Redirect hop resolved to a blocked IP — non-retryable security violation
+            from elspeth.plugins.transforms.web_scrape_errors import SSRFBlockedError as WSSRFBlockedError
+
+            raise WSSRFBlockedError(f"SSRF blocked during redirect: {safe_request.original_url}: {e}") from e
+        except SSRFNetworkError as e:
+            # DNS resolution failed during redirect hop
+            raise NetworkError(f"DNS resolution failed during redirect: {safe_request.original_url}: {e}") from e
+        except httpx.TooManyRedirects as e:
+            raise InvalidURLError(f"Too many redirects: {safe_request.original_url}: {e}") from e
 
     def close(self) -> None:
         """Release resources."""
