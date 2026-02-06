@@ -178,6 +178,7 @@ class TestTransformProtocol:
             plugin_version = "1.0.0"
             is_batch_aware = False  # Batch support (structural aggregation)
             creates_tokens = False  # Deaggregation (multi-row output)
+            transforms_adds_fields = False  # Schema evolution tracking
             _on_error: str | None = None  # Error routing (WP-11.99b)
 
             def __init__(self, config: dict[str, Any]) -> None:

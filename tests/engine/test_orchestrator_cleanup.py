@@ -7,42 +7,20 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema
+from elspeth.contracts import PipelineRow, PluginSchema
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
-from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
+from tests.conftest import as_sink, as_source, as_transform
+from tests.engine.conftest import CollectSink, ListSource
 
 
 class ValueSchema(PluginSchema):
     """Simple schema for test rows."""
 
     value: int
-
-
-class ListSource(_TestSourceBase):
-    """Test source that yields from a list."""
-
-    name = "list_source"
-    output_schema = ValueSchema
-
-    def __init__(self, data: list[dict[str, Any]]) -> None:
-        super().__init__()
-        self._data = data
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def load(self, ctx: Any) -> Any:
-        yield from self.wrap_rows(self._data)
-
-    def close(self) -> None:
-        pass
 
 
 class FailingSource(ListSource):
@@ -52,33 +30,6 @@ class FailingSource(ListSource):
 
     def load(self, ctx: Any) -> Any:
         raise RuntimeError("Source failed intentionally")
-
-
-class CollectSink(_TestSinkBase):
-    """Test sink that collects results in memory."""
-
-    name = "collect"
-    input_schema = ValueSchema
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.results: list[dict[str, Any]] = []
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-    def flush(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
 
 
 class TrackingTransform(BaseTransform):

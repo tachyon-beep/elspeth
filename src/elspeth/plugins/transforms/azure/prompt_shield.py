@@ -35,6 +35,15 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
+class MalformedResponseError(Exception):
+    """Raised when Azure API returns a response with invalid structure or types.
+
+    This is distinct from network errors (httpx.RequestError) - malformed responses
+    indicate the API returned something we can't safely interpret, which won't
+    improve on retry. Used to fail CLOSED on security-critical transforms.
+    """
+
+
 class AzurePromptShieldConfig(TransformDataConfig):
     """Configuration for Azure Prompt Shield transform.
 
@@ -333,6 +342,17 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                     },
                     retryable=True,
                 )
+            except MalformedResponseError as e:
+                # Malformed API response - fail CLOSED, non-retryable
+                # (response structure won't improve on retry)
+                return TransformResult.error(
+                    {
+                        "reason": "api_error",
+                        "error_type": "malformed_response",
+                        "message": str(e),
+                    },
+                    retryable=False,
+                )
 
             # Check if any attack was detected
             if analysis["user_prompt_attack"] or analysis["document_attack"]:
@@ -424,21 +444,55 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
         # Parse response - Azure API responses are external data (Tier 3: Zero Trust)
         # Security transform: fail CLOSED on malformed response
+        #
+        # We validate types strictly because:
+        # - attackDetected=null would be falsy → fail OPEN (security vulnerability)
+        # - attackDetected="true" would be truthy but for wrong reason
+        # - Non-list documentsAnalysis would crash or misbehave
         try:
             data = response.json()
-            user_attack = data["userPromptAnalysis"]["attackDetected"]
-            documents_analysis = data["documentsAnalysis"]
-            doc_attack = any(doc["attackDetected"] for doc in documents_analysis)
+        except Exception as e:
+            raise MalformedResponseError(f"Invalid JSON in response: {e}") from e
 
-            return {
-                "user_prompt_attack": user_attack,
-                "document_attack": doc_attack,
-            }
+        # Validate userPromptAnalysis structure
+        user_prompt_analysis = data.get("userPromptAnalysis") if isinstance(data, dict) else None
+        if not isinstance(user_prompt_analysis, dict):
+            raise MalformedResponseError(
+                f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}"
+            )
 
-        except (KeyError, TypeError) as e:
-            # Malformed response - the HTTP call was recorded as SUCCESS by AuditedHTTPClient
-            # (because we got a 200), but the response is unusable at the application level
-            raise httpx.RequestError(f"Malformed Prompt Shield response: {e}") from e
+        user_attack = user_prompt_analysis.get("attackDetected")
+        if not isinstance(user_attack, bool):
+            raise MalformedResponseError(
+                f"userPromptAnalysis.attackDetected must be bool, got {type(user_attack).__name__}"
+            )
+
+        # Validate documentsAnalysis structure
+        documents_analysis = data.get("documentsAnalysis")
+        if not isinstance(documents_analysis, list):
+            raise MalformedResponseError(
+                f"documentsAnalysis must be list, got {type(documents_analysis).__name__}"
+            )
+
+        # Validate each document entry and check for attacks
+        doc_attack = False
+        for i, doc in enumerate(documents_analysis):
+            if not isinstance(doc, dict):
+                raise MalformedResponseError(
+                    f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}"
+                )
+            attack_detected = doc.get("attackDetected")
+            if not isinstance(attack_detected, bool):
+                raise MalformedResponseError(
+                    f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}"
+                )
+            if attack_detected:
+                doc_attack = True
+
+        return {
+            "user_prompt_attack": user_attack,
+            "document_attack": doc_attack,
+        }
 
     def close(self) -> None:
         """Release resources."""

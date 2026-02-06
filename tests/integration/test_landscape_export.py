@@ -149,7 +149,12 @@ class TestLandscapeExport:
 
     @pytest.fixture
     def export_disabled_settings(self, tmp_path: Path) -> Path:
-        """Create settings file with export disabled."""
+        """Create settings file with export disabled.
+
+        NOTE: When export is disabled, we don't define an audit_export sink.
+        If export is disabled but the sink is still defined, graph validation
+        will fail because the sink is unreachable (nothing routes to it).
+        """
         input_csv = tmp_path / "input.csv"
         input_csv.write_text("id,name\n1,Test\n")
 
@@ -175,26 +180,25 @@ class TestLandscapeExport:
                         "format": "jsonl",
                     },
                 },
-                "audit_export": {
-                    "plugin": "json",
-                    "options": {
-                        "path": str(audit_json),
-                        "schema": {"mode": "observed"},
-                    },
-                },
+                # NOTE: No audit_export sink - export is disabled
             },
             "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
                     "enabled": False,  # Export disabled
-                    "sink": "audit_export",
+                    # No sink specified when disabled
                 },
             },
         }
 
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(yaml.dump(config))
+
+        # Create path marker for test assertion (file should NOT exist after run)
+        # Store path in fixture for test to verify
+        (tmp_path / "_audit_json_path.txt").write_text(str(audit_json))
+
         return settings_file
 
     def test_export_disabled_does_not_create_file(self, export_disabled_settings: Path, tmp_path: Path) -> None:

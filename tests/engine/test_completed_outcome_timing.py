@@ -18,7 +18,6 @@ after successful sink writes. They currently FAIL because the bug exists.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +33,6 @@ from elspeth.contracts import (
     RoutingMode,
     RowOutcome,
     SinkName,
-    SourceRow,
 )
 from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
 from elspeth.contracts.types import NodeID
@@ -48,11 +46,11 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
     _TestSinkBase,
-    _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
+from tests.engine.conftest import ListSource
 
 
 def _build_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -132,23 +130,6 @@ class TestCompletedOutcomeTimingContract:
 
         class RowSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-                # Create schema contract from output_schema
-                from elspeth.contracts.transform_contract import create_output_contract_from_schema
-
-                self._schema_contract = create_output_contract_from_schema(self.output_schema)
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row, contract=self._schema_contract)
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
@@ -243,23 +224,6 @@ class TestCompletedOutcomeTimingContract:
         class RowSchema(PluginSchema):
             value: int
 
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-                # Create schema contract from output_schema
-                from elspeth.contracts.transform_contract import create_output_contract_from_schema
-
-                self._schema_contract = create_output_contract_from_schema(self.output_schema)
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row, contract=self._schema_contract)
-
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
             input_schema = RowSchema
@@ -337,23 +301,6 @@ class TestCompletedOutcomeTimingContract:
 
         class RowSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-                # Create schema contract from output_schema
-                from elspeth.contracts.transform_contract import create_output_contract_from_schema
-
-                self._schema_contract = create_output_contract_from_schema(self.output_schema)
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row, contract=self._schema_contract)
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"

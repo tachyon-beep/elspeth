@@ -20,6 +20,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ class TestOrchestratorErrorHandling:
 
     def test_run_marks_failed_on_transform_exception(self, payload_store) -> None:
         """If a transform raises, run status should be failed in Landscape."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -39,23 +40,6 @@ class TestOrchestratorErrorHandling:
 
         class ValueSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
 
         class ExplodingTransform(BaseTransform):
             name = "exploding"
@@ -67,25 +51,6 @@ class TestOrchestratorErrorHandling:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("Transform exploded!")
-
-        class CollectSink(_TestSinkBase):
-            name = "test_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 42}])
         transform = ExplodingTransform()
@@ -129,7 +94,7 @@ class TestOrchestratorSourceQuarantineValidation:
         the orchestrator should fail at initialization with a clear error message,
         NOT silently drop quarantined rows at runtime.
         """
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import (
             Orchestrator,
@@ -172,25 +137,6 @@ class TestOrchestratorSourceQuarantineValidation:
             def close(self) -> None:
                 pass
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         source = QuarantiningSource()
         default_sink = CollectSink()
         # Note: NO 'nonexistent_quarantine_sink' provided!
@@ -226,7 +172,7 @@ class TestOrchestratorQuarantineMetrics:
         when it returns TransformResult.error(). These should be counted
         as quarantined, not failed.
         """
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -236,23 +182,6 @@ class TestOrchestratorQuarantineMetrics:
         class ValueSchema(PluginSchema):
             value: int
             quality: str
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
 
         class QualityFilter(BaseTransform):
             """Transform that errors on 'bad' quality rows.
@@ -272,25 +201,6 @@ class TestOrchestratorQuarantineMetrics:
                 if row.get("quality") == "bad":
                     return TransformResult.error({"reason": "validation_failed", "error": "bad_quality", "value": row["value"]})
                 return TransformResult.success(row.to_dict(), success_reason={"action": "quality_check_passed"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         # 3 rows: good, bad, good
         source = ListSource(
@@ -350,7 +260,7 @@ class TestSourceQuarantineTokenOutcome:
         """
         from collections.abc import Iterator
 
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, RowOutcome
+        from elspeth.contracts import PluginSchema, RowOutcome
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -378,19 +288,9 @@ class TestSourceQuarantineTokenOutcome:
                 # Another valid row
                 yield from self.wrap_rows([{"id": 3, "name": "charlie"}])
 
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
         source = QuarantiningSource()
-        default_sink = CollectSink()
-        quarantine_sink = CollectSink()
+        default_sink = CollectSink(name="collect_sink")
+        quarantine_sink = CollectSink(name="quarantine")
 
         config = PipelineConfig(
             source=as_source(source),
@@ -491,20 +391,8 @@ class TestSourceQuarantineTokenOutcome:
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
                 raise RuntimeError("Sink write failed!")
 
-        class CollectSink(_TestSinkBase):
-            """Normal sink that collects rows."""
-
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
         source = QuarantiningSource()
-        default_sink = CollectSink()
+        default_sink = CollectSink(name="collect_sink")
         failing_quarantine_sink = FailingSink()
 
         config = PipelineConfig(
@@ -575,7 +463,7 @@ class TestQuarantineDestinationRuntimeValidation:
         - "Plugin bugs must crash"
         - "Every row reaches exactly one terminal state - no silent drops"
         """
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -618,49 +506,9 @@ class TestQuarantineDestinationRuntimeValidation:
             def close(self) -> None:
                 pass
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        class QuarantineSink(_TestSinkBase):
-            """Valid quarantine sink - exists for init validation to pass."""
-
-            name = "quarantine"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         source = MisbehavingSource()
         default_sink = CollectSink()
-        quarantine_sink = QuarantineSink()
+        quarantine_sink = CollectSink(name="quarantine")
 
         config = PipelineConfig(
             source=as_source(source),
@@ -693,7 +541,7 @@ class TestQuarantineDestinationRuntimeValidation:
         This tests the case where SourceRow is constructed directly instead of
         using the SourceRow.quarantined() factory method.
         """
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -732,47 +580,9 @@ class TestQuarantineDestinationRuntimeValidation:
             def close(self) -> None:
                 pass
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        class QuarantineSink(_TestSinkBase):
-            name = "quarantine"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         source = BadSourceRow()
         default_sink = CollectSink()
-        quarantine_sink = QuarantineSink()
+        quarantine_sink = CollectSink(name="quarantine")
 
         config = PipelineConfig(
             source=as_source(source),

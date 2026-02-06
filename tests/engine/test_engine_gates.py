@@ -20,15 +20,16 @@ import pytest
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import ArtifactDescriptor, GateName, NodeID, NodeType, PipelineRow, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, PluginSchema, RoutingMode
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.expression_parser import ExpressionEvaluationError
-from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
+from tests.conftest import as_sink, as_source, as_transform
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 # =============================================================================
-# Shared Test Plugin Classes (P3 Fix: Deduplicate from individual tests)
+# Test Helpers
 # =============================================================================
 
 
@@ -54,50 +55,6 @@ def _make_pipeline_row(data: dict[str, Any]) -> Any:
     return PipelineRow(data, contract)
 
 
-class _CompositeSchema(PluginSchema):
-    """Schema for composite condition tests (a: int, b: str)."""
-
-    a: int
-    b: str
-
-
-class _StatusPrioritySchema(PluginSchema):
-    """Schema for OR condition tests."""
-
-    status: str
-    priority: int
-
-
-class _StatusOnlySchema(PluginSchema):
-    """Schema with just status field."""
-
-    status: str
-
-
-class _RequiredOnlySchema(PluginSchema):
-    """Schema with required field only."""
-
-    required: str
-
-
-class _ValueSchema(PluginSchema):
-    """Schema with integer value field."""
-
-    value: int
-
-
-class _PrioritySchema(PluginSchema):
-    """Schema with integer priority field."""
-
-    priority: int
-
-
-class _CategorySchema(PluginSchema):
-    """Schema with string category field."""
-
-    category: str
-
-
 class _RawScoreSchema(PluginSchema):
     """Schema with raw_score field."""
 
@@ -111,54 +68,6 @@ class _NormalizedScoreSchema(PluginSchema):
     score: float
 
 
-class ListSource(_TestSourceBase):
-    """Test source that yields rows from a list.
-
-    This is the standard test source for engine gate tests.
-    Provides rows from an in-memory list with configurable schema.
-    """
-
-    name = "list_source"
-    output_schema: type[PluginSchema] = _ValueSchema  # Default, can be overridden
-
-    def __init__(self, data: list[dict[str, Any]], schema: type[PluginSchema] | None = None) -> None:
-        super().__init__()
-        self._data = data
-        if schema is not None:
-            self.output_schema = schema
-
-        # Create schema contract from output_schema
-        from elspeth.contracts.transform_contract import create_output_contract_from_schema
-
-        self._schema_contract = create_output_contract_from_schema(self.output_schema)
-
-    def load(self, ctx: Any) -> Any:
-        for row in self._data:
-            yield SourceRow.valid(row, contract=self._schema_contract)
-
-    def close(self) -> None:
-        pass
-
-
-class CollectSink(_TestSinkBase):
-    """Test sink that collects rows into a list.
-
-    This is the standard test sink for engine gate tests.
-    Collects all written rows for assertion after pipeline completion.
-    """
-
-    name = "collect"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.results: list[dict[str, Any]] = []
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(path="memory://collect", size_bytes=0, content_hash="")
-
-    def close(self) -> None:
-        pass
 
 
 # =============================================================================
@@ -315,7 +224,6 @@ class TestCompositeConditions:
                 {"a": 5, "b": "y"},  # b!='x' fails - should route to "no_match"
                 {"a": 0, "b": "y"},  # Both fail - should route to "no_match"
             ],
-            schema=_CompositeSchema,
         )
         match_sink = CollectSink()
         no_match_sink = CollectSink()
@@ -369,7 +277,6 @@ class TestCompositeConditions:
                 {"status": "inactive", "priority": 8},  # priority > 5 - true
                 {"status": "inactive", "priority": 3},  # both false - false
             ],
-            schema=_StatusPrioritySchema,
         )
         pass_sink = CollectSink()
         fail_sink = CollectSink()
@@ -421,7 +328,6 @@ class TestCompositeConditions:
                 {"status": "deleted"},
                 {"status": "suspended"},
             ],
-            schema=_StatusOnlySchema,
         )
         allowed_sink = CollectSink()
         blocked_sink = CollectSink()
@@ -474,7 +380,6 @@ class TestCompositeConditions:
                 {"required": "b"},  # optional field missing
                 {"required": "c", "optional": None},  # optional explicitly None
             ],
-            schema=_RequiredOnlySchema,
         )
         has_optional_sink = CollectSink()
         missing_optional_sink = CollectSink()
@@ -643,7 +548,6 @@ class TestRouteLabelResolution:
                 {"category": "standard"},
                 {"category": "premium"},
             ],
-            schema=_CategorySchema,
         )
         premium_sink = CollectSink()
         standard_sink = CollectSink()
@@ -1115,7 +1019,6 @@ class TestEndToEndPipeline:
                 {"raw_score": 50},  # 0.5 - low confidence
                 {"raw_score": 85},  # 0.85 - exactly threshold
             ],
-            schema=_RawScoreSchema,
         )
         transform = NormalizeTransform(config={"schema": {"mode": "observed"}})
         high_conf_sink = CollectSink()
@@ -1224,7 +1127,7 @@ class TestEndToEndPipeline:
         db = landscape_db
 
         # Two rows: one high priority (routes to "urgent"), one low (continues to default)
-        source = ListSource([{"priority": 10}, {"priority": 2}], schema=_PrioritySchema)
+        source = ListSource([{"priority": 10}, {"priority": 2}])
         default_sink = CollectSink()
         urgent_sink = CollectSink()
 

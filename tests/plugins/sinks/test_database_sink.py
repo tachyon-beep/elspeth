@@ -1,8 +1,4 @@
-"""Tests for database sink plugin.
-
-NOTE: Protocol compliance tests (test_implements_protocol, test_has_required_attributes)
-are in conftest.py as parametrized tests covering all sink plugins.
-"""
+"""Tests for database sink plugin."""
 
 from pathlib import Path
 

@@ -511,6 +511,7 @@ class TestAuditedHTTPClient:
         mock_response.status_code = 200
         mock_response.headers = httpx.Headers({"content-type": "application/json", "x-request-id": "req-456"})
         mock_response.content = b"{}"
+        mock_response.text = "{}"
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -607,6 +608,7 @@ class TestAuditedHTTPClient:
             }
         )
         mock_response.content = b"{}"
+        mock_response.text = "{}"
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -734,7 +736,7 @@ class TestAuditedHTTPClient:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json; charset=utf-8"}
         mock_response.content = b'{"choices": [{"message": {"content": "Hello"}}]}'
-        mock_response.json.return_value = {"choices": [{"message": {"content": "Hello"}}]}
+        mock_response.text = '{"choices": [{"message": {"content": "Hello"}}]}'
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -958,7 +960,7 @@ class TestAuditedHTTPClient:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.content = json_str.encode("utf-8")
-        mock_response.json.return_value = large_json
+        mock_response.text = json_str
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -1024,6 +1026,216 @@ class TestAuditedHTTPClient:
         # Verify we can decode it back to original binary data
         decoded = base64.b64decode(recorded_body["_binary"])
         assert decoded == binary_data, "Decoded binary data doesn't match original"
+
+    def test_json_response_with_nan_recorded_as_parse_failure(self) -> None:
+        """JSON response containing NaN is recorded as parse failure.
+
+        This is a P1 bug fix (P1-2026-02-05): HTTP client must reject NaN/Infinity
+        at the Tier 3 boundary because canonicalization cannot handle them. Recording
+        as parse failure with raw text preserved ensures audit completeness without
+        crashing.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        # JSON with NaN (Python's json.loads accepts this)
+        json_with_nan = '{"value": NaN, "other": "data"}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_nan.encode("utf-8")
+        mock_response.text = json_with_nan
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            # Should NOT crash - should record as parse failure
+            response = client.post("https://api.example.com/endpoint")
+
+        # Response object is still returned to caller
+        assert response.status_code == 200
+
+        # Verify audit record was created successfully (not crashed)
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+
+        # Body should be recorded as parse failure with raw text
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert isinstance(recorded_body, dict)
+        assert recorded_body["_json_parse_failed"] is True
+        assert "NaN" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
+        assert recorded_body["_raw_text"] == json_with_nan
+
+    def test_json_response_with_infinity_recorded_as_parse_failure(self) -> None:
+        """JSON response containing Infinity is recorded as parse failure.
+
+        Similar to NaN test - Infinity is also non-canonicalizable and must be
+        rejected at the HTTP boundary.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        # JSON with Infinity (Python's json.loads accepts this)
+        json_with_infinity = '{"value": Infinity, "count": 42}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_infinity.encode("utf-8")
+        mock_response.text = json_with_infinity
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            # Should NOT crash - should record as parse failure
+            response = client.post("https://api.example.com/endpoint")
+
+        assert response.status_code == 200
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert recorded_body["_json_parse_failed"] is True
+        assert "Infinity" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
+        assert recorded_body["_raw_text"] == json_with_infinity
+
+    def test_json_response_with_negative_infinity_recorded_as_parse_failure(self) -> None:
+        """JSON response containing -Infinity is recorded as parse failure."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        json_with_neg_infinity = '{"value": -Infinity}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_neg_infinity.encode("utf-8")
+        mock_response.text = json_with_neg_infinity
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.post("https://api.example.com/endpoint")
+
+        assert response.status_code == 200
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert recorded_body["_json_parse_failed"] is True
+        assert recorded_body["_raw_text"] == json_with_neg_infinity
+
+    def test_json_response_with_nested_nan_recorded_as_parse_failure(self) -> None:
+        """JSON response with NaN nested in object/array is detected and rejected.
+
+        NaN can appear anywhere in the JSON structure - we must check recursively.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        # NaN nested in array within object
+        json_with_nested_nan = '{"data": {"values": [1, 2, NaN, 4]}}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_nested_nan.encode("utf-8")
+        mock_response.text = json_with_nested_nan
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.post("https://api.example.com/endpoint")
+
+        assert response.status_code == 200
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert recorded_body["_json_parse_failed"] is True
+        assert recorded_body["_raw_text"] == json_with_nested_nan
+
+    def test_valid_json_response_still_works(self) -> None:
+        """Ensure the NaN/Infinity fix doesn't break normal JSON parsing.
+
+        Regression test to verify that valid JSON (including edge cases like
+        null, empty objects, negative numbers) is still parsed correctly.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        # Valid JSON with edge cases
+        valid_json = '{"null_value": null, "negative": -42.5, "empty": {}, "array": [1, 2, 3]}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = valid_json.encode("utf-8")
+        mock_response.text = valid_json
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.post("https://api.example.com/endpoint")
+
+        assert response.status_code == 200
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+
+        # Should be parsed as dict, NOT as parse failure
+        assert isinstance(recorded_body, dict)
+        assert "_json_parse_failed" not in recorded_body
+        assert recorded_body["null_value"] is None
+        assert recorded_body["negative"] == -42.5
+        assert recorded_body["empty"] == {}
+        assert recorded_body["array"] == [1, 2, 3]
 
 
 class TestAuditedHTTPClientGet:
@@ -1100,7 +1312,7 @@ class TestAuditedHTTPClientGet:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.content = b'{"result": "ok"}'
-        mock_response.json.return_value = {"result": "ok"}
+        mock_response.text = '{"result": "ok"}'
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -1238,7 +1450,7 @@ class TestAuditedHTTPClientGet:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.content = b'{"items": [1, 2, 3]}'
-        mock_response.json.return_value = {"items": [1, 2, 3]}
+        mock_response.text = '{"items": [1, 2, 3]}'
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -1287,3 +1499,43 @@ class TestAuditedHTTPClientGet:
         assert call_kwargs["response_data"]["status_code"] == 404
         assert call_kwargs["error"]["type"] == "HTTPError"
         assert call_kwargs["error"]["status_code"] == 404
+
+    def test_get_json_response_with_nan_recorded_as_parse_failure(self) -> None:
+        """GET JSON response containing NaN is recorded as parse failure.
+
+        Ensures the NaN/Infinity fix applies to GET requests as well as POST.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        json_with_nan = '{"metric": NaN}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_nan.encode("utf-8")
+        mock_response.text = json_with_nan
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.get("https://api.example.com/metrics")
+
+        assert response.status_code == 200
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert recorded_body["_json_parse_failed"] is True
+        assert "NaN" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
+        assert recorded_body["_raw_text"] == json_with_nan

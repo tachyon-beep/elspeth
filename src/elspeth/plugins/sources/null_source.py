@@ -9,19 +9,28 @@ while actual row data is retrieved separately.
 from collections.abc import Iterator
 from typing import Any
 
+from pydantic import ConfigDict
+
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.context import PluginContext
 
 
 class NullSourceSchema(PluginSchema):
-    """Dynamic schema for NullSource - accepts any row structure.
+    """Dynamic/observed schema for NullSource - accepts any row structure.
 
     Since NullSource yields no rows, the schema never validates anything.
     This exists only to satisfy the SourceProtocol.output_schema requirement.
+
+    CRITICAL: Must set extra="allow" to be recognized as an observed schema.
+    The DAG validator checks `len(model_fields) == 0 AND model_config["extra"] == "allow"`
+    to identify observed schemas (see dag.py:_is_observed_schema). Without this,
+    NullSourceSchema would be treated as an explicit schema with zero fields,
+    causing resume graph validation to fail when downstream transforms have
+    explicit input schemas.
     """
 
-    pass
+    model_config = ConfigDict(extra="allow")
 
 
 class NullSource(BaseSource):

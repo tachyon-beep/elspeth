@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -14,9 +15,14 @@ runner = CliRunner()
 class TestCLISecretsLoading:
     """Tests for secret loading in CLI run command."""
 
-    def test_run_with_keyvault_secrets_loads_before_config(self, tmp_path: Path) -> None:
+    def test_run_with_keyvault_secrets_loads_before_config(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
         """Secrets should be loaded before config resolution."""
         from elspeth.cli import app
+
+        # Set fingerprint key required for Key Vault secret loading
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
 
         # Create a settings file that references a secret
         # NOTE: vault_url must be literal per P1-6
@@ -49,10 +55,15 @@ default_sink: output
             # Verify secret was loaded
             mock_loader.get_secret.assert_called_once_with("test-secret")
 
-    def test_run_with_keyvault_failure_exits_with_error(self, tmp_path: Path) -> None:
+    def test_run_with_keyvault_failure_exits_with_error(
+        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+    ) -> None:
         """Key Vault failure should exit with clear error message."""
         from elspeth.cli import app
         from elspeth.core.security.secret_loader import SecretNotFoundError
+
+        # Set fingerprint key required for Key Vault secret loading
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
 
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text("""

@@ -17,6 +17,7 @@ Field Origins:
 See alignment.py for complete field mapping documentation.
 """
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -103,8 +104,10 @@ def _validate_float_field(field_name: str, value: Any) -> float:
     if value is None:
         raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got None")
 
-    # Already float - pass through
+    # Already float - pass through (reject NaN/Infinity for RFC 8785 compliance)
     if isinstance(value, float) and not isinstance(value, bool):
+        if not math.isfinite(value):
+            raise ValueError(f"Invalid retry policy: {field_name} must be finite, got {value}")
         return value
 
     # Int - convert to float (but not bool)
@@ -114,9 +117,12 @@ def _validate_float_field(field_name: str, value: Any) -> float:
     # String - attempt numeric coercion
     if isinstance(value, str):
         try:
-            return float(value)
+            result = float(value)
         except ValueError:
             raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from None
+        if not math.isfinite(result):
+            raise ValueError(f"Invalid retry policy: {field_name} must be finite, got {value!r}")
+        return result
 
     # Non-numeric type (list, dict, bool, etc.)
     type_name = type(value).__name__

@@ -816,6 +816,17 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 retryable=False,
             )
 
+        # 8c. Check for content filtering (null content from provider)
+        if content is None:
+            return TransformResult.error(
+                {
+                    "reason": "content_filtered",
+                    "error": "LLM returned null content (likely content-filtered by provider)",
+                    "query": spec.output_prefix,
+                },
+                retryable=False,
+            )
+
         # OpenRouter can return {"usage": null} or omit usage entirely.
         # dict.get("usage", {}) only returns {} when key is MISSING, not when value is null.
         # The `or {}` ensures we get an empty dict for both missing AND null cases.

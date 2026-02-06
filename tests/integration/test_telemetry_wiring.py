@@ -87,6 +87,7 @@ class SimpleTransform:
     node_id: str | None = None
     is_batch_aware = False
     creates_tokens = False
+    transforms_adds_fields = False
     _on_error: str | None = None
 
     def process(self, row: Any, ctx: Any) -> TransformResult:

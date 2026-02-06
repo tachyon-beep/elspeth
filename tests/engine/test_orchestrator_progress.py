@@ -17,6 +17,7 @@ from tests.conftest import (
     as_sink,
     as_source,
 )
+from tests.engine.conftest import CollectSink
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -66,16 +67,6 @@ class TestOrchestratorProgress:
                 for i in range(self._count):
                     row = {"value": i}
                     yield SourceRow.valid(row, contract=_make_observed_contract(row))
-
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
         # Create 250-row source
         source = MultiRowSource(count=250)
@@ -152,16 +143,6 @@ class TestOrchestratorProgress:
                     row = {"value": i}
                     yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
         source = SmallSource()
         sink = CollectSink()
 
@@ -210,16 +191,6 @@ class TestOrchestratorProgress:
                         )
                     else:
                         yield SourceRow.valid(row, contract=_make_observed_contract(row))
-
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
         source = QuarantineAtBoundarySource()
         default_sink = CollectSink()

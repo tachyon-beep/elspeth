@@ -11,12 +11,11 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
-    _TestSinkBase,
-    _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource, _TestSchema
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -28,7 +27,7 @@ class TestOrchestratorRetry:
 
     def test_orchestrator_creates_retry_manager_from_settings(self, payload_store) -> None:
         """Orchestrator creates RetryManager when settings.retry is configured."""
-        from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema
+        from elspeth.contracts import PipelineRow
         from elspeth.core.config import (
             ElspethSettings,
             RetrySettings,
@@ -41,33 +40,13 @@ class TestOrchestratorRetry:
 
         db = LandscapeDB.in_memory()
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
         # Transform that tracks retry attempts via closure
         attempt_count = {"count": 0}
 
         class RetryableTransform(BaseTransform):
             name = "retryable"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
@@ -78,26 +57,6 @@ class TestOrchestratorRetry:
                 if attempt_count["count"] == 1:
                     raise ConnectionError("Transient failure")
                 return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         # Settings with retry configuration
         settings = ElspethSettings(
@@ -144,7 +103,7 @@ class TestOrchestratorRetry:
 
     def test_orchestrator_retry_exhausted_marks_row_failed(self, payload_store) -> None:
         """When all retry attempts fail, row should be marked FAILED."""
-        from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema
+        from elspeth.contracts import PipelineRow
         from elspeth.core.config import (
             ElspethSettings,
             RetrySettings,
@@ -153,60 +112,21 @@ class TestOrchestratorRetry:
         )
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
-
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
 
         # Transform that always fails with retryable error
         class AlwaysFailTransform(BaseTransform):
             name = "always_fail"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise ConnectionError("Persistent failure")
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         settings = ElspethSettings(
             source=SourceSettings(

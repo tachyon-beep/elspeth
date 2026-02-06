@@ -128,6 +128,17 @@ class AzureContentSafetyConfig(TransformDataConfig):
 AzureContentSafetyConfig.model_rebuild()
 
 
+# Explicit mapping from Azure Content Safety API category names to internal names.
+# This is the ONLY place where Azure category names are translated.
+# Unknown categories are REJECTED (fail closed) — see _analyze_content().
+_AZURE_CATEGORY_MAP: dict[str, str] = {
+    "Hate": "hate",
+    "Violence": "violence",
+    "Sexual": "sexual",
+    "SelfHarm": "self_harm",
+}
+
+
 class AzureContentSafety(BaseTransform, BatchTransformMixin):
     """Analyze content using Azure Content Safety API.
 
@@ -352,6 +363,18 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                     },
                     retryable=False,
                 )
+            except ValueError as e:
+                # Unknown category from Azure — fail CLOSED (security transform).
+                # Not retryable: the API response is structurally valid but contains
+                # categories we can't assess. Requires code update to handle.
+                return TransformResult.error(
+                    {
+                        "reason": "unknown_category",
+                        "field": field_name,
+                        "message": str(e),
+                    },
+                    retryable=False,
+                )
             except httpx.RequestError as e:
                 return TransformResult.error(
                     {
@@ -461,12 +484,21 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                 "self_harm": 0,
             }
             for item in data["categoriesAnalysis"]:
-                category = item["category"].lower().replace("selfharm", "self_harm")
-                result[category] = item["severity"]
+                azure_category = item["category"]
+                internal_name = _AZURE_CATEGORY_MAP.get(azure_category)
+                if internal_name is None:
+                    # Fail CLOSED: unknown category means Azure updated their taxonomy.
+                    # We cannot assess content safety with unknown categories — reject.
+                    raise ValueError(
+                        f"Unknown Azure Content Safety category: {azure_category!r}. "
+                        f"Known categories: {sorted(_AZURE_CATEGORY_MAP.keys())}. "
+                        f"Update _AZURE_CATEGORY_MAP to handle this category."
+                    )
+                result[internal_name] = item["severity"]
 
             return result
 
-        except (KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError) as e:
             # Malformed response - the HTTP call was recorded as SUCCESS by AuditedHTTPClient
             # (because we got a 200), but the response is unusable at the application level
             raise httpx.RequestError(f"Malformed API response: {e}") from e

@@ -26,6 +26,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -78,19 +79,6 @@ class TestOrchestratorContractRecording:
 
             def get_schema_contract(self) -> SchemaContract | None:
                 return self._contract
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                from elspeth.contracts import ArtifactDescriptor
-
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
         source = ContractSource(
             data=[{"id": 1, "value": "a"}, {"id": 2, "value": "b"}],
@@ -168,19 +156,6 @@ class TestOrchestratorContractRecording:
             def get_schema_contract(self) -> SchemaContract | None:
                 return self._contract
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                from elspeth.contracts import ArtifactDescriptor
-
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
         source = ContractSource(contract=test_contract)
         sink = CollectSink()
 
@@ -236,19 +211,6 @@ class TestOrchestratorContractRecording:
             def get_schema_contract(self) -> SchemaContract | None:
                 return None
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                from elspeth.contracts import ArtifactDescriptor
-
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
         source = NoContractSource()
         sink = CollectSink()
 
@@ -299,19 +261,6 @@ class TestOrchestratorContractRecording:
 
             def get_schema_contract(self) -> SchemaContract | None:
                 return self._contract
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                from elspeth.contracts import ArtifactDescriptor
-
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
         source = EmptyContractSource(contract=test_contract)
         sink = CollectSink()
@@ -399,19 +348,6 @@ class TestOrchestratorContractRecording:
 
             def get_schema_contract(self) -> SchemaContract | None:
                 return self._contract
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                from elspeth.contracts import ArtifactDescriptor
-
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
         source = QuarantineThenValidSource(contract=test_contract)
         sink = CollectSink()
@@ -524,19 +460,6 @@ class TestOrchestratorContractRecording:
                     success_reason={"action": "enriched"},
                 )
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                from elspeth.contracts import ArtifactDescriptor
-
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
         source = BaseSource(contract=test_contract)
         transform = EnrichTransform()
         sink = CollectSink()
@@ -606,19 +529,6 @@ class TestOrchestratorSecretResolutions:
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 yield from self.wrap_rows([{"x": 1}])
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                from elspeth.contracts import ArtifactDescriptor
-
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
         source = SimpleSource()
         sink = CollectSink()
 
@@ -685,19 +595,6 @@ class TestOrchestratorSecretResolutions:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 yield from self.wrap_rows([{"x": 1}])
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                from elspeth.contracts import ArtifactDescriptor
-
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
         source = SimpleSource()
         sink = CollectSink()

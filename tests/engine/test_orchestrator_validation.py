@@ -23,6 +23,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -59,7 +60,6 @@ class TestTransformErrorSinkValidation:
 
     def test_invalid_on_error_sink_fails_at_startup(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Transform with on_error pointing to non-existent sink fails before processing."""
-        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -99,25 +99,6 @@ class TestTransformErrorSinkValidation:
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         source = TrackingSource([{"value": 1}, {"value": 2}])
         transform = TransformWithInvalidOnError()
         sink = CollectSink()
@@ -139,7 +120,6 @@ class TestTransformErrorSinkValidation:
 
     def test_error_message_includes_transform_name_and_sinks(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Error message includes transform name and available sinks."""
-        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -148,18 +128,6 @@ class TestTransformErrorSinkValidation:
 
         class InputSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = InputSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class MyBadTransform(BaseTransform):
             """Transform with bad on_error config."""
@@ -174,25 +142,6 @@ class TestTransformErrorSinkValidation:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 1}])
         transform = MyBadTransform()
@@ -223,23 +172,10 @@ class TestTransformErrorSinkValidation:
 
     def test_on_error_discard_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_error: 'discard' passes validation (special value, not a sink)."""
-        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = InputSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class DiscardTransform(BaseTransform):
             """Transform that discards errors."""
@@ -254,25 +190,6 @@ class TestTransformErrorSinkValidation:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 1}])
         transform = DiscardTransform()
@@ -292,23 +209,10 @@ class TestTransformErrorSinkValidation:
 
     def test_on_error_none_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_error: null (not set) passes validation."""
-        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = InputSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class NormalTransform(BaseTransform):
             """Transform with no error routing (default)."""
@@ -323,25 +227,6 @@ class TestTransformErrorSinkValidation:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 1}])
         transform = NormalTransform()
@@ -361,23 +246,10 @@ class TestTransformErrorSinkValidation:
 
     def test_valid_on_error_sink_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Valid on_error sink name passes validation."""
-        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = InputSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class ErrorRoutingTransform(BaseTransform):
             """Transform that routes errors to a valid sink."""
@@ -392,25 +264,6 @@ class TestTransformErrorSinkValidation:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 1}])
         transform = ErrorRoutingTransform()

@@ -22,6 +22,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ class TestOrchestratorAuditTrail:
 
     def test_run_records_landscape_entries(self, payload_store) -> None:
         """Verify that run creates proper audit trail."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -42,23 +43,6 @@ class TestOrchestratorAuditTrail:
 
         class ValueSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
 
         class IdentityTransform(BaseTransform):
             name = "identity"
@@ -71,28 +55,9 @@ class TestOrchestratorAuditTrail:
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
-        class CollectSink(_TestSinkBase):
-            name = "test_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource([{"value": 42}])
+        source = ListSource([{"value": 42}], name="test_source")
         transform = IdentityTransform()
-        sink = CollectSink()
+        sink = CollectSink(name="test_sink")
 
         config = PipelineConfig(
             source=as_source(source),
@@ -168,7 +133,7 @@ class TestOrchestratorLandscapeExport:
 
     def test_orchestrator_exports_landscape_when_configured(self, plugin_manager, payload_store) -> None:
         """Orchestrator should export audit trail after run completes."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -180,32 +145,11 @@ class TestOrchestratorLandscapeExport:
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        class ValueSchema(PluginSchema):
-            value: int
+        class ExportCollectSink(_TestSinkBase):
+            """Sink that captures written rows, handling both list and single records."""
 
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            """Sink that captures written rows."""
-
-            name = "collect"
-
-            def __init__(self) -> None:
+            def __init__(self, name: str = "collect") -> None:
+                self.name = name
                 self.captured_rows: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -232,8 +176,8 @@ class TestOrchestratorLandscapeExport:
         db = LandscapeDB.in_memory()
 
         # Create sinks
-        output_sink = CollectSink()
-        export_sink = CollectSink()
+        output_sink = ExportCollectSink()
+        export_sink = ExportCollectSink()
 
         # Build settings with export enabled
         settings = ElspethSettings(
@@ -303,7 +247,7 @@ class TestOrchestratorLandscapeExport:
         import os
         from unittest.mock import patch
 
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -315,30 +259,11 @@ class TestOrchestratorLandscapeExport:
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        class ValueSchema(PluginSchema):
-            value: int
+        class ExportCollectSink(_TestSinkBase):
+            """Sink that captures written rows, handling both list and single records."""
 
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
+            def __init__(self, name: str = "collect") -> None:
+                self.name = name
                 self.captured_rows: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -362,8 +287,8 @@ class TestOrchestratorLandscapeExport:
                 pass
 
         db = LandscapeDB.in_memory()
-        output_sink = CollectSink()
-        export_sink = CollectSink()
+        output_sink = ExportCollectSink()
+        export_sink = ExportCollectSink()
 
         settings = ElspethSettings(
             source=SourceSettings(
@@ -434,7 +359,6 @@ class TestOrchestratorLandscapeExport:
         import os
         from unittest.mock import patch
 
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -445,48 +369,6 @@ class TestOrchestratorLandscapeExport:
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.captured_rows: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.captured_rows.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def flush(self) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
 
         db = LandscapeDB.in_memory()
         output_sink = CollectSink()
@@ -551,7 +433,6 @@ class TestOrchestratorLandscapeExport:
 
     def test_orchestrator_no_export_when_disabled(self, plugin_manager, payload_store) -> None:
         """Should not export when export.enabled is False."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeSettings,
@@ -561,48 +442,6 @@ class TestOrchestratorLandscapeExport:
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.captured_rows: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.captured_rows.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def flush(self) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
 
         db = LandscapeDB.in_memory()
         output_sink = CollectSink()
@@ -656,9 +495,9 @@ class TestOrchestratorLandscapeExport:
 
         assert result.status == RunStatus.COMPLETED
         # Output sink should have the row
-        assert len(output_sink.captured_rows) == 1
+        assert len(output_sink.results) == 1
         # Audit sink should be empty (no export)
-        assert len(audit_sink.captured_rows) == 0
+        assert len(audit_sink.results) == 0
 
 
 class TestOrchestratorConfigRecording:
@@ -668,7 +507,7 @@ class TestOrchestratorConfigRecording:
         """Run should record the full resolved configuration in Landscape."""
         import json
 
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -677,23 +516,6 @@ class TestOrchestratorConfigRecording:
 
         class ValueSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
 
         class IdentityTransform(BaseTransform):
             name = "identity"
@@ -706,28 +528,9 @@ class TestOrchestratorConfigRecording:
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
-        class CollectSink(_TestSinkBase):
-            name = "test_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource([{"value": 42}])
+        source = ListSource([{"value": 42}], name="test_source")
         transform = IdentityTransform()
-        sink = CollectSink()
+        sink = CollectSink(name="test_sink")
 
         # Create config WITH resolved configuration dict
         resolved_config = {
@@ -761,53 +564,13 @@ class TestOrchestratorConfigRecording:
         """Run with no config passed should record empty dict (current behavior)."""
         import json
 
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "test_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource([{"value": 42}])
-        sink = CollectSink()
+        source = ListSource([{"value": 42}], name="test_source")
+        sink = CollectSink(name="test_sink")
 
         # No config passed - should default to empty dict
         config = PipelineConfig(
@@ -1069,7 +832,7 @@ class TestNodeMetadataFromPlugin:
         This test verifies the fix: aggregation nodes now correctly inherit
         metadata from their transform plugin instance.
         """
-        from elspeth.contracts import AggregationName, ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import AggregationName, PluginSchema
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -1080,23 +843,6 @@ class TestNodeMetadataFromPlugin:
 
         class ValueSchema(PluginSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
 
         class NonDeterministicBatchTransform(BaseTransform):
             """Simulates an LLM batch transform - explicitly non-deterministic."""
@@ -1121,31 +867,9 @@ class TestNodeMetadataFromPlugin:
                     return TransformResult.success({"value": total}, success_reason={"action": "batch_aggregated"})
                 return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
-        class CollectSink(_TestSinkBase):
-            name = "test_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                if isinstance(rows, list):
-                    self.results.extend(rows)
-                else:
-                    self.results.append(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource([{"value": 10}, {"value": 20}])
+        source = ListSource([{"value": 10}, {"value": 20}], name="test_source")
         batch_transform = NonDeterministicBatchTransform()
-        sink = CollectSink()
+        sink = CollectSink(name="test_sink")
 
         # Create aggregation settings
         agg_settings = AggregationSettings(
@@ -1213,55 +937,12 @@ class TestNodeMetadataFromPlugin:
         they're engine components, not user plugins.
         """
         from elspeth import __version__ as ENGINE_VERSION
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "test_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                if isinstance(rows, list):
-                    self.results.extend(rows)
-                else:
-                    self.results.append(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         # Create a config gate (expression-based, not plugin-based)
         # Use literal "True" - the expression parser allows boolean literals
@@ -1271,8 +952,8 @@ class TestNodeMetadataFromPlugin:
             routes={"true": "continue", "false": "continue"},
         )
 
-        source = ListSource([{"value": 42}])
-        sink = CollectSink()
+        source = ListSource([{"value": 42}], name="test_source")
+        sink = CollectSink(name="test_sink")
 
         # Build graph with config gate
         graph = ExecutionGraph.from_plugin_instances(

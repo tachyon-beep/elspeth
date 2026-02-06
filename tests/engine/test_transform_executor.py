@@ -51,6 +51,7 @@ class TestTransformExecutor:
             input_schema = _TestSchema
             output_schema = _TestSchema
             node_id = node.node_id
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
@@ -113,6 +114,7 @@ class TestTransformExecutor:
             name = "failing"
             node_id = node.node_id
             _on_error = "discard"  # Required for transforms that return errors
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "validation_failed", "message": "validation failed"})
@@ -183,6 +185,7 @@ class TestTransformExecutor:
         class ExplodingTransform:
             name = "exploding"
             node_id = node.node_id
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise RuntimeError("kaboom!")
@@ -248,6 +251,7 @@ class TestTransformExecutor:
             input_schema = _TestSchema
             output_schema = _TestSchema
             node_id = node.node_id
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
@@ -309,6 +313,7 @@ class TestTransformExecutor:
             input_schema = _TestSchema
             output_schema = _TestSchema
             node_id = node.node_id
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
@@ -375,6 +380,7 @@ class TestTransformExecutor:
             name = "discarding"
             node_id = node.node_id
             _on_error = "discard"
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "invalid_input", "message": "invalid input"})
@@ -446,6 +452,7 @@ class TestTransformExecutor:
             name = "routing_to_error"
             node_id = node.node_id
             _on_error = "error_sink"  # Routes to named error sink
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "validation_failed", "message": "routing to error sink"})
@@ -504,6 +511,7 @@ class TestTransformExecutor:
             input_schema = _TestSchema
             output_schema = _TestSchema
             node_id = node.node_id
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"result": "ok"}, success_reason={"action": "test"})
@@ -564,6 +572,7 @@ class TestTransformExecutor:
             input_schema = _TestSchema
             output_schema = _TestSchema
             node_id = node.node_id
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
@@ -643,6 +652,7 @@ class TestTransformExecutor:
             input_schema = _TestSchema
             output_schema = _TestSchema
             node_id = node.node_id
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
@@ -748,6 +758,7 @@ class TestTransformErrorIdRegression:
             name = shared_plugin_name  # This is the plugin name (not unique)
             node_id = node2.node_id  # This is the unique DAG node ID
             _on_error = "error_sink"
+            transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "validation_failed", "error": "invalid phone format"})

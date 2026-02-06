@@ -4,8 +4,7 @@
 Extracted from test_orchestrator.py: TestOrchestrator, TestOrchestratorMultipleTransforms,
 TestOrchestratorEmptyPipeline, TestOrchestratorAcceptsGraph.
 
-All test plugins inherit from base classes (BaseTransform, BaseGate)
-because the processor uses isinstance() for type-safe plugin detection.
+Uses shared test plugins from tests/engine/conftest.py to reduce duplication.
 """
 
 from __future__ import annotations
@@ -17,90 +16,99 @@ import pytest
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName
 from elspeth.plugins.base import BaseTransform
-from tests.conftest import (
-    _TestSinkBase,
-    _TestSourceBase,
-    as_sink,
-    as_source,
-    as_transform,
-)
+from tests.conftest import as_sink, as_source, as_transform
+from tests.engine.conftest import CollectSink, ListSource, _TestSchema
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
 
 
+# ---------------------------------------------------------------------------
+# Shared test transforms (specific to orchestrator_core tests)
+# ---------------------------------------------------------------------------
+
+
+class DoubleTransform(BaseTransform):
+    """Transform that doubles a value field."""
+
+    name = "double"
+    input_schema = _TestSchema
+    output_schema = _TestSchema
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        from elspeth.plugins.results import TransformResult
+
+        return TransformResult.success(
+            {"value": row["value"], "doubled": row["value"] * 2},
+            success_reason={"action": "double"},
+        )
+
+
+class AddOneTransform(BaseTransform):
+    """Transform that adds 1 to a value field."""
+
+    name = "add_one"
+    input_schema = _TestSchema
+    output_schema = _TestSchema
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        from elspeth.plugins.results import TransformResult
+
+        return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
+
+
+class MultiplyTwoTransform(BaseTransform):
+    """Transform that multiplies value by 2."""
+
+    name = "multiply_two"
+    input_schema = _TestSchema
+    output_schema = _TestSchema
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        from elspeth.plugins.results import TransformResult
+
+        return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "multiply_two"})
+
+
+class IdentityTransform(BaseTransform):
+    """Transform that passes data through unchanged."""
+
+    name = "identity"
+    input_schema = _TestSchema
+    output_schema = _TestSchema
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        from elspeth.plugins.results import TransformResult
+
+        return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
 class TestOrchestrator:
     """Full run orchestration."""
 
     def test_run_simple_pipeline(self, payload_store) -> None:
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
-
-        class InputSchema(PluginSchema):
-            value: int
-
-        class OutputSchema(PluginSchema):
-            value: int
-            doubled: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = InputSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class DoubleTransform(BaseTransform):
-            name = "double"
-            input_schema = InputSchema
-            output_schema = OutputSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(
-                    {
-                        "value": row["value"],
-                        "doubled": row["value"] * 2,
-                    },
-                    success_reason={"action": "double"},
-                )
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = DoubleTransform()
         sink = CollectSink()
@@ -120,51 +128,11 @@ class TestOrchestrator:
         assert sink.results[0] == {"value": 1, "doubled": 2}
 
     def test_run_with_gate_routing(self, payload_store) -> None:
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         # Config-driven gate: routes values > 50 to "high" sink, else continues
         threshold_gate = GateSettings(
@@ -174,8 +142,8 @@ class TestOrchestrator:
         )
 
         source = ListSource([{"value": 10}, {"value": 100}, {"value": 30}])
-        default_sink = CollectSink()
-        high_sink = CollectSink()
+        default_sink = CollectSink(name="default")
+        high_sink = CollectSink(name="high")
 
         config = PipelineConfig(
             source=as_source(source),
@@ -198,74 +166,10 @@ class TestOrchestratorMultipleTransforms:
 
     def test_run_multiple_transforms_in_sequence(self, payload_store) -> None:
         """Test that multiple transforms execute in order."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
-
-        class NumberSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "numbers"
-            output_schema = NumberSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class AddOneTransform(BaseTransform):
-            name = "add_one"
-            input_schema = NumberSchema
-            output_schema = NumberSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
-
-        class MultiplyTwoTransform(BaseTransform):
-            name = "multiply_two"
-            input_schema = NumberSchema
-            output_schema = NumberSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "multiply_two"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         source = ListSource([{"value": 5}])
         transform1 = AddOneTransform()
         transform2 = MultiplyTwoTransform()
@@ -291,51 +195,10 @@ class TestOrchestratorEmptyPipeline:
 
     def test_run_no_transforms(self, payload_store) -> None:
         """Test pipeline with source directly to sink."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "direct"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                yield from self.wrap_rows(self._data)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         source = ListSource([{"value": 99}])
         sink = CollectSink()
 
@@ -355,60 +218,11 @@ class TestOrchestratorEmptyPipeline:
 
     def test_run_empty_source(self, payload_store) -> None:
         """Test pipeline with no rows from source."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
-
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class EmptySource(_TestSourceBase):
-            name = "empty"
-            output_schema = ValueSchema
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                return iter([])
-
-            def close(self) -> None:
-                pass
-
-        class IdentityTransform(BaseTransform):
-            name = "identity"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        source = EmptySource()
+        source = ListSource([])  # Empty source
         transform = IdentityTransform()
         sink = CollectSink()
 
@@ -433,11 +247,7 @@ class TestOrchestratorAcceptsGraph:
         """Orchestrator uses node IDs from graph, not generated IDs."""
         from unittest.mock import MagicMock, PropertyMock
 
-        from elspeth.core.config import (
-            ElspethSettings,
-            SinkSettings,
-            SourceSettings,
-        )
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -470,31 +280,27 @@ class TestOrchestratorAcceptsGraph:
         )
 
         # Use PropertyMock to track node_id setter calls
-        # PropertyMock tracks when attributes are SET, not just accessed
-        # This proves the orchestrator actually assigns node_id, not just that MagicMock accepts it
         mock_source = MagicMock()
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
-        mock_source._on_validation_failure = "discard"  # Required by SourceProtocol
+        mock_source._on_validation_failure = "discard"
 
-        # Track node_id setter with PropertyMock
         source_node_id_setter = PropertyMock()
         type(mock_source).node_id = source_node_id_setter
 
         schema_mock = MagicMock()
         schema_mock.model_json_schema.return_value = {"type": "object"}
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([])  # Empty source
+        mock_source.load.return_value = iter([])
         mock_source.get_field_resolution.return_value = None
-        mock_source.get_schema_contract.return_value = None  # No contract for mock source
+        mock_source.get_schema_contract.return_value = None
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
 
-        # Track node_id setter with PropertyMock
         sink_node_id_setter = PropertyMock()
         type(mock_sink).node_id = sink_node_id_setter
 
@@ -524,11 +330,7 @@ class TestOrchestratorAcceptsGraph:
         """Each sink should get a unique node_id from the graph, not shared."""
         from unittest.mock import MagicMock, PropertyMock
 
-        from elspeth.core.config import (
-            ElspethSettings,
-            SinkSettings,
-            SourceSettings,
-        )
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -576,7 +378,7 @@ class TestOrchestratorAcceptsGraph:
         schema_mock = MagicMock()
         schema_mock.model_json_schema.return_value = {"type": "object"}
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([])  # Empty source
+        mock_source.load.return_value = iter([])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None
 
@@ -649,42 +451,17 @@ class TestOrchestratorAcceptsGraph:
 
     def test_orchestrator_run_requires_graph(self, payload_store) -> None:
         """Orchestrator.run() raises ValueError if graph is None."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class DummySource(_TestSourceBase):
-            name = "dummy"
-            output_schema = ValueSchema
-
-            def load(self, ctx: Any) -> Any:
-                yield from []
-
-            def close(self) -> None:
-                pass
-
-        class DummySink(_TestSinkBase):
-            name = "dummy"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
+        source = ListSource([])
+        sink = CollectSink()
 
         config = PipelineConfig(
-            source=as_source(DummySource()),
+            source=as_source(source),
             transforms=[],
-            sinks={"default": as_sink(DummySink())},
+            sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)

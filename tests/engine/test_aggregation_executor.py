@@ -1132,6 +1132,7 @@ class TestAggregationExecutorCheckpoint:
         class MockBatchTransform:
             name = "batch_sum"
             mock_node_id = node_id
+            transforms_adds_fields: bool = False
 
             def process(self, rows: list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
                 total = sum(r["value"] for r in rows)
@@ -1206,6 +1207,7 @@ class TestAggregationExecutorCheckpoint:
         class MockTransform:
             name = "test"
             mock_node_id = node_id
+            transforms_adds_fields: bool = False
 
         transform = MockTransform()
         ctx = PluginContext(run_id=run.run_id, config={})

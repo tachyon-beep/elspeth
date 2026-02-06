@@ -1459,10 +1459,11 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
     """Lowercase dictionary keys for Pydantic schema matching, preserving user data.
 
     Dynaconf returns keys in UPPERCASE when they come from environment variables,
-    but Pydantic expects lowercase field names. User data inside 'options' dicts
-    must be preserved exactly as written - these can contain case-sensitive keys
-    like output_mapping: {"Score": "score"} where "Score" must match the LLM's
-    JSON response field name.
+    but Pydantic expects lowercase field names. User data inside 'options' and
+    'routes' dicts must be preserved exactly as written - these contain
+    case-sensitive keys that must match runtime values:
+    - options: {"Score": "score"} where "Score" must match the LLM's JSON field name
+    - routes: {"High": "continue"} where "High" must match the gate condition result
 
     Sink name handling:
     - FULLY UPPERCASE names (e.g., 'OUTPUT') are lowercased - these come from
@@ -1474,7 +1475,7 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
         obj: Any value - dicts are processed recursively, lists have their
              elements processed, other types pass through unchanged.
         _preserve_nested: Internal flag - when True, stop lowercasing keys
-             (we're inside an 'options' dict).
+             (we're inside an 'options' or 'routes' dict).
         _in_sinks: Internal flag - when True, we're processing sink name keys.
 
     Returns:
@@ -1497,10 +1498,13 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
 
             # Determine how to process children
             if _preserve_nested:
-                # Already inside options: stay in preserve mode, ignore special keys
+                # Already inside options/routes: stay in preserve mode, ignore special keys
                 child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
             elif new_key == "options":
                 # Options: preserve everything inside (user data)
+                child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
+            elif new_key == "routes":
+                # Routes: preserve everything inside (user-defined route labels)
                 child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
             elif new_key == "sinks":
                 # Entering sinks dict: next level has sink name keys

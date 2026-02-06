@@ -49,6 +49,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 
@@ -56,58 +57,6 @@ from tests.engine.orchestrator_test_helpers import build_production_graph
 def landscape_db() -> LandscapeDB:
     """Module-scoped in-memory database for coalesce integration tests."""
     return LandscapeDB.in_memory()
-
-
-class ListSource(_TestSourceBase):
-    """Reusable test source that yields rows from a list."""
-
-    name = "list_source"
-    output_schema = _TestSchema
-
-    def __init__(self, data: list[dict[str, Any]]) -> None:
-        super().__init__()  # Initialize config with schema
-        self._data = data
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def load(self, ctx: Any) -> Iterator[SourceRow]:
-        yield from self.wrap_rows(self._data)
-
-    def close(self) -> None:
-        pass
-
-
-class CollectSink(_TestSinkBase):
-    """Reusable test sink that collects rows into a list."""
-
-    name = "collect_sink"
-
-    def __init__(self) -> None:
-        self.rows: list[dict[str, Any]] = []
-        # IMPORTANT: Must include schema for production graph builder
-        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}  # type: ignore[misc]
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        for row in rows:
-            self.rows.append(row)
-        return ArtifactDescriptor.for_file(
-            path="memory://test",
-            size_bytes=0,
-            content_hash="test",
-        )
-
-    def close(self) -> None:
-        pass
 
 
 # =============================================================================
@@ -177,8 +126,8 @@ class TestForkCoalescePipeline:
         assert result.rows_coalesced == 1
 
         # Sink should have received exactly 1 merged output
-        assert len(sink.rows) == 1
-        merged = sink.rows[0]
+        assert len(sink.results) == 1
+        merged = sink.results[0]
         assert merged["id"] == 1
         assert merged["value"] == 100
 
@@ -252,9 +201,9 @@ class TestForkCoalescePipeline:
         assert result.rows_coalesced == 1
 
         # output_sink: 1 merged token from path_a + path_b
-        assert len(output_sink.rows) == 1
+        assert len(output_sink.results) == 1
         # path_c_sink: 1 direct token from path_c
-        assert len(path_c_sink.rows) == 1
+        assert len(path_c_sink.results) == 1
 
     def test_fork_coalesce_with_transform(
         self,
@@ -338,8 +287,8 @@ class TestForkCoalescePipeline:
         assert result.rows_coalesced == 1
 
         # Merged output should have enriched=True from transform
-        assert len(sink.rows) == 1
-        merged = sink.rows[0]
+        assert len(sink.results) == 1
+        merged = sink.results[0]
         assert merged["id"] == 1
         assert merged["value"] == 42
         assert merged["enriched"] is True
@@ -402,10 +351,10 @@ class TestForkCoalescePipeline:
         assert result.rows_coalesced == 3
 
         # 3 merged outputs (one per source row)
-        assert len(sink.rows) == 3
+        assert len(sink.results) == 3
 
         # Verify all IDs are present
-        ids = {row["id"] for row in sink.rows}
+        ids = {row["id"] for row in sink.results}
         assert ids == {1, 2, 3}
 
 
@@ -477,14 +426,14 @@ class TestCoalesceSuccessMetrics:
             f"Coalesced token should be counted in rows_succeeded. "
             f"Got rows_succeeded={result.rows_succeeded}, "
             f"rows_coalesced={result.rows_coalesced}, "
-            f"sink received {len(sink.rows)} rows"
+            f"sink received {len(sink.results)} rows"
         )
 
         # Sanity checks
         assert result.rows_processed == 1
         assert result.rows_forked == 1
         assert result.rows_coalesced == 1
-        assert len(sink.rows) == 1
+        assert len(sink.results) == 1
 
     def test_coalesce_with_downstream_transform_increments_rows_succeeded(
         self,
@@ -583,8 +532,8 @@ class TestCoalesceSuccessMetrics:
         assert result.rows_coalesced == 1
         # Post-coalesce transform should have processed the merged token
         assert post_transform.processed_count == 1
-        assert len(sink.rows) == 1
-        assert sink.rows[0].get("post_processed") is True
+        assert len(sink.results) == 1
+        assert sink.results[0].get("post_processed") is True
 
 
 class TestCoalesceAuditTrail:
@@ -1177,11 +1126,11 @@ class TestForkAggregationCoalesce:
         )
 
         # Verify sink received exactly 2 merged outputs
-        assert len(sink.rows) == 2, (
-            f"Expected 2 rows in sink (one per fork parent), got {len(sink.rows)}. Rows should flow through coalesce to sink."
+        assert len(sink.results) == 2, (
+            f"Expected 2 rows in sink (one per fork parent), got {len(sink.results)}. Rows should flow through coalesce to sink."
         )
 
         # Verify the merged outputs have nested structure from both paths
-        for row in sink.rows:
+        for row in sink.results:
             # With 'nested' merge strategy, each path's data is under its branch name
             assert "agg_path" in row or "direct_path" in row, f"Merged row should have branch data, got: {row}"

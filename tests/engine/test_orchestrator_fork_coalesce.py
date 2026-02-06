@@ -23,6 +23,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -88,9 +89,6 @@ class TestOrchestratorForkExecution:
         This tests the basic plumbing (list handling, counting) without forks.
         Fork-specific behavior is tested at processor level.
         """
-        import hashlib
-
-        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -99,22 +97,6 @@ class TestOrchestratorForkExecution:
 
         class RowSchema(_TestSchema):
             value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield from self.wrap_rows([{"value": 1}, {"value": 2}, {"value": 3}])
-
-            def close(self) -> None:
-                pass
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
@@ -127,34 +109,9 @@ class TestOrchestratorForkExecution:
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[Any] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                content = str(rows).encode()
-                return ArtifactDescriptor(
-                    artifact_type="file",
-                    path_or_uri="memory://test",
-                    content_hash=hashlib.sha256(content).hexdigest(),
-                    size_bytes=len(content),
-                )
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource()
+        source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = PassthroughTransform()
-        sink = CollectSink()
+        sink = CollectSink(name="collect_sink")
 
         config = PipelineConfig(
             source=as_source(source),

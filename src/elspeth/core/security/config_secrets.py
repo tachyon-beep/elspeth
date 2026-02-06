@@ -77,6 +77,29 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
     # P0-1: No defensive assertions - Pydantic guarantees vault_url and mapping
     # are set when source == "keyvault"
 
+    # P1-2026-02-05: Preflight check for fingerprint key before any Key Vault calls.
+    # Audit recording requires ELSPETH_FINGERPRINT_KEY to compute secret fingerprints.
+    # Without it, secrets would be fetched but audit recording would fail later,
+    # leaving secret resolution events unrecorded (violates auditability standard).
+    fingerprint_key_available = (
+        os.environ.get("ELSPETH_FINGERPRINT_KEY")
+        or "ELSPETH_FINGERPRINT_KEY" in config.mapping
+    )
+    if not fingerprint_key_available:
+        raise SecretLoadError(
+            "ELSPETH_FINGERPRINT_KEY is required when loading secrets from Key Vault.\n"
+            "The fingerprint key is used to compute HMAC fingerprints of secrets for the audit trail.\n"
+            "Fix by either:\n"
+            "  1. Set ELSPETH_FINGERPRINT_KEY environment variable, or\n"
+            "  2. Add ELSPETH_FINGERPRINT_KEY to your secrets mapping to load from Key Vault:\n"
+            "     secrets:\n"
+            "       source: keyvault\n"
+            "       vault_url: https://my-vault.vault.azure.net\n"
+            "       mapping:\n"
+            "         ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key\n"
+            "         # ... other secrets"
+        )
+
     # P0-4: Reuse existing KeyVaultSecretLoader instead of duplicating code
     try:
         from elspeth.core.security.secret_loader import (

@@ -852,6 +852,61 @@ class TestHTTPSpecificBehavior:
             # The error cascades through query_failed
             assert "query_failed" in result.reason["reason"]
 
+    def test_handles_null_content_from_content_filtering(
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterMultiQueryLLMTransform,
+        collector: CollectorOutputPort,
+    ) -> None:
+        """Null content (content filtering) returns error instead of crashing.
+
+        P0-05: When OpenRouter returns null content due to content filtering,
+        content.strip() threw AttributeError: 'NoneType' has no attribute 'strip'.
+        Must return TransformResult.error() with reason 'content_filtered'.
+        """
+        response_data = {
+            "choices": [{"message": {"content": None, "role": "assistant"}}],
+            "model": "anthropic/claude-3-opus",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+        }
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = Mock()
+            mock_response = Mock(spec=httpx.Response)
+            mock_response.status_code = 200
+            mock_response.headers = {"content-type": "application/json"}
+            mock_response.json.return_value = response_data
+            mock_response.text = json.dumps(response_data)
+            mock_response.content = b""
+            mock_response.raise_for_status = Mock()
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
+            mock_client_class.return_value.__exit__ = Mock(return_value=None)
+
+            row = {
+                "cs1_bg": "data",
+                "cs1_sym": "data",
+                "cs1_hist": "data",
+                "cs2_bg": "data",
+                "cs2_sym": "data",
+                "cs2_hist": "data",
+            }
+
+            transform.accept(_make_pipeline_row(row), ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _state_id = collector.results[0]
+            assert isinstance(result, TransformResult), f"Expected TransformResult, got {type(result)}"
+            assert result.status == "error"
+            assert result.reason is not None
+            # Multi-query wraps per-query errors in a query_failed envelope
+            assert result.reason["reason"] == "query_failed"
+            # All queries should have failed with content_filtered
+            assert result.reason["succeeded_count"] == 0
+            for failed_query in result.reason["failed_queries"]:
+                assert "content-filtered" in failed_query["error"]
+
     def test_handles_missing_output_field_in_json(
         self,
         ctx: PluginContext,

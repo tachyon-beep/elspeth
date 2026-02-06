@@ -313,10 +313,14 @@ class Orchestrator:
             transform.node_id = transform_id_map[seq]
 
         # Set node_id on sinks
+        # Note: Sinks not in graph are skipped (e.g., export sinks used post-run)
         for sink_name, sink in sinks.items():
-            if SinkName(sink_name) not in sink_id_map:
-                raise ValueError(f"Sink '{sink_name}' not found in graph. Available sinks: {list(sink_id_map.keys())}")
-            sink.node_id = sink_id_map[SinkName(sink_name)]
+            sink_name_typed = SinkName(sink_name)
+            if sink_name_typed not in sink_id_map:
+                # Sink not in execution graph - skip silently
+                # This happens for post-run sinks (e.g., landscape.export.sink)
+                continue
+            sink.node_id = sink_id_map[sink_name_typed]
 
     def _compute_coalesce_step_map(
         self,
@@ -1737,7 +1741,7 @@ class Orchestrator:
             # 1. Mask missing/corrupt audit data (evidence tampering)
             # 2. Produce incomplete contracts (fields appearing later are omitted)
             # 3. Violate the NO LEGACY CODE POLICY (no backward compatibility shims)
-            raise RuntimeError(
+            raise OrchestrationInvariantError(
                 f"Cannot resume run '{run_id}': schema contract is missing from audit trail. "
                 f"This indicates either:\n"
                 f"  1. The audit database is corrupt or incomplete\n"

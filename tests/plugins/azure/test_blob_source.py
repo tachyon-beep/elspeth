@@ -578,9 +578,13 @@ class TestAzureBlobSourceErrors:
         rows = list(source.load(ctx))
 
         # Pipeline continues (doesn't crash)
-        # Note: With on_bad_lines="warn", pandas may parse some rows or quarantine the whole file
-        # Either way, we should not crash
-        assert isinstance(rows, list)  # Got results, not a crash
+        # With delimiter mismatch, pandas parses the header "col1;col2;col3" as a single column
+        # and the data "value1,value2,value3" as three columns. The resulting row has columns
+        # that don't match the fixed schema fields, so the row fails validation and is quarantined.
+        assert len(rows) == 1
+        # The row should be quarantined because schema validation fails
+        assert rows[0].is_quarantined
+        assert rows[0].quarantine_destination == QUARANTINE_SINK
 
     def test_csv_structural_failure_quarantines_blob(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
         """BUG-BLOB-01: Catastrophic CSV structure failure quarantines blob, doesn't crash."""

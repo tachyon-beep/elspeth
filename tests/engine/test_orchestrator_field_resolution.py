@@ -14,12 +14,12 @@ from typing import Any
 
 from sqlalchemy import select
 
-from elspeth.contracts import ArtifactDescriptor
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.schema import runs_table
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.sources.csv_source import CSVSource
-from tests.conftest import _TestSinkBase, as_sink
+from tests.conftest import as_sink
+from tests.engine.conftest import CollectSink
 
 
 class TestFieldResolutionRecording:
@@ -47,26 +47,6 @@ class TestFieldResolutionRecording:
                 "on_validation_failure": "discard",
             }
         )
-
-        # Create sink using test helper
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
 
         sink = CollectSink()
 
@@ -134,25 +114,6 @@ class TestFieldResolutionRecording:
             }
         )
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
-
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -218,25 +179,6 @@ class TestFieldResolutionRecording:
                 "on_validation_failure": "discard",
             }
         )
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
 
         sink = CollectSink()
 

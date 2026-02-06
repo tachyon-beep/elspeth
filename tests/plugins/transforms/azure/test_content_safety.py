@@ -989,6 +989,116 @@ class TestContentSafetyBatchProcessing:
             transform.close()
 
 
+class TestContentSafetyFailsClosed:
+    """P0-03: Security transforms must fail CLOSED, not open.
+
+    When Azure returns an unknown category (e.g., after a taxonomy update),
+    the transform must reject the content — not silently pass it through.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_httpx_client(self):
+        """Patch httpx.Client to prevent real HTTP calls."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_instance = MagicMock()
+            mock_instance.__enter__ = MagicMock(return_value=mock_instance)
+            mock_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_unknown_category_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Unknown category in API response must cause error, not pass through."""
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                    {"category": "FutureCategory", "severity": 4},  # Unknown category
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["content"],
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = _make_pipeline_row({"content": "test content", "id": 1})
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            # Must fail closed — unknown category = reject content
+            assert result.status == "error", (
+                "Unknown category must fail CLOSED (error), not pass through as success"
+            )
+            assert result.reason is not None
+            assert "unknown_category" in result.reason["reason"]
+        finally:
+            transform.close()
+
+    def test_known_categories_still_work_with_explicit_mapping(self, mock_httpx_client: MagicMock) -> None:
+        """Known Azure categories map correctly with explicit lookup."""
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["content"],
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = _make_pipeline_row({"content": "safe content", "id": 1})
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            assert result.status == "success"
+        finally:
+            transform.close()
+
+
 class TestContentSafetyInternalProcessing:
     """Tests for internal processing methods (used by BatchTransformMixin)."""
 

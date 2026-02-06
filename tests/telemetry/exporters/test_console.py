@@ -442,6 +442,200 @@ class TestConsoleExporterDatetimeAndEnumSerialization:
         assert isinstance(parsed["routing_mode"], str)
 
 
+class TestConsoleExporterEdgeCases:
+    """Tests for edge cases and additional export behaviors."""
+
+    def test_json_format_with_none_values(self) -> None:
+        """JSON format correctly serializes None values for optional fields."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        # TransformCompleted with None output_hash (failed transform case)
+        event = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-none",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="test_transform",
+            status=NodeStateStatus.FAILED,
+            duration_ms=10.0,
+            input_hash="hash-in",
+            output_hash=None,  # Failed transform has no output
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)
+
+        assert parsed["output_hash"] is None
+        assert parsed["input_hash"] == "hash-in"
+        assert parsed["status"] == "failed"
+
+    def test_multiple_events_are_separate_lines(self) -> None:
+        """Multiple exports produce separate JSON lines (JSONL format)."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event1 = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-multi",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="transform-a",
+            status=NodeStateStatus.COMPLETED,
+            duration_ms=5.0,
+            input_hash="h1",
+            output_hash="h2",
+        )
+
+        event2 = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 1, tzinfo=UTC),
+            run_id="run-multi",
+            row_id="row-2",
+            token_id="token-2",
+            node_id="node-1",
+            plugin_name="transform-a",
+            status=NodeStateStatus.COMPLETED,
+            duration_ms=6.0,
+            input_hash="h3",
+            output_hash="h4",
+        )
+
+        exporter.export(event1)
+        exporter.export(event2)
+
+        lines = captured.getvalue().strip().split("\n")
+        assert len(lines) == 2
+
+        parsed1 = json.loads(lines[0])
+        parsed2 = json.loads(lines[1])
+
+        assert parsed1["row_id"] == "row-1"
+        assert parsed2["row_id"] == "row-2"
+
+    def test_pretty_format_with_tuple_destinations(self) -> None:
+        """Pretty format renders tuple destinations as list."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "pretty"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event = GateEvaluated(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-tuple",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="gate-1",
+            plugin_name="fork_gate",
+            routing_mode=RoutingMode.COPY,
+            destinations=("sink-a", "sink-b", "sink-c"),
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+
+        # Verify destinations tuple is rendered as list
+        assert "['sink-a', 'sink-b', 'sink-c']" in output
+        assert "routing_mode=copy" in output
+
+    def test_export_works_with_default_configuration(self) -> None:
+        """Export works without explicit configure() call (uses defaults)."""
+        exporter = ConsoleExporter()
+        # Deliberately NOT calling configure()
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        event = TokenCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-default",
+            row_id="row-1",
+            token_id="token-1",
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output",
+        )
+
+        exporter.export(event)
+
+        # Should use default json format
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)  # Valid JSON
+
+        assert parsed["event_type"] == "TokenCompleted"
+        assert parsed["run_id"] == "run-default"
+
+    def test_json_format_with_empty_destinations(self) -> None:
+        """JSON format handles empty tuple for destinations."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "json"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        # Edge case: gate with no destinations (unusual but valid)
+        event = GateEvaluated(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-empty-dest",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="gate-1",
+            plugin_name="drop_gate",
+            routing_mode=RoutingMode.MOVE,
+            destinations=(),  # Empty tuple
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+        parsed = json.loads(output)
+
+        assert parsed["destinations"] == []  # Empty tuple becomes empty list
+
+    def test_pretty_format_with_all_none_optional_fields(self) -> None:
+        """Pretty format omits all None optional fields."""
+        exporter = ConsoleExporter()
+        exporter.configure({"format": "pretty"})
+
+        captured = StringIO()
+        exporter._stream = captured
+
+        # TransformCompleted with both hashes as None
+        event = TransformCompleted(
+            timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+            run_id="run-all-none",
+            row_id="row-1",
+            token_id="token-1",
+            node_id="node-1",
+            plugin_name="test",
+            status=NodeStateStatus.FAILED,
+            duration_ms=0.5,
+            input_hash=None,
+            output_hash=None,
+        )
+
+        exporter.export(event)
+
+        output = captured.getvalue().strip()
+
+        # None fields should not appear in pretty format
+        assert "input_hash=None" not in output
+        assert "output_hash=None" not in output
+        # Non-None fields should appear
+        assert "duration_ms=0.5" in output
+        assert "status=failed" in output
+
+
 class TestConsoleExporterRegistration:
     """Tests for plugin registration."""
 

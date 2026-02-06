@@ -411,11 +411,18 @@ def run(
         raise typer.Exit(1) from None
 
     # NEW: Build and validate graph from plugin instances
+    # Exclude export sink from graph - it's used post-run, not during pipeline execution.
+    # The export sink receives audit records after the run completes, not pipeline data.
+    execution_sinks = plugins["sinks"]
+    if config.landscape.export.enabled and config.landscape.export.sink:
+        export_sink_name = config.landscape.export.sink
+        execution_sinks = {k: v for k, v in plugins["sinks"].items() if k != export_sink_name}
+
     try:
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
             transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
+            sinks=execution_sinks,
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
             default_sink=config.default_sink,

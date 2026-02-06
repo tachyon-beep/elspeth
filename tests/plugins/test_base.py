@@ -64,12 +64,31 @@ class TestBaseTransform:
         transform = ExpandingTransform({})
         assert transform.creates_tokens is True
 
-    def test_base_transform_abstract(self) -> None:
-        from elspeth.plugins.base import BaseTransform
+    def test_base_transform_process_raises_not_implemented(self) -> None:
+        """BaseTransform.process() raises NotImplementedError when called directly.
 
-        # Should not be instantiable directly
-        with pytest.raises(TypeError):
-            BaseTransform({})  # type: ignore[abstract]
+        Note: BaseTransform is no longer fully abstract (commit fb63cc3b) to allow
+        batch transforms to override process() with different signatures. Subclasses
+        must still implement process() - the base implementation raises NotImplementedError.
+        """
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.context import PluginContext
+
+        # Create a minimal concrete subclass that doesn't override process()
+        class IncompleteTransform(BaseTransform):
+            name = "incomplete"
+            input_schema = None  # type: ignore[assignment]
+            output_schema = None  # type: ignore[assignment]
+
+        transform = IncompleteTransform({})
+        ctx = PluginContext(run_id="test", config={})
+        row = _make_pipeline_row({"x": 1})
+
+        # Calling process() should raise NotImplementedError
+        with pytest.raises(NotImplementedError) as exc_info:
+            transform.process(row, ctx)
+
+        assert "IncompleteTransform must implement process()" in str(exc_info.value)
 
     def test_subclass_implementation(self) -> None:
         from elspeth.contracts import PluginSchema

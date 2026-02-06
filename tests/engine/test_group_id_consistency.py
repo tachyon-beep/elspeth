@@ -13,69 +13,16 @@ Per CLAUDE.md Test Path Integrity: Never bypass production factories in tests.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
-
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import ArtifactDescriptor, RowOutcome, SourceRow
+from elspeth.contracts import RowOutcome
 from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_sink, as_source
-
-
-# Test helper classes
-class ListSource(_TestSourceBase):
-    """Test source that yields rows from a list."""
-
-    name = "list_source"
-    output_schema = _TestSchema
-
-    def __init__(self, data: list[dict[str, Any]]) -> None:
-        super().__init__()
-        self._data = data
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def load(self, ctx: Any) -> Iterator[SourceRow]:
-        yield from self.wrap_rows(self._data)
-
-    def close(self) -> None:
-        pass
-
-
-class CollectSink(_TestSinkBase):
-    """Test sink that collects rows into a list."""
-
-    name = "collect_sink"
-
-    def __init__(self) -> None:
-        self.rows: list[dict[str, Any]] = []
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        for row in rows:
-            self.rows.append(row)
-        return ArtifactDescriptor.for_file(
-            path="memory://test",
-            size_bytes=0,
-            content_hash="test",
-        )
-
-    def close(self) -> None:
-        pass
+from tests.conftest import as_sink, as_source
+from tests.engine.conftest import CollectSink, ListSource
 
 
 class TestForkGroupIDConsistency:

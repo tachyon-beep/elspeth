@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import base64
+import json
+import math
 import os
 import time
 from datetime import UTC, datetime
@@ -19,6 +21,56 @@ from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallbac
 from elspeth.telemetry.events import ExternalCallCompleted
 
 logger = structlog.get_logger(__name__)
+
+
+def _contains_non_finite(obj: Any) -> bool:
+    """Recursively check if object contains NaN or Infinity float values.
+
+    This is a Tier 3 boundary check: external JSON may contain non-finite values
+    (Python's json module accepts them), but canonicalization rejects them. We
+    detect these at the HTTP boundary to record as parse failure rather than
+    crashing during audit recording.
+
+    Args:
+        obj: Any JSON-parsed value (dict, list, or primitive)
+
+    Returns:
+        True if any float value is NaN or Infinity
+    """
+    if isinstance(obj, float):
+        return math.isnan(obj) or math.isinf(obj)
+    if isinstance(obj, dict):
+        return any(_contains_non_finite(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(_contains_non_finite(v) for v in obj)
+    return False
+
+
+def _parse_json_strict(text: str) -> tuple[Any, str | None]:
+    """Parse JSON with strict rejection of NaN/Infinity.
+
+    Python's stdlib json module accepts non-finite values by default, but
+    these cannot be canonicalized. This function parses and validates in
+    one step at the Tier 3 boundary.
+
+    Args:
+        text: JSON string to parse
+
+    Returns:
+        Tuple of (parsed_value, error_message)
+        - On success: (parsed_dict_or_list, None)
+        - On failure: (None, error_message)
+    """
+    try:
+        parsed = json.loads(text)
+    except JSONDecodeError as e:
+        return None, str(e)
+
+    # Check for non-finite values that canonicalization would reject
+    if _contains_non_finite(parsed):
+        return None, "JSON contains non-finite values (NaN or Infinity)"
+
+    return parsed, None
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -264,10 +316,11 @@ class AuditedHTTPClient(AuditedClientBase):
             content_type = response.headers.get("content-type", "")
 
             if "application/json" in content_type:
-                try:
-                    response_body = response.json()
-                except JSONDecodeError as e:
-                    # JSON parse failed despite Content-Type claiming JSON
+                # Parse JSON strictly at Tier 3 boundary - reject NaN/Infinity
+                # that canonicalization cannot handle
+                parsed, error = _parse_json_strict(response.text)
+                if error is not None:
+                    # JSON parse failed or contains non-canonicalizable values
                     # This is a Tier 3 boundary issue - external data doesn't match contract
                     # Record the failure explicitly for audit trail completeness
                     logger.warning(
@@ -276,14 +329,16 @@ class AuditedHTTPClient(AuditedClientBase):
                             "url": full_url,
                             "status_code": response.status_code,
                             "body_preview": response.text[:200],
-                            "error": str(e),
+                            "error": error,
                         },
                     )
                     response_body = {
                         "_json_parse_failed": True,
-                        "_error": str(e),
+                        "_error": error,
                         "_raw_text": response.text,
                     }
+                else:
+                    response_body = parsed
             else:
                 # For non-JSON, detect text vs binary content
                 # Text content types: text/*, application/xml, application/x-www-form-urlencoded
@@ -476,10 +531,11 @@ class AuditedHTTPClient(AuditedClientBase):
             content_type = response.headers.get("content-type", "")
 
             if "application/json" in content_type:
-                try:
-                    response_body = response.json()
-                except JSONDecodeError as e:
-                    # JSON parse failed despite Content-Type claiming JSON
+                # Parse JSON strictly at Tier 3 boundary - reject NaN/Infinity
+                # that canonicalization cannot handle
+                parsed, error = _parse_json_strict(response.text)
+                if error is not None:
+                    # JSON parse failed or contains non-canonicalizable values
                     # This is a Tier 3 boundary issue - external data doesn't match contract
                     # Record the failure explicitly for audit trail completeness
                     logger.warning(
@@ -488,14 +544,16 @@ class AuditedHTTPClient(AuditedClientBase):
                             "url": full_url,
                             "status_code": response.status_code,
                             "body_preview": response.text[:200],
-                            "error": str(e),
+                            "error": error,
                         },
                     )
                     response_body = {
                         "_json_parse_failed": True,
-                        "_error": str(e),
+                        "_error": error,
                         "_raw_text": response.text,
                     }
+                else:
+                    response_body = parsed
             else:
                 # For non-JSON, detect text vs binary content
                 # Text content types: text/*, application/xml, application/x-www-form-urlencoded

@@ -6,9 +6,31 @@ from pathlib import Path
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, RunStatus
+from elspeth.contracts.contract_records import ContractAuditRecord
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
+
+
+def _create_test_schema_contract() -> tuple[str, str]:
+    """Create a minimal schema contract for test runs.
+
+    Returns:
+        Tuple of (schema_contract_json, schema_contract_hash)
+    """
+    field_contracts = (
+        FieldContract(
+            normalized_name="test_field",
+            original_name="test_field",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    contract = SchemaContract(fields=field_contracts, mode="FIXED", locked=True)
+    audit_record = ContractAuditRecord.from_contract(contract)
+    return audit_record.to_json(), contract.version_hash()
 
 
 class TestRecoveryProtocol:
@@ -59,6 +81,7 @@ class TestRecoveryProtocol:
 
         run_id = "failed-run-001"
         now = datetime.now(UTC)
+        schema_contract_json, schema_contract_hash = _create_test_schema_contract()
 
         with landscape_db.engine.connect() as conn:
             conn.execute(
@@ -69,6 +92,8 @@ class TestRecoveryProtocol:
                     settings_json="{}",
                     canonical_version="v1",
                     status=RunStatus.FAILED,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
             conn.execute(
@@ -248,6 +273,7 @@ class TestRecoveryProtocol:
 
         run_id = "agg-state-run"
         now = datetime.now(UTC)
+        schema_contract_json, schema_contract_hash = _create_test_schema_contract()
 
         with landscape_db.engine.connect() as conn:
             conn.execute(
@@ -258,6 +284,8 @@ class TestRecoveryProtocol:
                     settings_json="{}",
                     canonical_version="v1",
                     status=RunStatus.FAILED,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
             conn.execute(
@@ -792,3 +820,289 @@ class TestGetUnprocessedRowsFailureScenarios:
         assert "row-002" in unprocessed  # The failed row - must be retried
         assert "row-003" in unprocessed
         assert "row-004" in unprocessed
+
+
+class TestGetUnprocessedRowsBufferedInAggregation:
+    """Tests for P1-2026-02-05: Buffered rows in checkpoint aggregation state must be excluded.
+
+    When a checkpoint includes aggregation_state_json with buffered tokens,
+    those rows should NOT appear in get_unprocessed_rows() because they will
+    be restored from the checkpoint state, not reprocessed from source.
+    """
+
+    @pytest.fixture
+    def landscape_db(self, tmp_path: Path) -> LandscapeDB:
+        db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
+        return db
+
+    @pytest.fixture
+    def checkpoint_manager(self, landscape_db: LandscapeDB) -> CheckpointManager:
+        return CheckpointManager(landscape_db)
+
+    @pytest.fixture
+    def recovery_manager(self, landscape_db: LandscapeDB, checkpoint_manager: CheckpointManager) -> RecoveryManager:
+        return RecoveryManager(landscape_db, checkpoint_manager)
+
+    def _setup_aggregation_buffer_scenario(
+        self,
+        landscape_db: LandscapeDB,
+        checkpoint_manager: CheckpointManager,
+    ) -> str:
+        """Create scenario where rows are buffered in aggregation state.
+
+        Scenario:
+        - 5 rows (indices 0-4)
+        - Rows 0, 1: completed (terminal outcomes)
+        - Rows 2, 3: buffered in aggregation (no terminal outcome, but in checkpoint state)
+        - Row 4: not started (no token, no buffer)
+
+        Expected unprocessed WITHOUT fix: rows 2, 3, 4 (all without terminal outcomes)
+        Expected unprocessed WITH fix: row 4 only (rows 2, 3 are in aggregation buffer)
+        """
+        import json
+
+        from elspeth.contracts import RowOutcome
+        from elspeth.core.landscape.schema import (
+            nodes_table,
+            rows_table,
+            runs_table,
+            token_outcomes_table,
+            tokens_table,
+        )
+
+        run_id = "agg-buffer-test-run"
+        now = datetime.now(UTC)
+
+        with landscape_db.engine.connect() as conn:
+            # Create run
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=run_id,
+                    started_at=now,
+                    config_hash="abc",
+                    settings_json="{}",
+                    canonical_version="v1",
+                    status=RunStatus.FAILED,
+                )
+            )
+            # Create aggregation node
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="agg-node",
+                    run_id=run_id,
+                    plugin_name="passthrough",
+                    node_type=NodeType.AGGREGATION,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="xyz",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            # Create 5 source rows (indices 0-4)
+            for i in range(5):
+                conn.execute(
+                    rows_table.insert().values(
+                        row_id=f"row-{i:03d}",
+                        run_id=run_id,
+                        source_node_id="agg-node",
+                        row_index=i,
+                        source_data_hash=f"hash{i}",
+                        created_at=now,
+                    )
+                )
+            # Create tokens for rows 0-3 (row 4 has no token yet)
+            for i in range(4):
+                conn.execute(
+                    tokens_table.insert().values(
+                        token_id=f"tok-{i:03d}",
+                        row_id=f"row-{i:03d}",
+                        created_at=now,
+                    )
+                )
+            # Record terminal outcomes for rows 0 and 1 ONLY (completed)
+            for i in range(2):
+                conn.execute(
+                    token_outcomes_table.insert().values(
+                        outcome_id=f"outcome-{i:03d}",
+                        run_id=run_id,
+                        token_id=f"tok-{i:03d}",
+                        outcome=RowOutcome.COMPLETED.value,
+                        is_terminal=1,
+                        recorded_at=now,
+                        sink_name="output",
+                    )
+                )
+            conn.commit()
+
+        # Create checkpoint with aggregation state containing rows 2 and 3
+        # This simulates a passthrough aggregation that has buffered these rows
+        aggregation_state = {
+            "_version": "2.0",
+            "agg-node": {
+                "tokens": [
+                    {
+                        "token_id": "tok-002",
+                        "row_id": "row-002",
+                        "branch_name": None,
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
+                        "row_data": {"field": "value2"},
+                        "contract_version": "test-hash",
+                    },
+                    {
+                        "token_id": "tok-003",
+                        "row_id": "row-003",
+                        "branch_name": None,
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
+                        "row_data": {"field": "value3"},
+                        "contract_version": "test-hash",
+                    },
+                ],
+                "batch_id": "batch-001",
+                "elapsed_age_seconds": 5.0,
+                "count_fire_offset": None,
+                "condition_fire_offset": None,
+                "contract": {
+                    "mode": "observed",
+                    "fields": {"field": {"type": "string", "required": True}},
+                },
+            },
+        }
+
+        from tests.core.checkpoint.conftest import _create_test_graph
+
+        graph = _create_test_graph(checkpoint_node="agg-node")
+        checkpoint_manager.create_checkpoint(
+            run_id,
+            "tok-001",
+            "agg-node",
+            sequence_number=1,
+            aggregation_state=aggregation_state,
+            graph=graph,
+        )
+
+        return run_id
+
+    def test_buffered_rows_excluded_from_unprocessed(
+        self,
+        landscape_db: LandscapeDB,
+        checkpoint_manager: CheckpointManager,
+        recovery_manager: RecoveryManager,
+    ) -> None:
+        """Buffered rows in checkpoint aggregation state must NOT be reprocessed.
+
+        P1-2026-02-05: Rows 2, 3 are buffered in aggregation state.
+        They will be restored from checkpoint, not reprocessed.
+        Only row 4 (never started) should be in unprocessed list.
+        """
+        run_id = self._setup_aggregation_buffer_scenario(landscape_db, checkpoint_manager)
+
+        unprocessed = recovery_manager.get_unprocessed_rows(run_id)
+
+        # Only row 4 should be unprocessed
+        # Rows 0, 1 have terminal outcomes (completed)
+        # Rows 2, 3 are buffered in checkpoint aggregation state (will be restored)
+        assert len(unprocessed) == 1, f"Expected 1 unprocessed row, got {len(unprocessed)}: {unprocessed}"
+        assert "row-004" in unprocessed
+        assert "row-002" not in unprocessed  # Buffered - must NOT be reprocessed
+        assert "row-003" not in unprocessed  # Buffered - must NOT be reprocessed
+
+    def test_empty_aggregation_state_does_not_affect_unprocessed(
+        self,
+        landscape_db: LandscapeDB,
+        checkpoint_manager: CheckpointManager,
+        recovery_manager: RecoveryManager,
+    ) -> None:
+        """Checkpoint with empty or None aggregation state works correctly."""
+        from elspeth.contracts import RowOutcome
+        from elspeth.core.landscape.schema import (
+            nodes_table,
+            rows_table,
+            runs_table,
+            token_outcomes_table,
+            tokens_table,
+        )
+
+        run_id = "empty-agg-test-run"
+        now = datetime.now(UTC)
+
+        with landscape_db.engine.connect() as conn:
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=run_id,
+                    started_at=now,
+                    config_hash="abc",
+                    settings_json="{}",
+                    canonical_version="v1",
+                    status=RunStatus.FAILED,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="transform-1",
+                    run_id=run_id,
+                    plugin_name="test",
+                    node_type=NodeType.TRANSFORM,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="xyz",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            # Create 3 rows
+            for i in range(3):
+                conn.execute(
+                    rows_table.insert().values(
+                        row_id=f"row-{i:03d}",
+                        run_id=run_id,
+                        source_node_id="transform-1",
+                        row_index=i,
+                        source_data_hash=f"hash{i}",
+                        created_at=now,
+                    )
+                )
+                conn.execute(
+                    tokens_table.insert().values(
+                        token_id=f"tok-{i:03d}",
+                        row_id=f"row-{i:03d}",
+                        created_at=now,
+                    )
+                )
+            # Row 0 completed
+            conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id="outcome-000",
+                    run_id=run_id,
+                    token_id="tok-000",
+                    outcome=RowOutcome.COMPLETED.value,
+                    is_terminal=1,
+                    recorded_at=now,
+                    sink_name="output",
+                )
+            )
+            conn.commit()
+
+        # Create checkpoint WITHOUT aggregation state
+        from tests.core.checkpoint.conftest import _create_test_graph
+
+        graph = _create_test_graph(checkpoint_node="transform-1")
+        checkpoint_manager.create_checkpoint(
+            run_id,
+            "tok-000",
+            "transform-1",
+            sequence_number=0,
+            aggregation_state=None,  # No aggregation state
+            graph=graph,
+        )
+
+        unprocessed = recovery_manager.get_unprocessed_rows(run_id)
+
+        # Rows 1, 2 should be unprocessed (no terminal outcomes)
+        assert len(unprocessed) == 2
+        assert "row-001" in unprocessed
+        assert "row-002" in unprocessed

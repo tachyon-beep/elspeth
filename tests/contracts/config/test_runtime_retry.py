@@ -248,6 +248,51 @@ class TestFromPolicyTypeValidation:
             )
 
 
+class TestRuntimeRetryRejectsNonFiniteFloats:
+    """P0-06: NaN and Infinity must be rejected by float validation.
+
+    Non-finite floats pass through to runtime config and eventually reach
+    the canonical JSON layer (RFC 8785), which crashes during audit recording.
+    Catching them at validation time gives actionable error messages.
+    """
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_from_policy_rejects_non_finite_base_delay(self, value: float) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"base_delay.*finite"):
+            RuntimeRetryConfig.from_policy({"base_delay": value})
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_from_policy_rejects_non_finite_max_delay(self, value: float) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"max_delay.*finite"):
+            RuntimeRetryConfig.from_policy({"max_delay": value})
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_from_policy_rejects_non_finite_jitter(self, value: float) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"jitter.*finite"):
+            RuntimeRetryConfig.from_policy({"jitter": value})
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_from_policy_rejects_non_finite_exponential_base(self, value: float) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"exponential_base.*finite"):
+            RuntimeRetryConfig.from_policy({"exponential_base": value})
+
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf", "Infinity"])
+    def test_from_policy_rejects_non_finite_string_coercion(self, value: str) -> None:
+        """Strings like 'nan' and 'inf' are valid for float() but must be rejected."""
+        from elspeth.contracts.config.runtime import RuntimeRetryConfig
+
+        with pytest.raises(ValueError, match=r"base_delay.*finite"):
+            RuntimeRetryConfig.from_policy({"base_delay": value})
+
+
 class TestRuntimeRetryValidation:
     """Test validation in RuntimeRetryConfig."""
 

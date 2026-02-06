@@ -649,7 +649,8 @@ class TestPromptShieldBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "api_error"
-            assert "malformed" in result.reason["message"].lower()
+            assert result.reason["error_type"] == "malformed_response"
+            assert result.retryable is False  # Malformed responses are not retryable
         finally:
             transform.close()
 
@@ -687,7 +688,194 @@ class TestPromptShieldBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "api_error"
-            assert "malformed" in result.reason["message"].lower()
+            assert result.reason["error_type"] == "malformed_response"
+            assert result.retryable is False  # Malformed responses are not retryable
+        finally:
+            transform.close()
+
+    def test_null_attack_detected_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """attackDetected=null fails closed (not treated as False).
+
+        This is the critical security bug: if Azure returns null instead of a bool,
+        we must NOT treat it as "no attack detected" (which would fail open).
+        """
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        # Response with attackDetected: null (not False)
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": None},
+                "documentsAnalysis": [{"attackDetected": False}],
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row_data = {"prompt": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["error_type"] == "malformed_response"
+            assert "bool" in result.reason["message"]
+            assert "NoneType" in result.reason["message"]
+            assert result.retryable is False
+        finally:
+            transform.close()
+
+    def test_string_attack_detected_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """attackDetected="true" (string) fails closed.
+
+        Even though the string is truthy and would "pass" the attack check,
+        we must reject non-boolean types to ensure strict type safety.
+        """
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        # Response with attackDetected: "false" (string, not bool)
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": "false"},
+                "documentsAnalysis": [{"attackDetected": False}],
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row_data = {"prompt": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["error_type"] == "malformed_response"
+            assert "bool" in result.reason["message"]
+            assert "str" in result.reason["message"]
+            assert result.retryable is False
+        finally:
+            transform.close()
+
+    def test_document_null_attack_detected_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Document attackDetected=null fails closed."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        # Response with document attackDetected: null
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                "documentsAnalysis": [{"attackDetected": None}],
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row_data = {"prompt": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["error_type"] == "malformed_response"
+            assert "documentsAnalysis[0].attackDetected" in result.reason["message"]
+            assert result.retryable is False
+        finally:
+            transform.close()
+
+    def test_document_as_non_dict_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Document entry that is not a dict fails closed."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        # Response with document as string instead of dict
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                "documentsAnalysis": ["not a dict"],
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row_data = {"prompt": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["error_type"] == "malformed_response"
+            assert "documentsAnalysis[0] must be dict" in result.reason["message"]
+            assert result.retryable is False
         finally:
             transform.close()
 

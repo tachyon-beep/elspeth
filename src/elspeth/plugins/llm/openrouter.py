@@ -615,6 +615,16 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                     retryable=False,
                 )
 
+            # 6b. Check for content filtering (null content from provider)
+            if content is None:
+                return TransformResult.error(
+                    {
+                        "reason": "content_filtered",
+                        "error": "LLM returned null content (likely content-filtered by provider)",
+                    },
+                    retryable=False,
+                )
+
             # OpenRouter can return {"usage": null} or omit usage entirely.
             # Use `or {}` to handle both missing AND null cases.
             usage = data.get("usage") or {}

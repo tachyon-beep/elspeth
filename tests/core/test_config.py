@@ -1364,6 +1364,48 @@ gates:
         assert settings.gates[0].routes == {"true": "fork", "false": "continue"}
         assert settings.gates[0].fork_to == ["path_a", "path_b"]
 
+    def test_load_settings_preserves_mixed_case_route_labels(self, tmp_path: Path) -> None:
+        """Route labels preserve case through config loading.
+
+        Regression test for P1-2026-02-05: _lowercase_schema_keys() was lowercasing
+        gate route labels, causing routing failures when gate conditions returned
+        mixed-case strings like "High" but routes had been lowercased to "high".
+        """
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+
+sinks:
+  output:
+    plugin: csv
+  urgent:
+    plugin: csv
+  archive:
+    plugin: csv
+
+default_sink: output
+
+gates:
+  - name: priority_router
+    condition: "row['priority']"
+    routes:
+      High: urgent
+      Medium: continue
+      Low: archive
+""")
+        settings = load_settings(config_file)
+
+        assert len(settings.gates) == 1
+        gate = settings.gates[0]
+        assert gate.name == "priority_router"
+        # Route labels must preserve exact case - "High" not "high"
+        assert gate.routes == {"High": "urgent", "Medium": "continue", "Low": "archive"}
+        assert "High" in gate.routes
+        assert "high" not in gate.routes
+
 
 class TestCoalesceSettings:
     """Test CoalesceSettings configuration model."""

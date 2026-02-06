@@ -1061,6 +1061,61 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.reason is not None
         assert result.reason["reason"] == "empty_choices"
 
+    def test_null_content_from_content_filtering_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """Null content (content filtering) returns error instead of passing None through.
+
+        P0-05: When OpenRouter returns null content due to content filtering,
+        the single-query transform stored None in the output row. Must return
+        TransformResult.error() with reason 'content_filtered'.
+        """
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "openai/gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
+
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=json.dumps(
+                {
+                    "choices": [{"message": {"content": None, "role": "assistant"}}],
+                    "model": "openai/gpt-4",
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+                }
+            ),
+            headers={"content-type": "application/json"},
+        )
+
+        try:
+            with mock_httpx_client(chaosllm_server, response=response):
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "content_filtered"
+
     def test_missing_choices_key_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Missing 'choices' key in response emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(

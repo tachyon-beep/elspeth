@@ -16,6 +16,7 @@ from sqlalchemy.engine import Row
 from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointCorruptionError, CheckpointManager, IncompatibleCheckpointError
+from elspeth.core.checkpoint.serialization import checkpoint_loads
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import (
@@ -144,7 +145,8 @@ class RecoveryManager:
 
         agg_state = None
         if checkpoint.aggregation_state_json:
-            agg_state = json.loads(checkpoint.aggregation_state_json)
+            # Use checkpoint_loads for type restoration (datetime -> datetime, not string)
+            agg_state = checkpoint_loads(checkpoint.aggregation_state_json)
 
         return ResumePoint(
             checkpoint=checkpoint,
@@ -255,6 +257,8 @@ class RecoveryManager:
         Uses token outcomes to determine which rows need processing:
         - Rows with terminal outcomes (COMPLETED, ROUTED, QUARANTINED, FAILED) are done
         - Rows whose tokens lack terminal outcomes need reprocessing
+        - Rows already buffered in checkpoint aggregation state are excluded
+          (they will be restored from checkpoint, not reprocessed)
 
         This correctly handles multi-sink scenarios where rows are routed to
         different sinks in interleaved order. The previous row_index boundary
@@ -271,6 +275,25 @@ class RecoveryManager:
         checkpoint = self._checkpoint_manager.get_latest_checkpoint(run_id)
         if checkpoint is None:
             return []
+
+        # P1-2026-02-05: Extract row IDs from checkpoint aggregation state.
+        # These rows are already buffered and will be restored from checkpoint,
+        # so they must NOT be reprocessed (would cause duplicate buffering/outputs).
+        buffered_row_ids: set[str] = set()
+        if checkpoint.aggregation_state_json:
+            # Use checkpoint_loads for consistency (handles datetime type tags)
+            agg_state = checkpoint_loads(checkpoint.aggregation_state_json)
+            for node_id, node_state in agg_state.items():
+                # Skip metadata keys (e.g., "_version")
+                if node_id.startswith("_"):
+                    continue
+                # Extract row_id from each buffered token
+                # Format: {"node_id": {"tokens": [{"row_id": "...", ...}, ...]}}
+                tokens = node_state.get("tokens", [])
+                for token in tokens:
+                    row_id = token.get("row_id")
+                    if row_id:
+                        buffered_row_ids.add(row_id)
 
         with self._db.engine.connect() as conn:
             # CORRECT SEMANTICS FOR FORK/AGGREGATION/COALESCE RECOVERY:
@@ -381,6 +404,11 @@ class RecoveryManager:
 
             unprocessed = [row.row_id for row in conn.execute(query).fetchall()]
 
+        # P1-2026-02-05: Exclude rows already buffered in checkpoint aggregation state.
+        # These rows will be restored from checkpoint state, not reprocessed.
+        if buffered_row_ids:
+            unprocessed = [row_id for row_id in unprocessed if row_id not in buffered_row_ids]
+
         return unprocessed
 
     def _get_run(self, run_id: str) -> Row[Any] | None:
@@ -397,30 +425,28 @@ class RecoveryManager:
 
         return result
 
-    def verify_contract_integrity(self, run_id: str) -> SchemaContract | None:
+    def verify_contract_integrity(self, run_id: str) -> SchemaContract:
         """Verify schema contract integrity for a run.
 
         Retrieves the stored schema contract and verifies its integrity
-        via hash comparison. This is a Tier 1 check - corruption indicates
-        audit trail tampering or database corruption.
+        via hash comparison. This is a Tier 1 check - missing or corrupt
+        contracts indicate audit trail tampering or database corruption.
 
         Args:
             run_id: Run to verify
 
         Returns:
-            SchemaContract if valid and present, None if no contract was stored.
-            Runs without contracts (legacy or OBSERVED mode before first row)
-            return None - this is valid, not an error.
+            SchemaContract - always returns a valid contract
 
         Raises:
-            CheckpointCorruptionError: If contract hash mismatch detected.
-                This is a critical integrity failure - the audit trail
-                may have been tampered with or corrupted.
+            CheckpointCorruptionError: If contract is missing OR hash mismatch detected.
+                Per CLAUDE.md Tier-1 trust model: "Bad data in the audit trail = crash immediately"
+                Missing contract is treated as corruption - NO backward compatibility.
         """
         recorder = LandscapeRecorder(self._db)
 
         try:
-            return recorder.get_run_contract(run_id)
+            contract = recorder.get_run_contract(run_id)
         except ValueError as e:
             # get_run_contract raises ValueError when hash verification fails
             # Convert to CheckpointCorruptionError for checkpoint-specific context
@@ -428,3 +454,18 @@ class RecoveryManager:
                 f"Contract integrity verification failed for run '{run_id}': {e}. "
                 f"Resume aborted - audit trail may be corrupted or tampered with."
             ) from e
+
+        if contract is None:
+            # TIER-1 AUDIT INTEGRITY: Missing contract = audit trail corruption
+            # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
+            # Per NO LEGACY CODE POLICY: No backward compatibility for pre-contract runs
+            raise CheckpointCorruptionError(
+                f"Schema contract is missing from audit trail for run '{run_id}'. "
+                f"This indicates either:\n"
+                f"  1. The audit database is corrupt or incomplete\n"
+                f"  2. The run was started with a version that didn't record contracts\n"
+                f"Resume cannot proceed safely without the schema contract. "
+                f"The audit trail must be complete and trustworthy."
+            )
+
+        return contract

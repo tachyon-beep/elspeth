@@ -27,6 +27,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -109,27 +110,6 @@ class TestOrchestratorPayloadStoreRequirement:
         Verifies audit trail integrity: every row must have source_data_ref
         when a payload_store is provided.
         """
-
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for row in self._data:
-                    yield from self.wrap_rows([row])
-
-            def close(self) -> None:
-                pass
 
         class PassthroughSink(_TestSinkBase):
             name = "output"
@@ -289,34 +269,13 @@ class TestOrchestratorPayloadStoreIntegration:
         Verifies that payload storage happens before any transform processing.
         """
 
-        class ValueSchema(PluginSchema):
-            value: int
-
         class DoubledSchema(PluginSchema):
             value: int
             doubled: int
 
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for row in self._data:
-                    yield from self.wrap_rows([row])
-
-            def close(self) -> None:
-                pass
-
         class DoubleTransform(BaseTransform):
             name = "double"
-            input_schema = ValueSchema
+            input_schema = PluginSchema
             output_schema = DoubledSchema
 
             def __init__(self) -> None:
@@ -331,30 +290,10 @@ class TestOrchestratorPayloadStoreIntegration:
                     success_reason={"action": "doubled"},
                 )
 
-        class CollectSink(_TestSinkBase):
-            name = "output"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         db = LandscapeDB.in_memory()
         source = ListSource([{"value": 5}, {"value": 10}])
         transform = DoubleTransform()
-        sink = CollectSink()
+        sink = CollectSink(name="output")
 
         config = PipelineConfig(
             source=as_source(source),

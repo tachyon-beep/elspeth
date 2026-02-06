@@ -1556,8 +1556,9 @@ class AggregationExecutor:
         Raises:
             RuntimeError: If checkpoint exceeds 10MB size limit
         """
-        import json
         import logging
+
+        from elspeth.core.checkpoint.serialization import checkpoint_dumps
 
         logger = logging.getLogger(__name__)
 
@@ -1625,7 +1626,8 @@ class AggregationExecutor:
         state["_version"] = "2.0"
 
         # Size validation (on serialized checkpoint)
-        serialized = json.dumps(state)
+        # Use checkpoint_dumps to handle datetime (P1-2026-02-05 fix)
+        serialized = checkpoint_dumps(state)
         size_mb = len(serialized) / 1_000_000
         total_rows = sum(len(b) for b in self._buffer_tokens.values())
 

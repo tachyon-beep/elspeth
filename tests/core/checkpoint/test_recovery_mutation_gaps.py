@@ -17,6 +17,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, RunStatus
+from elspeth.contracts.contract_records import ContractAuditRecord
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint.recovery import RecoveryManager, ResumeCheck, ResumePoint
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.schema import (
@@ -25,6 +27,22 @@ from elspeth.core.landscape.schema import (
     runs_table,
     tokens_table,
 )
+
+
+def _create_test_schema_contract() -> tuple[str, str]:
+    """Create a minimal schema contract for test runs."""
+    field_contracts = (
+        FieldContract(
+            normalized_name="test_field",
+            original_name="test_field",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    contract = SchemaContract(fields=field_contracts, mode="FIXED", locked=True)
+    audit_record = ContractAuditRecord.from_contract(contract)
+    return audit_record.to_json(), contract.version_hash()
 
 if TYPE_CHECKING:
     from elspeth.core.checkpoint import CheckpointManager
@@ -42,12 +60,13 @@ def _create_run_with_checkpoint_prerequisites(
     """Helper to create run, node, row, and token needed for checkpoint FK constraints.
 
     This creates the minimum required data for a checkpoint to be valid:
-    - Run entry
+    - Run entry (with schema contract)
     - Node entry (source)
     - Row entry (points to source node)
     - Token entry (points to row)
     """
     now = datetime.now(UTC)
+    schema_contract_json, schema_contract_hash = _create_test_schema_contract()
     with db.engine.connect() as conn:
         conn.execute(
             runs_table.insert().values(
@@ -57,6 +76,8 @@ def _create_run_with_checkpoint_prerequisites(
                 settings_json="{}",
                 canonical_version="sha256-rfc8785-v1",
                 status=status,
+                schema_contract_json=schema_contract_json,
+                schema_contract_hash=schema_contract_hash,
             )
         )
         conn.execute(

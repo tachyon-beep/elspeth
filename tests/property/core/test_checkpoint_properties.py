@@ -295,7 +295,7 @@ class TestAggregationStateRoundTripProperties:
 
             setup_checkpoint_prerequisites(db, "test-nan", token_id="token-nan")
 
-            with pytest.raises(ValueError, match="Out of range float values are not JSON compliant"):
+            with pytest.raises(ValueError, match="Cannot serialize non-finite float"):
                 manager.create_checkpoint(
                     run_id="test-nan",
                     token_id="token-nan",
@@ -320,7 +320,7 @@ class TestAggregationStateRoundTripProperties:
 
             setup_checkpoint_prerequisites(db, "test-inf", token_id="token-inf")
 
-            with pytest.raises(ValueError, match="Out of range float values are not JSON compliant"):
+            with pytest.raises(ValueError, match="Cannot serialize non-finite float"):
                 manager.create_checkpoint(
                     run_id="test-inf",
                     token_id="token-inf",
