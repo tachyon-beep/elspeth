@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import Field, field_validator, model_validator
@@ -12,7 +12,7 @@ from elspeth.plugins.config_base import PluginConfig
 from elspeth.plugins.llm.azure import AzureOpenAIConfig
 
 
-class OutputFieldType(str, Enum):
+class OutputFieldType(StrEnum):
     """Supported types for structured output fields."""
 
     STRING = "string"
@@ -22,7 +22,7 @@ class OutputFieldType(str, Enum):
     ENUM = "enum"
 
 
-class ResponseFormat(str, Enum):
+class ResponseFormat(StrEnum):
     """LLM response format modes.
 
     - STANDARD: Uses {"type": "json_object"} - model outputs JSON but no schema enforcement

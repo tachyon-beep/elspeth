@@ -9,7 +9,7 @@ Verifies that the orchestrator:
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from elspeth.contracts import (
     SourceRow,
@@ -19,7 +19,6 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.conftest import (
     _TestSchema,
-    _TestSinkBase,
     _TestSourceBase,
     _TestTransformBase,
     as_sink,
@@ -28,9 +27,6 @@ from tests.conftest import (
 )
 from tests.engine.conftest import CollectSink
 from tests.engine.orchestrator_test_helpers import build_production_graph
-
-if TYPE_CHECKING:
-    from elspeth.contracts import ArtifactDescriptor
 
 
 class TestOrchestratorContractRecording:

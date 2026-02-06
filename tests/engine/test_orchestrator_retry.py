@@ -112,7 +112,6 @@ class TestOrchestratorRetry:
         )
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
 

@@ -13,7 +13,7 @@ Grades:
   via hashes, but cannot replay the run.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
 
 
-class ReproducibilityGrade(str, Enum):
+class ReproducibilityGrade(StrEnum):
     """Reproducibility levels for a completed run.
 
     Using str as base allows direct JSON serialization and comparison.

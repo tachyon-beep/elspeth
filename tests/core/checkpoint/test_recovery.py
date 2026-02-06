@@ -859,8 +859,6 @@ class TestGetUnprocessedRowsBufferedInAggregation:
         Expected unprocessed WITHOUT fix: rows 2, 3, 4 (all without terminal outcomes)
         Expected unprocessed WITH fix: row 4 only (rows 2, 3 are in aggregation buffer)
         """
-        import json
-
         from elspeth.contracts import RowOutcome
         from elspeth.core.landscape.schema import (
             nodes_table,

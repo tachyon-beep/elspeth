@@ -35,7 +35,7 @@ from elspeth.contracts.schema_contract import FieldContract, PipelineRow, Schema
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.engine.processor import MAX_WORK_QUEUE_ITERATIONS, RowProcessor, _WorkItem
+from elspeth.engine.processor import RowProcessor, _WorkItem
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext

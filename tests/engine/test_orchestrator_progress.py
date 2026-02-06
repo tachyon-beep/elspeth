@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import FieldContract, SchemaContract, SourceRow
+from elspeth.contracts import ArtifactDescriptor, FieldContract, SchemaContract, SourceRow
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
@@ -44,7 +44,7 @@ class TestOrchestratorProgress:
 
     def test_progress_callback_called_every_100_rows(self, payload_store) -> None:
         """Verify progress callback is called at 100, 200, and 250 row marks."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, ProgressEvent, SourceRow
+        from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -125,7 +125,7 @@ class TestOrchestratorProgress:
 
     def test_progress_callback_not_called_when_none(self, payload_store) -> None:
         """Verify no crash when on_progress is None."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -165,7 +165,7 @@ class TestOrchestratorProgress:
         continue, so quarantined rows at 100-row boundaries never triggered
         progress updates.
         """
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, ProgressEvent, SourceRow
+        from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 

@@ -7,7 +7,7 @@ by CLI formatters for human-readable or structured output.
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from elspeth.contracts.enums import (
     NodeStateStatus,
@@ -16,7 +16,7 @@ from elspeth.contracts.enums import (
 )
 
 
-class PipelinePhase(str, Enum):
+class PipelinePhase(StrEnum):
     """Pipeline lifecycle phases for observability events.
 
     Uses (str, Enum) pattern for consistency with existing codebase
@@ -34,7 +34,7 @@ class PipelinePhase(str, Enum):
     EXPORT = "export"
 
 
-class PhaseAction(str, Enum):
+class PhaseAction(StrEnum):
     """Actions within a pipeline phase."""
 
     LOADING = "loading"
@@ -46,7 +46,7 @@ class PhaseAction(str, Enum):
     EXPORTING = "exporting"
 
 
-class RunCompletionStatus(str, Enum):
+class RunCompletionStatus(StrEnum):
     """Final status for RunSummary events."""
 
     COMPLETED = "completed"

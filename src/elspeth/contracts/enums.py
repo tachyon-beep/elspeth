@@ -5,13 +5,13 @@ There is no "unknown" - undeclared determinism crashes at registration time.
 This is per ELSPETH's principle: "I don't know what happened" is never acceptable.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class RunStatus(str, Enum):
+class RunStatus(StrEnum):
     """Status of a pipeline run.
 
-    Uses (str, Enum) because this IS stored in the database (runs.status).
+    Stored in the database (runs.status).
     """
 
     RUNNING = "running"
@@ -19,10 +19,10 @@ class RunStatus(str, Enum):
     FAILED = "failed"
 
 
-class NodeStateStatus(str, Enum):
+class NodeStateStatus(StrEnum):
     """Status of a node processing a token.
 
-    Uses (str, Enum) for database serialization to node_states.status.
+    Stored in database (node_states.status).
     """
 
     OPEN = "open"
@@ -31,10 +31,10 @@ class NodeStateStatus(str, Enum):
     FAILED = "failed"
 
 
-class ExportStatus(str, Enum):
+class ExportStatus(StrEnum):
     """Status of run export operation.
 
-    Uses (str, Enum) for database serialization.
+    Stored in the database.
     """
 
     PENDING = "pending"
@@ -42,10 +42,10 @@ class ExportStatus(str, Enum):
     FAILED = "failed"
 
 
-class BatchStatus(str, Enum):
+class BatchStatus(StrEnum):
     """Status of an aggregation batch.
 
-    Uses (str, Enum) for database serialization to batches.status.
+    Stored in database (batches.status).
     """
 
     DRAFT = "draft"
@@ -54,10 +54,10 @@ class BatchStatus(str, Enum):
     FAILED = "failed"
 
 
-class TriggerType(str, Enum):
+class TriggerType(StrEnum):
     """Type of trigger that caused an aggregation batch to execute.
 
-    Uses (str, Enum) for database serialization to batches.trigger_type.
+    Stored in database (batches.trigger_type).
 
     Values:
         COUNT: Batch reached configured row count threshold
@@ -74,10 +74,10 @@ class TriggerType(str, Enum):
     MANUAL = "manual"
 
 
-class NodeType(str, Enum):
+class NodeType(StrEnum):
     """Type of node in the execution graph.
 
-    Uses (str, Enum) for database serialization to nodes.node_type.
+    Stored in database (nodes.node_type).
     """
 
     SOURCE = "source"
@@ -88,7 +88,7 @@ class NodeType(str, Enum):
     SINK = "sink"
 
 
-class Determinism(str, Enum):
+class Determinism(StrEnum):
     """Plugin determinism classification for reproducibility.
 
     Every plugin MUST declare one of these at registration. No default.
@@ -102,7 +102,7 @@ class Determinism(str, Enum):
     - EXTERNAL_CALL: Record request/response for replay
     - NON_DETERMINISTIC: Must record output, cannot reproduce
 
-    Uses (str, Enum) for database serialization to nodes.determinism.
+    Stored in database (nodes.determinism).
     """
 
     DETERMINISTIC = "deterministic"
@@ -113,10 +113,10 @@ class Determinism(str, Enum):
     NON_DETERMINISTIC = "non_deterministic"
 
 
-class RoutingKind(str, Enum):
+class RoutingKind(StrEnum):
     """Kind of routing action from a gate.
 
-    Uses (str, Enum) for serialization in routing_events.
+    Stored in routing_events.
     """
 
     CONTINUE = "continue"
@@ -124,7 +124,7 @@ class RoutingKind(str, Enum):
     FORK_TO_PATHS = "fork_to_paths"
 
 
-class RoutingMode(str, Enum):
+class RoutingMode(StrEnum):
     """Mode for routing edges.
 
     MOVE: Token exits current path, goes to destination only
@@ -135,7 +135,7 @@ class RoutingMode(str, Enum):
             on_error edges. These are structural markers in the DAG — rows
             reach these sinks via exception handling, not by traversing the edge.
 
-    Uses (str, Enum) for database serialization.
+    Stored in the database.
     """
 
     MOVE = "move"
@@ -143,11 +143,11 @@ class RoutingMode(str, Enum):
     DIVERT = "divert"
 
 
-class RowOutcome(str, Enum):
+class RowOutcome(StrEnum):
     """Outcome for a token in the pipeline.
 
     These outcomes are explicitly recorded in the `token_outcomes` table
-    (AUD-001) at determination time. The (str, Enum) base allows direct
+    (AUD-001) at determination time. The (StrEnum) base allows direct
     database storage via .value.
 
     Most outcomes are TERMINAL - the token's journey is complete:
@@ -188,10 +188,10 @@ class RowOutcome(str, Enum):
         return self != RowOutcome.BUFFERED
 
 
-class CallType(str, Enum):
+class CallType(StrEnum):
     """Type of external call (Phase 6).
 
-    Uses (str, Enum) for database serialization to calls.call_type.
+    Stored in database (calls.call_type).
     """
 
     LLM = "llm"
@@ -200,20 +200,20 @@ class CallType(str, Enum):
     FILESYSTEM = "filesystem"
 
 
-class CallStatus(str, Enum):
+class CallStatus(StrEnum):
     """Status of an external call (Phase 6).
 
-    Uses (str, Enum) for database serialization to calls.status.
+    Stored in database (calls.status).
     """
 
     SUCCESS = "success"
     ERROR = "error"
 
 
-class RunMode(str, Enum):
+class RunMode(StrEnum):
     """Pipeline execution mode for live/replay/verify behavior.
 
-    Uses (str, Enum) for database serialization to runs.run_mode.
+    Stored in database (runs.run_mode).
 
     Values:
         LIVE: Make real API calls, record everything
@@ -226,10 +226,8 @@ class RunMode(str, Enum):
     VERIFY = "verify"
 
 
-class TelemetryGranularity(str, Enum):
+class TelemetryGranularity(StrEnum):
     """Granularity of telemetry events emitted by the TelemetryManager.
-
-    Uses (str, Enum) for YAML/settings parsing and serialization.
 
     Values:
         LIFECYCLE: Only run start/complete/failed events (minimal overhead)
@@ -242,10 +240,8 @@ class TelemetryGranularity(str, Enum):
     FULL = "full"
 
 
-class BackpressureMode(str, Enum):
+class BackpressureMode(StrEnum):
     """How to handle backpressure when telemetry exporters can't keep up.
-
-    Uses (str, Enum) for YAML/settings parsing and serialization.
 
     Values:
         BLOCK: Block the pipeline until exporters catch up (safest, may slow pipeline)
@@ -263,10 +259,10 @@ class BackpressureMode(str, Enum):
 _IMPLEMENTED_BACKPRESSURE_MODES = frozenset({BackpressureMode.BLOCK, BackpressureMode.DROP})
 
 
-class OutputMode(str, Enum):
+class OutputMode(StrEnum):
     """Output mode for aggregation batches.
 
-    Uses (str, Enum) for YAML config compatibility and database serialization.
+    Stored in database.
 
     Values:
         PASSTHROUGH: Emit buffered rows unchanged after flush

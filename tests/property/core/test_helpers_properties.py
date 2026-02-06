@@ -22,7 +22,7 @@ Timestamp Properties:
 from __future__ import annotations
 
 from datetime import UTC, timedelta
-from enum import Enum
+from enum import StrEnum
 
 import pytest
 from hypothesis import given, settings
@@ -41,7 +41,7 @@ invalid_enum_values = st.text(min_size=1, max_size=20).filter(
 
 
 # Sample enum for coercion tests (avoid Test* prefix to prevent pytest collection)
-class SampleStatus(str, Enum):
+class SampleStatus(StrEnum):
     """Sample enum for property tests."""
 
     PENDING = "pending"
@@ -182,7 +182,7 @@ class TestCoerceEnumProperties:
         coerce it as a different enum type should fail.
         """
 
-        class OtherEnum(str, Enum):
+        class OtherEnum(StrEnum):
             ACTIVE = "active"
             INACTIVE = "inactive"
 

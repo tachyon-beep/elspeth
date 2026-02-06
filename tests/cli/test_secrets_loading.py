@@ -15,9 +15,7 @@ runner = CliRunner()
 class TestCLISecretsLoading:
     """Tests for secret loading in CLI run command."""
 
-    def test_run_with_keyvault_secrets_loads_before_config(
-        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
-    ) -> None:
+    def test_run_with_keyvault_secrets_loads_before_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Secrets should be loaded before config resolution."""
         from elspeth.cli import app
 
@@ -55,9 +53,7 @@ default_sink: output
             # Verify secret was loaded
             mock_loader.get_secret.assert_called_once_with("test-secret")
 
-    def test_run_with_keyvault_failure_exits_with_error(
-        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
-    ) -> None:
+    def test_run_with_keyvault_failure_exits_with_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Key Vault failure should exit with clear error message."""
         from elspeth.cli import app
         from elspeth.core.security.secret_loader import SecretNotFoundError

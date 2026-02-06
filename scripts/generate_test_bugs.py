@@ -7,13 +7,14 @@ and generates structured bug tickets in docs/test_bugs/open/.
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 
 
 @dataclass
 class AuditFinding:
     """A single finding from an audit file."""
+
     level: str  # Warning, Info
     line_ref: str
     description: str
@@ -22,6 +23,7 @@ class AuditFinding:
 @dataclass
 class AuditFile:
     """Parsed audit file content."""
+
     filename: str
     test_file: str
     lines: int
@@ -73,20 +75,20 @@ def parse_test_path(filename: str) -> tuple[str, str]:
 
 def extract_verdict(content: str) -> tuple[str, str]:
     """Extract verdict type and detail from audit content."""
-    verdict_section = re.search(r'## Verdict\s*\n(.*?)(?=\n#|$)', content, re.DOTALL)
+    verdict_section = re.search(r"## Verdict\s*\n(.*?)(?=\n#|$)", content, re.DOTALL)
     if not verdict_section:
         return "UNKNOWN", ""
 
     section_text = verdict_section.group(1).strip()
 
     # Check for bold verdict first
-    for v in ['REWRITE', 'SPLIT', 'DELETE', 'MERGE', 'KEEP']:
-        pattern = rf'\*\*{v}[^*]*\*\*'
+    for v in ["REWRITE", "SPLIT", "DELETE", "MERGE", "KEEP"]:
+        pattern = rf"\*\*{v}[^*]*\*\*"
         if re.search(pattern, section_text):
             return v, section_text
 
     # Check for non-bold verdict
-    for v in ['REWRITE', 'SPLIT', 'DELETE', 'MERGE', 'KEEP']:
+    for v in ["REWRITE", "SPLIT", "DELETE", "MERGE", "KEEP"]:
         if section_text.upper().startswith(v):
             return v, section_text
 
@@ -98,19 +100,19 @@ def parse_findings(content: str) -> list[AuditFinding]:
     findings = []
 
     # Find the Findings section
-    findings_section = re.search(r'## Findings\s*\n(.*?)(?=\n## |$)', content, re.DOTALL)
+    findings_section = re.search(r"## Findings\s*\n(.*?)(?=\n## |$)", content, re.DOTALL)
     if not findings_section:
         return findings
 
     section_text = findings_section.group(1)
 
     # Parse warning items (🟡)
-    warning_pattern = r'-\s+\*\*([^*]+)\*\*[:\s]*(.*?)(?=\n-|\n###|\n##|$)'
+    warning_pattern = r"-\s+\*\*([^*]+)\*\*[:\s]*(.*?)(?=\n-|\n###|\n##|$)"
     for match in re.finditer(warning_pattern, section_text, re.DOTALL):
         line_ref = match.group(1).strip()
         description = match.group(2).strip()
         # Clean up description - remove extra whitespace
-        description = ' '.join(description.split())
+        description = " ".join(description.split())
         if description:
             findings.append(AuditFinding("Warning", line_ref, description))
 
@@ -128,11 +130,11 @@ def parse_audit_file(filepath: Path) -> AuditFile | None:
     filename = filepath.name
 
     # Extract metadata
-    lines_match = re.search(r'\*\*Lines:\*\*\s*(\d+)', content)
-    test_count_match = re.search(r'\*\*Test count:\*\*\s*(\d+)', content)
+    lines_match = re.search(r"\*\*Lines:\*\*\s*(\d+)", content)
+    test_count_match = re.search(r"\*\*Test count:\*\*\s*(\d+)", content)
 
     # Extract summary
-    summary_match = re.search(r'## Summary\s*\n(.*?)(?=\n## )', content, re.DOTALL)
+    summary_match = re.search(r"## Summary\s*\n(.*?)(?=\n## )", content, re.DOTALL)
     summary = summary_match.group(1).strip() if summary_match else ""
 
     # Extract verdict
@@ -179,9 +181,7 @@ def verdict_to_priority(verdict: str, findings: list[AuditFinding]) -> str:
 
 def verdict_to_severity(verdict: str) -> str:
     """Map verdict to severity."""
-    if verdict in ("REWRITE", "DELETE"):
-        return "minor"
-    elif verdict == "SPLIT":
+    if verdict in ("REWRITE", "DELETE", "SPLIT"):
         return "minor"
     else:
         return "trivial"
@@ -191,7 +191,7 @@ def generate_ticket(audit: AuditFile) -> str:
     """Generate a bug ticket from parsed audit."""
     priority = verdict_to_priority(audit.verdict, audit.findings)
     severity = verdict_to_severity(audit.verdict)
-    today = date.today().isoformat()
+    today = datetime.now(UTC).date().isoformat()
 
     # Format findings as bullet points
     findings_text = ""
@@ -281,11 +281,11 @@ def slugify(text: str, max_len: int = 50) -> str:
     # Lowercase and replace spaces with hyphens
     slug = text.lower().replace(" ", "-")
     # Remove non-alphanumeric except hyphens
-    slug = re.sub(r'[^a-z0-9-]', '', slug)
+    slug = re.sub(r"[^a-z0-9-]", "", slug)
     # Collapse multiple hyphens
-    slug = re.sub(r'-+', '-', slug)
+    slug = re.sub(r"-+", "-", slug)
     # Truncate
-    return slug[:max_len].rstrip('-')
+    return slug[:max_len].rstrip("-")
 
 
 def main():
@@ -293,8 +293,18 @@ def main():
     output_dir = Path("docs/test_bugs/open")
 
     # Ensure output directories exist
-    for subdir in ["cli", "contracts", "core-checkpoint", "core-landscape",
-                   "core-security", "core-config", "engine", "audit", "plugins", "misc"]:
+    for subdir in [
+        "cli",
+        "contracts",
+        "core-checkpoint",
+        "core-landscape",
+        "core-security",
+        "core-config",
+        "engine",
+        "audit",
+        "plugins",
+        "misc",
+    ]:
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     # Process all audit files
@@ -316,7 +326,7 @@ def main():
 
         # Generate filename
         priority = verdict_to_priority(audit.verdict, audit.findings)
-        today = date.today().isoformat()
+        today = datetime.now(UTC).date().isoformat()
         short_name = audit.test_file.split("/")[-1].replace(".py", "").replace("test_", "")
         slug = slugify(short_name)
         filename = f"{priority}-{today}-{slug}.md"
@@ -327,15 +337,15 @@ def main():
         print(f"Created: {ticket_path}")
 
     # Print summary
-    print(f"\n{'='*60}")
-    print(f"Test Bug Generation Summary")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("Test Bug Generation Summary")
+    print(f"{'=' * 60}")
     print(f"Total audit files: {stats['total']}")
     print(f"Files with issues: {stats['processed']}")
-    print(f"\nBy verdict:")
+    print("\nBy verdict:")
     for v, count in sorted(stats["by_verdict"].items(), key=lambda x: -x[1]):
         print(f"  {v}: {count}")
-    print(f"\nBy category:")
+    print("\nBy category:")
     for c, count in sorted(stats["by_category"].items(), key=lambda x: -x[1]):
         print(f"  {c}: {count}")
 

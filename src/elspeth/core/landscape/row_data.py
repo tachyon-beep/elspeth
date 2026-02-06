@@ -14,11 +14,11 @@ States:
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class RowDataState(str, Enum):
+class RowDataState(StrEnum):
     """Discriminator for row data retrieval results.
 
     Inherits from str for JSON serialization compatibility.

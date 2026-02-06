@@ -19,7 +19,6 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import (
-    checkpoints_table,
     nodes_table,
     rows_table,
     runs_table,

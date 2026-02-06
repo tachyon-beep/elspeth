@@ -17,7 +17,6 @@ from elspeth.contracts.types import CoalesceName
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
-    _TestSinkBase,
     _TestSourceBase,
     as_sink,
     as_source,
