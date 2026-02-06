@@ -510,13 +510,14 @@ class TransformExecutor:
             # the routing_event is recorded inside the executor where state_id
             # is in scope, co-located with the node_state lifecycle.
             if on_error != "discard":
-                error_edge_id = self._error_edge_ids.get(NodeID(transform.node_id))
-                if error_edge_id is None:
+                try:
+                    error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
+                except KeyError:
                     raise OrchestrationInvariantError(
                         f"Transform '{transform.node_id}' has on_error={on_error!r} but no "
                         f"DIVERT edge registered. DAG construction should have created an "
                         f"__error_N__ edge in from_plugin_instances()."
-                    )
+                    ) from None
                 self._recorder.record_routing_event(
                     state_id=state.state_id,
                     edge_id=error_edge_id,

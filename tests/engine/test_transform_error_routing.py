@@ -169,7 +169,8 @@ class TestTransformErrorRouting:
         )
 
         executor = TransformExecutor(
-            recorder, SpanFactory(),
+            recorder,
+            SpanFactory(),
             error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
         )
 
@@ -382,7 +383,8 @@ class TestTransformErrorRouting:
         ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
 
         executor = TransformExecutor(
-            recorder, SpanFactory(),
+            recorder,
+            SpanFactory(),
             error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
         )
 
@@ -601,7 +603,8 @@ class TestTransformErrorRouting:
         )
 
         executor = TransformExecutor(
-            recorder, SpanFactory(),
+            recorder,
+            SpanFactory(),
             error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
         )
 
@@ -685,7 +688,8 @@ class TestTransformErrorRouting:
         )
 
         executor = TransformExecutor(
-            recorder, SpanFactory(),
+            recorder,
+            SpanFactory(),
             error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
         )
 
@@ -775,7 +779,8 @@ class TestTransformErrorDivertRoutingEvent:
         ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
 
         executor = TransformExecutor(
-            recorder, SpanFactory(),
+            recorder,
+            SpanFactory(),
             error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
         )
 

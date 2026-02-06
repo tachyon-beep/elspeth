@@ -477,7 +477,8 @@ class TestTransformExecutor:
         transform = ErrorRoutingTransform()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
         executor = TransformExecutor(
-            recorder, SpanFactory(),
+            recorder,
+            SpanFactory(),
             error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
         )
 
@@ -807,7 +808,8 @@ class TestTransformErrorIdRegression:
         transform = FailingFieldMapper()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
         executor = TransformExecutor(
-            recorder, SpanFactory(),
+            recorder,
+            SpanFactory(),
             error_edge_ids={NodeID(node2.node_id): error_edge.edge_id},
         )
 

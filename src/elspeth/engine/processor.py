@@ -178,7 +178,10 @@ class RowProcessor:
 
         self._token_manager = TokenManager(recorder, payload_store=payload_store)
         self._transform_executor = TransformExecutor(
-            recorder, span_factory, max_workers=max_workers, error_edge_ids=error_edge_ids,
+            recorder,
+            span_factory,
+            max_workers=max_workers,
+            error_edge_ids=error_edge_ids,
         )
         self._gate_executor = GateExecutor(recorder, span_factory, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(
@@ -1255,12 +1258,15 @@ class RowProcessor:
                     # Record DIVERT routing_event using ctx.state_id (set by executor
                     # at executors.py:247 before the exception propagated).
                     if on_error != "discard":
-                        error_edge_id = self._error_edge_ids.get(NodeID(transform.node_id))
-                        if error_edge_id is None:
+                        try:
+                            error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
+                        except KeyError:
                             raise OrchestrationInvariantError(
-                                f"Transform '{transform.node_id}' has on_error={on_error!r} "
-                                f"but no DIVERT edge registered."
+                                f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
                             ) from e
+                        assert ctx.state_id is not None, (
+                            f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
+                        )
                         self._recorder.record_routing_event(
                             state_id=ctx.state_id,
                             edge_id=error_edge_id,
@@ -1300,12 +1306,15 @@ class RowProcessor:
                 # Record DIVERT routing_event using ctx.state_id (set by executor
                 # at executors.py:247 before the exception propagated).
                 if on_error != "discard":
-                    error_edge_id = self._error_edge_ids.get(NodeID(transform.node_id))
-                    if error_edge_id is None:
+                    try:
+                        error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
+                    except KeyError:
                         raise OrchestrationInvariantError(
-                            f"Transform '{transform.node_id}' has on_error={on_error!r} "
-                            f"but no DIVERT edge registered."
+                            f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
                         ) from e
+                    assert ctx.state_id is not None, (
+                        f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
+                    )
                     self._recorder.record_routing_event(
                         state_id=ctx.state_id,
                         edge_id=error_edge_id,

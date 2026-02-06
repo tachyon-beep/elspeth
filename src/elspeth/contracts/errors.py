@@ -76,10 +76,7 @@ class PluginGateReason(TypedDict):
     comparison: NotRequired[str]
 
 
-# Discriminated union - field presence distinguishes variants:
-# - ConfigGateReason has "condition" and "result"
-# - PluginGateReason has "rule" and "matched_value"
-RoutingReason = ConfigGateReason | PluginGateReason
+# RoutingReason union is defined after TransformErrorReason (below line ~410)
 
 
 # Literal type for common transform actions (extensible - str also accepted)
@@ -406,6 +403,13 @@ class TransformErrorReason(TypedDict):
     output_file_id: NotRequired[str]  # Batch output file reference
     malformed_count: NotRequired[int]  # Count of malformed batch lines
     errors: NotRequired[list[str | ErrorDetail]]  # Error messages or structured errors
+
+
+# Discriminated union - field presence distinguishes variants:
+# - ConfigGateReason has "condition" and "result"
+# - PluginGateReason has "rule" and "matched_value"
+# - TransformErrorReason has "reason" (error category string)
+RoutingReason = ConfigGateReason | PluginGateReason | TransformErrorReason
 
 
 # =============================================================================
