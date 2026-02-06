@@ -888,7 +888,6 @@ class TestResolveConfig:
             transforms=[
                 {
                     "plugin": "field_mapper",
-                    "type": "transform",
                     "options": {"mapping": {"a": "b"}},
                 },
             ],

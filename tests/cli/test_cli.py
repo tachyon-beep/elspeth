@@ -453,8 +453,8 @@ class TestPurgeCommand:
         custom_payload_path = tmp_path / "custom_payloads"
         custom_payload_path.mkdir()
         settings = {
-            "source": {"plugin": "csv", "path": "test.csv"},
-            "sinks": {"output": {"plugin": "csv", "path": "output.csv"}},
+            "source": {"plugin": "csv", "options": {"path": "test.csv"}},
+            "sinks": {"output": {"plugin": "csv", "options": {"path": "output.csv"}}},
             "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
             "payload_store": {
@@ -492,8 +492,8 @@ class TestPurgeCommand:
 
         # Create settings.yaml with unsupported backend
         settings = {
-            "source": {"plugin": "csv", "path": "test.csv"},
-            "sinks": {"output": {"plugin": "csv", "path": "output.csv"}},
+            "source": {"plugin": "csv", "options": {"path": "test.csv"}},
+            "sinks": {"output": {"plugin": "csv", "options": {"path": "output.csv"}}},
             "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
             "payload_store": {

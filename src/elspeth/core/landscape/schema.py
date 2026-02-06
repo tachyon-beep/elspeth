@@ -356,8 +356,8 @@ batch_members_table = Table(
     Column("batch_id", String(64), ForeignKey("batches.batch_id"), nullable=False),
     Column("token_id", String(64), ForeignKey("tokens.token_id"), nullable=False),
     Column("ordinal", Integer, nullable=False),
-    UniqueConstraint("batch_id", "ordinal"),
-    UniqueConstraint("batch_id", "token_id"),  # Prevent duplicate token in same batch
+    PrimaryKeyConstraint("batch_id", "token_id"),  # Natural key: token belongs to batch once
+    UniqueConstraint("batch_id", "ordinal"),  # Ordering uniqueness within a batch
 )
 
 batch_outputs_table = Table(

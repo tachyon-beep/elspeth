@@ -10,6 +10,7 @@ Uses content-addressable storage (hash-based) for:
 
 import hashlib
 import hmac
+import os
 import re
 from pathlib import Path
 
@@ -101,9 +102,26 @@ class FilesystemPayloadStore:
                     f"Payload integrity check failed on store: existing file has hash {actual_hash}, expected {content_hash}"
                 )
         else:
-            # File doesn't exist - write it
+            # File doesn't exist — atomic write via temp file to prevent
+            # partial/corrupted files on crash (Tier 1 integrity requirement)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
+            temp_path = path.with_suffix(".tmp")
+            try:
+                with open(temp_path, "wb") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temp_path, path)
+                # Fsync parent directory to ensure rename survives power loss
+                dir_fd = os.open(str(path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except BaseException:
+                if temp_path.exists():
+                    temp_path.unlink()
+                raise
 
         return content_hash
 

@@ -256,7 +256,7 @@ class AggregationSettings(BaseModel):
               compute_mean: true
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Aggregation identifier (unique within pipeline)")
     plugin: str = Field(description="Plugin name to instantiate")
@@ -309,7 +309,7 @@ class GateSettings(BaseModel):
               - path_b
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Gate identifier (unique within pipeline)")
     condition: str = Field(description="Expression to evaluate (validated by ExpressionParser)")
@@ -465,7 +465,7 @@ class CoalesceSettings(BaseModel):
             timeout_seconds: 30
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Unique identifier for this coalesce point")
     branches: list[str] = Field(
@@ -523,7 +523,7 @@ class CoalesceSettings(BaseModel):
 class SourceSettings(BaseModel):
     """Source plugin configuration per architecture."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     plugin: str = Field(description="Plugin name (csv_local, json, http_poll, etc.)")
     options: dict[str, Any] = Field(
@@ -539,7 +539,7 @@ class TransformSettings(BaseModel):
     Plugin-based gates were removed - use the gates: section instead.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     plugin: str = Field(description="Plugin name")
     options: dict[str, Any] = Field(
@@ -551,7 +551,7 @@ class TransformSettings(BaseModel):
 class SinkSettings(BaseModel):
     """Sink plugin configuration per architecture."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     plugin: str = Field(description="Plugin name (csv, json, database, webhook, etc.)")
     options: dict[str, Any] = Field(
@@ -567,7 +567,7 @@ class LandscapeExportSettings(BaseModel):
     Optional cryptographic signing for legal-grade integrity.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(
         default=False,
@@ -590,7 +590,7 @@ class LandscapeExportSettings(BaseModel):
 class LandscapeSettings(BaseModel):
     """Landscape audit system configuration per architecture."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(default=True, description="Enable audit trail recording")
     backend: Literal["sqlite", "postgresql"] = Field(
@@ -652,7 +652,7 @@ class LandscapeSettings(BaseModel):
 class ConcurrencySettings(BaseModel):
     """Parallel processing configuration per architecture."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     max_workers: int = Field(
         default=4,
@@ -664,7 +664,7 @@ class ConcurrencySettings(BaseModel):
 class DatabaseSettings(BaseModel):
     """Database connection configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     url: str = Field(description="SQLAlchemy database URL")
     pool_size: int = Field(default=5, gt=0, description="Connection pool size")
@@ -674,7 +674,7 @@ class DatabaseSettings(BaseModel):
 class ServiceRateLimit(BaseModel):
     """Rate limit configuration for a specific service."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     requests_per_minute: int = Field(default=60, gt=0, description="Maximum requests per minute")
 
@@ -694,7 +694,7 @@ class RateLimitSettings(BaseModel):
               requests_per_minute: 120
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(default=True, description="Enable rate limiting for external calls")
     default_requests_per_minute: int = Field(default=60, gt=0, description="Default per-minute rate limit for unconfigured services")
@@ -719,7 +719,7 @@ class CheckpointSettings(BaseModel):
     - aggregation_only: Fastest, checkpoint only at aggregation flushes.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = True
     frequency: Literal["every_row", "every_n", "aggregation_only"] = "every_row"
@@ -736,7 +736,7 @@ class CheckpointSettings(BaseModel):
 class RetrySettings(BaseModel):
     """Retry behavior configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     max_attempts: int = Field(default=3, gt=0, description="Maximum retry attempts")
     initial_delay_seconds: float = Field(default=1.0, gt=0, description="Initial backoff delay")
@@ -747,7 +747,7 @@ class RetrySettings(BaseModel):
 class PayloadStoreSettings(BaseModel):
     """Payload store configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     backend: str = Field(default="filesystem", description="Storage backend type")
     base_path: Path = Field(
@@ -771,7 +771,7 @@ class ExporterSettings(BaseModel):
                 endpoint: https://otel.example.com
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Exporter name (console, otlp, azure_monitor, datadog)")
     options: dict[str, Any] = Field(
@@ -819,7 +819,7 @@ class TelemetrySettings(BaseModel):
         - slow: Adaptive rate limiting (not yet implemented)
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(
         default=False,
@@ -858,7 +858,7 @@ class ElspethSettings(BaseModel):
     All settings are validated and frozen after construction.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     # Required - core pipeline definition
     source: SourceSettings = Field(
@@ -1559,11 +1559,15 @@ def load_settings(config_path: Path) -> ElspethSettings:
     )
 
     # Dynaconf returns uppercase keys; convert to lowercase for Pydantic
-    # Also filter out internal Dynaconf settings
-    internal_keys = {"LOAD_DOTENV", "ENVIRONMENTS", "SETTINGS_FILES"}
     raw_dict = dynaconf_settings.as_dict()
-    filtered = {k: v for k, v in raw_dict.items() if k not in internal_keys}
-    raw_config = _lowercase_schema_keys(filtered)
+    raw_config = _lowercase_schema_keys(raw_dict)
+
+    # Positive allowlist: only pass keys that ElspethSettings knows about.
+    # Dynaconf injects internal settings (LOAD_DOTENV, ENVIRONMENTS, SETTINGS_FILES,
+    # MERGE_ENABLED, ALLOW_RAW_SECRETS, etc.) which must be excluded. A positive
+    # allowlist is robust against Dynaconf version changes — no whack-a-mole.
+    known_fields = set(ElspethSettings.model_fields.keys())
+    raw_config = {k: v for k, v in raw_config.items() if k in known_fields}
 
     # Expand ${VAR} and ${VAR:-default} patterns in config values
     raw_config = _expand_env_vars(raw_config)
