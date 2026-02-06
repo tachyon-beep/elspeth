@@ -116,10 +116,10 @@ allow_hits:
   reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
   safety: Returns lineage with payload_available=False - caller sees data was purged
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=d3e5e9d39ab48522
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=ff11b3a3d3c0e71d
   owner: architecture
   reason: OSError for infrastructure issues (NFS timeout, disk full) — payload unavailable but not corruption
-  safety: Returns lineage with payload_available=False - caller sees data was unavailable
+  safety: Logs warning with row_id/ref/error details, returns lineage with payload_available=False
   expires: null
 - key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=67f486733db58fcf
   owner: architecture

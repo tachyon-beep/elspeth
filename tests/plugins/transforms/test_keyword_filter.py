@@ -118,6 +118,90 @@ class TestKeywordFilterConfig:
         assert "blocked_patterns" in str(exc_info.value).lower()
 
 
+class TestValidateRegexSafety:
+    """Tests for _validate_regex_safety ReDoS detection."""
+
+    def test_rejects_nested_quantifier_star_star(self) -> None:
+        """(a*)* is a classic ReDoS pattern."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        with pytest.raises(ValueError, match="nested quantifiers"):
+            _validate_regex_safety("(a*)*")
+
+    def test_rejects_nested_quantifier_plus_plus(self) -> None:
+        """(a+)+ is the canonical ReDoS example."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        with pytest.raises(ValueError, match="nested quantifiers"):
+            _validate_regex_safety("(a+)+")
+
+    def test_rejects_nested_quantifier_plus_brace(self) -> None:
+        """(a+){2,} nests a quantifier inside a brace-quantified group."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        with pytest.raises(ValueError, match="nested quantifiers"):
+            _validate_regex_safety("(a+){2,}")
+
+    def test_rejects_non_capturing_group_nested(self) -> None:
+        """(?:a+)+ uses non-capturing group — still ReDoS."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        with pytest.raises(ValueError, match="nested quantifiers"):
+            _validate_regex_safety("(?:a+)+")
+
+    def test_accepts_simple_quantifier(self) -> None:
+        """a+ is a simple quantifier, not nested."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        _validate_regex_safety("a+")  # Should not raise
+
+    def test_accepts_alternation(self) -> None:
+        """(foo|bar) is safe — no nested quantifiers."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        _validate_regex_safety("(foo|bar)")  # Should not raise
+
+    def test_accepts_character_class_quantifier(self) -> None:
+        """[a-z]+ is a single quantifier, not nested."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        _validate_regex_safety("[a-z]+")  # Should not raise
+
+    def test_accepts_group_without_inner_quantifier(self) -> None:
+        """(abc)+ has a quantified group but no inner quantifier."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        _validate_regex_safety("(abc)+")  # Should not raise
+
+    def test_rejects_pattern_exceeding_max_length(self) -> None:
+        """Patterns exceeding _MAX_PATTERN_LENGTH are rejected."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        long_pattern = "a" * 1001
+        with pytest.raises(ValueError, match="exceeds maximum length"):
+            _validate_regex_safety(long_pattern)
+
+    def test_accepts_pattern_at_max_length(self) -> None:
+        """Pattern at exactly _MAX_PATTERN_LENGTH is accepted."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        pattern = "a" * 1000
+        _validate_regex_safety(pattern)  # Should not raise
+
+    def test_instantiation_rejects_redos_pattern(self) -> None:
+        """KeywordFilter __init__ rejects ReDoS-prone patterns."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        with pytest.raises(ValueError, match="nested quantifiers"):
+            KeywordFilter(
+                {
+                    "fields": ["content"],
+                    "blocked_patterns": ["(a+)+"],
+                    "schema": {"mode": "observed"},
+                }
+            )
+
+
 class TestKeywordFilterInstantiation:
     """Tests for KeywordFilter transform instantiation."""
 

@@ -15,6 +15,14 @@ from elspeth.plugins.schema_factory import create_schema_from_config
 
 # ReDoS detection: patterns with nested quantifiers cause catastrophic backtracking
 # on adversarial input. E.g., (a+)+ on "aaa...!" is O(2^n).
+#
+# Known limitations (defense-in-depth, not comprehensive):
+#   - Does not detect {n,} brace quantifiers inside groups: (a{2,})+
+#   - Cannot see past nested group boundaries: ((a+)b)+
+#   - Does not detect alternation-based attacks: (a|a)+
+#   - Does not detect overlapping character class repetition: [a-z]+[a-z]+
+# These gaps are mitigated by _MAX_PATTERN_LENGTH and the fact that patterns
+# come from operator-authored settings.yaml, not arbitrary user input.
 _NESTED_QUANTIFIER_RE = re.compile(
     r"[+*]\)["  # quantified group followed by
     r"+*{]"  # another quantifier

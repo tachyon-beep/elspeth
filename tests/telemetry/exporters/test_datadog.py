@@ -85,6 +85,20 @@ class TestDatadogExporterConfiguration:
             assert os.environ.get("DD_AGENT_HOST") is None
             assert os.environ.get("DD_TRACE_AGENT_PORT") is None
 
+    def test_pre_existing_env_vars_are_restored(self) -> None:
+        """Pre-existing DD_AGENT_HOST/DD_TRACE_AGENT_PORT are restored after configure."""
+        mock_module, _mock_tracer, _ = create_mock_ddtrace_module()
+
+        pre_existing = {"DD_AGENT_HOST": "original-host", "DD_TRACE_AGENT_PORT": "9999"}
+        with patch.dict(sys.modules, {"ddtrace": mock_module}), patch.dict("os.environ", pre_existing, clear=False):
+            exporter = DatadogExporter()
+            exporter.configure({"agent_host": "new-host", "agent_port": 1234})
+
+            import os
+
+            assert os.environ.get("DD_AGENT_HOST") == "original-host"
+            assert os.environ.get("DD_TRACE_AGENT_PORT") == "9999"
+
     def test_invalid_port_zero_raises(self) -> None:
         """Port 0 raises TelemetryExporterError."""
         exporter = DatadogExporter()

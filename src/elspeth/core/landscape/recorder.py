@@ -557,8 +557,9 @@ class LandscapeRecorder:
             fingerprint_key: Key for computing secret fingerprints (HMAC-SHA256)
 
         Note:
-            The secret_value in each record is used ONLY to compute the fingerprint.
-            The actual secret value is never stored in the audit database.
+            This method mutates each dict in ``resolutions``: the ``secret_value``
+            key is deleted after fingerprinting to clear plaintext secrets from
+            memory. Callers must not access ``secret_value`` after this call.
         """
         from elspeth.core.security.fingerprint import secret_fingerprint
 
@@ -1729,7 +1730,7 @@ class LandscapeRecorder:
             .where(batches_table.c.batch_id == batch_id)
             .values(
                 status=status.value,
-                trigger_type=trigger_type.value if trigger_type else None,
+                trigger_type=trigger_type.value if trigger_type is not None else None,
                 trigger_reason=trigger_reason,
                 aggregation_state_id=state_id,
                 completed_at=timestamp,
@@ -2668,9 +2669,15 @@ class LandscapeRecorder:
             except json.JSONDecodeError as e:
                 # Tier 1 violation: payload store data is OUR data — corruption is catastrophic
                 raise AuditIntegrityError(f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): {e}") from e
-            except OSError:
+            except OSError as e:
                 # Infrastructure issue (NFS timeout, disk full) — payload unavailable
-                pass
+                logging.getLogger(__name__).warning(
+                    "Payload retrieval failed for row %s (ref=%s): %s: %s",
+                    row_id,
+                    row.source_data_ref,
+                    type(e).__name__,
+                    e,
+                )
 
         return RowLineage(
             row_id=row.row_id,

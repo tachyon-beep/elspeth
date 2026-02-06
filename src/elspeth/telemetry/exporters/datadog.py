@@ -147,17 +147,19 @@ class DatadogExporter:
             os.environ["DD_AGENT_HOST"] = agent_host
             os.environ["DD_TRACE_AGENT_PORT"] = str(agent_port)
 
-            from ddtrace import tracer  # type: ignore[attr-defined]
-
-            # Restore original env (ddtrace caches connection info internally)
-            if old_host is None:
-                os.environ.pop("DD_AGENT_HOST", None)
-            else:
-                os.environ["DD_AGENT_HOST"] = old_host
-            if old_port is None:
-                os.environ.pop("DD_TRACE_AGENT_PORT", None)
-            else:
-                os.environ["DD_TRACE_AGENT_PORT"] = old_port
+            try:
+                from ddtrace import tracer  # type: ignore[attr-defined]
+            finally:
+                # Always restore original env, regardless of import outcome
+                # (ddtrace caches connection info internally at import time)
+                if old_host is None:
+                    os.environ.pop("DD_AGENT_HOST", None)
+                else:
+                    os.environ["DD_AGENT_HOST"] = old_host
+                if old_port is None:
+                    os.environ.pop("DD_TRACE_AGENT_PORT", None)
+                else:
+                    os.environ["DD_TRACE_AGENT_PORT"] = old_port
 
             self._tracer = tracer
         except ImportError as e:

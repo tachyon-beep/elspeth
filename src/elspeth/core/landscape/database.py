@@ -116,6 +116,7 @@ class LandscapeDB:
         Registers a connection event hook that sets:
         - PRAGMA journal_mode=WAL (better concurrency)
         - PRAGMA foreign_keys=ON (referential integrity)
+        - PRAGMA busy_timeout=5000 (contention tolerance)
 
         Args:
             engine: SQLAlchemy Engine to configure
