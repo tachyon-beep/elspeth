@@ -308,13 +308,19 @@ class JSONSink(BaseSink):
             self._file.write("\n")
 
     def _write_json_array(self) -> None:
-        """Write buffered rows as JSON array (rewrite mode)."""
-        if self._file is None:
-            # Handle kept open for streaming writes, closed in close()
-            self._file = open(self._path, "w", encoding=self._encoding)  # noqa: SIM115
-        self._file.seek(0)
-        self._file.truncate()
-        json.dump(self._rows, self._file, indent=self._indent)
+        """Write buffered rows as JSON array (atomic write via temp file).
+
+        Uses write-to-temp + os.replace() to prevent data loss on crash.
+        The temp file is in the same directory to guarantee same-filesystem
+        atomic rename on POSIX.
+        """
+        temp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        with open(temp_path, "w", encoding=self._encoding) as f:
+            json.dump(self._rows, f, indent=self._indent)
+            f.flush()
+            os.fsync(f.fileno())
+        # Atomic replace — file transitions directly from old content to new
+        os.replace(temp_path, self._path)
 
     def _compute_file_hash(self) -> str:
         """Compute SHA-256 hash of the file contents."""
@@ -340,11 +346,11 @@ class JSONSink(BaseSink):
             os.fsync(self._file.fileno())
 
     def close(self) -> None:
-        """Close the file handle."""
+        """Close the file handle and release buffered rows."""
         if self._file is not None:
             self._file.close()
             self._file = None
-            self._rows = []
+        self._rows = []
 
     # === Display Header Support ===
 
