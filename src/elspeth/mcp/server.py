@@ -24,7 +24,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from elspeth.contracts.enums import CallStatus
+from elspeth.contracts.enums import CallStatus, RoutingMode
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.formatters import dataclass_to_dict, serialize_datetime
 from elspeth.core.landscape.lineage import explain
@@ -669,6 +669,7 @@ class LandscapeAnalyzer:
                 "to": e.to_node_id,
                 "label": e.label,
                 "mode": e.default_mode.value,
+                "flow_type": "divert" if e.default_mode == RoutingMode.DIVERT else "normal",
             }
             for e in edges
         ]
@@ -679,7 +680,12 @@ class LandscapeAnalyzer:
             label = f"{n.plugin_name}[{n.node_type.value}]"
             lines.append(f'    {n.node_id[:8]}["{label}"]')
         for e in edges:
-            arrow = "-->" if e.label == "continue" else f"-->|{e.label}|"
+            if e.default_mode == RoutingMode.DIVERT:
+                arrow = f"-.->|{e.label}|"
+            elif e.label == "continue":
+                arrow = "-->"
+            else:
+                arrow = f"-->|{e.label}|"
             lines.append(f"    {e.from_node_id[:8]} {arrow} {e.to_node_id[:8]}")
 
         return {
