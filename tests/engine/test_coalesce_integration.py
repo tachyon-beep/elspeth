@@ -493,7 +493,7 @@ class TestCoalesceSuccessMetrics:
             ],
             transforms=[
                 # This transform runs AFTER coalesce
-                {"name": "post_coalesce", "plugin": "post_coalesce", "options": {}},
+                {"plugin": "post_coalesce", "options": {}},
             ],
         )
 

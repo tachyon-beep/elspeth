@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, PipelineRow, PluginSchema, RoutingMode, RowOutcome, RunStatus, SourceRow
+from elspeth.contracts.contract_records import ContractAuditRecord
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -29,6 +31,26 @@ from tests.conftest import (
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
+
+
+def _create_test_schema_contract() -> tuple[str, str]:
+    """Create a minimal schema contract for test runs.
+
+    Returns:
+        Tuple of (schema_contract_json, schema_contract_hash)
+    """
+    field_contracts = (
+        FieldContract(
+            normalized_name="test_field",
+            original_name="test_field",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    contract = SchemaContract(fields=field_contracts, mode="FIXED", locked=True)
+    audit_record = ContractAuditRecord.from_contract(contract)
+    return audit_record.to_json(), contract.version_hash()
 
 
 class _InputSchema(PluginSchema):
@@ -631,6 +653,7 @@ class TestCheckpointRecovery:
 
         run_id = "checkpoint-partial-progress-test"
         now = datetime.now(UTC)
+        contract_json, contract_hash = _create_test_schema_contract()
 
         # Create the run and rows directly in the database
         with db.engine.connect() as conn:
@@ -643,6 +666,8 @@ class TestCheckpointRecovery:
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
                     status=RunStatus.FAILED,
+                    schema_contract_json=contract_json,
+                    schema_contract_hash=contract_hash,
                 )
             )
 
@@ -764,6 +789,7 @@ class TestCheckpointRecovery:
 
         run_id = "checkpoint-restart-test"
         now = datetime.now(UTC)
+        contract_json, contract_hash = _create_test_schema_contract()
 
         with db1.engine.connect() as conn:
             # Create run
@@ -775,6 +801,8 @@ class TestCheckpointRecovery:
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
                     status=RunStatus.FAILED,
+                    schema_contract_json=contract_json,
+                    schema_contract_hash=contract_hash,
                 )
             )
 
@@ -932,10 +960,24 @@ class TestAggregationRecovery:
         recovery_mgr = test_env["recovery_manager"]
         recorder = test_env["recorder"]
 
-        # Create run
+        # Create run with schema contract (required by recovery protocol)
+        test_contract = SchemaContract(
+            fields=(
+                FieldContract(
+                    normalized_name="test_field",
+                    original_name="test_field",
+                    python_type=str,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            mode="FIXED",
+            locked=True,
+        )
         run = recorder.begin_run(
             config={"aggregation": {"trigger": {"count": 5}}},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=test_contract,
         )
 
         # Register nodes using raw SQL

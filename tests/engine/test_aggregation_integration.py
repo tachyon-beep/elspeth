@@ -210,7 +210,6 @@ class TestAggregationTimeoutIntegration:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
@@ -385,7 +384,6 @@ class TestAggregationTimeoutIntegration:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
@@ -546,7 +544,6 @@ class TestAggregationTimeoutIntegration:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
@@ -711,7 +708,6 @@ class TestEndOfSourceFlush:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -860,7 +856,6 @@ class TestEndOfSourceFlush:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -1013,7 +1008,6 @@ class TestEndOfSourceFlush:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -1174,7 +1168,6 @@ class TestEndOfSourceFlush:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -1328,7 +1321,6 @@ class TestEndOfSourceFlush:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -1482,7 +1474,6 @@ class TestTimeoutFlushErrorHandling:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         # Inject MockClock for deterministic timeout testing
@@ -1666,7 +1657,6 @@ class TestTimeoutFlushErrorHandling:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         # Inject MockClock for deterministic timeout testing
@@ -1829,7 +1819,6 @@ class TestTimeoutFlushErrorHandling:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -1999,7 +1988,6 @@ class TestTimeoutFlushErrorHandling:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -2181,7 +2169,6 @@ class TestTimeoutFlushErrorHandling:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -2341,7 +2328,6 @@ class TestTimeoutFlushErrorHandling:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -2498,7 +2484,6 @@ class TestTimeoutFlushStepIndexing:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         # Inject MockClock for deterministic timeout testing
@@ -2650,7 +2635,6 @@ class TestTimeoutFlushStepIndexing:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -2806,7 +2790,6 @@ class TestExpectedOutputCountEnforcement:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -2945,7 +2928,6 @@ class TestExpectedOutputCountEnforcement:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)
@@ -3074,7 +3056,6 @@ class TestExpectedOutputCountEnforcement:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
@@ -3216,7 +3197,6 @@ class TestExpectedOutputCountEnforcement:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
         )
 
         orchestrator = Orchestrator(db=landscape_db)

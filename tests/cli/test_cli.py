@@ -792,6 +792,8 @@ default_sink: output
         from sqlalchemy import insert
 
         from elspeth.cli import app
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.core.landscape import LandscapeDB
         from elspeth.core.landscape.schema import (
             nodes_table,
@@ -863,6 +865,21 @@ default_sink: output
         db_url = f"sqlite:///{db_file}"
         db = LandscapeDB.from_url(db_url)
 
+        # Create schema contract for the run (required by recovery protocol)
+        field_contracts = (
+            FieldContract(
+                normalized_name="data",
+                original_name="data",
+                python_type=str,
+                required=True,
+                source="declared",
+            ),
+        )
+        contract = SchemaContract(fields=field_contracts, mode="FIXED", locked=True)
+        audit_record = ContractAuditRecord.from_contract(contract)
+        contract_json = audit_record.to_json()
+        contract_hash = contract.version_hash()
+
         run_id = "failed-with-checkpoint-001"
         now = datetime.now(UTC)
         with db.connection() as conn:
@@ -876,6 +893,8 @@ default_sink: output
                     config_hash="abc123",
                     settings_json="{}",
                     canonical_version="1.0.0",
+                    schema_contract_json=contract_json,
+                    schema_contract_hash=contract_hash,
                 )
             )
             # Insert nodes (source and sink) for FK integrity using actual node IDs
