@@ -167,7 +167,7 @@ class TransformExecutor:
 
         if not hasattr(transform, "_executor_batch_adapter"):
             adapter = SharedBatchAdapter()
-            transform._executor_batch_adapter = adapter  # type: ignore[attr-defined]
+            transform._executor_batch_adapter = adapter  # type: ignore[attr-defined]  # dynamic attr on BatchTransformProtocol instances
 
             # Connect output (one-time setup)
             # Use _pool_size stored by LLM transforms, default to 30
@@ -175,10 +175,10 @@ class TransformExecutor:
             max_pending = getattr(transform, "_pool_size", 30)
             if self._max_workers is not None:
                 max_pending = min(max_pending, self._max_workers)
-            transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]
-            transform._batch_initialized = True  # type: ignore[attr-defined]
+            transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]  # BatchTransformProtocol method
+            transform._batch_initialized = True  # type: ignore[attr-defined]  # dynamic attr on BatchTransformProtocol instances
 
-        return transform._executor_batch_adapter  # type: ignore[attr-defined, return-value, no-any-return]
+        return transform._executor_batch_adapter  # type: ignore[attr-defined, return-value, no-any-return]  # dynamic attr set above
 
     def execute_transform(
         self,
@@ -283,7 +283,7 @@ class TransformExecutor:
                     ctx.token = token
 
                     # Submit work - this returns immediately
-                    transform.accept(token.row_data, ctx)  # type: ignore[attr-defined]
+                    transform.accept(token.row_data, ctx)  # type: ignore[attr-defined]  # BatchTransformProtocol method
 
                     # Block until THIS row's result arrives.
                     #
@@ -334,7 +334,7 @@ class TransformExecutor:
                 # 4. Original worker may still complete, but result is discarded
                 if isinstance(e, TimeoutError) and has_accept:
                     # has_accept guarantees transform has evict_submission (batch protocol)
-                    evict_fn = transform.evict_submission  # type: ignore[attr-defined]
+                    evict_fn = transform.evict_submission  # type: ignore[attr-defined]  # BatchTransformProtocol method
                     if not callable(evict_fn):
                         raise TypeError(
                             f"Transform '{transform.name}' evict_submission must be callable, got {type(evict_fn).__name__}"

@@ -34,6 +34,7 @@ from elspeth.core.config import (
 from elspeth.core.dag import (
     ExecutionGraph,
     GraphValidationError,
+    NodeConfig,
     NodeInfo,
 )
 from elspeth.core.events import (
@@ -62,6 +63,7 @@ __all__ = [
     "IntegrityError",
     "LandscapeExportSettings",
     "LandscapeSettings",
+    "NodeConfig",
     "NodeInfo",
     "NullEventBus",
     "PayloadStore",

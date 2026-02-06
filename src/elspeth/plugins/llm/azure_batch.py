@@ -252,7 +252,7 @@ class AzureBatchLLMTransform(BaseTransform):
         not per-row (since rows are processed by Azure infrastructure).
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
 
             cfg = self._tracing_config
             if not isinstance(cfg, LangfuseTracingConfig):
@@ -477,7 +477,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 "AzureBatchLLMTransform requires checkpoint API on PluginContext. "
                 "Ensure engine provides get_checkpoint/update_checkpoint/clear_checkpoint methods."
             )
-        return ctx.get_checkpoint()  # type: ignore[no-any-return]
+        return ctx.get_checkpoint()  # type: ignore[no-any-return]  # checkpoint returns dict[str, Any] | None, guarded by hasattr above
 
     def _update_checkpoint(self, ctx: PluginContext, data: dict[str, Any]) -> None:
         """Update checkpoint state.

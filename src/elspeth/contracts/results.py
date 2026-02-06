@@ -176,7 +176,7 @@ class TransformResult:
         if self.contract is None:
             raise ValueError("TransformResult has no contract - cannot create PipelineRow")
         # Single-row success result - row is guaranteed to be non-None
-        return PipelineRow(self.row, self.contract)  # type: ignore[arg-type]
+        return PipelineRow(self.row, self.contract)  # type: ignore[arg-type]  # row is non-None for success results (guarded above)
 
     def to_pipeline_rows(self) -> list[PipelineRow]:
         """Convert multi-row success result to list of PipelineRows.
@@ -196,7 +196,7 @@ class TransformResult:
         if self.contract is None:
             raise ValueError("TransformResult has no contract - cannot create PipelineRows")
         # Multi-row success result - rows is guaranteed to be non-None
-        return [PipelineRow(_extract_dict_from_row(row), self.contract) for row in self.rows]  # type: ignore[union-attr]
+        return [PipelineRow(_extract_dict_from_row(row), self.contract) for row in self.rows]  # type: ignore[union-attr]  # rows is non-None for multi-row results (guarded above)
 
     @classmethod
     def success(

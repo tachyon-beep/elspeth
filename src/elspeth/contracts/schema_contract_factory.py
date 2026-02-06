@@ -39,7 +39,7 @@ def map_schema_mode(
         SchemaContract mode literal (uppercase)
     """
     # Simple uppercase conversion - YAML lowercase to runtime uppercase
-    return mode.upper()  # type: ignore[return-value]
+    return mode.upper()  # type: ignore[return-value]  # str.upper() returns str, not Literal; callers validate mode beforehand
 
 
 def create_contract_from_config(

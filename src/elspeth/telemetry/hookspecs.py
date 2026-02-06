@@ -35,7 +35,7 @@ class ElspethTelemetrySpec:
     """Hook specifications for telemetry exporter plugins."""
 
     @hookspec
-    def elspeth_get_exporters(self) -> list[type["ExporterProtocol"]]:  # type: ignore[empty-body]
+    def elspeth_get_exporters(self) -> list[type["ExporterProtocol"]]:  # type: ignore[empty-body]  # pluggy hookspec: body provided by implementations
         """Return telemetry exporter classes.
 
         Called during TelemetryManager initialization to discover

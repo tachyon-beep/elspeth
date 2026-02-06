@@ -42,7 +42,7 @@ class ElspethSourceSpec:
     """Hook specifications for source plugins."""
 
     @hookspec
-    def elspeth_get_source(self) -> list[type["SourceProtocol"]]:  # type: ignore[empty-body]
+    def elspeth_get_source(self) -> list[type["SourceProtocol"]]:  # type: ignore[empty-body]  # pluggy hookspec: body provided by implementations
         """Return source plugin classes.
 
         Returns:
@@ -54,7 +54,7 @@ class ElspethTransformSpec:
     """Hook specifications for transform plugins."""
 
     @hookspec
-    def elspeth_get_transforms(self) -> list[type["TransformProtocol"]]:  # type: ignore[empty-body]
+    def elspeth_get_transforms(self) -> list[type["TransformProtocol"]]:  # type: ignore[empty-body]  # pluggy hookspec: body provided by implementations
         """Return transform plugin classes.
 
         Returns:
@@ -62,7 +62,7 @@ class ElspethTransformSpec:
         """
 
     @hookspec
-    def elspeth_get_gates(self) -> list[type["GateProtocol"]]:  # type: ignore[empty-body]
+    def elspeth_get_gates(self) -> list[type["GateProtocol"]]:  # type: ignore[empty-body]  # pluggy hookspec: body provided by implementations
         """Return gate plugin classes.
 
         Returns:
@@ -74,7 +74,7 @@ class ElspethSinkSpec:
     """Hook specifications for sink plugins."""
 
     @hookspec
-    def elspeth_get_sinks(self) -> list[type["SinkProtocol"]]:  # type: ignore[empty-body]
+    def elspeth_get_sinks(self) -> list[type["SinkProtocol"]]:  # type: ignore[empty-body]  # pluggy hookspec: body provided by implementations
         """Return sink plugin classes.
 
         Returns:

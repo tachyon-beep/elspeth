@@ -807,7 +807,7 @@ def create_server(database_path: str) -> Server:
     server = Server("chaosllm-analysis")
     analyzer = ChaosLLMAnalyzer(database_path)
 
-    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]
+    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def list_tools() -> list[Tool]:
         """List available analysis tools."""
         return [
@@ -923,7 +923,7 @@ def create_server(database_path: str) -> Server:
             ),
         ]
 
-    @server.call_tool()  # type: ignore[misc, untyped-decorator]
+    @server.call_tool()  # type: ignore[misc, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle tool calls."""
         try:

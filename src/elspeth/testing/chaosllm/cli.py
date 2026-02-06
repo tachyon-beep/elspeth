@@ -539,9 +539,9 @@ def mcp_main(
     # The chaosllm_mcp module is implemented in a separate task
     try:
         # Type ignore because module may not exist yet during development
-        import elspeth.testing.chaosllm_mcp.server as mcp_server  # type: ignore[import-not-found]
+        import elspeth.testing.chaosllm_mcp.server as mcp_server  # type: ignore[import-not-found]  # conditional import: module may not be built yet
 
-        mcp_server.serve(database)  # type: ignore[attr-defined]
+        mcp_server.serve(database)  # type: ignore[attr-defined]  # serve() defined at module level, not in stubs
     except ImportError as e:
         typer.secho(
             f"Error: MCP server not available. The chaosllm_mcp module may not be installed yet.\n{e}",

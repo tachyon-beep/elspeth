@@ -111,7 +111,7 @@ class FieldDefinition:
         if field_type not in SUPPORTED_TYPES:
             raise ValueError(f"Unsupported field type: {field_type}")
         # Cast needed because mypy can't infer type narrowing from set membership
-        typed_field: Literal["str", "int", "float", "bool", "any"] = field_type  # type: ignore[assignment]
+        typed_field: Literal["str", "int", "float", "bool", "any"] = field_type  # type: ignore[assignment]  # narrowed by SUPPORTED_TYPES membership check above
 
         return cls(
             name=name,

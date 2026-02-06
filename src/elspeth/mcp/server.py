@@ -983,7 +983,7 @@ class LandscapeAnalyzer:
                     "total_latency_ms": 0,
                 }
             stats = llm_by_plugin[plugin]
-            call_count: int = row.count  # type: ignore[assignment]
+            call_count: int = row.count  # type: ignore[assignment]  # SA Row attribute from COUNT() aggregate; typed as Any
             stats["total_calls"] += call_count
             if row.status == CallStatus.SUCCESS.value:
                 stats["successful"] += call_count
@@ -1727,7 +1727,7 @@ def create_server(database_url: str) -> Server:
     server = Server("elspeth-landscape")
     analyzer = LandscapeAnalyzer(database_url)
 
-    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]
+    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def list_tools() -> list[Tool]:
         """List available analysis tools."""
         return [
@@ -2044,7 +2044,7 @@ def create_server(database_url: str) -> Server:
             ),
         ]
 
-    @server.call_tool()  # type: ignore[misc, untyped-decorator]
+    @server.call_tool()  # type: ignore[misc, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle tool calls."""
         try:

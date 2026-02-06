@@ -124,7 +124,7 @@ class LandscapeDB:
 
         @event.listens_for(engine, "connect")
         def set_sqlite_pragma(dbapi_connection: object, connection_record: object) -> None:
-            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]  # SQLAlchemy event passes DBAPI connection (has .cursor()) typed as object
             # Enable WAL mode for better concurrency
             cursor.execute("PRAGMA journal_mode=WAL")
             # Enable foreign key enforcement

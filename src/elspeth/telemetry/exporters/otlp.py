@@ -365,7 +365,7 @@ class OTLPExporter:
 try:
     from opentelemetry.sdk.trace import ReadableSpan as _ReadableSpanBase
 except ImportError:
-    _ReadableSpanBase = object  # type: ignore[misc,assignment]
+    _ReadableSpanBase = object  # type: ignore[misc,assignment]  # fallback when opentelemetry is not installed
 
 
 class _SyntheticReadableSpan(_ReadableSpanBase):

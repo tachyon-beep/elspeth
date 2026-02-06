@@ -119,7 +119,7 @@ def create_output_contract_from_schema(
         )
 
     return SchemaContract(
-        mode=mode,  # type: ignore[arg-type]
+        mode=mode,  # type: ignore[arg-type]  # mode is a valid SchemaMode literal; narrowing from str to Literal not expressible here
         fields=tuple(fields),
         locked=True,  # Transform schemas are static
     )

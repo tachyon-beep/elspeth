@@ -922,7 +922,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
     def _setup_langfuse_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
         """Initialize Langfuse tracing (v3 API)."""
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
 
             if not isinstance(tracing_config, LangfuseTracingConfig):
                 return
