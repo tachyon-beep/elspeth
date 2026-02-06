@@ -9,7 +9,7 @@ from elspeth.contracts.enums import Determinism, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
-from tests.conftest import as_transform
+from tests.conftest import as_batch_transform
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -1144,7 +1144,7 @@ class TestAggregationExecutorCheckpoint:
         # Execute flush - should NOT crash with IndexError
         result, consumed_tokens, _batch_id = executor.execute_flush(
             node_id=node_id,
-            transform=as_transform(transform),
+            transform=as_batch_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.COUNT,
@@ -1216,7 +1216,7 @@ class TestAggregationExecutorCheckpoint:
         with pytest.raises(RuntimeError, match="Internal state corruption"):
             executor.execute_flush(
                 node_id=node_id,
-                transform=as_transform(transform),
+                transform=as_batch_transform(transform),
                 ctx=ctx,
                 step_in_pipeline=1,
                 trigger_type=TriggerType.COUNT,

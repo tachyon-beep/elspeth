@@ -265,13 +265,13 @@ class TestConsoleExporterExportBehavior:
 
         # Mock a broken stream that raises on write
         class BrokenStream:
-            def write(self, *args, **kwargs):
+            def write(self, *args: object, **kwargs: object) -> int:
                 raise OSError("Simulated I/O error")
 
-            def flush(self):
+            def flush(self) -> None:
                 pass
 
-        exporter._stream = BrokenStream()
+        exporter._stream = BrokenStream()  # type: ignore[assignment]  # Test intentionally uses mock
 
         event = TransformCompleted(
             timestamp=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
@@ -326,12 +326,12 @@ class TestConsoleExporterLifecycle:
         """Flush must not raise exceptions."""
 
         class BrokenStream:
-            def flush(self):
+            def flush(self) -> None:
                 raise OSError("Simulated flush error")
 
         exporter = ConsoleExporter()
         exporter.configure({})
-        exporter._stream = BrokenStream()
+        exporter._stream = BrokenStream()  # type: ignore[assignment]  # Test intentionally uses mock
 
         # Should not raise
         exporter.flush()

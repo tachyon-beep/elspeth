@@ -905,7 +905,11 @@ class TestHTTPSpecificBehavior:
             # All queries should have failed with content_filtered
             assert result.reason["succeeded_count"] == 0
             for failed_query in result.reason["failed_queries"]:
-                assert "content-filtered" in failed_query["error"]
+                # failed_query can be str | QueryFailureDetail - we check both forms
+                if isinstance(failed_query, dict):
+                    assert "content-filtered" in failed_query["error"]
+                else:
+                    assert "content-filtered" in failed_query
 
     def test_handles_missing_output_field_in_json(
         self,

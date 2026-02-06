@@ -290,7 +290,7 @@ class TestRuntimeRetryRejectsNonFiniteFloats:
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
 
         with pytest.raises(ValueError, match=r"base_delay.*finite"):
-            RuntimeRetryConfig.from_policy({"base_delay": value})
+            RuntimeRetryConfig.from_policy({"base_delay": value})  # type: ignore[arg-type]
 
 
 class TestRuntimeRetryValidation:

@@ -12,10 +12,27 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value) if value is not None else object,
+            required=False,
+            source="inferred",
+        )
+        for key, value in data.items()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestBatchStatsHappyPath:
@@ -45,9 +62,9 @@ class TestBatchStatsHappyPath:
         )
 
         rows = [
-            {"id": 1, "amount": 10.0},
-            {"id": 2, "amount": 20.0},
-            {"id": 3, "amount": 30.0},
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": 20.0}),
+            _make_row({"id": 3, "amount": 30.0}),
         ]
 
         result = transform.process(rows, ctx)
@@ -72,8 +89,8 @@ class TestBatchStatsHappyPath:
         )
 
         rows = [
-            {"id": 1, "amount": 10.0, "category": "sales"},
-            {"id": 2, "amount": 20.0, "category": "sales"},
+            _make_row({"id": 1, "amount": 10.0, "category": "sales"}),
+            _make_row({"id": 2, "amount": 20.0, "category": "sales"}),
         ]
 
         result = transform.process(rows, ctx)
@@ -118,10 +135,10 @@ class TestBatchStatsHappyPath:
             }
         )
 
-        rows: list[dict[str, Any]] = [
-            {"id": 1, "amount": 10.0},
-            {"id": 2, "amount": "not_a_number"},  # This must raise, not skip
-            {"id": 3, "amount": 30.0},
+        rows = [
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": "not_a_number"}),  # This must raise, not skip
+            _make_row({"id": 3, "amount": 30.0}),
         ]
 
         with pytest.raises(TypeError, match="must be numeric"):

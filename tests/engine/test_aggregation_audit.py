@@ -24,7 +24,7 @@ from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult
-from tests.conftest import _TestTransformBase, as_transform
+from tests.conftest import _TestTransformBase, as_batch_transform
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -267,7 +267,7 @@ class TestAggregationFlushAuditTrail:
         # Execute flush
         result, _consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
-            transform=as_transform(transform),
+            transform=as_batch_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.COUNT,
@@ -336,7 +336,7 @@ class TestAggregationFlushAuditTrail:
 
         aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
-            transform=as_transform(transform),
+            transform=as_batch_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.COUNT,
@@ -376,7 +376,7 @@ class TestAggregationFlushAuditTrail:
         with pytest.raises(RuntimeError, match="intentional failure"):
             aggregation_executor.execute_flush(
                 node_id=aggregation_node_id,
-                transform=as_transform(transform),
+                transform=as_batch_transform(transform),
                 ctx=ctx,
                 step_in_pipeline=1,
                 trigger_type=TriggerType.COUNT,
@@ -443,7 +443,7 @@ class TestAggregationFlushAuditTrail:
 
         result, _consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
-            transform=as_transform(transform),
+            transform=as_batch_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.COUNT,
@@ -516,7 +516,7 @@ class TestAggregationFlushAuditTrail:
 
         aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
-            transform=as_transform(transform),
+            transform=as_batch_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.END_OF_SOURCE,
@@ -555,7 +555,7 @@ class TestAggregationFlushAuditTrail:
 
         aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
-            transform=as_transform(transform),
+            transform=as_batch_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.COUNT,
@@ -594,7 +594,7 @@ class TestAggregationFlushAuditTrail:
 
         _result, consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
-            transform=as_transform(transform),
+            transform=as_batch_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.COUNT,
@@ -626,7 +626,7 @@ class TestAggregationFlushAuditTrail:
         - No orphaned OPEN states should remain in audit trail
         """
         # Setup aggregation executor with batch-pending transform
-        transform = as_transform(BatchPendingTransform())
+        transform = as_batch_transform(BatchPendingTransform())
         transform.node_id = "batch_pending_node"
 
         aggregation_settings = AggregationSettings(
@@ -876,7 +876,7 @@ class TestAggregationFlushAuditTrail:
         # Execute flush
         result, _consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
-            transform=as_transform(transform),
+            transform=as_batch_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.COUNT,

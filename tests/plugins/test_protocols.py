@@ -382,7 +382,7 @@ class TestCoalesceProtocol:
             quorum_threshold = 2  # At least 2 branches must arrive
             output_schema = OutputSchema
             node_id: str | None = None  # Set by orchestrator
-            config: ClassVar[dict[str, Any]] = {}  # Required by CoalesceProtocol
+            config: dict[str, Any]  # Set in __init__
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
@@ -427,7 +427,7 @@ class TestCoalesceProtocol:
             quorum_threshold = None
             output_schema = OutputSchema
             node_id: str | None = None  # Set by orchestrator
-            config: ClassVar[dict[str, Any]] = {}  # Required by CoalesceProtocol
+            config: dict[str, Any]  # Set in __init__
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
@@ -502,7 +502,7 @@ class TestSinkProtocol:
             input_schema = InputSchema
             idempotent = True
             node_id: str | None = None
-            config: ClassVar[dict[str, Any]] = {}  # Required by SinkProtocol
+            config: dict[str, Any]  # Set in __init__
             determinism = Determinism.IO_WRITE
             plugin_version = "1.0.0"
             supports_resume = False  # Required by SinkProtocol

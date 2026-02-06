@@ -18,27 +18,27 @@ from elspeth.contracts.schema_contract import FieldContract, PipelineRow, Schema
 def _make_branch_contracts() -> tuple[SchemaContract, SchemaContract]:
     """Create sample contracts for two branches."""
     contract_a = SchemaContract(
-        fields=[
+        fields=(
             FieldContract(
                 original_name="value_a",
                 normalized_name="value_a",
                 python_type=str,
                 required=True,
                 source="inferred",
-            )
-        ],
+            ),
+        ),
         mode="FIXED",
     )
     contract_b = SchemaContract(
-        fields=[
+        fields=(
             FieldContract(
                 original_name="value_b",
                 normalized_name="value_b",
                 python_type=str,
                 required=True,
                 source="inferred",
-            )
-        ],
+            ),
+        ),
         mode="FIXED",
     )
     return contract_a, contract_b

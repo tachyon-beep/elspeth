@@ -95,6 +95,7 @@ if TYPE_CHECKING:
     from elspeth.contracts import TransformResult
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.plugins.protocols import (
+        BatchTransformProtocol,
         GateProtocol,
         SinkProtocol,
         SourceProtocol,
@@ -801,6 +802,11 @@ def as_source(source: Any) -> "SourceProtocol":
 def as_transform(transform: Any) -> "TransformProtocol":
     """Cast a test transform to TransformProtocol."""
     return cast("TransformProtocol", transform)
+
+
+def as_batch_transform(transform: Any) -> "BatchTransformProtocol":
+    """Cast a test batch transform to BatchTransformProtocol."""
+    return cast("BatchTransformProtocol", transform)
 
 
 def as_sink(sink: Any) -> "SinkProtocol":

@@ -670,6 +670,7 @@ class TestCheckpointManager:
             aggregation_state=agg_state,
         )
 
+        assert checkpoint.aggregation_state_json is not None
         restored = checkpoint_loads(checkpoint.aggregation_state_json)
         row_data = restored["node-001"]["tokens"][0]["row_data"]
 
