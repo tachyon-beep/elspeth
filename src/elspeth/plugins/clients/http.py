@@ -1,5 +1,9 @@
 # src/elspeth/plugins/clients/http.py
-"""Audited HTTP client with automatic call recording."""
+"""Audited HTTP client with automatic call recording.
+
+Provides SSRF-safe HTTP methods via get_ssrf_safe() which uses IP pinning
+to prevent DNS rebinding attacks. See core/security/web.py for details.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,10 @@ import structlog
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.core.canonical import stable_hash
+from elspeth.core.security.web import (
+    SSRFSafeRequest,
+    validate_url_for_ssrf,
+)
 from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallback
 from elspeth.telemetry.events import ExternalCallCompleted
 
@@ -71,6 +79,7 @@ def _parse_json_strict(text: str) -> tuple[Any, str | None]:
         return None, "JSON contains non-finite values (NaN or Infinity)"
 
     return parsed, None
+
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -680,3 +689,274 @@ class AuditedHTTPClient(AuditedClientBase):
                 )
 
             raise
+
+    def get_ssrf_safe(
+        self,
+        request: SSRFSafeRequest,
+        *,
+        headers: dict[str, str] | None = None,
+        follow_redirects: bool = False,
+        max_redirects: int = 10,
+    ) -> httpx.Response:
+        """GET with SSRF-safe IP pinning and redirect validation.
+
+        Connects to the pre-validated IP in the SSRFSafeRequest, setting the
+        Host header and TLS SNI to the original hostname. Each redirect hop
+        is independently validated against the SSRF blocklist.
+
+        Args:
+            request: SSRFSafeRequest from validate_url_for_ssrf()
+            headers: Additional headers for this request
+            follow_redirects: Whether to follow HTTP redirects (default: False)
+            max_redirects: Maximum redirect hops when follow_redirects=True
+
+        Returns:
+            httpx.Response object
+
+        Raises:
+            httpx.HTTPError: For network/HTTP errors
+            SSRFBlockedError: If redirect target resolves to blocked IP
+        """
+        self._acquire_rate_limit()
+
+        call_index = self._next_call_index()
+
+        merged_headers = {
+            **self._default_headers,
+            **(headers or {}),
+            "Host": request.host_header,
+        }
+
+        connection_url = request.connection_url
+        effective_timeout = self._timeout
+
+        # TLS SNI: use original hostname for certificate verification
+        extensions: dict[str, str] = {}
+        if request.scheme == "https":
+            extensions["sni_hostname"] = request.sni_hostname
+
+        # Record original URL and resolved IP in audit trail
+        request_data: dict[str, Any] = {
+            "method": "GET",
+            "url": request.original_url,
+            "resolved_ip": request.resolved_ip,
+            "headers": self._filter_request_headers(merged_headers),
+        }
+
+        start = time.perf_counter()
+
+        try:
+            with httpx.Client(
+                timeout=effective_timeout,
+                follow_redirects=False,
+            ) as client:
+                response = client.get(
+                    connection_url,
+                    headers=merged_headers,
+                    extensions=extensions if extensions else None,
+                )
+
+            # Handle redirects with SSRF validation at each hop
+            if follow_redirects:
+                response = self._follow_redirects_safe(response, max_redirects, effective_timeout, merged_headers)
+
+            latency_ms = (time.perf_counter() - start) * 1000
+
+            response_body: Any = None
+            content_type = response.headers.get("content-type", "")
+
+            if "application/json" in content_type:
+                parsed, error = _parse_json_strict(response.text)
+                if error is not None:
+                    logger.warning(
+                        "JSON parse failed despite Content-Type: application/json",
+                        extra={
+                            "url": request.original_url,
+                            "status_code": response.status_code,
+                            "body_preview": response.text[:200],
+                            "error": error,
+                        },
+                    )
+                    response_body = {
+                        "_json_parse_failed": True,
+                        "_error": error,
+                        "_raw_text": response.text,
+                    }
+                else:
+                    response_body = parsed
+            else:
+                is_text_content = content_type.startswith("text/") or "xml" in content_type or "form-urlencoded" in content_type
+                if is_text_content:
+                    response_body = response.text
+                else:
+                    response_body = {"_binary": base64.b64encode(response.content).decode("ascii")}
+
+            is_success = 200 <= response.status_code < 300
+            call_status = CallStatus.SUCCESS if is_success else CallStatus.ERROR
+
+            response_data: dict[str, Any] = {
+                "status_code": response.status_code,
+                "headers": self._filter_response_headers(dict(response.headers)),
+                "body_size": len(response.content),
+                "body": response_body,
+            }
+
+            error_data: dict[str, Any] | None = None
+            if not is_success:
+                error_data = {
+                    "type": "HTTPError",
+                    "message": f"HTTP {response.status_code}",
+                    "status_code": response.status_code,
+                }
+
+            self._recorder.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.HTTP,
+                status=call_status,
+                request_data=request_data,
+                response_data=response_data,
+                error=error_data,
+                latency_ms=latency_ms,
+            )
+
+            try:
+                self._telemetry_emit(
+                    ExternalCallCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=self._run_id,
+                        call_type=CallType.HTTP,
+                        provider=request.host_header,
+                        status=call_status,
+                        latency_ms=latency_ms,
+                        state_id=self._state_id,
+                        operation_id=None,
+                        request_hash=stable_hash(request_data),
+                        response_hash=stable_hash(response_data),
+                        request_payload=request_data,
+                        response_payload=response_data,
+                        token_usage=None,
+                    )
+                )
+            except Exception as tel_err:
+                logger.warning(
+                    "telemetry_emit_failed",
+                    error=str(tel_err),
+                    error_type=type(tel_err).__name__,
+                    run_id=self._run_id,
+                    state_id=self._state_id,
+                    call_type="http_ssrf_safe",
+                )
+
+            return response
+
+        except Exception as e:
+            latency_ms = (time.perf_counter() - start) * 1000
+
+            self._recorder.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data=request_data,
+                error={
+                    "type": type(e).__name__,
+                    "message": str(e),
+                },
+                latency_ms=latency_ms,
+            )
+
+            try:
+                self._telemetry_emit(
+                    ExternalCallCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=self._run_id,
+                        call_type=CallType.HTTP,
+                        provider=request.host_header,
+                        status=CallStatus.ERROR,
+                        latency_ms=latency_ms,
+                        state_id=self._state_id,
+                        operation_id=None,
+                        request_hash=stable_hash(request_data),
+                        response_hash=None,
+                        request_payload=request_data,
+                        response_payload=None,
+                        token_usage=None,
+                    )
+                )
+            except Exception as tel_err:
+                logger.warning(
+                    "telemetry_emit_failed",
+                    error=str(tel_err),
+                    error_type=type(tel_err).__name__,
+                    run_id=self._run_id,
+                    state_id=self._state_id,
+                    call_type="http_ssrf_safe",
+                )
+
+            raise
+
+    def _follow_redirects_safe(
+        self,
+        response: httpx.Response,
+        max_redirects: int,
+        timeout: float,
+        original_headers: dict[str, str],
+    ) -> httpx.Response:
+        """Follow HTTP redirects with SSRF validation at each hop.
+
+        Each redirect target is independently resolved and validated against
+        the SSRF blocklist, preventing redirect-based SSRF attacks like:
+        attacker.com -> 301 -> http://169.254.169.254/
+
+        Args:
+            response: Initial response (may be a redirect)
+            max_redirects: Maximum number of redirect hops
+            timeout: Request timeout for each hop
+            original_headers: Headers from original request (minus Host, which is set per-hop)
+
+        Returns:
+            Final non-redirect response
+
+        Raises:
+            SSRFBlockedError: If any redirect target resolves to a blocked IP
+            httpx.TooManyRedirects: If redirect chain exceeds max_redirects
+        """
+        redirects_followed = 0
+
+        while response.is_redirect and redirects_followed < max_redirects:
+            location = response.headers.get("location")
+            if not location:
+                break
+
+            # Resolve relative URLs against the current URL
+            redirect_url = str(response.url.join(location))
+
+            # CRITICAL: Validate the redirect target for SSRF
+            redirect_request = validate_url_for_ssrf(redirect_url)
+
+            # Build headers for this hop (Host header for virtual hosting)
+            hop_headers = {k: v for k, v in original_headers.items() if k.lower() != "host"}
+            hop_headers["Host"] = redirect_request.host_header
+
+            # TLS SNI for this hop
+            extensions: dict[str, str] = {}
+            if redirect_request.scheme == "https":
+                extensions["sni_hostname"] = redirect_request.sni_hostname
+
+            with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+                response = client.get(
+                    redirect_request.connection_url,
+                    headers=hop_headers,
+                    extensions=extensions if extensions else None,
+                )
+
+            redirects_followed += 1
+
+        if response.is_redirect and redirects_followed >= max_redirects:
+            raise httpx.TooManyRedirects(
+                f"Exceeded {max_redirects} redirects",
+                request=response.request,
+            )
+
+        return response

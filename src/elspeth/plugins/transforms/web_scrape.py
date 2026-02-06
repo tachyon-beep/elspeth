@@ -23,7 +23,14 @@ from pydantic import Field
 from elspeth.contracts import Determinism
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.core.security import validate_ip, validate_url_scheme
+from elspeth.core.security.web import (
+    NetworkError as SSRFNetworkError,
+)
+from elspeth.core.security.web import (
+    SSRFBlockedError,
+    SSRFSafeRequest,
+    validate_url_for_ssrf,
+)
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.config_base import TransformDataConfig
@@ -149,14 +156,11 @@ class WebScrapeTransform(BaseTransform):
         """
         url = row[self._url_field]
 
-        # Validate URL security (SSRF prevention)
+        # Validate URL and pin resolved IP (SSRF prevention with DNS rebinding defense)
         try:
-            validate_url_scheme(url)
-            parsed = httpx.URL(url)
-            if parsed.host:
-                validate_ip(parsed.host)
-        except Exception as e:
-            # Security violations are non-retryable
+            safe_request = validate_url_for_ssrf(url)
+        except (SSRFBlockedError, SSRFNetworkError) as e:
+            # Security violations and DNS failures are non-retryable
             return TransformResult.error(
                 {
                     "reason": "validation_failed",
@@ -165,9 +169,9 @@ class WebScrapeTransform(BaseTransform):
                 }
             )
 
-        # Fetch URL
+        # Fetch URL using pinned IP (prevents DNS rebinding between validation and fetch)
         try:
-            response = self._fetch_url(url, ctx)
+            response = self._fetch_url(safe_request, ctx)
         except WebScrapeError as e:
             if e.retryable:
                 # Re-raise retryable errors for engine RetryManager
@@ -225,11 +229,11 @@ class WebScrapeTransform(BaseTransform):
             contract=output_contract,
         )
 
-    def _fetch_url(self, url: str, ctx: PluginContext) -> httpx.Response:
-        """Fetch URL with audit recording.
+    def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: PluginContext) -> httpx.Response:
+        """Fetch URL using SSRF-safe IP pinning with audit recording.
 
         Args:
-            url: URL to fetch
+            safe_request: Pre-validated SSRFSafeRequest with pinned IP
             ctx: Plugin context
 
         Returns:
@@ -238,7 +242,6 @@ class WebScrapeTransform(BaseTransform):
         Raises:
             WebScrapeError: For retryable or non-retryable failures
         """
-        # Get rate limiter
         # Context is guaranteed to have these - executor sets them
         assert ctx.rate_limit_registry is not None
         assert ctx.landscape is not None
@@ -262,14 +265,14 @@ class WebScrapeTransform(BaseTransform):
         }
 
         try:
-            http_response = client.get(url, headers=headers)
-
-            # Convert to httpx.Response for return
-            # AuditedHTTPClient.get() already returns httpx.Response, but
-            # we want to ensure we're working with the right type
-            response = http_response
+            response = client.get_ssrf_safe(
+                safe_request,
+                headers=headers,
+                follow_redirects=True,
+            )
 
             # Check status code and raise appropriate errors
+            url = safe_request.original_url
             if response.status_code == 404:
                 raise NotFoundError(f"HTTP 404: {url}")
             elif response.status_code == 403:
@@ -284,9 +287,9 @@ class WebScrapeTransform(BaseTransform):
             return response
 
         except httpx.TimeoutException as e:
-            raise NetworkError(f"Timeout fetching {url}: {e}") from e
+            raise NetworkError(f"Timeout fetching {safe_request.original_url}: {e}") from e
         except httpx.ConnectError as e:
-            raise NetworkError(f"Connection error fetching {url}: {e}") from e
+            raise NetworkError(f"Connection error fetching {safe_request.original_url}: {e}") from e
 
     def close(self) -> None:
         """Release resources."""

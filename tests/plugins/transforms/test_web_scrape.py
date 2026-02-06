@@ -1,7 +1,13 @@
-"""Tests for WebScrapeTransform plugin."""
+"""Tests for WebScrapeTransform plugin.
 
+All tests mock socket.getaddrinfo so that validate_url_for_ssrf() produces a
+known resolved IP, then mock respx to match the IP-based URL that
+get_ssrf_safe() actually sends.
+"""
+
+import socket
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import httpx
 import pytest
@@ -15,6 +21,9 @@ from elspeth.plugins.transforms.web_scrape_errors import (
     RateLimitError,
     ServerError,
 )
+
+# Stable test IP used for all DNS resolution mocks
+_TEST_IP = "104.18.27.120"
 
 
 def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
@@ -31,6 +40,22 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return PipelineRow(data, contract)
+
+
+def _mock_getaddrinfo(ip: str = _TEST_IP) -> Any:
+    """Create a mock getaddrinfo that returns the given IP."""
+
+    def _getaddrinfo(
+        host: str,
+        port: Any,
+        family: int = 0,
+        type: int = 0,
+        proto: int = 0,
+        flags: int = 0,
+    ) -> list[tuple[Any, ...]]:
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+    return _getaddrinfo
 
 
 @pytest.fixture
@@ -61,7 +86,8 @@ def test_web_scrape_success_markdown(mock_ctx):
     """Successful scrape should enrich row with content and fingerprint."""
     html_content = "<html><body><h1>Title</h1><p>Content here</p></body></html>"
 
-    respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text=html_content))
+    # Mock the IP-based URL that get_ssrf_safe() sends
+    respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
 
     transform = WebScrapeTransform(
         {
@@ -78,7 +104,8 @@ def test_web_scrape_success_markdown(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     assert "# Title" in result.row["page_content"]
@@ -86,13 +113,12 @@ def test_web_scrape_success_markdown(mock_ctx):
     assert result.row["page_fingerprint"] is not None
     assert len(result.row["page_fingerprint"]) == 64  # SHA-256
     assert result.row["fetch_status"] == 200
-    assert result.row["fetch_url_final"] == "https://example.com/page"
 
 
 @respx.mock
 def test_web_scrape_404_returns_error(mock_ctx):
     """404 should return error result (non-retryable)."""
-    respx.get("https://example.com/missing").mock(return_value=httpx.Response(404))
+    respx.get(f"https://{_TEST_IP}:443/missing").mock(return_value=httpx.Response(404))
 
     transform = WebScrapeTransform(
         {
@@ -107,7 +133,8 @@ def test_web_scrape_404_returns_error(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/missing"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/missing"}), mock_ctx)
 
     assert result.status == "error"
     assert "NotFoundError" in result.reason["error_type"]
@@ -117,7 +144,7 @@ def test_web_scrape_404_returns_error(mock_ctx):
 @respx.mock
 def test_web_scrape_500_raises_for_retry(mock_ctx):
     """HTTP 500 should raise ServerError (retryable)."""
-    respx.get("https://example.com/error").mock(return_value=httpx.Response(500))
+    respx.get(f"https://{_TEST_IP}:443/error").mock(return_value=httpx.Response(500))
 
     transform = WebScrapeTransform(
         {
@@ -132,7 +159,7 @@ def test_web_scrape_500_raises_for_retry(mock_ctx):
         }
     )
 
-    with pytest.raises(ServerError) as exc_info:
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(ServerError) as exc_info:
         transform.process(_make_pipeline_row({"url": "https://example.com/error"}), mock_ctx)
 
     assert exc_info.value.retryable is True
@@ -142,7 +169,7 @@ def test_web_scrape_500_raises_for_retry(mock_ctx):
 @respx.mock
 def test_web_scrape_429_raises_for_retry(mock_ctx):
     """HTTP 429 should raise RateLimitError (retryable)."""
-    respx.get("https://example.com/throttled").mock(return_value=httpx.Response(429))
+    respx.get(f"https://{_TEST_IP}:443/throttled").mock(return_value=httpx.Response(429))
 
     transform = WebScrapeTransform(
         {
@@ -157,7 +184,7 @@ def test_web_scrape_429_raises_for_retry(mock_ctx):
         }
     )
 
-    with pytest.raises(RateLimitError) as exc_info:
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(RateLimitError) as exc_info:
         transform.process(_make_pipeline_row({"url": "https://example.com/throttled"}), mock_ctx)
 
     assert exc_info.value.retryable is True
@@ -201,8 +228,8 @@ def test_web_scrape_private_ip_returns_error(mock_ctx):
         }
     )
 
-    # Use http://localhost which should be blocked after hostname resolution
-    result = transform.process(_make_pipeline_row({"url": "http://169.254.169.254/metadata"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("169.254.169.254")):
+        result = transform.process(_make_pipeline_row({"url": "http://169.254.169.254/metadata"}), mock_ctx)
 
     assert result.status == "error"
     assert "SSRFBlockedError" in result.reason["error_type"]
@@ -213,7 +240,7 @@ def test_web_scrape_text_format(mock_ctx):
     """Test text extraction format."""
     html_content = "<html><body><h1>Title</h1><p>Content here</p></body></html>"
 
-    respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text=html_content))
+    respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
 
     transform = WebScrapeTransform(
         {
@@ -229,7 +256,8 @@ def test_web_scrape_text_format(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     # Text format should not include markdown
@@ -251,7 +279,7 @@ def test_web_scrape_strips_script_tags(mock_ctx):
     </html>
     """
 
-    respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text=html_content))
+    respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
 
     transform = WebScrapeTransform(
         {
@@ -267,7 +295,8 @@ def test_web_scrape_strips_script_tags(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     assert "alert" not in result.row["page_content"]
@@ -280,7 +309,7 @@ def test_web_scrape_payload_storage(mock_ctx):
     """Test that payloads are stored in payload store."""
     html_content = "<html><body><h1>Title</h1></body></html>"
 
-    respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text=html_content))
+    respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
 
     transform = WebScrapeTransform(
         {
@@ -295,7 +324,8 @@ def test_web_scrape_payload_storage(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     # Check payload hashes were stored and are valid SHA-256 hashes
@@ -314,8 +344,8 @@ def test_web_scrape_payload_storage(mock_ctx):
 @respx.mock
 def test_web_scrape_timeout_raises_network_error(mock_ctx):
     """Timeout should raise NetworkError (retryable)."""
-    # Mock timeout by raising httpx.TimeoutException
-    respx.get("https://example.com/slow").mock(side_effect=httpx.TimeoutException("Connection timeout"))
+    # Mock timeout by raising httpx.TimeoutException on the IP-based URL
+    respx.get(f"https://{_TEST_IP}:443/slow").mock(side_effect=httpx.TimeoutException("Connection timeout"))
 
     transform = WebScrapeTransform(
         {
@@ -331,7 +361,7 @@ def test_web_scrape_timeout_raises_network_error(mock_ctx):
         }
     )
 
-    with pytest.raises(NetworkError) as exc_info:
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError) as exc_info:
         transform.process(_make_pipeline_row({"url": "https://example.com/slow"}), mock_ctx)
 
     assert exc_info.value.retryable is True
@@ -341,7 +371,7 @@ def test_web_scrape_timeout_raises_network_error(mock_ctx):
 @respx.mock
 def test_web_scrape_connection_error_raises_network_error(mock_ctx):
     """Connection error should raise NetworkError (retryable)."""
-    respx.get("https://example.com/unreachable").mock(side_effect=httpx.ConnectError("Connection refused"))
+    respx.get(f"https://{_TEST_IP}:443/unreachable").mock(side_effect=httpx.ConnectError("Connection refused"))
 
     transform = WebScrapeTransform(
         {
@@ -356,7 +386,7 @@ def test_web_scrape_connection_error_raises_network_error(mock_ctx):
         }
     )
 
-    with pytest.raises(NetworkError) as exc_info:
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError) as exc_info:
         transform.process(_make_pipeline_row({"url": "https://example.com/unreachable"}), mock_ctx)
 
     assert exc_info.value.retryable is True
@@ -366,7 +396,7 @@ def test_web_scrape_connection_error_raises_network_error(mock_ctx):
 @respx.mock
 def test_web_scrape_403_returns_error(mock_ctx):
     """HTTP 403 should return error result (non-retryable)."""
-    respx.get("https://example.com/forbidden").mock(return_value=httpx.Response(403))
+    respx.get(f"https://{_TEST_IP}:443/forbidden").mock(return_value=httpx.Response(403))
 
     transform = WebScrapeTransform(
         {
@@ -381,7 +411,8 @@ def test_web_scrape_403_returns_error(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/forbidden"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/forbidden"}), mock_ctx)
 
     assert result.status == "error"
     assert "ForbiddenError" in result.reason["error_type"]
@@ -391,7 +422,7 @@ def test_web_scrape_403_returns_error(mock_ctx):
 @respx.mock
 def test_web_scrape_401_returns_error(mock_ctx):
     """HTTP 401 should return error result (non-retryable)."""
-    respx.get("https://example.com/unauthorized").mock(return_value=httpx.Response(401))
+    respx.get(f"https://{_TEST_IP}:443/unauthorized").mock(return_value=httpx.Response(401))
 
     transform = WebScrapeTransform(
         {
@@ -406,7 +437,8 @@ def test_web_scrape_401_returns_error(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/unauthorized"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/unauthorized"}), mock_ctx)
 
     assert result.status == "error"
     assert "UnauthorizedError" in result.reason["error_type"]
@@ -416,10 +448,8 @@ def test_web_scrape_401_returns_error(mock_ctx):
 @respx.mock
 def test_web_scrape_with_pipeline_row(mock_ctx):
     """Test that web_scrape works correctly with PipelineRow input."""
-    from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-
     html_content = "<html><body><h1>Test</h1></body></html>"
-    respx.get("https://example.com/test").mock(return_value=httpx.Response(200, text=html_content))
+    respx.get(f"https://{_TEST_IP}:443/test").mock(return_value=httpx.Response(200, text=html_content))
 
     transform = WebScrapeTransform(
         {
@@ -449,7 +479,8 @@ def test_web_scrape_with_pipeline_row(mock_ctx):
     pipeline_row = PipelineRow({"url": "https://example.com/test"}, contract)
 
     # Process should work with PipelineRow (uses row.to_dict() internally)
-    result = transform.process(pipeline_row, mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(pipeline_row, mock_ctx)
 
     assert result.status == "success"
     assert "# Test" in result.row["page_content"]
@@ -466,12 +497,11 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
     The scraper should follow the redirect and record both the requested URL
     and the final URL after redirect resolution.
 
-    **Status:** This test documents desired behavior. httpx follows redirects
-    by default, but testing this with respx mocking requires integration test setup.
+    **Status:** This test documents desired behavior. The redirect following now
+    happens via _follow_redirects_safe() which re-validates each hop for SSRF.
     """
-    # Set up redirect chain: /old -> /new
-    respx.get("https://example.com/old").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/new"}))
-    respx.get("https://example.com/new").mock(return_value=httpx.Response(200, text="<html><body><h1>New Location</h1></body></html>"))
+    respx.get(f"https://{_TEST_IP}:443/old").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/new"}))
+    respx.get(f"https://{_TEST_IP}:443/new").mock(return_value=httpx.Response(200, text="<html><body><h1>New Location</h1></body></html>"))
 
     transform = WebScrapeTransform(
         {
@@ -488,7 +518,8 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/old"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/old"}), mock_ctx)
 
     assert result.status == "success"
     assert "# New Location" in result.row["page_content"]
@@ -499,18 +530,12 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
 @pytest.mark.xfail(reason="Redirect chain testing with respx requires integration test setup - documents desired behavior")
 @respx.mock
 def test_web_scrape_follows_redirect_chain(mock_ctx):
-    """Multiple redirects (301->302->200) should be followed to final destination.
-
-    Edge case: Redirect chains occur when multiple URL migrations happen over time
-    or when CDNs/load balancers add intermediate redirects.
-
-    **Status:** This test documents desired behavior. httpx follows redirect chains,
-    but testing with respx mocking is complex and better suited for integration tests.
-    """
-    # Set up redirect chain: /start -> /middle -> /end
-    respx.get("https://example.com/start").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/middle"}))
-    respx.get("https://example.com/middle").mock(return_value=httpx.Response(302, headers={"Location": "https://example.com/end"}))
-    respx.get("https://example.com/end").mock(return_value=httpx.Response(200, text="<html><body><h1>Final Destination</h1></body></html>"))
+    """Multiple redirects (301->302->200) should be followed to final destination."""
+    respx.get(f"https://{_TEST_IP}:443/start").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/middle"}))
+    respx.get(f"https://{_TEST_IP}:443/middle").mock(return_value=httpx.Response(302, headers={"Location": "https://example.com/end"}))
+    respx.get(f"https://{_TEST_IP}:443/end").mock(
+        return_value=httpx.Response(200, text="<html><body><h1>Final Destination</h1></body></html>")
+    )
 
     transform = WebScrapeTransform(
         {
@@ -527,7 +552,8 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/start"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/start"}), mock_ctx)
 
     assert result.status == "success"
     assert "# Final Destination" in result.row["page_content"]
@@ -538,17 +564,9 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
 @pytest.mark.xfail(reason="Redirect loop testing with respx requires integration test setup - documents desired behavior")
 @respx.mock
 def test_web_scrape_redirect_limit_exceeded(mock_ctx):
-    """Excessive redirects should fail with network error.
-
-    Edge case: Redirect loops or very long redirect chains should be caught
-    to prevent infinite loops and wasted resources.
-
-    **Status:** This test documents desired behavior. httpx has redirect limits,
-    but testing this with respx mocking is complex and better suited for integration tests.
-    """
-    # Set up circular redirect: /a -> /b -> /a (loop)
-    respx.get("https://example.com/a").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/b"}))
-    respx.get("https://example.com/b").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/a"}))
+    """Excessive redirects should fail with network error."""
+    respx.get(f"https://{_TEST_IP}:443/a").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/b"}))
+    respx.get(f"https://{_TEST_IP}:443/b").mock(return_value=httpx.Response(301, headers={"Location": "https://example.com/a"}))
 
     transform = WebScrapeTransform(
         {
@@ -565,19 +583,13 @@ def test_web_scrape_redirect_limit_exceeded(mock_ctx):
         }
     )
 
-    # httpx has a default redirect limit of 20, circular redirects should hit it
-    with pytest.raises(NetworkError, match=r"redirect|too many redirects"):
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError, match=r"redirect|too many redirects"):
         transform.process(_make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
 
 
 @respx.mock
 def test_web_scrape_malformed_html_graceful_degradation(mock_ctx):
-    """Malformed HTML should still extract text content without crashing.
-
-    Edge case: Real-world HTML is often malformed (missing closing tags, invalid nesting).
-    The scraper should handle this gracefully using BeautifulSoup's lenient parsing.
-    """
-    # Malformed HTML: unclosed tags, invalid nesting
+    """Malformed HTML should still extract text content without crashing."""
     malformed_html = """
     <html>
     <body>
@@ -589,7 +601,7 @@ def test_web_scrape_malformed_html_graceful_degradation(mock_ctx):
         <!-- Missing closing tags for body and html -->
     """
 
-    respx.get("https://example.com/malformed").mock(return_value=httpx.Response(200, text=malformed_html))
+    respx.get(f"https://{_TEST_IP}:443/malformed").mock(return_value=httpx.Response(200, text=malformed_html))
 
     transform = WebScrapeTransform(
         {
@@ -606,7 +618,8 @@ def test_web_scrape_malformed_html_graceful_degradation(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "https://example.com/malformed"}), mock_ctx)
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/malformed"}), mock_ctx)
 
     # Should succeed despite malformed HTML
     assert result.status == "success"

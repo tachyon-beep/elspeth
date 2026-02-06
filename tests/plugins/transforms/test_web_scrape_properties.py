@@ -20,7 +20,7 @@ from hypothesis.strategies import (
     text,
 )
 
-from elspeth.core.security.web import SSRFBlockedError, validate_ip, validate_url_scheme
+from elspeth.core.security.web import SSRFBlockedError, validate_url_for_ssrf, validate_url_scheme
 from elspeth.plugins.transforms.web_scrape_extraction import extract_content
 from elspeth.plugins.transforms.web_scrape_fingerprint import compute_fingerprint, normalize_for_fingerprint
 
@@ -202,12 +202,20 @@ def test_forbidden_schemes_rejected(url: str):
 @given(blocked_ip_addresses())
 def test_blocked_ips_rejected(ip: str):
     """Private/loopback/metadata IPs should be blocked."""
+    import socket
     from unittest.mock import patch
 
+    is_ipv6 = ":" in ip
+
+    def _mock_getaddrinfo(*args, **kwargs):
+        if is_ipv6:
+            return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", (ip, 0, 0, 0))]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
     # Mock DNS resolution to return the blocked IP
-    with patch("socket.gethostbyname", return_value=ip):
+    with patch("socket.getaddrinfo", side_effect=_mock_getaddrinfo):
         try:
-            validate_ip("test.example.com")
+            validate_url_for_ssrf("http://test.example.com/")
             raise AssertionError(f"Expected SSRFBlockedError for IP {ip}")
         except SSRFBlockedError as e:
             assert ip in str(e), f"Error message should mention blocked IP {ip}"

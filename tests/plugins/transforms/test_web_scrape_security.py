@@ -1,5 +1,12 @@
-"""Security tests for WebScrapeTransform (SSRF prevention)."""
+"""Security tests for WebScrapeTransform (SSRF prevention).
 
+Tests the complete SSRF-safe pipeline:
+1. validate_url_for_ssrf() validates URL and pins IP
+2. get_ssrf_safe() connects to the pinned IP
+3. Redirects are independently validated at each hop
+"""
+
+import socket
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -27,6 +34,25 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return PipelineRow(data, contract)
+
+
+def _mock_getaddrinfo(ip: str) -> Any:
+    """Create a mock getaddrinfo that returns the given IP."""
+    is_ipv6 = ":" in ip
+
+    def _getaddrinfo(
+        host: str,
+        port: Any,
+        family: int = 0,
+        type: int = 0,
+        proto: int = 0,
+        flags: int = 0,
+    ) -> list[tuple[Any, ...]]:
+        if is_ipv6:
+            return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", (ip, 0, 0, 0))]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+    return _getaddrinfo
 
 
 @pytest.fixture
@@ -75,7 +101,7 @@ def test_ssrf_blocks_file_scheme(transform, mock_ctx):
 
 def test_ssrf_blocks_private_ip(transform, mock_ctx):
     """Private IPs should be blocked."""
-    with patch("socket.gethostbyname", return_value="192.168.1.1"):
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("192.168.1.1")):
         result = transform.process(_make_pipeline_row({"url": "https://internal.example.com"}), mock_ctx)
 
         assert result.status == "error"
@@ -84,7 +110,7 @@ def test_ssrf_blocks_private_ip(transform, mock_ctx):
 
 def test_ssrf_blocks_loopback(transform, mock_ctx):
     """Loopback IPs should be blocked."""
-    with patch("socket.gethostbyname", return_value="127.0.0.1"):
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("127.0.0.1")):
         result = transform.process(_make_pipeline_row({"url": "http://localhost/admin"}), mock_ctx)
 
         assert result.status == "error"
@@ -93,7 +119,7 @@ def test_ssrf_blocks_loopback(transform, mock_ctx):
 
 def test_ssrf_blocks_cloud_metadata(transform, mock_ctx):
     """Cloud metadata endpoints should be blocked."""
-    with patch("socket.gethostbyname", return_value="169.254.169.254"):
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("169.254.169.254")):
         result = transform.process(
             _make_pipeline_row({"url": "http://metadata.google.internal/computeMetadata/v1/"}),
             mock_ctx,
@@ -105,13 +131,60 @@ def test_ssrf_blocks_cloud_metadata(transform, mock_ctx):
 
 @respx.mock
 def test_ssrf_allows_public_ip(transform, mock_ctx):
-    """Public IPs should be allowed."""
-    respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
+    """Public IPs should be allowed (request goes to pinned IP)."""
+    # Mock the IP-based URL that get_ssrf_safe() will actually request
+    respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
 
-    with patch("socket.gethostbyname", return_value="8.8.8.8"):
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
         result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
         assert result.status == "success"
+
+
+# ============================================================================
+# DNS Rebinding Prevention Tests
+# ============================================================================
+
+
+@respx.mock
+def test_connection_uses_validated_ip(transform, mock_ctx):
+    """Verify the actual HTTP request goes to the validated IP, not re-resolved hostname.
+
+    This is the core DNS rebinding test: even if an attacker could change
+    DNS between validation and connection, get_ssrf_safe() connects to the
+    IP that was validated, not a re-resolved IP.
+    """
+    # The request should go to the pinned IP (93.184.216.34), NOT to example.com
+    ip_route = respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Safe</html>"))
+    # If httpx re-resolves DNS, it would hit the hostname route instead
+    hostname_route = respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text="<html>Unsafe</html>"))
+
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
+        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+
+    assert result.status == "success"
+    assert ip_route.called, "Request should go to pinned IP, not hostname"
+    assert not hostname_route.called, "Request should NOT re-resolve DNS to hostname"
+
+
+# ============================================================================
+# Audit Trail Tests
+# ============================================================================
+
+
+@respx.mock
+def test_resolved_ip_recorded_in_audit(transform, mock_ctx):
+    """Audit trail should record the resolved IP for forensic traceability."""
+    respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
+
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
+        transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+
+    # Check that record_call was invoked with resolved_ip in request_data
+    record_call_args = mock_ctx.landscape.record_call.call_args
+    assert record_call_args is not None, "record_call should have been called"
+    request_data = record_call_args.kwargs.get("request_data") or record_call_args[1].get("request_data")
+    assert request_data["resolved_ip"] == "93.184.216.34"
 
 
 # ============================================================================
@@ -127,9 +200,9 @@ def test_contract_includes_output_fields(transform, mock_ctx):
     to build contract from output_schema (which is same as input_schema). New fields
     were not accessible under FIXED schema mode.
     """
-    respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
+    respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
 
-    with patch("socket.gethostbyname", return_value="8.8.8.8"):
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
         result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
         assert result.status == "success"
@@ -155,9 +228,9 @@ def test_contract_includes_output_fields(transform, mock_ctx):
 @respx.mock
 def test_contract_field_types_are_correct(transform, mock_ctx):
     """Output contract fields should have correct types inferred from values."""
-    respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
+    respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
 
-    with patch("socket.gethostbyname", return_value="8.8.8.8"):
+    with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
         result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
         assert result.contract is not None
