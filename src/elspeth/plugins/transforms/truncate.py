@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -95,7 +96,7 @@ class Truncate(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Truncate specified fields in row.
 
         Args:
@@ -105,7 +106,8 @@ class Truncate(BaseTransform):
         Returns:
             TransformResult with truncated field values
         """
-        output = copy.deepcopy(row)
+        row_dict = row.to_dict()
+        output = copy.deepcopy(row_dict)
 
         for field_name, max_len in self._fields.items():
             if field_name not in output:
@@ -139,7 +141,7 @@ class Truncate(BaseTransform):
         fields_modified = [
             field_name
             for field_name, max_len in self._fields.items()
-            if field_name in row and isinstance(row[field_name], str) and len(row[field_name]) > max_len
+            if field_name in row_dict and isinstance(row_dict[field_name], str) and len(row_dict[field_name]) > max_len
         ]
 
         return TransformResult.success(
@@ -148,6 +150,7 @@ class Truncate(BaseTransform):
                 "action": "transformed",
                 "fields_modified": fields_modified,
             },
+            contract=row.contract,
         )
 
     def close(self) -> None:

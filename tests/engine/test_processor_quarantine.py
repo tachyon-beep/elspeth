@@ -8,7 +8,7 @@ Tests the full quarantine flow including:
 
 from typing import Any
 
-from elspeth.contracts import NodeType
+from elspeth.contracts import FieldContract, NodeType, PipelineRow, SchemaContract, SourceRow
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -17,6 +17,21 @@ from elspeth.plugins.results import (
     TransformResult,
 )
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestQuarantineIntegration:
@@ -72,7 +87,7 @@ class TestQuarantineIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 if row["value"] < 0:
                     return TransformResult.error(
                         {
@@ -98,7 +113,7 @@ class TestQuarantineIntegration:
         for i, value in enumerate(test_values):
             results = processor.process_row(
                 row_index=i,
-                row_data={"value": value},
+                source_row=SourceRow.valid({"value": value}, contract=_make_observed_contract({"value": value})),
                 transforms=[ValidatingTransform(transform.node_id)],
                 ctx=ctx,
             )
@@ -132,7 +147,7 @@ class TestQuarantineIntegration:
         - A node_state was recorded with status="failed"
         - The node_state record exists in the database
         """
-        from elspeth.contracts import NodeStateFailed
+        from elspeth.contracts import NodeStateFailed, SourceRow
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
@@ -170,7 +185,7 @@ class TestQuarantineIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 # row.get() is allowed here - this is row data (their data, Tier 2)
                 if "required_field" not in row:
                     return TransformResult.error(
@@ -192,7 +207,7 @@ class TestQuarantineIntegration:
         # Process an invalid row (missing required_field)
         results = processor.process_row(
             row_index=0,
-            row_data={"other_field": "some_value"},
+            source_row=SourceRow.valid({"other_field": "some_value"}, contract=_make_observed_contract({"other_field": "some_value"})),
             transforms=[StrictValidator(transform.node_id)],
             ctx=ctx,
         )
@@ -205,7 +220,9 @@ class TestQuarantineIntegration:
         assert result.outcome == RowOutcome.QUARANTINED
 
         # Verify original data is preserved
-        assert result.final_data == {"other_field": "some_value"}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"other_field": "some_value"}
 
         # Query the node_states table to confirm the record exists
         states = recorder.get_node_states_for_token(result.token.token_id)

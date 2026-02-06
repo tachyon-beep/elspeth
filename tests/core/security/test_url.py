@@ -449,6 +449,179 @@ class TestSensitiveParams:
         assert result.fingerprint is not None
 
 
+class TestFragmentTokenSanitization:
+    """Tests for URL fragment token sanitization.
+
+    SECURITY: OAuth implicit flow and some APIs put tokens in URL fragments
+    (e.g., #access_token=xxx). These must be sanitized like query params.
+    """
+
+    def test_fragment_access_token_removed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fragment access_token is removed from sanitized URL."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://example.com/callback#access_token=sk-abc123"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "sk-abc123" not in result.sanitized_url
+        assert "access_token" not in result.sanitized_url
+        assert result.sanitized_url == "https://example.com/callback"
+        assert result.fingerprint is not None
+
+    def test_fragment_token_removed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fragment token parameter is removed."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com/auth#token=secret-value"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "secret-value" not in result.sanitized_url
+        assert "token" not in result.sanitized_url
+        assert result.fingerprint is not None
+
+    def test_fragment_with_multiple_params_strips_only_sensitive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fragment with mixed params keeps non-sensitive, strips sensitive."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://example.com/callback#access_token=secret&state=abc123&token_type=bearer"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # Sensitive param stripped
+        assert "access_token" not in result.sanitized_url
+        assert "secret" not in result.sanitized_url
+        # Non-sensitive params preserved
+        assert "state=abc123" in result.sanitized_url
+        assert "token_type=bearer" in result.sanitized_url
+        assert result.fingerprint is not None
+
+    def test_fragment_and_query_both_sanitized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Both query params and fragment params are sanitized."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://example.com/callback?api_key=query-secret#access_token=fragment-secret"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # Both secrets removed
+        assert "query-secret" not in result.sanitized_url
+        assert "fragment-secret" not in result.sanitized_url
+        assert "api_key" not in result.sanitized_url
+        assert "access_token" not in result.sanitized_url
+        # URL structure preserved but empty
+        assert result.sanitized_url == "https://example.com/callback"
+        assert result.fingerprint is not None
+
+    def test_fragment_fingerprint_matches_expected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fragment token fingerprint matches expected HMAC value."""
+        from elspeth.core.security.fingerprint import secret_fingerprint
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://example.com/callback#access_token=my-token"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        expected = secret_fingerprint("my-token")
+        assert result.fingerprint == expected
+
+    def test_fragment_and_query_fingerprint_combined(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fingerprint combines secrets from both query and fragment."""
+        from elspeth.core.security.fingerprint import secret_fingerprint
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://example.com/callback?api_key=key1#access_token=key2"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # Fingerprint is sorted combination: "key1|key2"
+        expected = secret_fingerprint("key1|key2")
+        assert result.fingerprint == expected
+
+    def test_fragment_raises_when_no_key_production_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Raises SecretFingerprintError when fragment token present but no key."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        url = "https://example.com/callback#access_token=secret"
+
+        with pytest.raises(SecretFingerprintError, match="ELSPETH_FINGERPRINT_KEY"):
+            SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=True)
+
+    def test_fragment_dev_mode_sanitizes_without_fingerprint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Dev mode sanitizes fragment without fingerprint."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        url = "https://example.com/callback#access_token=secret"
+
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert "secret" not in result.sanitized_url
+        assert "access_token" not in result.sanitized_url
+        assert result.fingerprint is None
+
+    def test_fragment_empty_value_strips_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty fragment token value still strips the key name."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        url = "https://example.com/callback#access_token="
+
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert "access_token" not in result.sanitized_url
+        assert result.sanitized_url == "https://example.com/callback"
+        assert result.fingerprint is None  # No non-empty value to fingerprint
+
+    def test_fragment_empty_does_not_trigger_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty fragment token value doesn't trigger SecretFingerprintError."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        url = "https://example.com/callback#access_token="
+
+        # Should NOT raise - no actual secret value
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=True)
+
+        assert "access_token" not in result.sanitized_url
+        assert result.fingerprint is None
+
+    def test_fragment_case_insensitive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fragment param matching is case-insensitive."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://example.com/callback#ACCESS_TOKEN=secret"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "secret" not in result.sanitized_url
+        assert "ACCESS_TOKEN" not in result.sanitized_url
+
+    def test_non_sensitive_fragment_unchanged(self) -> None:
+        """URL with only non-sensitive fragment is returned unchanged."""
+        url = "https://example.com/page#section=intro&highlight=true"
+
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert result.sanitized_url == url
+        assert result.fingerprint is None
+
+    def test_plain_fragment_without_params_unchanged(self) -> None:
+        """URL with plain fragment (no key=value) is unchanged."""
+        url = "https://example.com/page#section-header"
+
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert result.sanitized_url == url
+        assert result.fingerprint is None
+
+    def test_oauth_implicit_flow_pattern(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Real-world OAuth implicit flow URL is properly sanitized."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        # Typical OAuth implicit flow response URL
+        url = "https://myapp.com/callback#access_token=ya29.abc123&token_type=Bearer&expires_in=3600&state=xyz"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # Secret stripped
+        assert "ya29.abc123" not in result.sanitized_url
+        assert "access_token" not in result.sanitized_url
+        # Non-sensitive params preserved
+        assert "token_type=Bearer" in result.sanitized_url
+        assert "expires_in=3600" in result.sanitized_url
+        assert "state=xyz" in result.sanitized_url
+        assert result.fingerprint is not None
+
+
 class TestIntegrationWithArtifactDescriptor:
     """Integration tests with ArtifactDescriptor."""
 

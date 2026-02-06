@@ -3,6 +3,8 @@
 
 import pytest
 
+from elspeth.contracts.schema_contract import PipelineRow
+
 
 class TestDAGBuilder:
     """Building execution graphs from configuration."""
@@ -164,6 +166,122 @@ class TestDAGValidation:
 
         # Should not raise - labels are unique per source node
         graph.validate()
+
+    def test_validate_rejects_disconnected_graph(self) -> None:
+        """Graphs with unreachable nodes must be rejected.
+
+        If a node cannot be reached from the source, it will never execute.
+        This is either a configuration error or indicates orphaned nodes.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="process")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("orphan", node_type=NodeType.TRANSFORM, plugin_name="abandoned")  # Not connected!
+
+        graph.add_edge("source", "transform", label="continue")
+        graph.add_edge("transform", "sink", label="continue")
+        # orphan has no incoming edges - unreachable
+
+        with pytest.raises(GraphValidationError, match=r"unreachable|disconnected"):
+            graph.validate()
+
+    def test_validate_rejects_self_loop(self) -> None:
+        """Self-loops (node with edge to itself) must be rejected.
+
+        A node cannot route to itself - this would create infinite recursion.
+        Should be caught as a special case of cycle detection.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="loop")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source", "transform", label="continue")
+        graph.add_edge("transform", "transform", label="retry")  # Self-loop!
+        graph.add_edge("transform", "sink", label="continue")
+
+        with pytest.raises(GraphValidationError, match=r"cycle|self-loop"):
+            graph.validate()
+
+    def test_validate_allows_diamond_merge(self) -> None:
+        """Diamond patterns (node with multiple incoming edges) should be allowed.
+
+        A node can have multiple incoming edges as long as the graph is acyclic.
+        Common pattern: fork → parallel processing → merge.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork_gate")
+        graph.add_node("path_a", node_type=NodeType.TRANSFORM, plugin_name="fast")
+        graph.add_node("path_b", node_type=NodeType.TRANSFORM, plugin_name="slow")
+        graph.add_node("merge", node_type=NodeType.COALESCE, plugin_name="merge_results")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source", "gate", label="continue")
+        graph.add_edge("gate", "path_a", label="path_a")
+        graph.add_edge("gate", "path_b", label="path_b")
+        graph.add_edge("path_a", "merge", label="continue")  # First incoming edge
+        graph.add_edge("path_b", "merge", label="continue")  # Second incoming edge (diamond!)
+        graph.add_edge("merge", "sink", label="continue")
+
+        # Should not raise - diamond merge is valid
+        graph.validate()
+
+
+class TestSchemaContractValidation:
+    """Schema contract validation during DAG construction."""
+
+    def test_unsatisfiable_contract_dependencies_detected(self) -> None:
+        """Impossible contract dependencies should be detected during validation.
+
+        Scenario: Transform B requires field from Transform A's output, but A comes
+        AFTER B in the pipeline (impossible to satisfy).
+
+        This documents the "circular contract dependencies" edge case: when contract
+        requirements create a logical impossibility in a linear pipeline.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+
+        # Build a linear pipeline: source → transform_b → transform_a → sink
+        # But transform_b requires a field that only transform_a produces (impossible!)
+
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node(
+            "transform_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="requires_a_output",
+            config={"required_input_fields": ["field_from_a"]},  # Requires A's output
+        )
+        graph.add_node(
+            "transform_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="produces_output",
+            output_schema_config=SchemaConfig.from_dict({"mode": "observed", "guaranteed_fields": ["field_from_a"]}),  # Produces the field
+        )
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        # Pipeline order means B can't see A's output
+        graph.add_edge("source", "transform_b", label="continue")
+        graph.add_edge("transform_b", "transform_a", label="continue")
+        graph.add_edge("transform_a", "sink", label="continue")
+
+        # Should raise during edge validation - B requires field that isn't available
+        with pytest.raises(ValueError, match=r"required field|missing field|unsatisfied"):
+            graph.validate_edge_compatibility()
 
 
 class TestSourceSinkValidation:
@@ -1449,8 +1567,8 @@ class TestCoalesceNodes:
             input_schema = DummySchema
             output_schema = DummySchema
 
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                return GateResult(row=row, action=RoutingAction.continue_())
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
+                return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
 
         source = DummySource()
         sinks = {
@@ -1470,9 +1588,9 @@ class TestCoalesceNodes:
 
         with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
             ExecutionGraph.from_plugin_instances(
-                source=source,
-                transforms=[gate],
-                sinks=sinks,
+                source=source,  # type: ignore[arg-type]
+                transforms=[gate],  # type: ignore[list-item]
+                sinks=sinks,  # type: ignore[arg-type]
                 aggregations={},
                 gates=[],
                 default_sink="output",
@@ -3388,3 +3506,220 @@ class TestCoalesceGateIndex:
 
         index = graph.get_coalesce_gate_index()
         assert index == {}
+
+
+class TestDivertEdges:
+    """Tests for quarantine and error divert edges in graph construction.
+
+    These tests use the production factory path (instantiate_plugins_from_config)
+    per the Test Path Integrity rule. Divert edges make quarantine/error sinks
+    reachable in the graph without participating in normal DAG traversal.
+    """
+
+    def _build_graph(self, settings):
+        """Build ExecutionGraph via production factory path."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.dag import ExecutionGraph
+
+        plugins = instantiate_plugins_from_config(settings)
+        return ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+        )
+
+    def test_source_quarantine_edge_created(self, plugin_manager) -> None:
+        """Source with on_validation_failure creates a divert edge to quarantine sink."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "quarantine",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "quarantine": SinkSettings(plugin="json", options={"path": "quar.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="default",
+        )
+        graph = self._build_graph(settings)
+        graph.validate()
+
+        edges = graph.get_edges()
+        divert_edges = [e for e in edges if e.mode == RoutingMode.DIVERT]
+        assert len(divert_edges) == 1
+        assert divert_edges[0].label == "__quarantine__"
+
+    def test_source_discard_no_divert_edge(self, plugin_manager) -> None:
+        """Source with on_validation_failure='discard' creates no divert edge."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={"default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
+            default_sink="default",
+        )
+        graph = self._build_graph(settings)
+        graph.validate()
+
+        edges = graph.get_edges()
+        divert_edges = [e for e in edges if e.mode == RoutingMode.DIVERT]
+        assert len(divert_edges) == 0
+
+    def test_transform_error_edge_created(self, plugin_manager) -> None:
+        """Transform with on_error creates a divert edge to error sink."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+            ],
+            sinks={
+                "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="default",
+        )
+        graph = self._build_graph(settings)
+        graph.validate()
+
+        edges = graph.get_edges()
+        divert_edges = [e for e in edges if e.mode == RoutingMode.DIVERT]
+        assert len(divert_edges) == 1
+        assert divert_edges[0].label == "__error_0__"
+
+    def test_quarantine_and_error_both_present(self, plugin_manager) -> None:
+        """Both quarantine and error divert edges coexist."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "quarantine",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+            ],
+            sinks={
+                "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "quarantine": SinkSettings(plugin="json", options={"path": "quar.json", "schema": {"mode": "observed"}}),
+                "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="default",
+        )
+        graph = self._build_graph(settings)
+        graph.validate()
+
+        edges = graph.get_edges()
+        divert_edges = [e for e in edges if e.mode == RoutingMode.DIVERT]
+        assert len(divert_edges) == 2
+
+    def test_quarantine_to_default_sink_creates_divert_edge(self, plugin_manager) -> None:
+        """If quarantine destination is default sink, divert edge still created.
+
+        Verifies that schema validation still runs for the normal continue
+        edge to default sink (the DIVERT skip is per-edge, not per-node-pair).
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "default",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={"default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
+            default_sink="default",
+        )
+        graph = self._build_graph(settings)
+        graph.validate()
+
+        edges = graph.get_edges()
+        divert_edges = [e for e in edges if e.mode == RoutingMode.DIVERT]
+        assert len(divert_edges) == 1
+        # Normal continue edge should also exist
+        normal_edges = [e for e in edges if e.mode != RoutingMode.DIVERT]
+        assert any(e.label == "continue" for e in normal_edges)
+
+    def test_multiple_transforms_share_error_sink(self, plugin_manager) -> None:
+        """Multiple transforms can route errors to the same sink."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+            ],
+            sinks={
+                "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="default",
+        )
+        graph = self._build_graph(settings)
+        graph.validate()
+
+        edges = graph.get_edges()
+        divert_edges = [e for e in edges if e.mode == RoutingMode.DIVERT]
+        error_edges = [e for e in divert_edges if e.label.startswith("__error_")]
+        assert len(error_edges) == 2
+        assert {e.label for e in error_edges} == {"__error_0__", "__error_1__"}

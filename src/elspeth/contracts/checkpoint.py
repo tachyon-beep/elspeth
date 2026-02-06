@@ -41,3 +41,15 @@ class ResumePoint:
     node_id: str
     sequence_number: int
     aggregation_state: dict[str, Any] | None
+
+    def __post_init__(self) -> None:
+        """Validate aggregation_state is dict or None - Tier 1 crash on invalid types.
+
+        Per CLAUDE.md Data Manifesto: Checkpoints are Tier 1 audit data.
+        If aggregation_state is not a dict (when present), this indicates
+        corrupted checkpoint data - crash immediately, no silent coercion.
+        """
+        if self.aggregation_state is not None and not isinstance(self.aggregation_state, dict):
+            raise ValueError(
+                f"aggregation_state must be dict or None, got {type(self.aggregation_state).__name__}: {self.aggregation_state!r}"
+            )

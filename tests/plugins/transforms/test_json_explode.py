@@ -9,14 +9,32 @@ THREE-TIER TRUST MODEL:
 - No TransformResult.error() for type violations - they are bugs to fix
 """
 
+from typing import Any
+
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestJSONExplodeHappyPath:
@@ -43,7 +61,7 @@ class TestJSONExplodeHappyPath:
             "items": [{"name": "a"}, {"name": "b"}, {"name": "c"}],
         }
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.is_multi_row
@@ -81,7 +99,7 @@ class TestJSONExplodeHappyPath:
 
         row = {"id": 1, "items": []}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert not result.is_multi_row  # Single row result
@@ -102,7 +120,7 @@ class TestJSONExplodeHappyPath:
 
         row = {"id": 1, "tags": ["red", "green", "blue"]}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.is_multi_row
@@ -127,7 +145,7 @@ class TestJSONExplodeHappyPath:
 
         row = {"id": 1, "items": ["a", "b"]}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.is_multi_row
@@ -158,7 +176,7 @@ class TestJSONExplodeHappyPath:
             "items": ["x"],
         }
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.is_multi_row
@@ -206,7 +224,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1}  # Missing 'items' field
 
         with pytest.raises(KeyError, match="items"):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_none_value_crashes(self, ctx: PluginContext) -> None:
         """None value for array field is upstream bug - should crash (TypeError)."""
@@ -222,7 +240,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1, "items": None}
 
         with pytest.raises(TypeError):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_string_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
         """String value is upstream bug - should crash with TypeError.
@@ -245,7 +263,7 @@ class TestJSONExplodeTypeViolations:
 
         # Should crash with clear error message
         with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_dict_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
         """Dict value is upstream bug - should crash with TypeError.
@@ -265,7 +283,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1, "items": {"x": 1, "y": 2}}  # Dict, not list!
 
         with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_tuple_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
         """Tuple value is upstream bug - should crash with TypeError.
@@ -286,7 +304,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1, "items": ("a", "b", "c")}  # Tuple, not list!
 
         with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_non_iterable_value_crashes(self, ctx: PluginContext) -> None:
         """Non-iterable value is upstream bug - should crash (TypeError)."""
@@ -302,7 +320,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1, "items": 42}  # int is not iterable
 
         with pytest.raises(TypeError):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
 
 class TestJSONExplodeConfiguration:
@@ -336,19 +354,6 @@ class TestJSONExplodeConfiguration:
 
         with pytest.raises(PluginConfigError, match="schema"):
             JSONExplode({"array_field": "items"})
-
-    def test_implements_transform_protocol(self) -> None:
-        """JSONExplode implements TransformProtocol."""
-        from elspeth.plugins.transforms.json_explode import JSONExplode
-
-        transform = JSONExplode(
-            {
-                "schema": DYNAMIC_SCHEMA,
-                "array_field": "items",
-            }
-        )
-
-        assert isinstance(transform, TransformProtocol)
 
     def test_has_name_attribute(self) -> None:
         """JSONExplode has name class attribute."""
@@ -392,3 +397,92 @@ class TestJSONExplodeOutputSchema:
 
         config = transform.output_schema.model_config
         assert config.get("extra") == "allow", "Output schema should allow extra fields (dynamic)"
+
+
+class TestJSONExplodeContractPropagation:
+    """Tests for JSONExplode contract propagation."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_contract_contains_output_field_not_array_field(self, ctx: PluginContext) -> None:
+        """Output contract contains output_field and item_index, not array_field."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = _make_pipeline_row({"id": 1, "items": ["a", "b"]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+
+        field_names = {f.normalized_name for f in result.contract.fields}
+        assert "item" in field_names
+        assert "item_index" in field_names
+        assert "items" not in field_names  # Array field removed
+        assert "id" in field_names  # Other fields preserved
+
+    def test_contract_empty_array_case(self, ctx: PluginContext) -> None:
+        """Output contract for empty array contains output_field with None type."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        row = _make_pipeline_row({"id": 1, "items": []})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+
+        field_names = {f.normalized_name for f in result.contract.fields}
+        assert "item" in field_names
+        assert "item_index" in field_names
+        assert "items" not in field_names
+
+    def test_downstream_can_access_exploded_fields(self, ctx: PluginContext) -> None:
+        """Downstream transforms can access exploded fields via contract."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "tags",
+                "output_field": "tag",
+            }
+        )
+
+        row = _make_pipeline_row({"id": 1, "tags": ["python", "elspeth"]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+        assert result.rows is not None
+        assert len(result.rows) == 2
+        assert isinstance(result.rows[0], dict)
+
+        # Create PipelineRow with output contract for first child
+        output_row = PipelineRow(result.rows[0], result.contract)
+
+        # Downstream access via contract should work
+        assert output_row["tag"] == "python"
+        assert output_row["item_index"] == 0
+        assert output_row["id"] == 1
+
+        # Original array field should not be accessible
+        with pytest.raises(KeyError, match="not found in schema contract"):
+            _ = output_row["tags"]

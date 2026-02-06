@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import ast
 import operator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from elspeth.contracts import PipelineRow
 
 
 class ExpressionSecurityError(Exception):
@@ -290,7 +293,7 @@ class _ExpressionValidator(ast.NodeVisitor):
 class _ExpressionEvaluator(ast.NodeVisitor):
     """AST visitor that evaluates validated expressions."""
 
-    def __init__(self, row: dict[str, Any]) -> None:
+    def __init__(self, row: dict[str, Any] | PipelineRow) -> None:
         self._row = row
 
     def visit_Expression(self, node: ast.Expression) -> Any:
@@ -564,11 +567,11 @@ class ExpressionParser:
         # Everything else (field access, arithmetic, etc.) is not guaranteed boolean
         return False
 
-    def evaluate(self, row: dict[str, Any]) -> Any:
+    def evaluate(self, row: dict[str, Any] | PipelineRow) -> Any:
         """Evaluate expression against row data.
 
         Args:
-            row: Row data dictionary
+            row: Row data dictionary or PipelineRow (which implements __getitem__ and .get())
 
         Returns:
             Result of expression evaluation (typically bool for gate conditions)

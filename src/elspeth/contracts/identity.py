@@ -3,8 +3,13 @@
 These types answer: "How do we refer to things?"
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import PipelineRow
 
 
 @dataclass
@@ -19,19 +24,19 @@ class TokenInfo:
     - join_group_id: Groups all tokens merged in a coalesce operation
     - expand_group_id: Groups all children from an expand operation
 
-    Note: NOT frozen because row_data is mutable dict and executors
-    update tokens as they flow through the pipeline.
+    Note: NOT frozen because row_data may need to be updated as tokens
+    flow through the pipeline. Use with_updated_data() for updates.
     """
 
     row_id: str
     token_id: str
-    row_data: dict[str, Any]
+    row_data: PipelineRow  # CHANGED from dict[str, Any]
     branch_name: str | None = None
     fork_group_id: str | None = None
     join_group_id: str | None = None
     expand_group_id: str | None = None
 
-    def with_updated_data(self, new_data: dict[str, Any]) -> "TokenInfo":
+    def with_updated_data(self, new_data: PipelineRow) -> TokenInfo:
         """Return a new TokenInfo with updated row_data, preserving all lineage fields.
 
         This method ensures that when row_data is updated after a transform,
@@ -42,7 +47,7 @@ class TokenInfo:
         a token's data after processing.
 
         Args:
-            new_data: The new row_data to use
+            new_data: The new PipelineRow to use
 
         Returns:
             A new TokenInfo with the same identity/lineage but new row_data

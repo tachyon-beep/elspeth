@@ -26,6 +26,22 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.routing import RoutingAction
 
 
+def _extract_dict_from_row(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
+    """Extract dict from PipelineRow or pass through dict.
+
+    This is a legitimate boundary operation when creating a new PipelineRow
+    with a different contract.
+    """
+    if TYPE_CHECKING:
+        from elspeth.contracts.schema_contract import PipelineRow as PR
+    else:
+        from elspeth.contracts.schema_contract import PipelineRow as PR
+
+    if isinstance(row, PR):
+        return dict(row._data)
+    return row
+
+
 @dataclass
 class ExceptionResult:
     """Wrapper for exceptions that should propagate through async pattern.
@@ -99,10 +115,10 @@ class TransformResult:
     """
 
     status: Literal["success", "error"]
-    row: dict[str, Any] | None
+    row: dict[str, Any] | PipelineRow | None
     reason: TransformErrorReason | None
     retryable: bool = False
-    rows: list[dict[str, Any]] | None = None
+    rows: list[dict[str, Any] | PipelineRow] | None = None
 
     # Success metadata - REQUIRED for success results, None for error results
     # Invariant: status="success" implies success_reason is not None
@@ -180,12 +196,12 @@ class TransformResult:
         if self.contract is None:
             raise ValueError("TransformResult has no contract - cannot create PipelineRows")
         # Multi-row success result - rows is guaranteed to be non-None
-        return [PipelineRow(row, self.contract) for row in self.rows]  # type: ignore[union-attr]
+        return [PipelineRow(_extract_dict_from_row(row), self.contract) for row in self.rows]  # type: ignore[union-attr]
 
     @classmethod
     def success(
         cls,
-        row: dict[str, Any],
+        row: dict[str, Any] | PipelineRow,
         *,
         success_reason: TransformSuccessReason,
         context_after: dict[str, Any] | None = None,
@@ -225,7 +241,7 @@ class TransformResult:
     @classmethod
     def success_multi(
         cls,
-        rows: list[dict[str, Any]],
+        rows: list[dict[str, Any] | PipelineRow],
         *,
         success_reason: TransformSuccessReason,
         context_after: dict[str, Any] | None = None,
@@ -311,10 +327,29 @@ class GateResult:
     row: dict[str, Any]
     action: RoutingAction
 
+    # Schema contract for output (optional)
+    # Enables conversion to PipelineRow via to_pipeline_row()
+    contract: SchemaContract | None = field(default=None, repr=False)
+
     # Audit fields - set by executor, not by plugin
     input_hash: str | None = field(default=None, repr=False)
     output_hash: str | None = field(default=None, repr=False)
     duration_ms: float | None = field(default=None, repr=False)
+
+    def to_pipeline_row(self) -> PipelineRow:
+        """Convert to PipelineRow for downstream processing.
+
+        Returns:
+            PipelineRow wrapping row data with contract
+
+        Raises:
+            ValueError: If contract is None
+        """
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        if self.contract is None:
+            raise ValueError("GateResult has no contract - cannot create PipelineRow")
+        return PipelineRow(self.row, self.contract)
 
 
 # NOTE: AcceptResult was deleted in aggregation structural cleanup.
@@ -338,7 +373,7 @@ class RowResult:
     """
 
     token: TokenInfo
-    final_data: dict[str, Any]
+    final_data: dict[str, Any] | PipelineRow
     outcome: RowOutcome
     sink_name: str | None = None
     error: FailureInfo | None = None

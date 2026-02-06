@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from pydantic import Field
 
-from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
+from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
@@ -443,14 +444,14 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             logger = structlog.get_logger(__name__)
             logger.warning("Failed to record Langfuse error trace", error=str(e))
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
 
         This is the pipeline entry point. Rows are processed concurrently
         with FIFO output ordering. Blocks when buffer is full (backpressure).
 
         Args:
-            row: Row to process
+            row: Row to process as PipelineRow
             ctx: Plugin context with landscape and state_id
 
         Raises:
@@ -463,7 +464,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Not supported - use accept() for row-level pipelining.
@@ -478,7 +479,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
         )
 
-    def _process_row(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Process a single row through OpenRouter API.
 
         Called by worker threads from the BatchTransformMixin. Each row is
@@ -490,15 +491,18 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         3. Response parsing (EXTERNAL DATA) - wrap, return error
 
         Args:
-            row: Row to process
+            row: Row to process as PipelineRow
             ctx: Plugin context with landscape and state_id
 
         Returns:
             TransformResult with processed row or error
         """
+        # Extract dict from PipelineRow for template rendering (which hashes the data)
+        row_data = row.to_dict()
+
         # 1. Render template with row data (THEIR DATA - wrap)
         try:
-            rendered = self._template.render_with_metadata(row)
+            rendered = self._template.render_with_metadata(row_data)
         except TemplateError as e:
             error_reason: TransformErrorReason = {
                 "reason": "template_rendering_failed",
@@ -611,6 +615,16 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                     retryable=False,
                 )
 
+            # 6b. Check for content filtering (null content from provider)
+            if content is None:
+                return TransformResult.error(
+                    {
+                        "reason": "content_filtered",
+                        "error": "LLM returned null content (likely content-filtered by provider)",
+                    },
+                    retryable=False,
+                )
+
             # OpenRouter can return {"usage": null} or omit usage entirely.
             # Use `or {}` to handle both missing AND null cases.
             usage = data.get("usage") or {}
@@ -628,7 +642,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             # 7. Build output row (OUR CODE - let exceptions crash)
-            output = dict(row)
+            output = row_data.copy()
             output[self._response_field] = content
             output[f"{self._response_field}_usage"] = usage
             output[f"{self._response_field}_template_hash"] = rendered.template_hash
@@ -639,9 +653,17 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
             output[f"{self._response_field}_model"] = data.get("model", self._model)
 
+            # 8. Propagate contract (always present in PipelineRow)
+            output_contract = propagate_contract(
+                input_contract=row.contract,
+                output_row=output,
+                transform_adds_fields=True,  # LLM transforms add response field + metadata
+            )
+
             return TransformResult.success(
                 output,
                 success_reason={"action": "enriched", "fields_added": [self._response_field]},
+                contract=output_contract,
             )
         finally:
             # Clean up cached client for this state_id to prevent unbounded growth

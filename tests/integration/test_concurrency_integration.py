@@ -10,6 +10,7 @@ STATUS: IMPLEMENTED
 """
 
 from elspeth.contracts.config import RuntimeConcurrencyConfig
+from elspeth.contracts.types import NodeID
 from elspeth.core.config import ConcurrencySettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
@@ -94,7 +95,7 @@ class TestConcurrencyConfigInRowProcessor:
                 recorder=recorder,
                 span_factory=span_factory,
                 run_id="test-run",
-                source_node_id="source-1",
+                source_node_id=NodeID("source-1"),
                 max_workers=4,
             )
             # Verify max_workers was passed to TransformExecutor
@@ -113,7 +114,7 @@ class TestConcurrencyConfigInRowProcessor:
                 recorder=recorder,
                 span_factory=span_factory,
                 run_id="test-run",
-                source_node_id="source-1",
+                source_node_id=NodeID("source-1"),
             )
             # No max_workers means no cap
             assert processor._transform_executor._max_workers is None
@@ -153,7 +154,8 @@ class TestConcurrencyConfigProtocolCompliance:
         # Verify Orchestrator accepts it
         db = LandscapeDB.in_memory()
         try:
-            orchestrator = Orchestrator(db, concurrency_config=custom_config)
+            orchestrator = Orchestrator(db, concurrency_config=custom_config)  # type: ignore[arg-type]
+            assert orchestrator._concurrency_config is not None
             assert orchestrator._concurrency_config.max_workers == 12
         finally:
             db.close()
@@ -173,52 +175,62 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         This test verifies the full wiring path:
         CLI -> RuntimeConcurrencyConfig -> Orchestrator -> RowProcessor -> TransformExecutor
         """
-        from unittest.mock import MagicMock, patch
+        from collections.abc import Iterator
+        from typing import Any
+        from unittest.mock import patch
 
-        from elspeth.contracts import ArtifactDescriptor, Determinism, NodeType, RoutingMode, SinkName, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, SourceRow
         from elspeth.core.dag import ExecutionGraph
+        from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_sink, as_source
 
         db = LandscapeDB.in_memory()
         concurrency_config = RuntimeConcurrencyConfig(max_workers=5)
         orchestrator = Orchestrator(db, concurrency_config=concurrency_config)
 
-        # Create minimal graph
-        graph = ExecutionGraph()
-        schema_config = {"schema": {"mode": "observed"}}
-        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
-        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
-        graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._sink_id_map = {SinkName("output"): "sink"}
-        graph._default_sink = "output"
-        graph._transform_id_map = {}
+        # Create simple test source
+        class SimpleSource(_TestSourceBase):
+            name = "simple_source"
+            output_schema = _TestSchema
 
-        # Create mock source
-        mock_source = MagicMock()
-        mock_source.name = "test_source"
-        mock_source._on_validation_failure = "discard"
-        mock_source.determinism = Determinism.IO_READ
-        mock_source.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-        mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
-        mock_source.get_field_resolution.return_value = None
-        mock_source.get_schema_contract.return_value = None  # Prevent MagicMock nesting
+            def __init__(self) -> None:
+                super().__init__()
+                self._data = [{"id": 1}]
 
-        # Create mock sink
-        mock_sink = MagicMock()
-        mock_sink.name = "test_sink"
-        mock_sink.determinism = Determinism.IO_WRITE
-        mock_sink.plugin_version = "1.0.0"
-        mock_sink.input_schema = schema_mock
-        mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield from self.wrap_rows(self._data)
+
+        # Create simple test sink
+        class SimpleSink(_TestSinkBase):
+            name = "simple_sink"
+            input_schema = _TestSchema
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.written: list[dict[str, Any]] = []
+
+            def write(self, rows: list[dict[str, Any]], ctx: Any) -> ArtifactDescriptor:
+                self.written.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+        # Build graph using production path
+        source = SimpleSource()
+        sink = SimpleSink()
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[],
+            sinks={"output": as_sink(sink)},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+        )
 
         from elspeth.engine.orchestrator import PipelineConfig
 
         pipeline_config = PipelineConfig(
-            source=mock_source,
+            source=as_source(source),
             transforms=[],
-            sinks={"output": mock_sink},
+            sinks={"output": as_sink(sink)},
             gates=[],
             aggregation_settings={},
             coalesce_settings=[],

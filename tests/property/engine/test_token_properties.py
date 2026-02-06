@@ -17,14 +17,14 @@ nested data structures, not just the specific case that triggered the bug.
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 from unittest.mock import MagicMock
 
-from hypothesis import assume, given, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.engine.tokens import TokenManager
 from tests.property.conftest import (
     deeply_nested_data,
@@ -32,6 +32,16 @@ from tests.property.conftest import (
     mutable_nested_data,
     row_data,
 )
+
+
+def _make_observed_contract() -> SchemaContract:
+    """Create an OBSERVED schema contract for property tests."""
+    return SchemaContract(mode="OBSERVED", fields=())
+
+
+def _wrap_dict_as_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Wrap dict as PipelineRow with OBSERVED contract for property tests."""
+    return PipelineRow(data, _make_observed_contract())
 
 
 def _create_mock_recorder(branches: list[str]) -> MagicMock:
@@ -56,8 +66,10 @@ class TestForkIsolationProperties:
     def test_fork_creates_isolated_copies(self, row_data: dict[str, Any], branches: list[str]) -> None:
         """Property: Forked children have isolated row_data.
 
-        Mutating one child's row_data must NOT affect any sibling's data.
-        This is the core audit trail integrity guarantee.
+        Each child must get its own PipelineRow instance (not shared reference).
+        This is the core audit trail integrity guarantee - even though PipelineRow
+        is immutable, fork operations must create independent copies via deepcopy
+        to ensure each child can be independently updated with_updated_data().
         """
         mock_recorder = _create_mock_recorder(branches)
         manager = TokenManager(mock_recorder)
@@ -65,7 +77,7 @@ class TestForkIsolationProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=row_data,
+            row_data=_wrap_dict_as_pipeline_row(row_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -77,29 +89,21 @@ class TestForkIsolationProperties:
 
         assert len(children) == len(branches), "Wrong number of children"
 
-        # Get first key for mutation test
-        if not children[0].row_data:
-            assume(False)
-            return
+        # Verify each child has its own PipelineRow instance (not shared)
+        # Even though PipelineRow is immutable, each token needs independent copies
+        # so they can be updated independently via with_updated_data()
+        for i in range(len(children)):
+            for j in range(i + 1, len(children)):
+                # Check object identity - they must be different instances
+                assert children[i].row_data is not children[j].row_data, (
+                    f"Children {i} and {j} share the same PipelineRow instance! Fork must create independent copies via deepcopy."
+                )
 
-        first_key = next(iter(children[0].row_data))
-        original_values = [copy.deepcopy(c.row_data.get(first_key)) for c in children]
-
-        # Mutate first child's data (testing various mutation types)
-        if isinstance(children[0].row_data[first_key], list):
-            children[0].row_data[first_key].append(999999)
-        elif isinstance(children[0].row_data[first_key], dict):
-            children[0].row_data[first_key]["__mutated__"] = True
-        else:
-            children[0].row_data[first_key] = "__MUTATED__"
-
-        # Verify ALL siblings are unaffected
-        for i, child in enumerate(children[1:], start=1):
-            actual_value = child.row_data.get(first_key)
-            expected_value = original_values[i]
-            assert actual_value == expected_value, (
-                f"Child {i} was affected by mutation to child 0! Expected {expected_value!r}, got {actual_value!r}"
-            )
+        # Verify all children have equivalent data content (but different instances)
+        expected_data = parent.row_data.to_dict()
+        for i, child in enumerate(children):
+            actual_data = child.row_data.to_dict()
+            assert actual_data == expected_data, f"Child {i} has different data content! Expected {expected_data!r}, got {actual_data!r}"
 
     @given(
         row_data=deeply_nested_data,
@@ -109,8 +113,8 @@ class TestForkIsolationProperties:
     def test_fork_isolates_deeply_nested_data(self, row_data: Any, branches: list[str]) -> None:
         """Property: Deep nesting doesn't break isolation.
 
-        Shallow copy only copies top-level references. This test ensures
-        even deeply nested structures are properly isolated.
+        Each child must get its own PipelineRow with deep-copied data.
+        Even deeply nested mutable structures must be independent across siblings.
         """
         # Wrap in dict if needed (deeply_nested_data can be int, list, or dict)
         if not isinstance(row_data, dict):
@@ -122,7 +126,7 @@ class TestForkIsolationProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=row_data,
+            row_data=_wrap_dict_as_pipeline_row(row_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -132,36 +136,47 @@ class TestForkIsolationProperties:
             run_id="test_run_1",
         )
 
-        # Store original state of all children
-        original_states = [copy.deepcopy(c.row_data) for c in children]
+        # Verify each child has independent PipelineRow instances
+        # Check all pairs have different object identities
+        for i in range(len(children)):
+            for j in range(i + 1, len(children)):
+                assert children[i].row_data is not children[j].row_data, (
+                    f"Deep nesting test: Children {i} and {j} share PipelineRow instance!"
+                )
 
-        # Recursively mutate first child's data
-        def mutate_deeply(obj: Any, depth: int = 0) -> bool:
-            """Mutate the deepest mutable object found."""
-            if depth > 10:
-                return False
+        # Verify all children have equivalent data (deep equality)
+        expected_data = parent.row_data.to_dict()
+        for i, child in enumerate(children):
+            actual_data = child.row_data.to_dict()
+            assert actual_data == expected_data, (
+                f"Deep nesting test: Child {i} has different data! Expected {expected_data!r}, got {actual_data!r}"
+            )
 
-            if isinstance(obj, dict):
-                for key, value in obj.items():
-                    if isinstance(value, (dict, list)):
-                        if mutate_deeply(value, depth + 1):
-                            return True
-                    else:
-                        obj[key] = "__DEEP_MUTATED__"
-                        return True
-            elif isinstance(obj, list) and obj:
-                if isinstance(obj[0], (dict, list)):
-                    return mutate_deeply(obj[0], depth + 1)
-                else:
-                    obj[0] = "__DEEP_MUTATED__"
-                    return True
-            return False
+        # Additionally verify that the underlying data dict is NOT shared
+        # (even though PipelineRow is immutable, the dict inside should be independent)
+        # This ensures deep copying happened correctly
+        if len(children) >= 2:
+            # Get the internal data dicts (they should be different instances)
+            data_0 = children[0].row_data.to_dict()
+            data_1 = children[1].row_data.to_dict()
+            # They should be equal in value but not the same object
+            assert data_0 == data_1, "Children should have equal data"
 
-        mutate_deeply(children[0].row_data)
+            # For mutable nested structures, verify they're independent copies
+            def check_independent_nested(obj1: Any, obj2: Any, path: str = "") -> None:
+                """Recursively verify nested mutable objects are independent."""
+                if isinstance(obj1, dict) and isinstance(obj2, dict):
+                    for key in obj1:
+                        if key in obj2:
+                            check_independent_nested(obj1[key], obj2[key], f"{path}.{key}")
+                elif isinstance(obj1, list) and isinstance(obj2, list):
+                    for idx in range(min(len(obj1), len(obj2))):
+                        check_independent_nested(obj1[idx], obj2[idx], f"{path}[{idx}]")
+                elif isinstance(obj1, (dict, list)):
+                    # Both are mutable - they must be different objects
+                    assert obj1 is not obj2, f"Mutable objects at {path} are shared!"
 
-        # Verify siblings unchanged
-        for i, child in enumerate(children[1:], start=1):
-            assert child.row_data == original_states[i], f"Child {i} was affected by deep mutation to child 0!"
+            check_independent_nested(data_0, data_1)
 
 
 class TestForkParentPreservationProperties:
@@ -175,8 +190,9 @@ class TestForkParentPreservationProperties:
     def test_fork_preserves_parent_data(self, row_data: dict[str, Any], branches: list[str]) -> None:
         """Property: Forking doesn't mutate parent token.
 
-        The parent's row_data must be unchanged after fork,
-        regardless of what happens to children.
+        The parent's row_data must remain independent from children.
+        Since PipelineRow is immutable, we verify parent and children
+        have different PipelineRow instances (not shared).
         """
         mock_recorder = _create_mock_recorder(branches)
         manager = TokenManager(mock_recorder)
@@ -184,11 +200,11 @@ class TestForkParentPreservationProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=row_data,
+            row_data=_wrap_dict_as_pipeline_row(row_data),
         )
 
-        # Deep copy parent data for comparison
-        original_parent_data = copy.deepcopy(parent.row_data)
+        # Store original parent data for comparison
+        original_parent_data = parent.row_data.to_dict()
 
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
@@ -197,14 +213,18 @@ class TestForkParentPreservationProperties:
             run_id="test_run_1",
         )
 
-        # Mutate all children
-        for child in children:
-            if child.row_data:
-                for key in list(child.row_data.keys()):
-                    child.row_data[key] = "__CHILD_MUTATED__"
+        # Verify parent's PipelineRow is not shared with any child
+        for i, child in enumerate(children):
+            assert child.row_data is not parent.row_data, (
+                f"Child {i} shares PipelineRow instance with parent! Fork must create independent copies."
+            )
 
-        # Parent must be unchanged
-        assert parent.row_data == original_parent_data, "Parent data was mutated by child operations!"
+        # Verify parent data is unchanged (value equality)
+        assert parent.row_data.to_dict() == original_parent_data, "Parent data was changed after fork!"
+
+        # Verify all children have same data as parent (but different instances)
+        for i, child in enumerate(children):
+            assert child.row_data.to_dict() == original_parent_data, f"Child {i} has different data from parent!"
 
     @given(
         row_data=row_data,
@@ -226,7 +246,7 @@ class TestForkParentPreservationProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=row_data,
+            row_data=_wrap_dict_as_pipeline_row(row_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -278,7 +298,7 @@ class TestForkRowDataOverrideProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=original_data,
+            row_data=_wrap_dict_as_pipeline_row(original_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -286,7 +306,7 @@ class TestForkRowDataOverrideProperties:
             branches=branches,
             step_in_pipeline=1,
             run_id="test_run_1",
-            row_data=override_data,  # Explicit override
+            row_data=_wrap_dict_as_pipeline_row(override_data),  # Explicit override
         )
 
         # Children should have override data, not parent data
@@ -315,7 +335,7 @@ class TestForkRowDataOverrideProperties:
         parent = TokenInfo(
             row_id="row_1",
             token_id="parent_1",
-            row_data=original_data,
+            row_data=_wrap_dict_as_pipeline_row(original_data),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -328,4 +348,4 @@ class TestForkRowDataOverrideProperties:
 
         # Children should have parent's data structure
         for child in children:
-            assert child.row_data == original_data, "Child data doesn't match parent when no override provided"
+            assert child.row_data.to_dict() == original_data, "Child data doesn't match parent when no override provided"

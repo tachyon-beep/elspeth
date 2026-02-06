@@ -19,7 +19,7 @@ from elspeth.plugins.batching.row_reorder_buffer import (
 class TestRowReorderBufferBasics:
     """Basic functionality tests."""
 
-    def test_single_row_submit_complete_release(self):
+    def test_single_row_submit_complete_release(self) -> None:
         """Single row flows through correctly."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -34,7 +34,7 @@ class TestRowReorderBufferBasics:
         assert entry.row_id == "row-1"
         assert entry.sequence == 0
 
-    def test_fifo_ordering_sequential_complete(self):
+    def test_fifo_ordering_sequential_complete(self) -> None:
         """Rows completed in order are released in order."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -50,7 +50,7 @@ class TestRowReorderBufferBasics:
         assert buffer.wait_for_next_release(timeout=1.0).result == "result-2"
         assert buffer.wait_for_next_release(timeout=1.0).result == "result-3"
 
-    def test_fifo_ordering_reverse_complete(self):
+    def test_fifo_ordering_reverse_complete(self) -> None:
         """Rows completed in reverse order still release in submission order."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -68,7 +68,7 @@ class TestRowReorderBufferBasics:
         assert buffer.wait_for_next_release(timeout=1.0).result == "result-2"
         assert buffer.wait_for_next_release(timeout=1.0).result == "result-3"
 
-    def test_metrics_accurate(self):
+    def test_metrics_accurate(self) -> None:
         """Metrics reflect actual buffer state."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -92,7 +92,7 @@ class TestRowReorderBufferBasics:
 class TestBackpressure:
     """Backpressure tests."""
 
-    def test_submit_blocks_when_full(self):
+    def test_submit_blocks_when_full(self) -> None:
         """Submit blocks when max_pending reached."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=2)
 
@@ -120,7 +120,7 @@ class TestBackpressure:
         assert submit_completed.wait(timeout=1.0)
         thread.join()
 
-    def test_submit_timeout(self):
+    def test_submit_timeout(self) -> None:
         """Submit times out if buffer stays full."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=1)
 
@@ -133,7 +133,7 @@ class TestBackpressure:
 class TestShutdown:
     """Shutdown and error handling tests."""
 
-    def test_shutdown_wakes_submit_waiters(self):
+    def test_shutdown_wakes_submit_waiters(self) -> None:
         """Shutdown wakes threads blocked on submit."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=1)
 
@@ -159,7 +159,7 @@ class TestShutdown:
         assert "shut down" in str(caught_exception[0])
         thread.join()
 
-    def test_shutdown_wakes_release_waiters(self):
+    def test_shutdown_wakes_release_waiters(self) -> None:
         """Shutdown wakes threads blocked on wait_for_next_release."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -180,7 +180,7 @@ class TestShutdown:
         assert exception_caught.wait(timeout=1.0)
         thread.join()
 
-    def test_double_complete_raises(self):
+    def test_double_complete_raises(self) -> None:
         """Completing the same ticket twice raises ValueError."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -194,7 +194,7 @@ class TestShutdown:
 class TestConcurrency:
     """Concurrent access tests."""
 
-    def test_concurrent_complete_fifo_maintained(self):
+    def test_concurrent_complete_fifo_maintained(self) -> None:
         """FIFO ordering maintained with concurrent completions."""
         buffer: RowReorderBuffer[int] = RowReorderBuffer(max_pending=100)
         num_rows = 50
@@ -213,7 +213,7 @@ class TestConcurrency:
                 buffer.complete(tickets[i], i)
 
         # Split indices across threads
-        threads = []
+        threads: list[threading.Thread] = []
         chunk_size = num_rows // 5
         for t in range(5):
             start = t * chunk_size
@@ -229,8 +229,8 @@ class TestConcurrency:
             entry = buffer.wait_for_next_release(timeout=10.0)
             results.append(entry.result)
 
-        for t in threads:
-            t.join()
+        for thread in threads:
+            thread.join()
 
         # Results should be in submission order (0, 1, 2, ...)
         assert results == list(range(num_rows))
@@ -239,7 +239,7 @@ class TestConcurrency:
 class TestEviction:
     """Tests for evicting abandoned entries (timeout/retry scenarios)."""
 
-    def test_evict_removes_entry_and_advances_release_sequence(self):
+    def test_evict_removes_entry_and_advances_release_sequence(self) -> None:
         """Evicting an entry allows subsequent entries to be released.
 
         This is the core retry scenario:
@@ -273,7 +273,7 @@ class TestEviction:
         assert entry.result == "retry-result"
         assert entry.sequence == 1
 
-    def test_evict_already_completed_returns_false(self):
+    def test_evict_already_completed_returns_false(self) -> None:
         """Evicting an already-completed entry returns False."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -283,7 +283,7 @@ class TestEviction:
         # Already completed - evict should fail
         assert buffer.evict(ticket) is False
 
-    def test_evict_already_released_returns_false(self):
+    def test_evict_already_released_returns_false(self) -> None:
         """Evicting an already-released entry returns False."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -294,7 +294,7 @@ class TestEviction:
         # Already released - evict should fail (not in pending)
         assert buffer.evict(ticket) is False
 
-    def test_evict_advances_past_multiple_evicted(self):
+    def test_evict_advances_past_multiple_evicted(self) -> None:
         """Evicting multiple entries advances past all of them."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
 
@@ -316,7 +316,7 @@ class TestEviction:
         assert entry.result == "result-3"
         assert entry.sequence == 3
 
-    def test_evict_releases_backpressure(self):
+    def test_evict_releases_backpressure(self) -> None:
         """Evicting an entry frees up a slot for new submissions."""
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=2)
 

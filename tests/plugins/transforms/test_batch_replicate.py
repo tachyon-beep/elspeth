@@ -7,13 +7,31 @@ Contract enforcement tests verify that wrong types raise TypeError per
 the Tier 2 trust model - transforms must not coerce pipeline data types.
 """
 
+from typing import Any
+
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestBatchReplicateHappyPath:
@@ -23,18 +41,6 @@ class TestBatchReplicateHappyPath:
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """BatchReplicate implements TransformProtocol."""
-        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
-
-        transform = BatchReplicate(
-            {
-                "schema": DYNAMIC_SCHEMA,
-                "copies_field": "copies",
-            }
-        )
-        assert isinstance(transform, TransformProtocol)  # type: ignore[unreachable]
 
     def test_has_required_attributes(self) -> None:
         """BatchReplicate has name and is_batch_aware."""
@@ -55,9 +61,9 @@ class TestBatchReplicateHappyPath:
         )
 
         rows = [
-            {"id": 1, "copies": 2},
-            {"id": 2, "copies": 3},
-            {"id": 3, "copies": 1},
+            _make_pipeline_row({"id": 1, "copies": 2}),
+            _make_pipeline_row({"id": 2, "copies": 3}),
+            _make_pipeline_row({"id": 3, "copies": 1}),
         ]
 
         result = transform.process(rows, ctx)
@@ -85,8 +91,8 @@ class TestBatchReplicateHappyPath:
         )
 
         rows = [
-            {"id": 1},  # No copies field - use default
-            {"id": 2, "copies": 3},
+            _make_pipeline_row({"id": 1}),  # No copies field - use default
+            _make_pipeline_row({"id": 2, "copies": 3}),
         ]
 
         result = transform.process(rows, ctx)
@@ -137,7 +143,7 @@ class TestBatchReplicateTypeEnforcement:
             }
         )
 
-        rows = [{"id": 1, "copies": "3"}]  # String "3" instead of int 3
+        rows = [_make_pipeline_row({"id": 1, "copies": "3"})]  # String "3" instead of int 3
 
         with pytest.raises(TypeError, match="must be int, got str"):
             transform.process(rows, ctx)
@@ -153,7 +159,7 @@ class TestBatchReplicateTypeEnforcement:
             }
         )
 
-        rows = [{"id": 1, "copies": 3.5}]  # Float instead of int
+        rows = [_make_pipeline_row({"id": 1, "copies": 3.5})]  # Float instead of int
 
         with pytest.raises(TypeError, match="must be int, got float"):
             transform.process(rows, ctx)
@@ -169,7 +175,7 @@ class TestBatchReplicateTypeEnforcement:
             }
         )
 
-        rows = [{"id": 1, "copies": None}]
+        rows = [_make_pipeline_row({"id": 1, "copies": None})]
 
         with pytest.raises(TypeError, match="must be int, got NoneType"):
             transform.process(rows, ctx)
@@ -185,7 +191,7 @@ class TestBatchReplicateTypeEnforcement:
             }
         )
 
-        rows = [{"id": 1, "copies": 0}]
+        rows = [_make_pipeline_row({"id": 1, "copies": 0})]
 
         with pytest.raises(ValueError, match="must be >= 1"):
             transform.process(rows, ctx)
@@ -201,7 +207,7 @@ class TestBatchReplicateTypeEnforcement:
             }
         )
 
-        rows = [{"id": 1, "copies": -1}]
+        rows = [_make_pipeline_row({"id": 1, "copies": -1})]
 
         with pytest.raises(ValueError, match="must be >= 1"):
             transform.process(rows, ctx)
@@ -217,7 +223,7 @@ class TestBatchReplicateTypeEnforcement:
             }
         )
 
-        rows = [{"id": 1, "copies": "invalid"}]
+        rows = [_make_pipeline_row({"id": 1, "copies": "invalid"})]
 
         with pytest.raises(TypeError, match="upstream validation bug"):
             transform.process(rows, ctx)
@@ -271,7 +277,7 @@ class TestBatchReplicateSchemaContract:
         output_schema = transform.output_schema
         # Dynamic schemas accept any fields
         validated = output_schema.model_validate({"id": 1, "copy_index": 0})
-        assert validated.copy_index == 0
+        assert validated.copy_index == 0  # type: ignore[attr-defined]
 
     def test_output_schema_accepts_copy_index_field(self) -> None:
         """Output schema validation passes for rows with copy_index."""

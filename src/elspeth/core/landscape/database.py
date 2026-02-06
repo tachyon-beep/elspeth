@@ -38,6 +38,12 @@ _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     ("node_states", "success_reason_json"),
     # Operation call linkage - enables source/sink call tracking
     ("calls", "operation_id"),
+    # Phase 5: Schema contract audit trail - captures contracts in effect for run
+    ("runs", "schema_contract_json"),
+    ("runs", "schema_contract_hash"),
+    # Phase 5: Plugin contract audit trail - captures input/output contracts per node
+    ("nodes", "input_contract_json"),
+    ("nodes", "output_contract_json"),
 ]
 
 # Required foreign keys for audit integrity (Tier 1 trust).
@@ -110,6 +116,7 @@ class LandscapeDB:
         Registers a connection event hook that sets:
         - PRAGMA journal_mode=WAL (better concurrency)
         - PRAGMA foreign_keys=ON (referential integrity)
+        - PRAGMA busy_timeout=5000 (contention tolerance)
 
         Args:
             engine: SQLAlchemy Engine to configure
@@ -122,6 +129,8 @@ class LandscapeDB:
             cursor.execute("PRAGMA journal_mode=WAL")
             # Enable foreign key enforcement
             cursor.execute("PRAGMA foreign_keys=ON")
+            # Set busy timeout to avoid immediate SQLITE_BUSY errors under contention
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
     def _create_tables(self) -> None:

@@ -15,7 +15,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema, RunStatus
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
@@ -27,6 +27,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -52,6 +53,7 @@ class TestOrchestratorPayloadStoreRequirement:
             output_schema = MinimalSchema
 
             def __init__(self) -> None:
+                super().__init__()
                 self.load_called = False
 
             def on_start(self, ctx: Any) -> None:
@@ -59,7 +61,7 @@ class TestOrchestratorPayloadStoreRequirement:
 
             def load(self, ctx: Any) -> Any:
                 self.load_called = True
-                yield SourceRow.valid({"value": 1})
+                yield from self.wrap_rows([{"value": 1}])
 
             def close(self) -> None:
                 pass
@@ -109,30 +111,11 @@ class TestOrchestratorPayloadStoreRequirement:
         when a payload_store is provided.
         """
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class PassthroughSink(_TestSinkBase):
             name = "output"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.rows_written: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -202,7 +185,7 @@ class TestOrchestratorPayloadStoreRequirement:
                 pass
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"value": 1})
+                yield from self.wrap_rows([{"value": 1}])
 
             def close(self) -> None:
                 pass
@@ -286,39 +269,19 @@ class TestOrchestratorPayloadStoreIntegration:
         Verifies that payload storage happens before any transform processing.
         """
 
-        class ValueSchema(PluginSchema):
-            value: int
-
         class DoubledSchema(PluginSchema):
             value: int
             doubled: int
 
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class DoubleTransform(BaseTransform):
             name = "double"
-            input_schema = ValueSchema
+            input_schema = PluginSchema
             output_schema = DoubledSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
                     {
                         "value": row["value"],
@@ -327,29 +290,10 @@ class TestOrchestratorPayloadStoreIntegration:
                     success_reason={"action": "doubled"},
                 )
 
-        class CollectSink(_TestSinkBase):
-            name = "output"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         db = LandscapeDB.in_memory()
         source = ListSource([{"value": 5}, {"value": 10}])
         transform = DoubleTransform()
-        sink = CollectSink()
+        sink = CollectSink(name="output")
 
         config = PipelineConfig(
             source=as_source(source),

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus, SourceRow
+from elspeth.contracts import PipelineRow, PluginSchema, RunStatus, SourceRow
 from elspeth.contracts.events import PhaseError, PipelinePhase
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.events import EventBus
@@ -20,12 +20,12 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
-    _TestSinkBase,
     _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -44,24 +44,6 @@ class TestPhaseErrorEmission:
         class ValueSchema(PluginSchema):
             value: int
 
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class ExplodingTransform(BaseTransform):
             name = "exploding"
             input_schema = ValueSchema
@@ -70,30 +52,13 @@ class TestPhaseErrorEmission:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 raise RuntimeError("Transform exploded!")
 
-        class CollectSink(_TestSinkBase):
-            name = "default"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         # Create plugin instances
-        source = ListSource([{"value": 42}])
+        source = ListSource([{"value": 42}], name="test_source")
         transform = ExplodingTransform()
-        sink = CollectSink()
+        sink = CollectSink(name="default")
 
         # Build graph using public API (P2 fix)
         graph = ExecutionGraph.from_plugin_instances(
@@ -162,26 +127,9 @@ class TestPhaseErrorEmission:
             def close(self) -> None:
                 pass
 
-        class CollectSink(_TestSinkBase):
-            name = "default"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         # Create plugin instances
         source = ExplodingSource()
-        sink = CollectSink()
+        sink = CollectSink(name="default")
 
         # Build graph using public API (P2 fix)
         graph = ExecutionGraph.from_plugin_instances(

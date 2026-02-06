@@ -85,6 +85,28 @@ class TestOrchestratorResume:
         source_schema_json = json.dumps(RowSchema.model_json_schema())
         run = recorder.begin_run(config={}, canonical_version="v1", source_schema_json=source_schema_json)
 
+        # Record schema contract for resume (required after PipelineRow migration)
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        fields = (
+            FieldContract(
+                normalized_name="id",
+                original_name="id",
+                python_type=int,
+                required=True,
+                source="inferred",
+            ),
+            FieldContract(
+                normalized_name="value",
+                original_name="value",
+                python_type=int,
+                required=True,
+                source="inferred",
+            ),
+        )
+        schema_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        recorder.update_run_contract(run.run_id, schema_contract)
+
         # Register nodes
         recorder.register_node(
             run_id=run.run_id,
@@ -157,8 +179,30 @@ class TestOrchestratorResume:
             recorder.add_batch_member(batch.batch_id, token.token_id, ordinal=i)
             original_members.append(token.token_id)
 
-        # Checkpoint with aggregation state
-        agg_state = {"buffer": [0, 100, 200], "sum": 300, "count": 3}
+        # Checkpoint with aggregation state matching production format
+        # (see AggregationExecutor.get_checkpoint_state() in executors.py)
+        agg_state = {
+            "agg_node": {
+                "tokens": [
+                    {
+                        "token_id": token.token_id,
+                        "row_id": rows[i].row_id,
+                        "branch_name": None,
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
+                        "row_data": {"id": i, "value": i * 100},
+                        "contract_version": "test",
+                    }
+                    for i, token in enumerate(tokens)
+                ],
+                "batch_id": batch.batch_id,
+                "elapsed_age_seconds": 0.0,
+                "count_fire_offset": None,
+                "condition_fire_offset": None,
+            },
+            "_version": "2.0",
+        }
         checkpoint_manager.create_checkpoint(
             run_id=run.run_id,
             token_id=tokens[-1].token_id,
@@ -270,7 +314,7 @@ class TestOrchestratorResume:
         Uses manual node IDs matching the failed_run_with_batch fixture
         to ensure checkpoint/resume compatibility.
         """
-        from elspeth.contracts.types import SinkName
+        from elspeth.contracts.types import NodeID, SinkName
 
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -290,7 +334,7 @@ class TestOrchestratorResume:
 
         # Manually populate ID maps that from_plugin_instances() normally creates
         # Maps sink_name (from PipelineConfig) -> node_id (in graph)
-        graph._sink_id_map = {SinkName("default"): "sink"}
+        graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         graph._default_sink = "default"
 
         return graph

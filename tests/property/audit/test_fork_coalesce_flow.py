@@ -155,14 +155,14 @@ class _ListSource(_TestSourceBase):
     output_schema = _CoalesceTestSchema
 
     def __init__(self, data: list[dict[str, Any]]) -> None:
+        super().__init__()
         self._data = data
 
     def on_start(self, ctx: Any) -> None:
         pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._data:
-            yield SourceRow.valid(row)
+        yield from self.wrap_rows(self._data)
 
     def close(self) -> None:
         pass

@@ -23,6 +23,7 @@ from elspeth.contracts import NodeStateCompleted, TransformResult
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
@@ -144,7 +145,22 @@ def create_token_in_recorder(
         row_id=row_id,
     )
     recorder.create_token(row_id=row.row_id, token_id=token_id)
-    return TokenInfo(row_id=row_id, token_id=token_id, row_data=row_data)
+
+    # Create PipelineRow with OBSERVED schema for testing
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    pipeline_row = PipelineRow(row_data, contract)
+
+    return TokenInfo(row_id=row_id, token_id=token_id, row_data=pipeline_row)
 
 
 class TestExecutorBatchIntegration:

@@ -14,66 +14,45 @@ the WP-09 specific verification requirements.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import ArtifactDescriptor, GateName, NodeID, NodeType, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, PluginSchema, RoutingMode
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.expression_parser import ExpressionEvaluationError
-from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
+from tests.conftest import as_sink, as_source, as_transform
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 # =============================================================================
-# Shared Test Plugin Classes (P3 Fix: Deduplicate from individual tests)
+# Test Helpers
 # =============================================================================
 
 
-class _CompositeSchema(PluginSchema):
-    """Schema for composite condition tests (a: int, b: str)."""
+def _make_pipeline_row(data: dict[str, Any]) -> Any:
+    """Create a PipelineRow with OBSERVED schema for testing.
 
-    a: int
-    b: str
+    Helper for tests that manually create TokenInfo objects.
+    Creates a PipelineRow with a contract that accepts any fields.
+    """
+    from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 
-
-class _StatusPrioritySchema(PluginSchema):
-    """Schema for OR condition tests."""
-
-    status: str
-    priority: int
-
-
-class _StatusOnlySchema(PluginSchema):
-    """Schema with just status field."""
-
-    status: str
-
-
-class _RequiredOnlySchema(PluginSchema):
-    """Schema with required field only."""
-
-    required: str
-
-
-class _ValueSchema(PluginSchema):
-    """Schema with integer value field."""
-
-    value: int
-
-
-class _PrioritySchema(PluginSchema):
-    """Schema with integer priority field."""
-
-    priority: int
-
-
-class _CategorySchema(PluginSchema):
-    """Schema with string category field."""
-
-    category: str
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class _RawScoreSchema(PluginSchema):
@@ -87,51 +66,6 @@ class _NormalizedScoreSchema(PluginSchema):
 
     raw_score: int
     score: float
-
-
-class ListSource(_TestSourceBase):
-    """Test source that yields rows from a list.
-
-    This is the standard test source for engine gate tests.
-    Provides rows from an in-memory list with configurable schema.
-    """
-
-    name = "list_source"
-    output_schema: type[PluginSchema] = _ValueSchema  # Default, can be overridden
-
-    def __init__(self, data: list[dict[str, Any]], schema: type[PluginSchema] | None = None) -> None:
-        super().__init__()
-        self._data = data
-        if schema is not None:
-            self.output_schema = schema
-
-    def load(self, ctx: Any) -> Any:
-        for row in self._data:
-            yield SourceRow.valid(row)
-
-    def close(self) -> None:
-        pass
-
-
-class CollectSink(_TestSinkBase):
-    """Test sink that collects rows into a list.
-
-    This is the standard test sink for engine gate tests.
-    Collects all written rows for assertion after pipeline completion.
-    """
-
-    name = "collect"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.results: list[dict[str, Any]] = []
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(path="memory://collect", size_bytes=0, content_hash="")
-
-    def close(self) -> None:
-        pass
 
 
 # =============================================================================
@@ -288,7 +222,6 @@ class TestCompositeConditions:
                 {"a": 5, "b": "y"},  # b!='x' fails - should route to "no_match"
                 {"a": 0, "b": "y"},  # Both fail - should route to "no_match"
             ],
-            schema=_CompositeSchema,
         )
         match_sink = CollectSink()
         no_match_sink = CollectSink()
@@ -342,7 +275,6 @@ class TestCompositeConditions:
                 {"status": "inactive", "priority": 8},  # priority > 5 - true
                 {"status": "inactive", "priority": 3},  # both false - false
             ],
-            schema=_StatusPrioritySchema,
         )
         pass_sink = CollectSink()
         fail_sink = CollectSink()
@@ -394,7 +326,6 @@ class TestCompositeConditions:
                 {"status": "deleted"},
                 {"status": "suspended"},
             ],
-            schema=_StatusOnlySchema,
         )
         allowed_sink = CollectSink()
         blocked_sink = CollectSink()
@@ -447,7 +378,6 @@ class TestCompositeConditions:
                 {"required": "b"},  # optional field missing
                 {"required": "c", "optional": None},  # optional explicitly None
             ],
-            schema=_RequiredOnlySchema,
         )
         has_optional_sink = CollectSink()
         missing_optional_sink = CollectSink()
@@ -616,7 +546,6 @@ class TestRouteLabelResolution:
                 {"category": "standard"},
                 {"category": "premium"},
             ],
-            schema=_CategorySchema,
         )
         premium_sink = CollectSink()
         standard_sink = CollectSink()
@@ -1073,9 +1002,14 @@ class TestEndToEndPipeline:
             output_schema = _NormalizedScoreSchema
             plugin_version = "1.0.0"
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                normalized = row["raw_score"] / 100.0
-                return TransformResult.success({**row, "score": normalized}, success_reason={"action": "normalize"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                # row is now a PipelineRow, convert to dict for output
+                row_dict = row.to_dict()
+                normalized = row_dict["raw_score"] / 100.0
+                return TransformResult.success(
+                    {**row_dict, "score": normalized},
+                    success_reason={"action": "normalize"},
+                )
 
         source = ListSource(
             [
@@ -1083,7 +1017,6 @@ class TestEndToEndPipeline:
                 {"raw_score": 50},  # 0.5 - low confidence
                 {"raw_score": 85},  # 0.85 - exactly threshold
             ],
-            schema=_RawScoreSchema,
         )
         transform = NormalizeTransform(config={"schema": {"mode": "observed"}})
         high_conf_sink = CollectSink()
@@ -1192,7 +1125,7 @@ class TestEndToEndPipeline:
         db = landscape_db
 
         # Two rows: one high priority (routes to "urgent"), one low (continues to default)
-        source = ListSource([{"priority": 10}, {"priority": 2}], schema=_PrioritySchema)
+        source = ListSource([{"priority": 10}, {"priority": 2}])
         default_sink = CollectSink()
         urgent_sink = CollectSink()
 
@@ -1399,7 +1332,7 @@ class TestGateRuntimeErrors:
         token = TokenInfo(
             row_id="row_1",
             token_id="token_1",
-            row_data={"existing_field": 42},  # Missing 'nonexistent' field
+            row_data=_make_pipeline_row({"existing_field": 42}),  # Missing 'nonexistent' field
         )
 
         # Create row and token in landscape for audit trail
@@ -1407,7 +1340,7 @@ class TestGateRuntimeErrors:
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1523,7 +1456,7 @@ class TestGateRuntimeErrors:
         token_missing = TokenInfo(
             row_id="row_1",
             token_id="token_1",
-            row_data={"required": "value"},  # Missing 'optional' field
+            row_data=_make_pipeline_row({"required": "value"}),  # Missing 'optional' field
         )
 
         # Create row and token in landscape for audit trail
@@ -1531,7 +1464,7 @@ class TestGateRuntimeErrors:
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token_missing.row_data,
+            data=token_missing.row_data.to_dict(),
             row_id=token_missing.row_id,
         )
         recorder.create_token(row_id=row1.row_id, token_id=token_missing.token_id)
@@ -1550,20 +1483,20 @@ class TestGateRuntimeErrors:
         # With default 0, condition "0 > 5" is false
         assert outcome_missing.result.action.kind.value == "continue"
         # Check that the raw evaluation result (captured in reason) shows "false"
-        assert outcome_missing.result.action.reason["result"] == "false"
+        assert cast(dict[str, str], outcome_missing.result.action.reason)["result"] == "false"
 
         # Test 2: Present optional field with value > 5 - should evaluate to true
         token_present = TokenInfo(
             row_id="row_2",
             token_id="token_2",
-            row_data={"required": "value", "optional": 10},
+            row_data=_make_pipeline_row({"required": "value", "optional": 10}),
         )
 
         row2 = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=1,
-            data=token_present.row_data,
+            data=token_present.row_data.to_dict(),
             row_id=token_present.row_id,
         )
         recorder.create_token(row_id=row2.row_id, token_id=token_present.token_id)
@@ -1578,20 +1511,20 @@ class TestGateRuntimeErrors:
 
         # With value 10, condition "10 > 5" is true
         assert outcome_present.result.action.kind.value == "continue"
-        assert outcome_present.result.action.reason["result"] == "true"
+        assert cast(dict[str, str], outcome_present.result.action.reason)["result"] == "true"
 
         # Test 3: Present optional field with value <= 5 - should evaluate to false
         token_low = TokenInfo(
             row_id="row_3",
             token_id="token_3",
-            row_data={"required": "value", "optional": 3},
+            row_data=_make_pipeline_row({"required": "value", "optional": 3}),
         )
 
         row3 = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=2,
-            data=token_low.row_data,
+            data=token_low.row_data.to_dict(),
             row_id=token_low.row_id,
         )
         recorder.create_token(row_id=row3.row_id, token_id=token_low.token_id)
@@ -1606,7 +1539,7 @@ class TestGateRuntimeErrors:
 
         # With value 3, condition "3 > 5" is false
         assert outcome_low.result.action.kind.value == "continue"
-        assert outcome_low.result.action.reason["result"] == "false"
+        assert cast(dict[str, str], outcome_low.result.action.reason)["result"] == "false"
 
         # Verify all node states are completed (not failed)
         with db.engine.connect() as conn:

@@ -11,15 +11,15 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import GateName, NodeID, NodeType, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, RoutingMode, SinkName
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,
-    _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource, _TestSchema
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
@@ -71,7 +71,6 @@ class TestOrchestratorCheckpointing:
     def test_maybe_checkpoint_creates_on_every_row(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """_maybe_checkpoint creates checkpoint when frequency=every_row."""
 
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
@@ -92,55 +91,16 @@ class TestOrchestratorCheckpointing:
 
         checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
         class IdentityTransform(BaseTransform):
             name = "identity"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = IdentityTransform()
@@ -168,7 +128,6 @@ class TestOrchestratorCheckpointing:
 
     def test_maybe_checkpoint_respects_interval(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """_maybe_checkpoint only creates checkpoint every N rows."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
@@ -190,55 +149,16 @@ class TestOrchestratorCheckpointing:
 
         checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
         class IdentityTransform(BaseTransform):
             name = "identity"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         # 7 rows: should checkpoint at rows 3, 6 (sequence 3, 6)
         source = ListSource([{"value": i} for i in range(7)])
@@ -268,7 +188,6 @@ class TestOrchestratorCheckpointing:
 
     def test_checkpoint_deleted_on_successful_completion(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Checkpoints are deleted when run completes successfully."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
@@ -279,55 +198,16 @@ class TestOrchestratorCheckpointing:
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
         class IdentityTransform(BaseTransform):
             name = "identity"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = IdentityTransform()
@@ -366,7 +246,7 @@ class TestOrchestratorCheckpointing:
         - Checkpoints are created after each sink.write() returns successfully
         - If a later sink fails, checkpoints from earlier sinks are preserved
         """
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings, GateSettings
@@ -378,36 +258,16 @@ class TestOrchestratorCheckpointing:
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         class GoodSink(_TestSinkBase):
             """Sink that succeeds."""
@@ -415,6 +275,7 @@ class TestOrchestratorCheckpointing:
             name = "good_sink"
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def on_start(self, ctx: Any) -> None:
@@ -537,7 +398,6 @@ class TestOrchestratorCheckpointing:
 
     def test_checkpoint_disabled_skips_checkpoint_creation(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """No checkpoints created when checkpointing is disabled."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
@@ -558,55 +418,16 @@ class TestOrchestratorCheckpointing:
 
         checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
         class IdentityTransform(BaseTransform):
             name = "identity"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = IdentityTransform()
@@ -632,7 +453,6 @@ class TestOrchestratorCheckpointing:
 
     def test_no_checkpoint_manager_skips_checkpointing(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Orchestrator works fine without checkpoint manager."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -641,55 +461,16 @@ class TestOrchestratorCheckpointing:
         settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
-        class ValueSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = ValueSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
         class IdentityTransform(BaseTransform):
             name = "identity"
-            input_schema = ValueSchema
-            output_schema = ValueSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         source = ListSource([{"value": 1}])
         transform = IdentityTransform()

@@ -22,6 +22,7 @@ import httpx
 from pydantic import Field
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.config_base import TransformDataConfig
@@ -29,6 +30,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, is_capacity_error
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.azure.errors import MalformedResponseError
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -214,7 +216,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
 
         Submits the row to the batch processing pipeline. Returns quickly
@@ -240,7 +242,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Not supported - use accept() for row-level pipelining.
@@ -257,7 +259,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
     def _process_row(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row. Called by worker threads.
@@ -284,7 +286,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
     def _process_single_with_state(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         state_id: str,
     ) -> TransformResult:
         """Process a single row with explicit state_id.
@@ -294,13 +296,15 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         Raises:
             CapacityError: On rate limit errors (for pooled retry)
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        # Get dict representation for field scanning
+        row_dict = row.to_dict()
+        fields_to_scan = self._get_fields_to_scan(row_dict)
 
         for field_name in fields_to_scan:
-            if field_name not in row:
+            if field_name not in row_dict:
                 continue  # Skip fields not present in this row
 
-            value = row[field_name]
+            value = row_dict[field_name]
             if not isinstance(value, str):
                 continue
 
@@ -330,6 +334,17 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                     },
                     retryable=True,
                 )
+            except MalformedResponseError as e:
+                # Malformed API response - fail CLOSED, non-retryable
+                # (response structure won't improve on retry)
+                return TransformResult.error(
+                    {
+                        "reason": "api_error",
+                        "error_type": "malformed_response",
+                        "message": str(e),
+                    },
+                    retryable=False,
+                )
 
             # Check if any attack was detected
             if analysis["user_prompt_attack"] or analysis["document_attack"]:
@@ -343,8 +358,9 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                 )
 
         return TransformResult.success(
-            row,
+            row_dict,
             success_reason={"action": "validated"},
+            contract=row.contract,
         )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
@@ -420,21 +436,45 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
         # Parse response - Azure API responses are external data (Tier 3: Zero Trust)
         # Security transform: fail CLOSED on malformed response
+        #
+        # We validate types strictly because:
+        # - attackDetected=null would be falsy → fail OPEN (security vulnerability)
+        # - attackDetected="true" would be truthy but for wrong reason
+        # - Non-list documentsAnalysis would crash or misbehave
         try:
             data = response.json()
-            user_attack = data["userPromptAnalysis"]["attackDetected"]
-            documents_analysis = data["documentsAnalysis"]
-            doc_attack = any(doc["attackDetected"] for doc in documents_analysis)
+        except Exception as e:
+            raise MalformedResponseError(f"Invalid JSON in response: {e}") from e
 
-            return {
-                "user_prompt_attack": user_attack,
-                "document_attack": doc_attack,
-            }
+        # Validate userPromptAnalysis structure
+        user_prompt_analysis = data.get("userPromptAnalysis") if isinstance(data, dict) else None
+        if not isinstance(user_prompt_analysis, dict):
+            raise MalformedResponseError(f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}")
 
-        except (KeyError, TypeError) as e:
-            # Malformed response - the HTTP call was recorded as SUCCESS by AuditedHTTPClient
-            # (because we got a 200), but the response is unusable at the application level
-            raise httpx.RequestError(f"Malformed Prompt Shield response: {e}") from e
+        user_attack = user_prompt_analysis.get("attackDetected")
+        if not isinstance(user_attack, bool):
+            raise MalformedResponseError(f"userPromptAnalysis.attackDetected must be bool, got {type(user_attack).__name__}")
+
+        # Validate documentsAnalysis structure
+        documents_analysis = data.get("documentsAnalysis")
+        if not isinstance(documents_analysis, list):
+            raise MalformedResponseError(f"documentsAnalysis must be list, got {type(documents_analysis).__name__}")
+
+        # Validate each document entry and check for attacks
+        doc_attack = False
+        for i, doc in enumerate(documents_analysis):
+            if not isinstance(doc, dict):
+                raise MalformedResponseError(f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}")
+            attack_detected = doc.get("attackDetected")
+            if not isinstance(attack_detected, bool):
+                raise MalformedResponseError(f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}")
+            if attack_detected:
+                doc_attack = True
+
+        return {
+            "user_prompt_attack": user_attack,
+            "document_attack": doc_attack,
+        }
 
     def close(self) -> None:
         """Release resources."""

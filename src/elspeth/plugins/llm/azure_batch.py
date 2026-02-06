@@ -26,6 +26,7 @@ from pydantic import Field
 
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -354,16 +355,16 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def process(
         self,
-        row: dict[str, Any] | list[dict[str, Any]],
+        row: PipelineRow | list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Process batch with checkpoint-based recovery.
 
-        When is_batch_aware=True, the engine passes list[dict].
-        For single-row fallback, the engine passes dict.
+        When is_batch_aware=True and configured as aggregation, the engine passes list[PipelineRow].
+        For single-row fallback (non-aggregation), the engine passes PipelineRow.
 
         Args:
-            row: Single row dict OR list of row dicts (batch)
+            row: Single PipelineRow OR list[PipelineRow] (batch mode)
             ctx: Plugin context with checkpoint support
 
         Returns:
@@ -380,7 +381,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def _process_single(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row (fallback for non-batch mode).
@@ -399,10 +400,12 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            # Propagate success_reason from batch result
+            # Propagate success_reason AND contract from batch result
+            # Contract is critical for downstream transforms to access LLM-added fields
             return TransformResult.success(
                 result.rows[0],
                 success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
+                contract=result.contract,
             )
         elif result.status == "error":
             return result
@@ -415,7 +418,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def _process_batch(
         self,
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Process batch with two-phase checkpoint approach.
@@ -511,7 +514,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     def _submit_batch(
         self,
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Submit new batch to Azure Batch API.
@@ -535,7 +538,7 @@ class AzureBatchLLMTransform(BaseTransform):
             custom_id = f"row-{idx}-{uuid.uuid4().hex[:8]}"
 
             try:
-                rendered = self._template.render_with_metadata(row)
+                rendered = self._template.render_with_metadata(row.to_dict())
             except TemplateError as e:
                 template_errors.append((idx, str(e)))
                 continue
@@ -693,7 +696,7 @@ class AzureBatchLLMTransform(BaseTransform):
     def _check_batch_status(
         self,
         checkpoint: dict[str, Any],
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Check batch status and complete if ready.
@@ -874,7 +877,7 @@ class AzureBatchLLMTransform(BaseTransform):
         self,
         batch: Any,
         checkpoint: dict[str, Any],
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Download batch results and assemble output rows.
@@ -882,7 +885,7 @@ class AzureBatchLLMTransform(BaseTransform):
         Args:
             batch: Completed Azure batch object
             checkpoint: Checkpoint data with row mapping
-            rows: Original input rows
+            rows: Original input rows (list[PipelineRow])
             ctx: Plugin context
 
         Returns:
@@ -1002,7 +1005,7 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         # Assemble output rows in original order
-        output_rows: list[dict[str, Any]] = []
+        output_rows: list[dict[str, Any] | PipelineRow] = []
         row_errors: list[RowErrorEntry] = []
 
         # Track which rows had template errors (excluded from batch)
@@ -1015,7 +1018,7 @@ class AzureBatchLLMTransform(BaseTransform):
             if idx in template_error_indices:
                 # Row had template error - include original row with error field
                 error_msg = next((err for i, err in template_errors if i == idx), "Unknown error")
-                output_row = dict(row)
+                output_row = row.to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
                     "reason": "template_rendering_failed",
@@ -1032,7 +1035,7 @@ class AzureBatchLLMTransform(BaseTransform):
             if custom_id not in results_by_id:
                 # Result not found in Azure batch output - request was sent but no response received
                 # This is rare but can happen with Azure Batch API edge cases
-                output_row = dict(row)
+                output_row = row.to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
                     "reason": "result_not_found",
@@ -1063,7 +1066,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
             if "error" in result:
                 # API error for this row
-                output_row = dict(row)
+                output_row = row.to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
                     "reason": "api_error",
@@ -1081,7 +1084,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 choices = body.get("choices")
                 if not isinstance(choices, list) or len(choices) == 0:
                     # Missing or empty choices - record as validation error
-                    output_row = dict(row)
+                    output_row = row.to_dict()
                     output_row[self._response_field] = None
                     output_row[f"{self._response_field}_error"] = {
                         "reason": "invalid_response_structure",
@@ -1093,7 +1096,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
                 first_choice = choices[0]
                 if not isinstance(first_choice, dict):
-                    output_row = dict(row)
+                    output_row = row.to_dict()
                     output_row[self._response_field] = None
                     output_row[f"{self._response_field}_error"] = {
                         "reason": "invalid_response_structure",
@@ -1105,7 +1108,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
                 message = first_choice.get("message")
                 if not isinstance(message, dict):
-                    output_row = dict(row)
+                    output_row = row.to_dict()
                     output_row[self._response_field] = None
                     output_row[f"{self._response_field}_error"] = {
                         "reason": "invalid_response_structure",
@@ -1119,7 +1122,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 content = message.get("content", "")  # content can be empty string, that's valid
                 usage = body.get("usage", {})  # usage is optional in Azure API
 
-                output_row = dict(row)
+                output_row = row.to_dict()
                 output_row[self._response_field] = content
 
                 # Retrieve variables_hash from checkpoint
@@ -1187,9 +1190,31 @@ class AzureBatchLLMTransform(BaseTransform):
                 }
             )
 
+        # Create OBSERVED contract from first output row
+        # Batch transforms don't have access to input contracts (architectural gap),
+        # so we infer an OBSERVED contract from the output data
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        if output_rows:
+            first_row = output_rows[0]
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,  # Use object for dynamic typing
+                    required=False,
+                    source="inferred",
+                )
+                for key in first_row
+            )
+            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        else:
+            output_contract = None
+
         return TransformResult.success_multi(
             output_rows,
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
+            contract=output_contract,
         )
 
     @property

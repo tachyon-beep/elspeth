@@ -75,7 +75,7 @@ dev = [
     "pytest-timeout>=2.3,<3",  # Test timeouts for stress tests
     "hypothesis>=6.98,<7",  # Property-based testing
     "mypy>=1.19,<2",  # Static type checking
-    "ruff>=0.14,<1",  # Linting and formatting
+    "ruff==0.15.0",  # Linting and formatting
     "pre-commit>=3.6,<4",  # Git hooks
     # Type stubs
     "pandas-stubs>=2.2,<3",  # Pandas type hints
@@ -86,6 +86,8 @@ dev = [
     # ChaosLLM test server
     "starlette>=0.45,<1",  # ASGI framework for ChaosLLM
     "uvicorn>=0.34,<1",  # ASGI server for ChaosLLM
+    # HTTP mocking
+    "respx>=0.21,<1",  # httpx mocking for web scrape tests
 ]
 
 llm = [
@@ -103,6 +105,12 @@ azure = [
     "azure-keyvault-secrets>=4.10,<5",  # Key Vault for fingerprint key
     "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2",  # b46+ fixes LogData import error  # Azure Monitor / App Insights telemetry
     "jinja2>=3.1,<4",  # Template engine for path templating
+]
+
+web = [
+    # Web scraping and HTML processing
+    "html2text>=2024.2.26",  # HTML to markdown conversion
+    "beautifulsoup4>=4.12,<5",  # HTML parsing and element stripping
 ]
 
 mcp = [
@@ -140,7 +148,7 @@ all = [
     "pytest-timeout>=2.3,<3",
     "hypothesis>=6.98,<7",
     "mypy>=1.19,<2",
-    "ruff>=0.14,<1",
+    "ruff==0.15.0",
     "pre-commit>=3.6,<4",
     "pandas-stubs>=2.2,<3",
     "types-networkx>=3.2,<4",
@@ -148,6 +156,7 @@ all = [
     "mutmut>=2.4,<3",
     "starlette>=0.45,<1",
     "uvicorn>=0.34,<1",
+    "respx>=0.21,<1",
     # llm dependencies
     "jinja2>=3.1,<4",
     "openai>=2.15,<3",
@@ -157,6 +166,9 @@ all = [
     "azure-identity>=1.25,<2",
     "azure-keyvault-secrets>=4.10,<5",
     "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2",  # b46+ fixes LogData import error
+    # web dependencies
+    "html2text>=2024.2.26",
+    "beautifulsoup4>=4.12,<5",
     # mcp dependencies
     "mcp>=1.0,<2",
     # tracing dependencies

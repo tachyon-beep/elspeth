@@ -39,7 +39,6 @@ class TestFieldNormalizationCanonicalHashProperties:
             normalized = normalize_field_name(raw)
         except ValueError:
             assume(False)
-            return
 
         # Hash a dict containing the normalized field
         hash1 = stable_hash({"field": normalized})
@@ -60,7 +59,6 @@ class TestFieldNormalizationCanonicalHashProperties:
             normalized_twice = normalize_field_name(normalized_once)
         except ValueError:
             assume(False)
-            return
 
         hash_once = stable_hash({"field": normalized_once})
         hash_twice = stable_hash({"field": normalized_twice})

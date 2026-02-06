@@ -176,7 +176,7 @@ class ExecutionGraph:
             from_node: Source node ID
             to_node: Target node ID
             label: Edge label (e.g., "continue", "suspicious") - also used as edge key
-            mode: Routing mode (MOVE or COPY)
+            mode: Routing mode (MOVE, COPY, or DIVERT)
         """
         # Use label as key to allow multiple edges between same nodes
         self._graph.add_edge(from_node, to_node, key=label, label=label, mode=mode)
@@ -192,7 +192,8 @@ class ExecutionGraph:
         1. Graph is acyclic (no cycles)
         2. Exactly one source node exists
         3. At least one sink node exists
-        4. Edge labels are unique per source node
+        4. All nodes are reachable from source (no disconnected/orphaned nodes)
+        5. Edge labels are unique per source node
 
         Does NOT check schema compatibility - plugins validate their own
         schemas during construction.
@@ -220,6 +221,23 @@ class ExecutionGraph:
         sinks = self.get_sinks()
         if len(sinks) < 1:
             raise GraphValidationError("Graph must have at least one sink")
+
+        # Check for unreachable nodes (nodes not reachable from source)
+        source_id = sources[0]  # We already validated exactly one source exists
+        reachable = nx.descendants(self._graph, source_id)
+        reachable.add(source_id)  # Include source itself in reachable set
+
+        all_nodes = set(self._graph.nodes())
+        unreachable = all_nodes - reachable
+
+        if unreachable:
+            # Build detailed error message with node types
+            unreachable_details = [f"{node_id} ({self._graph.nodes[node_id]['info'].node_type})" for node_id in sorted(unreachable)]
+            raise GraphValidationError(
+                f"Graph validation failed: {len(unreachable)} unreachable node(s) detected:\n"
+                f"  {', '.join(unreachable_details)}\n"
+                f"All nodes must be reachable from the source node '{source_id}'."
+            )
 
         # Check outgoing edge labels are unique per node.
         # The orchestrator's edge_map keys by (from_node, label), so duplicate
@@ -755,6 +773,44 @@ class ExecutionGraph:
         if not gates and SinkName(default_sink) in sink_ids:
             graph.add_edge(prev_node_id, sink_ids[SinkName(default_sink)], label="continue", mode=RoutingMode.MOVE)
 
+        # ===== ADD DIVERT EDGES (quarantine/error sinks) =====
+        # Divert edges represent error/quarantine data flows that bypass the
+        # normal DAG execution path. They make quarantine/error sinks reachable
+        # in the graph (required for node_ids and audit trail).
+        #
+        # These are STRUCTURAL markers, not execution paths. Rows reach these
+        # sinks via exception handling (processor.py) or source validation
+        # failures (orchestrator.py), not by traversing the edge during
+        # normal processing.
+
+        # Source quarantine edge
+        # _on_validation_failure is defined on SourceProtocol (protocols.py:78)
+        quarantine_dest = source._on_validation_failure
+        if quarantine_dest != "discard" and SinkName(quarantine_dest) in sink_ids:
+            graph.add_edge(
+                source_id,
+                sink_ids[SinkName(quarantine_dest)],
+                label="__quarantine__",
+                mode=RoutingMode.DIVERT,
+            )
+
+        # Transform error edges
+        # GateProtocol does NOT define _on_error, so skip gates.
+        # The isinstance check is framework-boundary type narrowing — the
+        # transforms list contains both TransformProtocol and GateProtocol
+        # instances (see dag.py:456 where is_gate = isinstance(transform, GateProtocol)).
+        for i, transform in enumerate(transforms):
+            if isinstance(transform, GateProtocol):
+                continue
+            on_error = transform._on_error
+            if on_error is not None and on_error != "discard" and SinkName(on_error) in sink_ids:
+                graph.add_edge(
+                    transform_ids[i],
+                    sink_ids[SinkName(on_error)],
+                    label=f"__error_{i}__",
+                    mode=RoutingMode.DIVERT,
+                )
+
         # ===== CONNECT COALESCE TO NEXT NODE =====
         if coalesce_settings:
             for coalesce_name, coalesce_id in coalesce_ids.items():
@@ -900,8 +956,11 @@ class ExecutionGraph:
             This is PHASE 2 validation (cross-plugin compatibility). Plugin
             SELF-validation happens in PHASE 1 during plugin construction.
         """
-        # Validate each edge
-        for from_id, to_id, _edge_data in self._graph.edges(data=True):
+        # Validate each edge (skip divert edges — quarantine/error data doesn't
+        # conform to producer schemas because it failed validation or errored)
+        for from_id, to_id, edge_data in self._graph.edges(data=True):
+            if edge_data["mode"] == RoutingMode.DIVERT:
+                continue
             self._validate_single_edge(from_id, to_id)
 
         # Validate all coalesce nodes (must have compatible schemas from all branches)

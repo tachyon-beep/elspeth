@@ -184,7 +184,7 @@ class ChaosLLMFixture:
         updates: dict[str, Any] = {}
 
         # Collect error injection updates
-        error_updates: dict[str, float] = {}
+        error_updates: dict[str, float | str] = {}
         if rate_limit_pct is not None:
             error_updates["rate_limit_pct"] = rate_limit_pct
         if capacity_529_pct is not None:

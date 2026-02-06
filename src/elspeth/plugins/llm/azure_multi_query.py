@@ -14,9 +14,10 @@ from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
-from elspeth.contracts import Determinism, TransformErrorCategory, TransformErrorReason, TransformResult
+from elspeth.contracts import Determinism, TransformErrorCategory, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
@@ -578,7 +579,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             success_reason={"action": "enriched", "fields_added": fields_added},
         )
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
 
         Submits the row to the batch processing pipeline. Returns quickly
@@ -586,7 +587,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         the output port in FIFO order.
 
         Args:
-            row: Input row with all case study fields
+            row: Input row with all case study fields as PipelineRow
             ctx: Plugin context with token and landscape
 
         Raises:
@@ -604,7 +605,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Not supported - use accept() for row-level pipelining.
@@ -621,7 +622,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
     def _process_row(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row with all queries. Called by worker threads.
@@ -632,7 +633,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         for query-level parallelism.
 
         Args:
-            row: Input row with all case study fields
+            row: Input row with all case study fields as PipelineRow
             ctx: Plugin context with state_id for audit trail
 
         Returns:
@@ -641,11 +642,27 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         if ctx.state_id is None:
             raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
 
+        # Extract dict from PipelineRow for internal processing
+        row_data = row.to_dict()
+
         # Extract token_id for tracing correlation
         token_id = ctx.token.token_id if ctx.token is not None else "unknown"
 
+        # Store contract for propagation
+        input_contract = row.contract
+
         try:
-            return self._process_single_row_internal(row, ctx.state_id, token_id)
+            result = self._process_single_row_internal(row_data, ctx.state_id, token_id)
+            # Propagate contract on success
+            if result.status == "success" and result.row is not None:
+                # Convert PipelineRow to dict for contract propagation
+                output_row = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
+                result.contract = propagate_contract(
+                    input_contract=input_contract,
+                    output_row=output_row,
+                    transform_adds_fields=True,  # Multi-query transforms add multiple output fields
+                )
+            return result
         finally:
             # Clean up cached clients for this state_id
             with self._llm_clients_lock:
@@ -704,7 +721,9 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
         # Merge all results into output row
-        output = dict(row)
+        # row is already a dict at this point (converted from PipelineRow in _process_row)
+        # Shallow copy to avoid mutating the input row
+        output = row.copy()
         for result in results:
             # Check for row presence: successful results should always have a row,
             # but TransformResult supports multi-output scenarios where row may be
@@ -831,6 +850,18 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                         "error": str(e),
                         "query": spec.output_prefix,
                     }
+                )
+            except LLMClientError as e:
+                # In concurrent mode, retryable errors are re-raised for pool retry.
+                # In sequential mode (no pool), return error result directly.
+                result = TransformResult.error(
+                    {
+                        "reason": "llm_call_failed",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "query": spec.output_prefix,
+                    },
+                    retryable=e.retryable,
                 )
             results.append(result)
 

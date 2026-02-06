@@ -25,6 +25,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+from elspeth.contracts.schema_contract import PipelineRow
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
@@ -51,9 +52,9 @@ class BaseTransform(ABC):
             input_schema = InputSchema
             output_schema = OutputSchema
 
-            def process(self, row: dict, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
-                    {**row, "new_field": "value"},
+                    {**row.to_dict(), "new_field": "value"},
                     success_reason={"action": "processed"},
                 )
     """
@@ -79,6 +80,12 @@ class BaseTransform(ABC):
     # Default: False (most transforms don't create new tokens)
     creates_tokens: bool = False
 
+    # Schema evolution flag (P1-2026-02-05)
+    # When True, transform adds fields during execution and evolved contract
+    # should be recorded to audit trail (input fields + added fields).
+    # When False (default), transform does not add fields to schema.
+    transforms_adds_fields: bool = False
+
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig override this from config.
     # None means: transform doesn't return errors, OR errors are bugs.
@@ -92,22 +99,29 @@ class BaseTransform(ABC):
         """
         self.config = config
 
-    @abstractmethod
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row.
 
+        Single-row transforms must override this method.
+        Batch-aware transforms (is_batch_aware=True) should override with
+        signature: process(self, rows: list[PipelineRow], ctx) -> TransformResult
+
         Args:
-            row: Input row matching input_schema
+            row: Input row as PipelineRow (immutable, supports dual-name access)
             ctx: Plugin context
 
         Returns:
-            TransformResult with processed row or error
+            TransformResult with processed row dict or error
         """
-        ...
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement process(). "
+            f"Single-row transforms: process(row: PipelineRow, ctx) -> TransformResult. "
+            f"Batch-aware transforms: process(rows: list[PipelineRow], ctx) -> TransformResult."
+        )
 
     def close(self) -> None:  # noqa: B027 - optional override, not abstract
         """Clean up resources after pipeline completion.
@@ -146,13 +160,13 @@ class BaseGate(ABC):
             input_schema = RowSchema
             output_schema = RowSchema
 
-            def evaluate(self, row: dict, ctx: PluginContext) -> GateResult:
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                 if self._is_suspicious(row):
                     return GateResult(
-                        row=row,
+                        row=row.to_dict(),
                         action=RoutingAction.route("suspicious"),  # Resolved via routes config
                     )
-                return GateResult(row=row, action=RoutingAction.route("normal"))
+                return GateResult(row=row.to_dict(), action=RoutingAction.route("normal"))
     """
 
     name: str
@@ -181,13 +195,13 @@ class BaseGate(ABC):
     @abstractmethod
     def evaluate(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> GateResult:
         """Evaluate a row and decide routing.
 
         Args:
-            row: Input row
+            row: Input row as PipelineRow (immutable, supports dual-name access)
             ctx: Plugin context
 
         Returns:

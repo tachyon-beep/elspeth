@@ -12,9 +12,31 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, RowOutcome, RunStatus
+from elspeth.contracts.contract_records import ContractAuditRecord
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
+
+
+def _create_test_schema_contract() -> tuple[str, str, SchemaContract]:
+    """Create a minimal schema contract for test runs.
+
+    Returns:
+        Tuple of (schema_contract_json, schema_contract_hash, contract)
+    """
+    field_contracts = (
+        FieldContract(
+            normalized_name="test_field",
+            original_name="test_field",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    contract = SchemaContract(fields=field_contracts, mode="FIXED", locked=True)
+    audit_record = ContractAuditRecord.from_contract(contract)
+    return audit_record.to_json(), contract.version_hash(), contract
 
 
 class TestCheckpointRecoveryIntegration:
@@ -232,6 +254,8 @@ class TestCheckpointRecoveryIntegration:
         if not graph.has_node(node_id):
             graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"mode": "observed"}})
 
+        contract_json, contract_hash, _contract = _create_test_schema_contract()
+
         with db.engine.connect() as conn:
             # Create run (failed status)
             conn.execute(
@@ -242,6 +266,8 @@ class TestCheckpointRecoveryIntegration:
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
                     status=RunStatus.FAILED,
+                    schema_contract_json=contract_json,
+                    schema_contract_hash=contract_hash,
                 )
             )
 
@@ -351,7 +377,8 @@ class TestCheckpointTopologyHashAtomicity:
         )
 
         # Create run
-        run = recorder.begin_run(config={}, canonical_version="test-v1")
+        _cj, _ch, test_contract = _create_test_schema_contract()
+        run = recorder.begin_run(config={}, canonical_version="test-v1", schema_contract=test_contract)
 
         # Register nodes in database
         schema_config = SchemaConfig(mode="observed", fields=None)
@@ -432,7 +459,8 @@ class TestCheckpointTopologyHashAtomicity:
         recorder = LandscapeRecorder(db)
 
         # Create minimal run
-        run = recorder.begin_run(config={}, canonical_version="test-v1")
+        _cj, _ch, test_contract = _create_test_schema_contract()
+        run = recorder.begin_run(config={}, canonical_version="test-v1", schema_contract=test_contract)
 
         # Register source node
         schema_config = SchemaConfig(mode="observed", fields=None)
@@ -480,7 +508,8 @@ class TestCheckpointTopologyHashAtomicity:
         graph.add_node("existing_node", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"mode": "observed"}})
 
         # Create minimal run
-        run = recorder.begin_run(config={}, canonical_version="test-v1")
+        _cj, _ch, test_contract = _create_test_schema_contract()
+        run = recorder.begin_run(config={}, canonical_version="test-v1", schema_contract=test_contract)
 
         # Register nodes in database (need source for row creation)
         schema_config = SchemaConfig(mode="observed", fields=None)
@@ -582,7 +611,8 @@ class TestResumeCheckpointCleanup:
 
         # Create run and required parent records
         recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        _cj, _ch, test_contract = _create_test_schema_contract()
+        run = recorder.begin_run(config={}, canonical_version="v1", schema_contract=test_contract)
 
         now = datetime.now(UTC)
         with db.engine.begin() as conn:
@@ -686,7 +716,8 @@ class TestCanResumeErrorHandling:
         graph.add_edge("source", "transform", label="continue")
 
         # Create run with FAILED status (required for resume eligibility)
-        run = recorder.begin_run(config={}, canonical_version="test-v1")
+        _cj, _ch, test_contract = _create_test_schema_contract()
+        run = recorder.begin_run(config={}, canonical_version="test-v1", schema_contract=test_contract)
 
         # Register nodes
         schema_config = SchemaConfig(mode="observed", fields=None)

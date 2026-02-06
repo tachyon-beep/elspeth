@@ -8,6 +8,7 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
@@ -16,12 +17,28 @@ if TYPE_CHECKING:
     pass
 
 
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
+
+
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     """Create a TokenInfo for testing."""
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},
+        row_data=_make_pipeline_row({}),
     )
 
 
@@ -347,9 +364,10 @@ class TestAzureContentSafetyTransform:
         )
 
         ctx = make_mock_context()
+        row = _make_pipeline_row({"content": "test"})
 
         with pytest.raises(NotImplementedError, match="accept"):
-            transform.process({"content": "test"}, ctx)
+            transform.process(row, ctx)
 
 
 class TestContentSafetyPoolConfig:
@@ -460,9 +478,10 @@ class TestContentSafetyBatchProcessing:
         )
 
         ctx = make_mock_context()
+        row = _make_pipeline_row({"content": "test"})
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept({"content": "test"}, ctx)
+            transform.accept(row, ctx)
 
     def test_connect_output_cannot_be_called_twice(self) -> None:
         """connect_output() raises if called more than once."""
@@ -521,7 +540,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "Hello world", "id": 1}
+            row_data = {"content": "Hello world", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -529,7 +549,7 @@ class TestContentSafetyBatchProcessing:
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
             assert result.status == "success"
-            assert result.row == row
+            assert result.row == row_data
         finally:
             transform.close()
 
@@ -565,7 +585,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "Some hateful content", "id": 1}
+            row_data = {"content": "Some hateful content", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -575,8 +596,10 @@ class TestContentSafetyBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "content_safety_violation"
-            assert result.reason["categories"]["hate"]["exceeded"] is True
-            assert result.reason["categories"]["hate"]["severity"] == 4
+            categories = result.reason["categories"]
+            assert isinstance(categories, dict)  # dict variant, not list
+            assert categories["hate"]["exceeded"] is True
+            assert categories["hate"]["severity"] == 4
         finally:
             transform.close()
 
@@ -613,7 +636,8 @@ class TestContentSafetyBatchProcessing:
 
         try:
             # Row is missing "optional_field"
-            row = {"content": "safe data", "id": 1}
+            row_data = {"content": "safe data", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -648,7 +672,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "test", "id": 1}
+            row_data = {"content": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -658,9 +683,9 @@ class TestContentSafetyBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "api_error"
-            assert result.reason["error_type"] == "network_error"
+            assert result.reason["error_type"] == "malformed_response"
             assert "malformed" in result.reason["message"].lower()
-            assert result.retryable is True
+            assert result.retryable is False
         finally:
             transform.close()
 
@@ -694,7 +719,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "test", "id": 1}
+            row_data = {"content": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -704,15 +730,16 @@ class TestContentSafetyBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "api_error"
-            assert result.retryable is True
+            assert result.reason["error_type"] == "malformed_response"
+            assert result.retryable is False
         finally:
             transform.close()
 
-    def test_missing_categories_treated_as_safe(self, mock_httpx_client: MagicMock) -> None:
-        """Missing categories in API response default to severity 0 (safe)."""
+    def test_missing_categories_rejected_fail_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Missing expected categories in API response are rejected (fail-closed)."""
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
-        # Only returns Hate category
+        # Only returns Hate category — missing Violence, Sexual, SelfHarm
         mock_response = _create_mock_http_response(
             {
                 "categoriesAnalysis": [
@@ -739,15 +766,20 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "test", "id": 1}
+            row_data = {"content": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
-            # Should pass since missing categories default to 0, which is below threshold 2
+            # Fail CLOSED: missing categories are rejected, not silently treated as safe
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
-            assert result.status == "success"
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["error_type"] == "malformed_response"
+            assert "missing expected categories" in result.reason["message"].lower()
+            assert result.retryable is False
         finally:
             transform.close()
 
@@ -783,7 +815,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "completely safe content", "id": 1}
+            row_data = {"content": "completely safe content", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -792,7 +825,7 @@ class TestContentSafetyBatchProcessing:
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
             assert result.status == "success"
-            assert result.row == row
+            assert result.row == row_data
         finally:
             transform.close()
 
@@ -828,7 +861,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "content with mild self-harm", "id": 1}
+            row_data = {"content": "content with mild self-harm", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -839,7 +873,9 @@ class TestContentSafetyBatchProcessing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "content_safety_violation"
-            assert result.reason["categories"]["self_harm"]["exceeded"] is True
+            categories = result.reason["categories"]
+            assert isinstance(categories, dict)  # dict variant, not list
+            assert categories["self_harm"]["exceeded"] is True
         finally:
             transform.close()
 
@@ -875,7 +911,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "test text", "id": 1}
+            row_data = {"content": "test text", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -932,15 +969,16 @@ class TestContentSafetyBatchProcessing:
 
         try:
             # Submit multiple rows with different markers
-            rows = [
+            rows_data = [
                 {"content": "row 1", "marker": "first"},
                 {"content": "row 2", "marker": "second"},
                 {"content": "row 3", "marker": "third"},
             ]
 
-            for i, row in enumerate(rows):
+            for i, row_data in enumerate(rows_data):
                 token = make_token(f"row-{i}", f"token-{i}")
                 ctx = make_mock_context(state_id=f"state-{i}", token=token)
+                row = _make_pipeline_row(row_data)
                 transform.accept(row, ctx)
 
             transform.flush_batch_processing(timeout=10.0)
@@ -951,7 +989,115 @@ class TestContentSafetyBatchProcessing:
                 assert isinstance(result, TransformResult)
                 assert result.status == "success"
                 assert result.row is not None
-                assert result.row["marker"] == rows[i]["marker"]
+                assert result.row["marker"] == rows_data[i]["marker"]
+        finally:
+            transform.close()
+
+
+class TestContentSafetyFailsClosed:
+    """P0-03: Security transforms must fail CLOSED, not open.
+
+    When Azure returns an unknown category (e.g., after a taxonomy update),
+    the transform must reject the content — not silently pass it through.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_httpx_client(self):
+        """Patch httpx.Client to prevent real HTTP calls."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_instance = MagicMock()
+            mock_instance.__enter__ = MagicMock(return_value=mock_instance)
+            mock_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_unknown_category_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Unknown category in API response must cause error, not pass through."""
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                    {"category": "FutureCategory", "severity": 4},  # Unknown category
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["content"],
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = _make_pipeline_row({"content": "test content", "id": 1})
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            # Must fail closed — unknown category = reject content
+            assert result.status == "error", "Unknown category must fail CLOSED (error), not pass through as success"
+            assert result.reason is not None
+            assert "unknown_category" in result.reason["reason"]
+        finally:
+            transform.close()
+
+    def test_known_categories_still_work_with_explicit_mapping(self, mock_httpx_client: MagicMock) -> None:
+        """Known Azure categories map correctly with explicit lookup."""
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["content"],
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = _make_pipeline_row({"content": "safe content", "id": 1})
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            assert result.status == "success"
         finally:
             transform.close()
 
@@ -995,7 +1141,8 @@ class TestContentSafetyInternalProcessing:
         ctx = make_mock_context()
         transform.on_start(ctx)
 
-        row = {"content": "test", "id": 1}
+        row_data = {"content": "test", "id": 1}
+        row = _make_pipeline_row(row_data)
 
         with pytest.raises(CapacityError) as exc_info:
             transform._process_single_with_state(row, "test-state-id")
@@ -1027,7 +1174,8 @@ class TestContentSafetyInternalProcessing:
         ctx = make_mock_context()
         transform.on_start(ctx)
 
-        row = {"content": "test", "id": 1}
+        row_data = {"content": "test", "id": 1}
+        row = _make_pipeline_row(row_data)
         result = transform._process_single_with_state(row, "test-state-id")
 
         assert result.status == "error"
@@ -1056,7 +1204,8 @@ class TestContentSafetyInternalProcessing:
         ctx = make_mock_context()
         transform.on_start(ctx)
 
-        row = {"content": "test", "id": 1}
+        row_data = {"content": "test", "id": 1}
+        row = _make_pipeline_row(row_data)
         result = transform._process_single_with_state(row, "test-state-id")
 
         assert result.status == "error"

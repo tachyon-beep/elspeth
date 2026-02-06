@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, RowOutcome, RunStatus, SourceRow
+from elspeth.contracts import Determinism, NodeType, PipelineRow, PluginSchema, RoutingMode, RowOutcome, RunStatus, SourceRow
+from elspeth.contracts.contract_records import ContractAuditRecord
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -29,6 +31,26 @@ from tests.conftest import (
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
+
+
+def _create_test_schema_contract() -> tuple[str, str]:
+    """Create a minimal schema contract for test runs.
+
+    Returns:
+        Tuple of (schema_contract_json, schema_contract_hash)
+    """
+    field_contracts = (
+        FieldContract(
+            normalized_name="test_field",
+            original_name="test_field",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    contract = SchemaContract(fields=field_contracts, mode="FIXED", locked=True)
+    audit_record = ContractAuditRecord.from_contract(contract)
+    return audit_record.to_json(), contract.version_hash()
 
 
 class _InputSchema(PluginSchema):
@@ -67,7 +89,7 @@ class _FailOnceTransform(BaseTransform):
         cls._attempt_count.clear()
         cls._fail_row_ids.clear()
 
-    def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
         row_id = row.get("id", "unknown")
@@ -156,14 +178,14 @@ class TestResumeIdempotence:
             output_schema = RowSchema
 
             def __init__(self, data: list[dict[str, Any]]) -> None:
+                super().__init__()  # Initialize base class (sets _schema_contract)
                 self._data = data
 
             def on_start(self, ctx: Any) -> None:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass
@@ -179,7 +201,7 @@ class TestResumeIdempotence:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({**row, "value": row["value"] * 2}, success_reason={"action": "doubler"})
 
         class CollectSink(_TestSinkBase):
@@ -314,6 +336,33 @@ class TestResumeIdempotence:
             label="continue",
             mode=RoutingMode.MOVE,
         )
+
+        # Record schema contract (needed for resume)
+        # The source would have recorded this after the first valid row
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        source_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                ),
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+        recorder.update_run_contract(run_id, source_contract)
+        recorder.update_node_output_contract(run_id, "source", source_contract)
 
         # Create all 5 rows with payloads
         row_ids = []
@@ -462,7 +511,7 @@ class TestRetryBehavior:
                 super().__init__({"schema": {"mode": "observed"}})
                 self._fail_ids = fail_ids
 
-            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 if row["id"] in self._fail_ids:
                     return TransformResult.error(
                         {
@@ -470,7 +519,7 @@ class TestRetryBehavior:
                             "error": f"Row {row['id']} failed validation",
                         }
                     )
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
 
@@ -479,9 +528,9 @@ class TestRetryBehavior:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"id": "row_1", "value": 100})
-                yield SourceRow.valid({"id": "row_2", "value": 200})  # Will fail
-                yield SourceRow.valid({"id": "row_3", "value": 300})
+                yield from self.wrap_rows(
+                    [{"id": "row_1", "value": 100}, {"id": "row_2", "value": 200}, {"id": "row_3", "value": 300}]
+                )  # Row 2 will fail
 
             def close(self) -> None:
                 pass
@@ -604,6 +653,7 @@ class TestCheckpointRecovery:
 
         run_id = "checkpoint-partial-progress-test"
         now = datetime.now(UTC)
+        contract_json, contract_hash = _create_test_schema_contract()
 
         # Create the run and rows directly in the database
         with db.engine.connect() as conn:
@@ -616,6 +666,8 @@ class TestCheckpointRecovery:
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
                     status=RunStatus.FAILED,
+                    schema_contract_json=contract_json,
+                    schema_contract_hash=contract_hash,
                 )
             )
 
@@ -737,6 +789,7 @@ class TestCheckpointRecovery:
 
         run_id = "checkpoint-restart-test"
         now = datetime.now(UTC)
+        contract_json, contract_hash = _create_test_schema_contract()
 
         with db1.engine.connect() as conn:
             # Create run
@@ -748,6 +801,8 @@ class TestCheckpointRecovery:
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
                     status=RunStatus.FAILED,
+                    schema_contract_json=contract_json,
+                    schema_contract_hash=contract_hash,
                 )
             )
 
@@ -905,10 +960,24 @@ class TestAggregationRecovery:
         recovery_mgr = test_env["recovery_manager"]
         recorder = test_env["recorder"]
 
-        # Create run
+        # Create run with schema contract (required by recovery protocol)
+        test_contract = SchemaContract(
+            fields=(
+                FieldContract(
+                    normalized_name="test_field",
+                    original_name="test_field",
+                    python_type=str,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            mode="FIXED",
+            locked=True,
+        )
         run = recorder.begin_run(
             config={"aggregation": {"trigger": {"count": 5}}},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=test_contract,
         )
 
         # Register nodes using raw SQL

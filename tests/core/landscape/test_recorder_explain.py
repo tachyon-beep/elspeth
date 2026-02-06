@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from elspeth.contracts import NodeType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -251,7 +254,7 @@ class TestExplainGracefulDegradation:
         assert lineage.payload_available is False
 
     def test_explain_row_with_corrupted_payload(self, tmp_path: Path, payload_store) -> None:
-        """explain_row() handles corrupted payload (invalid JSON) gracefully."""
+        """explain_row() crashes on corrupted payload — Tier 1 integrity violation."""
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -283,16 +286,12 @@ class TestExplainGracefulDegradation:
             payload_ref=payload_ref,
         )
 
-        # explain_row should handle JSONDecodeError gracefully
-        lineage = recorder.explain_row(
-            run_id=run.run_id,
-            row_id=row.row_id,
-        )
-
-        assert lineage is not None
-        assert lineage.source_data_hash is not None  # Hash preserved
-        assert lineage.source_data is None  # Corrupted payload not returned
-        assert lineage.payload_available is False  # Reports as unavailable
+        # Tier 1 violation: corrupted payload store data is OUR data — must crash
+        with pytest.raises(AuditIntegrityError, match="Corrupt payload"):
+            recorder.explain_row(
+                run_id=run.run_id,
+                row_id=row.row_id,
+            )
 
     def test_explain_row_rejects_run_id_mismatch(self, tmp_path: Path, payload_store) -> None:
         """explain_row() returns None when row belongs to different run."""

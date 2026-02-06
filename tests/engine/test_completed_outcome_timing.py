@@ -18,7 +18,6 @@ after successful sink writes. They currently FAIL because the bug exists.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -29,13 +28,14 @@ from elspeth.contracts import (
     ArtifactDescriptor,
     NodeStateStatus,
     NodeType,
+    PipelineRow,
     PluginSchema,
     RoutingMode,
     RowOutcome,
     SinkName,
-    SourceRow,
 )
 from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -46,11 +46,11 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
     _TestSinkBase,
-    _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
+from tests.engine.conftest import ListSource
 
 
 def _build_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -80,7 +80,7 @@ def _build_graph(config: PipelineConfig) -> ExecutionGraph:
         prev = node_id
 
     # Add sink
-    sink_node_id = "sink_default"
+    sink_node_id = NodeID("sink_default")
     graph.add_node(
         sink_node_id,
         node_type=NodeType.SINK,
@@ -91,7 +91,7 @@ def _build_graph(config: PipelineConfig) -> ExecutionGraph:
 
     # Set internal mappings
     graph._sink_id_map = {SinkName("default"): sink_node_id}
-    graph._transform_id_map = {i: f"transform_{i}" for i in range(len(config.transforms))}
+    graph._transform_id_map = {i: NodeID(f"transform_{i}") for i in range(len(config.transforms))}
     graph._config_gate_id_map = {}
     graph._route_resolution_map = {}
     graph._default_sink = "default"
@@ -131,18 +131,6 @@ class TestCompletedOutcomeTimingContract:
         class RowSchema(PluginSchema):
             value: int
 
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
             input_schema = RowSchema
@@ -151,8 +139,12 @@ class TestCompletedOutcomeTimingContract:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(
+                    row.to_dict(),
+                    success_reason={"action": "passthrough"},
+                    contract=row.contract,
+                )
 
         class FailingSink(_TestSinkBase):
             """Sink that always throws on write.
@@ -232,18 +224,6 @@ class TestCompletedOutcomeTimingContract:
         class RowSchema(PluginSchema):
             value: int
 
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
             input_schema = RowSchema
@@ -252,8 +232,12 @@ class TestCompletedOutcomeTimingContract:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(
+                    row.to_dict(),
+                    success_reason={"action": "passthrough"},
+                    contract=row.contract,
+                )
 
         class FailingSink(_TestSinkBase):
             name = "failing_sink"
@@ -318,18 +302,6 @@ class TestCompletedOutcomeTimingContract:
         class RowSchema(PluginSchema):
             value: int
 
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                super().__init__()
-                self._data = data
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
             input_schema = RowSchema
@@ -338,8 +310,12 @@ class TestCompletedOutcomeTimingContract:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(
+                    row.to_dict(),
+                    success_reason={"action": "passthrough"},
+                    contract=row.contract,
+                )
 
         class FailingSink(_TestSinkBase):
             name = "failing_sink"

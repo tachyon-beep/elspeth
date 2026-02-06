@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -65,7 +66,7 @@ class PassThrough(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Return row unchanged (deep copy to prevent mutation).
 
         Args:
@@ -81,11 +82,12 @@ class PassThrough(BaseTransform):
         """
         # Optional input validation - crash on wrong types (source bug!)
         if self._validate_input and not self._schema_config.is_observed:
-            self.input_schema.model_validate(row)  # Raises on failure
+            self.input_schema.model_validate(row.to_dict())  # Raises on failure
 
         return TransformResult.success(
-            copy.deepcopy(row),
+            copy.deepcopy(row.to_dict()),
             success_reason={"action": "passthrough"},
+            contract=row.contract,
         )
 
     def close(self) -> None:

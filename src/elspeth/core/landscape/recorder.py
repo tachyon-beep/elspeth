@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.errors import ContractViolation, TransformSuccessReason
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema import SchemaConfig
-    from elspeth.contracts.schema_contract import SchemaContract
+    from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 from sqlalchemy import select
@@ -486,20 +486,20 @@ class LandscapeRecorder:
         node_id: str,
         contract: SchemaContract,
     ) -> None:
-        """Update a node's output_contract after first-row inference.
+        """Update a node's output_contract after first-row inference or schema evolution.
 
-        Called when a source infers schema from the first valid row during
-        OBSERVED mode. The contract is set during node registration but is
-        None at that point for dynamic sources.
+        Called in two scenarios:
+        1. Source infers schema from first valid row during OBSERVED mode
+        2. Transform adds fields during execution (schema evolution)
 
         Args:
             run_id: Run containing the node
-            node_id: Node to update (typically the source node)
-            contract: SchemaContract with inferred fields (should be locked)
+            node_id: Node to update (source or transform node)
+            contract: SchemaContract with inferred/evolved fields
 
         Note:
             This is the complement to update_run_contract() for node-level contracts.
-            Used for sources that discover schema during load() rather than from config.
+            Used for dynamic schema discovery and transform schema evolution.
         """
         audit_record = ContractAuditRecord.from_contract(contract)
         output_contract_json = audit_record.to_json()
@@ -557,8 +557,9 @@ class LandscapeRecorder:
             fingerprint_key: Key for computing secret fingerprints (HMAC-SHA256)
 
         Note:
-            The secret_value in each record is used ONLY to compute the fingerprint.
-            The actual secret value is never stored in the audit database.
+            This method mutates each dict in ``resolutions``: the ``secret_value``
+            key is deleted after fingerprinting to clear plaintext secrets from
+            memory. Callers must not access ``secret_value`` after this call.
         """
         from elspeth.core.security.fingerprint import secret_fingerprint
 
@@ -567,6 +568,9 @@ class LandscapeRecorder:
             # Direct access - resolutions come from load_secrets_from_config() which
             # always includes these fields for keyvault source (our code, not user data)
             fp = secret_fingerprint(rec["secret_value"], key=fingerprint_key)
+
+            # Clear plaintext secret from memory immediately after fingerprinting
+            del rec["secret_value"]
 
             self._ops.execute_insert(
                 secret_resolutions_table.insert().values(
@@ -1492,6 +1496,12 @@ class LandscapeRecorder:
         reason_hash = stable_hash(reason) if reason else None
         timestamp = now()
 
+        # Auto-persist reason to payload store if available and ref not provided
+        # This enables exported audit trails to explain routing decisions
+        if reason is not None and reason_ref is None and self._payload_store is not None:
+            reason_bytes = canonical_json(reason).encode("utf-8")
+            reason_ref = self._payload_store.store(reason_bytes)
+
         event = RoutingEvent(
             event_id=event_id,
             state_id=state_id,
@@ -1543,6 +1553,13 @@ class LandscapeRecorder:
         timestamp = now()
         events = []
 
+        # Auto-persist shared reason to payload store if available
+        # All events in the fork will reference the same reason payload
+        reason_ref = None
+        if reason is not None and self._payload_store is not None:
+            reason_bytes = canonical_json(reason).encode("utf-8")
+            reason_ref = self._payload_store.store(reason_bytes)
+
         with self._db.connection() as conn:
             for ordinal, route in enumerate(routes):
                 event_id = generate_id()
@@ -1554,7 +1571,7 @@ class LandscapeRecorder:
                     ordinal=ordinal,
                     mode=route.mode,  # Already RoutingMode enum from RoutingSpec
                     reason_hash=reason_hash,
-                    reason_ref=None,
+                    reason_ref=reason_ref,
                     created_at=timestamp,
                 )
 
@@ -1567,6 +1584,7 @@ class LandscapeRecorder:
                         ordinal=event.ordinal,
                         mode=event.mode.value,  # Store string in DB
                         reason_hash=event.reason_hash,
+                        reason_ref=event.reason_ref,
                         created_at=event.created_at,
                     )
                 )
@@ -1673,11 +1691,11 @@ class LandscapeRecorder:
         """
         updates: dict[str, Any] = {"status": status.value}
 
-        if trigger_type:
+        if trigger_type is not None:
             updates["trigger_type"] = trigger_type.value
-        if trigger_reason:
+        if trigger_reason is not None:
             updates["trigger_reason"] = trigger_reason
-        if state_id:
+        if state_id is not None:
             updates["aggregation_state_id"] = state_id
         if status in (BatchStatus.COMPLETED, BatchStatus.FAILED):
             updates["completed_at"] = now()
@@ -1712,7 +1730,7 @@ class LandscapeRecorder:
             .where(batches_table.c.batch_id == batch_id)
             .values(
                 status=status.value,
-                trigger_type=trigger_type.value if trigger_type else None,
+                trigger_type=trigger_type.value if trigger_type is not None else None,
                 trigger_reason=trigger_reason,
                 aggregation_state_id=state_id,
                 completed_at=timestamp,
@@ -2645,12 +2663,21 @@ class LandscapeRecorder:
                 payload_bytes = self._payload_store.retrieve(row.source_data_ref)
                 source_data = json.loads(payload_bytes.decode("utf-8"))
                 payload_available = True
-            except (KeyError, json.JSONDecodeError, OSError):
-                # Payload has been purged or is corrupted
-                # KeyError: raised by PayloadStore when content not found
-                # JSONDecodeError: content corrupted
-                # OSError: filesystem issues
+            except KeyError:
+                # Payload purged by retention policy — expected, continue without data
                 pass
+            except json.JSONDecodeError as e:
+                # Tier 1 violation: payload store data is OUR data — corruption is catastrophic
+                raise AuditIntegrityError(f"Corrupt payload for row {row_id} (ref={row.source_data_ref}): {e}") from e
+            except OSError as e:
+                # Infrastructure issue (NFS timeout, disk full) — payload unavailable
+                logging.getLogger(__name__).warning(
+                    "Payload retrieval failed for row %s (ref=%s): %s: %s",
+                    row_id,
+                    row.source_data_ref,
+                    type(e).__name__,
+                    e,
+                )
 
         return RowLineage(
             row_id=row.row_id,
@@ -3018,7 +3045,7 @@ class LandscapeRecorder:
         run_id: str,
         token_id: str,
         transform_id: str,
-        row_data: dict[str, Any],
+        row_data: dict[str, Any] | PipelineRow,
         error_details: TransformErrorReason,
         destination: str,
     ) -> str:

@@ -1,9 +1,14 @@
 # Web Scrape Transform Design
 
 **Date:** 2026-02-03
-**Status:** Draft - Revised per review feedback (2026-02-03)
+**Status:** Draft - Revised per review feedback (2026-02-04)
 **Author:** Brainstorming session
 **Review:** [2026-02-03-web-scrape-transform-design.review.json](./2026-02-03-web-scrape-transform-design.review.json)
+
+**Review Summary (2026-02-04):**
+- ✅ Fixed 8 blocking issues: RateLimitRegistry API, test base class, plugin registration, security infrastructure, DNS timeout, signal.alarm, disk space, html2text determinism
+- ✅ Addressed 7 warnings: Added storage estimates, pool size vs rate limit documentation
+- ✅ Ready for implementation with correct patterns
 
 ## Overview
 
@@ -175,6 +180,28 @@ elspeth payload get <fetch_response_processed_hash>  # What we extracted
 ```
 
 If `format: raw`, response_raw and response_processed point to same hash (deduplication).
+
+**Storage Requirements:**
+
+3 payloads per URL (request, response raw, response processed). Estimate based on average 5MB response size:
+
+| URL Count | Payloads | Storage per Run | 30-day Retention | 90-day Retention |
+|-----------|----------|-----------------|------------------|------------------|
+| 1,000 | 3,000 | ~15 GB | ~450 GB | ~1.4 TB |
+| 10,000 | 30,000 | ~150 GB | ~4.5 TB | ~14 TB |
+| 100,000 | 300,000 | ~1.5 TB | ~45 TB | ~140 TB |
+
+**Factors affecting storage:**
+- Avg 5MB assumes mostly HTML pages (10MB max response size)
+- Larger images/PDFs increase storage significantly
+- Deduplication reduces storage when same content fetched multiple times
+- Compression is applied by PayloadStore but not factored into estimates above
+
+**Operational Planning:**
+- Monitor disk space before large runs
+- Configure retention policy appropriate for audit requirements (30-90 days typical)
+- Use `elspeth purge --run <run_id>` to manually purge old payloads
+- Reference: See CLAUDE.md Payload Store and `core/retention/` for retention policies
 
 ### Example Output Row
 
@@ -529,12 +556,29 @@ Web scraping introduces significant security risks. This section documents manda
        ipaddress.ip_network("fc00::/7"),         # IPv6 private
    ]
 
-   def validate_ip(hostname: str) -> str:
-       """Resolve hostname and validate IP is not blocked. Returns resolved IP."""
-       try:
-           ip_str = socket.gethostbyname(hostname)
-       except socket.gaierror as e:
-           raise NetworkError(f"DNS resolution failed: {hostname}: {e}")
+   def validate_ip(hostname: str, timeout: float = 5.0) -> str:
+       """Resolve hostname with timeout and validate IP is not blocked.
+
+       Returns resolved IP address.
+
+       **DNS Timeout:** Wraps socket.gethostbyname() in ThreadPoolExecutor with timeout.
+       httpx timeout only covers network phase AFTER DNS resolution, so we need explicit
+       DNS timeout to prevent indefinite hangs on slow/unavailable DNS servers.
+       """
+       from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+       def _resolve():
+           try:
+               return socket.gethostbyname(hostname)
+           except socket.gaierror as e:
+               raise NetworkError(f"DNS resolution failed: {hostname}: {e}")
+
+       with ThreadPoolExecutor(max_workers=1, thread_name_prefix="dns_resolve") as executor:
+           future = executor.submit(_resolve)
+           try:
+               ip_str = future.result(timeout=timeout)
+           except FuturesTimeoutError:
+               raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}")
 
        ip = ipaddress.ip_address(ip_str)
        for blocked in BLOCKED_RANGES:
@@ -621,31 +665,47 @@ async def fetch_with_size_limit(
 
 **Threat:** Malicious HTML causes html2text/BeautifulSoup to hang or consume excessive CPU.
 
-**Control:** Wrap conversion in timeout:
+**Control:** Wrap conversion in timeout using ThreadPoolExecutor (cross-platform, thread-safe):
 
 ```python
-import signal
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
-@contextmanager
-def timeout(seconds: int):
-    """Context manager for timeout (Unix only)."""
-    def handler(signum, frame):
-        raise ConversionTimeoutError(f"HTML conversion exceeded {seconds}s timeout")
+def convert_html_with_timeout(html_content: str, format: str, timeout_seconds: int) -> str:
+    """Convert HTML with timeout protection (cross-platform, thread-safe).
 
-    old_handler = signal.signal(signal.SIGALRM, handler)
-    signal.alarm(seconds)
-    try:
-        yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
+    Uses ThreadPoolExecutor to run conversion in background thread with timeout.
+
+    **Thread-safe:** Compatible with BatchTransformMixin's worker pool. Each conversion
+    runs in its own timeout-controlled thread, isolated from the worker pool threads.
+
+    **Cross-platform:** Works on Unix, Windows, and macOS (unlike signal.alarm which
+    is Unix-only and process-global).
+    """
+    def _convert():
+        if format == "markdown":
+            h = html2text.HTML2Text()
+            h.ignore_links = False
+            h.body_width = 0
+            return h.handle(html_content)
+        elif format == "text":
+            soup = BeautifulSoup(html_content, "html.parser")
+            return soup.get_text(separator=" ", strip=True)
+        else:  # raw
+            return html_content
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="html_convert") as executor:
+        future = executor.submit(_convert)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FuturesTimeoutError:
+            raise ConversionTimeoutError(
+                f"HTML conversion exceeded {timeout_seconds}s timeout"
+            )
 
 # Usage
 CONVERSION_TIMEOUT_SECONDS = 30
 
-with timeout(CONVERSION_TIMEOUT_SECONDS):
-    markdown = html2text.handle(html_content)
+markdown = convert_html_with_timeout(html_content, "markdown", CONVERSION_TIMEOUT_SECONDS)
 ```
 
 ### Certificate Validation
@@ -758,27 +818,32 @@ def get(self, url: str, ...) -> HTTPResponse:
 
 ### Registration
 
-Plugins are registered via the `pluggy` hook system in `src/elspeth/plugins/manager.py`. The `PluginManager` discovers plugins via the `elspeth_get_transforms` hook.
+**No manual registration required.** Plugins are **auto-discovered** by pluggy's folder scanning mechanism in `src/elspeth/plugins/discovery.py`.
+
+Simply create the file and the PluginManager will discover it automatically:
 
 ```python
-# src/elspeth/plugins/transforms/__init__.py
-# Add to the TRANSFORM_REGISTRY dict:
-from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
+# src/elspeth/plugins/transforms/web_scrape.py
+from elspeth.plugins.base import BaseTransform
 
-TRANSFORM_REGISTRY: dict[str, type[BaseTransform]] = {
-    # ... existing transforms ...
-    "web_scrape": WebScrapeTransform,
-}
+class WebScrapeTransform(BaseTransform):
+    """Web scraping transform with concurrent fetch support."""
 
-# The PluginManager in manager.py loads transforms from this registry
-# No separate hookimpl.py file is needed
+    # Plugin name used in configuration - REQUIRED for auto-discovery
+    name = "web_scrape"
+
+    def __init__(self, options: dict[str, Any]) -> None:
+        super().__init__(options)
+        # ... initialization
 ```
 
 **Plugin discovery flow:**
-1. `PluginManager.get_transform(name)` is called with `"web_scrape"`
-2. Manager looks up in `TRANSFORM_REGISTRY`
-3. Returns `WebScrapeTransform` class
-4. Engine instantiates with config options
+1. `PluginManager` scans `src/elspeth/plugins/transforms/` directory on startup
+2. Finds all Python files with `BaseTransform` subclasses that have a `name` attribute
+3. Registers classes by their `name` attribute
+4. User references `plugin: web_scrape` in YAML → manager instantiates `WebScrapeTransform`
+
+**No `__init__.py` modifications needed.** The discovery mechanism handles everything.
 
 ### Optional Dependency Group
 
@@ -847,33 +912,33 @@ class WebScrapeTransform(BatchTransformMixin, BaseTransform):
 
 ### Throughput Expectations
 
-| Configuration | URLs/hour | 10,000 URLs |
-|---------------|-----------|-------------|
-| Sequential (no batching) | ~1,200 | 8.3 hours |
-| `pool_size: 5` | ~6,000 | 1.7 hours |
-| `pool_size: 10` (default) | ~12,000 | 50 minutes |
-| `pool_size: 20` | ~24,000 | 25 minutes |
+> **⚠️ Critical Note:** When rate limiting is enabled, **throughput is capped by the rate limit regardless of pool_size**. Thread pool concurrency only helps when rate limiting is disabled or when scraping multiple distinct domains with per-domain limits (not currently implemented).
 
-> ⚠️ **Warning:** Higher pool sizes increase load on target servers. Always combine with rate limiting.
+| Configuration | Actual Throughput | Explanation |
+|---------------|-------------------|-------------|
+| Sequential (no batching, no rate limit) | ~1,200 URLs/hour | Network + processing time bottleneck |
+| `pool_size: 10` **without** rate limiting | ~12,000 URLs/hour | True parallelism on I/O-bound work |
+| `rate_limit: 60/min` (regardless of pool_size) | **3,600 URLs/hour** | Rate limiter serializes all requests |
+| `rate_limit: 60/min` + `pool_size: 10` | **3,600 URLs/hour** | Pool size has no effect when rate-limited |
+
+**For 10,000 URLs:**
+- Without rate limiting: ~50 minutes (with pool_size=10)
+- With rate_limit=60/min: **2.8 hours** (regardless of pool_size)
+
+> ⚠️ **Pool Size vs Rate Limit Mismatch:** Setting `pool_size: 20` with `rate_limit: 60/min` (1 req/sec) means 19 threads will be blocked waiting for rate limit tokens while only 1 thread does useful work. Configure pool_size proportional to your rate limit: `pool_size ≤ requests_per_minute / 60` for full utilization.
+
+> ⚠️ **Recommendation:** Set `pool_size: 1` when rate limiting is enabled to avoid thread pool overhead with no benefit.
 
 ### Rate Limiting Integration
 
 Rate limiting is **mandatory** for responsible scraping. The transform integrates with ELSPETH's `RateLimitRegistry`:
 
 ```python
-from elspeth.core.rate_limit import RateLimitRegistry
-
 class WebScrapeTransform(BatchTransformMixin, BaseTransform):
     def __init__(self, options: dict[str, Any]) -> None:
         super().__init__(options)
-
-        # Get rate limiter from registry
-        rate_config = options.get("rate_limit", {})
-        self._limiter = RateLimitRegistry.get_or_create(
-            service_name="web_scrape",
-            requests_per_minute=rate_config.get("requests_per_minute", 60),
-            burst=rate_config.get("burst", 10),
-        )
+        # Rate limiter config comes from pipeline settings via RuntimeRateLimitConfig
+        # Transform just retrieves the limiter by service name
 
     def _fetch_and_extract(
         self,
@@ -882,15 +947,15 @@ class WebScrapeTransform(BatchTransformMixin, BaseTransform):
     ) -> TransformResult:
         url = row[self._url_field]
 
-        # Wait for rate limit token before making request
-        self._limiter.acquire()
+        # Get limiter from registry (configured via pipeline settings)
+        limiter = ctx.rate_limit_registry.get_limiter("web_scrape")
 
-        # Create audited client with limiter
+        # Create audited client - client handles rate limiting internally
         client = AuditedHTTPClient(
-            recorder=ctx.recorder,
+            landscape=ctx.landscape,  # Correct: ctx.landscape, not ctx.recorder
             state_id=ctx.state_id,
             run_id=ctx.run_id,
-            limiter=self._limiter,  # Pass limiter to client
+            limiter=limiter,  # Client calls limiter.acquire() before each request
             # ... other params
         )
 
@@ -1009,14 +1074,14 @@ def test_429_raises_for_retry():
 
 ### Contract Tests
 
-Inherit from the standard base to get 15+ protocol tests free:
+**Batch Transform Contract:** Since WebScrapeTransform uses `BatchTransformMixin`, it must use the batch transform contract test base:
 
 ```python
-from tests.contracts.transform_contracts.test_transform_protocol import (
-    TransformContractPropertyTestBase,
+from tests.contracts.transform_contracts.test_batch_transform_protocol import (
+    BatchTransformContractTestBase,
 )
 
-class TestWebScrapeContract(TransformContractPropertyTestBase):
+class TestWebScrapeContract(BatchTransformContractTestBase):
     @pytest.fixture
     def transform(self):
         return WebScrapeTransform({
@@ -1034,6 +1099,12 @@ class TestWebScrapeContract(TransformContractPropertyTestBase):
     def valid_input(self):
         return {"url": "https://example.com"}
 ```
+
+**Why BatchTransformContractTestBase:** This base class verifies batch processing behavior including:
+- Concurrent row processing via thread pool
+- FIFO ordering maintenance via `RowReorderBuffer`
+- Backpressure handling when buffer is full
+- Thread-safe state management
 
 ### Fingerprint Stability Tests
 
@@ -1091,6 +1162,63 @@ def test_fingerprint_structure_mode_detects_dom_changes():
 
     assert fp1 != fp2
 ```
+
+### html2text Determinism Tests (Audit Integrity)
+
+**CRITICAL:** html2text must produce identical output for identical input to preserve audit integrity. If non-deterministic, retries will produce different `fetch_response_processed_hash` values for the same HTML, breaking the "same input = same hash" audit invariant.
+
+```python
+from hypothesis import given
+from hypothesis.strategies import text
+import html2text
+
+def test_html2text_deterministic_simple():
+    """html2text must produce identical output for identical input."""
+    html = "<html><body><h1>Title</h1><p>Content</p></body></html>"
+
+    h = html2text.HTML2Text()
+    h.ignore_links = False
+    h.body_width = 0
+
+    result1 = h.handle(html)
+    result2 = h.handle(html)
+
+    assert result1 == result2, "html2text output is non-deterministic!"
+
+@given(text(min_size=10, max_size=200))
+def test_html2text_deterministic_property(content: str):
+    """Property test: html2text must be deterministic for all inputs."""
+    # Wrap content in minimal HTML structure
+    html = f"<html><body><p>{content}</p></body></html>"
+
+    h = html2text.HTML2Text()
+    h.ignore_links = False
+    h.body_width = 0
+
+    result1 = h.handle(html)
+    result2 = h.handle(html)
+
+    assert result1 == result2, f"Non-deterministic for input: {html!r}"
+
+def test_html2text_deterministic_across_instances():
+    """Verify determinism even with separate HTML2Text instances."""
+    html = "<html><body><h1>Test</h1><p>Content</p></body></html>"
+
+    h1 = html2text.HTML2Text()
+    h1.ignore_links = False
+    h1.body_width = 0
+
+    h2 = html2text.HTML2Text()
+    h2.ignore_links = False
+    h2.body_width = 0
+
+    result1 = h1.handle(html)
+    result2 = h2.handle(html)
+
+    assert result1 == result2, "html2text not deterministic across instances!"
+```
+
+**If these tests fail:** html2text is non-deterministic. Evaluate alternatives or pin version strictly and document the determinism guarantee in dependency constraints.
 
 ### Integration Test (Real HTTP, Localhost)
 
@@ -1366,43 +1494,51 @@ default_sink: compliant
 
 ### Implementation Tasks
 
-1. **Add `get()` method to `AuditedHTTPClient`** in `src/elspeth/plugins/clients/http.py`
+1. **Create shared security infrastructure** in `src/elspeth/core/security/web.py` ⚠️ **PRE-RELEASE CRITICAL**
+   - Extract reusable validators: `validate_url_scheme()`, `validate_ip()`, `validate_redirect()`
+   - `SSRFValidator` class with configurable blocklist
+   - Export from `elspeth.core.security`
+   - **Rationale:** Shared infrastructure prevents code duplication when other plugins need web requests
+   - **This is a one-way door:** Once shipped without shared infrastructure, changing it is a breaking change
+
+2. **Add `get()` method to `AuditedHTTPClient`** in `src/elspeth/plugins/clients/http.py`
    - Client already exists (413 lines) with `post()` method
    - Add `get()` following same audit pattern
-   - Integrate SSRF prevention (URL validation, IP blocklist, redirect validation)
+   - Accept optional `validator: SSRFValidator` parameter
+   - Call validator before DNS resolution
    - Add response size streaming with limit check
 
-2. **Create `WebScrapeTransform`** in `src/elspeth/plugins/transforms/web_scrape.py`
+3. **Create `WebScrapeTransform`** in `src/elspeth/plugins/transforms/web_scrape.py`
    - Inherit from `BatchTransformMixin` for concurrent processing
    - Config validation (mandatory fields, security settings)
-   - Content extraction (markdown/text/raw) with conversion timeout
-   - Fingerprinting (content/full/structure modes)
-   - Integration with `AuditedHTTPClient.get()` and `RateLimitRegistry`
+   - Content extraction (markdown/text/raw) with conversion timeout (ThreadPoolExecutor, not signal.alarm)
+   - Fingerprinting (content/full modes - defer structure mode)
+   - Integration with `AuditedHTTPClient.get()` and `ctx.rate_limit_registry.get_limiter()`
    - Telemetry emission for operational visibility
+   - **Disk space check:** Add validation in `__init__()` or document as operational requirement
 
-3. **Create error hierarchy** in `src/elspeth/plugins/transforms/web_scrape.py`
+4. **Create error hierarchy** in `src/elspeth/plugins/transforms/web_scrape.py`
    - `WebScrapeError` base with `retryable` flag
    - Typed subclasses for each error category (see Section 5)
    - Include new security errors: `SSRFBlockedError`, `ResponseTooLargeError`, `ConversionTimeoutError`
 
-4. **Add dependencies** to `pyproject.toml`
+5. **Add dependencies** to `pyproject.toml`
    - `html2text>=2024.2.26` to `[web]` group
    - `beautifulsoup4>=4.12,<5` to `[web]` group
    - `respx>=0.21,<1` to `[dev]` group
    - Add `[web]` to `[all]` group
 
-5. **Register plugin** in `src/elspeth/plugins/transforms/__init__.py`
-   - Add to `TRANSFORM_REGISTRY` dict
-   - No separate hookimpl.py needed
-
 6. **Write tests**
    - Unit tests with respx mocking
-   - Contract tests (inherit from `TransformContractPropertyTestBase`)
+   - Contract tests (inherit from `BatchTransformContractTestBase` - not `TransformContractPropertyTestBase`)
    - Fingerprint stability tests
+   - **html2text determinism test:** Property test verifying `handle(html) == handle(html)` (audit integrity)
    - Security tests (SSRF, response size, redirects)
    - Timeout and network error tests
    - Encoding edge case tests
    - Integration tests with local HTTP server
+   - Telemetry emission tests
+   - Rate limiter integration tests
 
 ### Open Questions (Resolved)
 

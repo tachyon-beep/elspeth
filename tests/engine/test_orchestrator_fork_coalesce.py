@@ -12,19 +12,41 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import SourceRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.types import CoalesceName
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
-    _TestSinkBase,
     _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 # =============================================================================
@@ -48,7 +70,7 @@ class CoalesceTestSource(_TestSourceBase):
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         for row in self._rows:
-            yield SourceRow.valid(row)
+            yield from self.wrap_rows([row])
 
 
 class TestOrchestratorForkExecution:
@@ -66,9 +88,6 @@ class TestOrchestratorForkExecution:
         This tests the basic plumbing (list handling, counting) without forks.
         Fork-specific behavior is tested at processor level.
         """
-        import hashlib
-
-        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -78,24 +97,6 @@ class TestOrchestratorForkExecution:
         class RowSchema(_TestSchema):
             value: int
 
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                yield SourceRow.valid({"value": 1})
-                yield SourceRow.valid({"value": 2})
-                yield SourceRow.valid({"value": 3})
-
-            def close(self) -> None:
-                pass
-
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
             input_schema = RowSchema
@@ -104,37 +105,12 @@ class TestOrchestratorForkExecution:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[Any] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                content = str(rows).encode()
-                return ArtifactDescriptor(
-                    artifact_type="file",
-                    path_or_uri="memory://test",
-                    content_hash=hashlib.sha256(content).hexdigest(),
-                    size_bytes=len(content),
-                )
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource()
+        source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = PassthroughTransform()
-        sink = CollectSink()
+        sink = CollectSink(name="collect_sink")
 
         config = PipelineConfig(
             source=as_source(source),
@@ -336,7 +312,7 @@ class TestCoalesceWiring:
         merged_token = TokenInfo(
             row_id="row_1",
             token_id="merged_token_1",  # Fake - not in DB
-            row_data={"merged": True},
+            row_data=_make_pipeline_row({"merged": True}),
             branch_name=None,
         )
         coalesced_result = RowResult(
@@ -352,7 +328,9 @@ class TestCoalesceWiring:
         ):
             mock_processor = MagicMock()
             mock_processor.process_row.return_value = [coalesced_result]
-            mock_processor.token_manager.create_initial_token.return_value = MagicMock(row_id="row_1", token_id="t1", row_data={"value": 1})
+            mock_processor.token_manager.create_initial_token.return_value = MagicMock(
+                row_id="row_1", token_id="t1", row_data=_make_pipeline_row({"value": 1})
+            )
             mock_processor_cls.return_value = mock_processor
 
             mock_sink_executor = MagicMock()
@@ -535,7 +513,7 @@ class TestCoalesceWiring:
         merged_token = TokenInfo(
             row_id="row_1",
             token_id="flushed_merged_token",  # Fake - not in DB
-            row_data={"merged_at_flush": True},
+            row_data=_make_pipeline_row({"merged_at_flush": True}),
             branch_name=None,
         )
 
@@ -737,8 +715,8 @@ class TestCoalesceWiring:
         # forker gate is at pipeline index 2 (after 2 transforms)
         # coalesce_step = len(transforms) + len(gates) + coalesce_index
         #               = 2 + 1 + 0 = 3
-        assert "merge_results" in step_map
-        assert step_map["merge_results"] == 3
+        assert CoalesceName("merge_results") in step_map
+        assert step_map[CoalesceName("merge_results")] == 3
 
 
 class TestCoalesceStepMapCalculation:

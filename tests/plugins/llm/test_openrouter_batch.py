@@ -13,14 +13,16 @@ Tests cover:
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
-from typing import Any
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import httpx
 import pytest
 
-from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts import CallStatus, CallType, Determinism, PipelineRow, TransformResult
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.openrouter_batch import (
@@ -32,6 +34,22 @@ from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_ht
 
 # Common schema config for dynamic field handling
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with observed schema contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data=data, contract=contract)
 
 
 def _make_valid_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -56,7 +74,7 @@ def _create_mock_response(
     status_code: int = 200,
     raw_body: str | None = None,
     headers: dict[str, str] | None = None,
-) -> Mock:
+) -> httpx.Response:
     """Create an httpx.Response using ChaosLLM response generation."""
     request = {
         "model": model,
@@ -87,20 +105,31 @@ def _create_mock_context(
     return ctx
 
 
+@contextmanager
 def mock_httpx_client(
     chaosllm_server,
     responses: list[httpx.Response] | httpx.Response | None = None,
     side_effect: Exception | None = None,
-) -> Generator[Mock, None, None]:
+) -> Iterator[Mock]:
     """Context manager to mock httpx.Client using ChaosLLM responses."""
     if responses is None and side_effect is None:
         responses = _create_mock_response(chaosllm_server)
-    normalized = responses if isinstance(responses, list) else [responses]
-    return chaosllm_openrouter_http_responses(
+    # Build list of responses, ensuring no None values
+    if responses is None:
+        # side_effect is provided, responses list not used
+        normalized: list[httpx.Response] = []
+    elif isinstance(responses, list):
+        normalized = responses
+    else:
+        normalized = [responses]
+    # Cast to the expected type for chaosllm_openrouter_http_responses
+    typed_responses = cast(list[dict[str, Any] | str | httpx.Response], normalized)
+    with chaosllm_openrouter_http_responses(
         chaosllm_server,
-        normalized,
+        typed_responses,
         side_effect=side_effect,
-    )
+    ) as mock_client:
+        yield mock_client
 
 
 class TestOpenRouterBatchConfig:
@@ -252,7 +281,7 @@ class TestOpenRouterBatchSingleRow:
         row = {"text": "Hello world"}
 
         with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server, content="Analyzed!")):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -266,7 +295,7 @@ class TestOpenRouterBatchSingleRow:
         row = {"text": "Hello"}
 
         with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         # Template error returns error in the row, not TransformResult.error()
         # because batch processing continues with other rows
@@ -293,7 +322,7 @@ class TestOpenRouterBatchProcessing:
         responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(3)]
 
         with mock_httpx_client(chaosllm_server, responses):
-            result = transform.process(rows, ctx)
+            result = transform.process([_make_pipeline_row(r) for r in rows], ctx)
 
         assert result.status == "success"
         assert result.rows is not None
@@ -313,7 +342,7 @@ class TestOpenRouterBatchProcessing:
         responses = [_create_mock_response(chaosllm_server) for _ in range(2)]
 
         with mock_httpx_client(chaosllm_server, responses):
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(r) for r in rows], ctx)
 
         # Should have recorded calls for each row
         assert ctx.record_call.call_count == 2
@@ -335,7 +364,7 @@ class TestOpenRouterBatchProcessing:
         error_response = _create_mock_response(chaosllm_server, status_code=500)
 
         with mock_httpx_client(chaosllm_server, [success_response, error_response]):
-            result = transform.process(rows, ctx)
+            result = transform.process([_make_pipeline_row(r) for r in rows], ctx)
 
         assert result.status == "success"
         assert result.rows is not None
@@ -366,7 +395,7 @@ class TestOpenRouterBatchErrorHandling:
         )
 
         with mock_httpx_client(chaosllm_server, side_effect=error):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"  # Single row fallback
         assert result.row is not None
@@ -381,7 +410,7 @@ class TestOpenRouterBatchErrorHandling:
         row = {"text": "Test"}
 
         with mock_httpx_client(chaosllm_server, side_effect=httpx.ConnectError("Connection refused")):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -401,7 +430,7 @@ class TestOpenRouterBatchErrorHandling:
         )
 
         with mock_httpx_client(chaosllm_server, response):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -421,7 +450,7 @@ class TestOpenRouterBatchErrorHandling:
         )
 
         with mock_httpx_client(chaosllm_server, response):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -441,7 +470,7 @@ class TestOpenRouterBatchErrorHandling:
         )
 
         with mock_httpx_client(chaosllm_server, response):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -456,7 +485,7 @@ class TestOpenRouterBatchErrorHandling:
         row = {"text": "Test"}
 
         with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -474,7 +503,7 @@ class TestOpenRouterBatchAuditFields:
         row = {"text": "Test"}
 
         with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.row is not None
         output = result.row
@@ -497,7 +526,7 @@ class TestOpenRouterBatchAuditFields:
         row = {"text": "Test"}
 
         with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
-            result = transform.process(row, ctx)
+            result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.row is not None
         output = result.row
@@ -526,7 +555,7 @@ class TestOpenRouterBatchSharedClient:
             mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
             mock_client_class.return_value.__exit__ = Mock(return_value=None)
 
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(r) for r in rows], ctx)
 
             # Client constructor called exactly once (not 5 times)
             assert mock_client_class.call_count == 1
@@ -559,7 +588,7 @@ class TestOpenRouterBatchAllRowsFail:
         )
 
         with mock_httpx_client(chaosllm_server, side_effect=error):
-            result = transform.process(rows, ctx)
+            result = transform.process([_make_pipeline_row(r) for r in rows], ctx)
 
         # All rows processed - success_multi with error markers on each row
         assert result.status == "success"
@@ -586,7 +615,7 @@ class TestOpenRouterBatchTemplateErrorAuditTrail:
         rows = [{"text": "Test row"}]  # Template references nonexistent_field
 
         with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(r) for r in rows], ctx)
 
         # Template error should be recorded to audit trail
         assert ctx.record_call.call_count >= 1
@@ -637,4 +666,4 @@ class TestOpenRouterBatchSingleRowFallback:
             patch.object(transform, "_process_batch", return_value=invalid_result),
             pytest.raises(RuntimeError, match="Unexpected result from _process_batch"),
         ):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)

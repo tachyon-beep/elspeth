@@ -86,7 +86,7 @@ def build_production_graph(
 
                 return TransformResult.success(row, success_reason={"action": "test"})
 
-        aggregations[agg_name] = (_AggTransform(), agg_settings)
+        aggregations[agg_name] = (_AggTransform(), agg_settings)  # type: ignore[assignment]
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,

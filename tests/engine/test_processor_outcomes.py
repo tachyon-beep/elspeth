@@ -9,12 +9,35 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeType, RoutingMode, RowOutcome, RunStatus
+from elspeth.contracts import NodeStateStatus, NodeType, PipelineRow, RoutingMode, RowOutcome, SourceRow
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import GateName, NodeID
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+
+
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
 
 
 class TestProcessorRecordsOutcomes:
@@ -398,7 +421,7 @@ class TestEngineIntegrationOutcomes:
 
     def test_processor_records_completed_outcome_with_context(self, landscape_db) -> None:
         """RowProcessor should record COMPLETED outcome with correct context."""
-        from typing import Any, ClassVar
+        from typing import ClassVar
 
         from pydantic import ConfigDict
 
@@ -443,7 +466,7 @@ class TestEngineIntegrationOutcomes:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         processor = RowProcessor(
@@ -456,7 +479,7 @@ class TestEngineIntegrationOutcomes:
         ctx = PluginContext(run_id=run.run_id, config={})
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=make_source_row({"value": 42}),
             transforms=[EnricherTransform(transform.node_id)],
             ctx=ctx,
         )
@@ -472,13 +495,13 @@ class TestEngineIntegrationOutcomes:
         states = recorder.get_node_states_for_token(result.token.token_id)
         assert len(states) == 1, "Should have node_state for the transform"
         state = states[0]
-        assert state.status == RunStatus.COMPLETED, "Transform should complete successfully"
+        assert state.status == NodeStateStatus.COMPLETED, "Transform should complete successfully"
         assert state.input_hash is not None, "Input hash should be recorded"
         assert hasattr(state, "output_hash") and state.output_hash is not None, "Output hash should be recorded"
 
     def test_processor_records_quarantined_outcome_with_error_hash(self) -> None:
         """RowProcessor should record QUARANTINED outcome with error_hash."""
-        from typing import Any, ClassVar
+        from typing import ClassVar
 
         from pydantic import ConfigDict
 
@@ -525,10 +548,10 @@ class TestEngineIntegrationOutcomes:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 if row["value"] < 0:
                     return TransformResult.error({"reason": "validation_failed", "error": "negative_value"})
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
         processor = RowProcessor(
             recorder=recorder,
@@ -540,7 +563,7 @@ class TestEngineIntegrationOutcomes:
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
         results = processor.process_row(
             row_index=0,
-            row_data={"value": -5},
+            source_row=make_source_row({"value": -5}),
             transforms=[ValidatingTransform(transform.node_id)],
             ctx=ctx,
         )
@@ -644,7 +667,7 @@ class TestEngineIntegrationOutcomes:
         ctx = PluginContext(run_id=run.run_id, config={})
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=make_source_row({"value": 42}),
             transforms=[],
             ctx=ctx,
         )

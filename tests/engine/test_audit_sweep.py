@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
-from elspeth.contracts import ArtifactDescriptor, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PipelineRow, SourceRow
 from elspeth.core.landscape import LandscapeDB
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
@@ -198,14 +198,20 @@ class _ListSource(_TestSourceBase):
     output_schema = _ValueSchema
 
     def __init__(self, data: list[dict[str, Any]]) -> None:
+        super().__init__()
         self._data = data
+
+        # Create schema contract from output_schema
+        from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+        self._schema_contract = create_output_contract_from_schema(self.output_schema)
 
     def on_start(self, ctx: Any) -> None:
         pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         for row in self._data:
-            yield SourceRow.valid(row)
+            yield SourceRow.valid(row, contract=self._schema_contract)
 
     def close(self) -> None:
         pass
@@ -221,8 +227,13 @@ class _PassTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row, success_reason={"action": "passthrough"})
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        # Convert PipelineRow to dict and pass contract along
+        return TransformResult.success(
+            row.to_dict(),
+            success_reason={"action": "passthrough"},
+            contract=row.contract,
+        )
 
 
 class _CollectSink(_TestSinkBase):
@@ -378,10 +389,15 @@ class TestAuditSweepErrorHandling:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 if row["value"] == 2:
                     return TransformResult.error({"reason": "test_error"})
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+                # Convert PipelineRow to dict and pass contract along
+                return TransformResult.success(
+                    row.to_dict(),
+                    success_reason={"action": "passthrough"},
+                    contract=row.contract,
+                )
 
         source = _ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = _FailingTransform()
@@ -684,18 +700,22 @@ class TestAuditSweepForkCoalesce:
             output_schema = _ValueSchema
 
             def __init__(self) -> None:
-                pass
+                super().__init__()
+                # Create schema contract from output_schema
+                from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+                self._schema_contract = create_output_contract_from_schema(self.output_schema)
 
             def on_start(self, ctx: Any) -> None:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # First row triggers the fork
-                yield SourceRow.valid({"value": 1})
+                yield SourceRow.valid({"value": 1}, contract=self._schema_contract)
                 # Delay allows timeout to fire during row processing
                 time.sleep(0.1)
                 # Second row gives orchestrator chance to call check_timeouts
-                yield SourceRow.valid({"value": 2})
+                yield SourceRow.valid({"value": 2}, contract=self._schema_contract)
 
             def close(self) -> None:
                 pass
@@ -715,7 +735,7 @@ class TestAuditSweepForkCoalesce:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 # Only fail on path_b (which is indicated by branch_name on token)
                 # Since we can't easily check branch name here, we use a workaround:
                 # This transform is ONLY placed on path_b, so all rows through it fail

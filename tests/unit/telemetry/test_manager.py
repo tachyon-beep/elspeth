@@ -45,7 +45,7 @@ class MockConfig:
     backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
 
     @property
-    def exporter_configs(self) -> tuple:
+    def exporter_configs(self) -> tuple[()]:
         return ()
 
 
@@ -134,6 +134,8 @@ class ReentrantExporter:
             reentrant_event = RunStarted(
                 timestamp=event.timestamp,
                 run_id=f"reentrant-{event.run_id}",
+                config_hash="test_hash",
+                source_plugin="test_source",
             )
             self._manager.handle_event(reentrant_event)
             self.reentrant_calls.append(event.run_id)

@@ -10,7 +10,6 @@ Each sink type has slightly different setup requirements, handled by factory fix
 
 import csv
 import json
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -34,7 +33,10 @@ class SinkProtocol(Protocol):
     def close(self) -> None: ...
 
 
-SinkFactory = Callable[[list[str], dict[str, Any]], SinkProtocol]
+class SinkFactory(Protocol):
+    """Protocol for sink factory functions with keyword arguments."""
+
+    def __call__(self, target_fields: list[str], schema_config: dict[str, Any]) -> SinkProtocol: ...
 
 
 # =============================================================================
@@ -304,7 +306,7 @@ class TestCSVSinkOrderValidation:
         result = sink.validate_output_target()
 
         assert result.valid is False
-        assert "fixed mode" in result.error_message
+        assert result.error_message is not None and "fixed mode" in result.error_message
         assert result.order_mismatch is True
         # No missing or extra fields - just order wrong
         assert len(result.missing_fields) == 0
@@ -405,7 +407,7 @@ class TestJSONSinkSpecific:
         result = sink.validate_output_target()
 
         assert result.valid is False
-        assert "invalid JSON" in result.error_message
+        assert result.error_message is not None and "invalid JSON" in result.error_message
 
     def test_validate_non_object_record_returns_failure(self, tmp_jsonl_path: Path):
         """JSONL with non-object records should return failure."""
@@ -421,7 +423,7 @@ class TestJSONSinkSpecific:
         result = sink.validate_output_target()
 
         assert result.valid is False
-        assert "non-object" in result.error_message
+        assert result.error_message is not None and "non-object" in result.error_message
 
     def test_validate_auto_detected_jsonl_format(self, tmp_path: Path):
         """Auto-detected JSONL format should validate correctly."""

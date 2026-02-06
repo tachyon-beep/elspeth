@@ -256,7 +256,7 @@ class AggregationSettings(BaseModel):
               compute_mean: true
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Aggregation identifier (unique within pipeline)")
     plugin: str = Field(description="Plugin name to instantiate")
@@ -309,7 +309,7 @@ class GateSettings(BaseModel):
               - path_b
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Gate identifier (unique within pipeline)")
     condition: str = Field(description="Expression to evaluate (validated by ExpressionParser)")
@@ -359,6 +359,13 @@ class GateSettings(BaseModel):
             if label in _RESERVED_EDGE_LABELS:
                 raise ValueError(f"Route label '{label}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
 
+            # Labels starting with __ are reserved for system edges
+            # (__quarantine__, __error_N__) added by the DAG builder
+            if label.startswith("__"):
+                raise ValueError(
+                    f"Route label '{label}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
+                )
+
             # Destinations must be "continue", "fork", or a sink name.
             # Sink name validation is deferred to DAG compilation where we have
             # access to the actual sink definitions.
@@ -381,6 +388,10 @@ class GateSettings(BaseModel):
         for branch in v:
             if branch in _RESERVED_EDGE_LABELS:
                 raise ValueError(f"Fork branch '{branch}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
+            if branch.startswith("__"):
+                raise ValueError(
+                    f"Fork branch '{branch}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
+                )
         return v
 
     @model_validator(mode="after")
@@ -465,7 +476,7 @@ class CoalesceSettings(BaseModel):
             timeout_seconds: 30
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Unique identifier for this coalesce point")
     branches: list[str] = Field(
@@ -523,7 +534,7 @@ class CoalesceSettings(BaseModel):
 class SourceSettings(BaseModel):
     """Source plugin configuration per architecture."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     plugin: str = Field(description="Plugin name (csv_local, json, http_poll, etc.)")
     options: dict[str, Any] = Field(
@@ -539,7 +550,7 @@ class TransformSettings(BaseModel):
     Plugin-based gates were removed - use the gates: section instead.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     plugin: str = Field(description="Plugin name")
     options: dict[str, Any] = Field(
@@ -551,7 +562,7 @@ class TransformSettings(BaseModel):
 class SinkSettings(BaseModel):
     """Sink plugin configuration per architecture."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     plugin: str = Field(description="Plugin name (csv, json, database, webhook, etc.)")
     options: dict[str, Any] = Field(
@@ -567,7 +578,7 @@ class LandscapeExportSettings(BaseModel):
     Optional cryptographic signing for legal-grade integrity.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(
         default=False,
@@ -590,7 +601,7 @@ class LandscapeExportSettings(BaseModel):
 class LandscapeSettings(BaseModel):
     """Landscape audit system configuration per architecture."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(default=True, description="Enable audit trail recording")
     backend: Literal["sqlite", "postgresql"] = Field(
@@ -652,7 +663,7 @@ class LandscapeSettings(BaseModel):
 class ConcurrencySettings(BaseModel):
     """Parallel processing configuration per architecture."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     max_workers: int = Field(
         default=4,
@@ -664,7 +675,7 @@ class ConcurrencySettings(BaseModel):
 class DatabaseSettings(BaseModel):
     """Database connection configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     url: str = Field(description="SQLAlchemy database URL")
     pool_size: int = Field(default=5, gt=0, description="Connection pool size")
@@ -674,7 +685,7 @@ class DatabaseSettings(BaseModel):
 class ServiceRateLimit(BaseModel):
     """Rate limit configuration for a specific service."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     requests_per_minute: int = Field(default=60, gt=0, description="Maximum requests per minute")
 
@@ -694,7 +705,7 @@ class RateLimitSettings(BaseModel):
               requests_per_minute: 120
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(default=True, description="Enable rate limiting for external calls")
     default_requests_per_minute: int = Field(default=60, gt=0, description="Default per-minute rate limit for unconfigured services")
@@ -719,7 +730,7 @@ class CheckpointSettings(BaseModel):
     - aggregation_only: Fastest, checkpoint only at aggregation flushes.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = True
     frequency: Literal["every_row", "every_n", "aggregation_only"] = "every_row"
@@ -736,7 +747,7 @@ class CheckpointSettings(BaseModel):
 class RetrySettings(BaseModel):
     """Retry behavior configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     max_attempts: int = Field(default=3, gt=0, description="Maximum retry attempts")
     initial_delay_seconds: float = Field(default=1.0, gt=0, description="Initial backoff delay")
@@ -747,7 +758,7 @@ class RetrySettings(BaseModel):
 class PayloadStoreSettings(BaseModel):
     """Payload store configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     backend: str = Field(default="filesystem", description="Storage backend type")
     base_path: Path = Field(
@@ -771,7 +782,7 @@ class ExporterSettings(BaseModel):
                 endpoint: https://otel.example.com
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Exporter name (console, otlp, azure_monitor, datadog)")
     options: dict[str, Any] = Field(
@@ -819,7 +830,7 @@ class TelemetrySettings(BaseModel):
         - slow: Adaptive rate limiting (not yet implemented)
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(
         default=False,
@@ -858,7 +869,7 @@ class ElspethSettings(BaseModel):
     All settings are validated and frozen after construction.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     # Required - core pipeline definition
     source: SourceSettings = Field(
@@ -1459,10 +1470,11 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
     """Lowercase dictionary keys for Pydantic schema matching, preserving user data.
 
     Dynaconf returns keys in UPPERCASE when they come from environment variables,
-    but Pydantic expects lowercase field names. User data inside 'options' dicts
-    must be preserved exactly as written - these can contain case-sensitive keys
-    like output_mapping: {"Score": "score"} where "Score" must match the LLM's
-    JSON response field name.
+    but Pydantic expects lowercase field names. User data inside 'options' and
+    'routes' dicts must be preserved exactly as written - these contain
+    case-sensitive keys that must match runtime values:
+    - options: {"Score": "score"} where "Score" must match the LLM's JSON field name
+    - routes: {"High": "continue"} where "High" must match the gate condition result
 
     Sink name handling:
     - FULLY UPPERCASE names (e.g., 'OUTPUT') are lowercased - these come from
@@ -1474,7 +1486,7 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
         obj: Any value - dicts are processed recursively, lists have their
              elements processed, other types pass through unchanged.
         _preserve_nested: Internal flag - when True, stop lowercasing keys
-             (we're inside an 'options' dict).
+             (we're inside an 'options' or 'routes' dict).
         _in_sinks: Internal flag - when True, we're processing sink name keys.
 
     Returns:
@@ -1497,10 +1509,13 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
 
             # Determine how to process children
             if _preserve_nested:
-                # Already inside options: stay in preserve mode, ignore special keys
+                # Already inside options/routes: stay in preserve mode, ignore special keys
                 child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
             elif new_key == "options":
                 # Options: preserve everything inside (user data)
+                child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
+            elif new_key == "routes":
+                # Routes: preserve everything inside (user-defined route labels)
                 child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
             elif new_key == "sinks":
                 # Entering sinks dict: next level has sink name keys
@@ -1555,11 +1570,15 @@ def load_settings(config_path: Path) -> ElspethSettings:
     )
 
     # Dynaconf returns uppercase keys; convert to lowercase for Pydantic
-    # Also filter out internal Dynaconf settings
-    internal_keys = {"LOAD_DOTENV", "ENVIRONMENTS", "SETTINGS_FILES"}
     raw_dict = dynaconf_settings.as_dict()
-    filtered = {k: v for k, v in raw_dict.items() if k not in internal_keys}
-    raw_config = _lowercase_schema_keys(filtered)
+    raw_config = _lowercase_schema_keys(raw_dict)
+
+    # Positive allowlist: only pass keys that ElspethSettings knows about.
+    # Dynaconf injects internal settings (LOAD_DOTENV, ENVIRONMENTS, SETTINGS_FILES,
+    # MERGE_ENABLED, ALLOW_RAW_SECRETS, etc.) which must be excluded. A positive
+    # allowlist is robust against Dynaconf version changes — no whack-a-mole.
+    known_fields = set(ElspethSettings.model_fields.keys())
+    raw_config = {k: v for k, v in raw_config.items() if k in known_fields}
 
     # Expand ${VAR} and ${VAR:-default} patterns in config values
     raw_config = _expand_env_vars(raw_config)

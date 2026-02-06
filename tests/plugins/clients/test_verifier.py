@@ -2,6 +2,7 @@
 """Tests for CallVerifier."""
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 from elspeth.contracts import Call, CallStatus, CallType
@@ -688,7 +689,7 @@ class TestCallVerifier:
                 request_hash=request_hash,
             )
 
-        def get_response_side_effect(call_id: str) -> dict[str, object]:
+        def get_response_side_effect(call_id: str) -> dict[str, str]:
             """Return response data based on call_id."""
             idx = int(call_id.split("_")[1])
             return recorded_responses[idx]
@@ -863,8 +864,8 @@ class TestCallVerifier:
         request_data = {"id": 1}
         request_hash = stable_hash(request_data)
 
-        recorded_response = {"items": []}
-        live_response = {"items": []}
+        recorded_response: dict[str, list[Any]] = {"items": []}
+        live_response: dict[str, list[Any]] = {"items": []}
 
         mock_call = self._create_mock_call(request_hash=request_hash)
         recorder.find_call_by_request_hash.return_value = mock_call

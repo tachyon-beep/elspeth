@@ -66,10 +66,27 @@ def make_token(
     row_data: dict[str, Any],
 ) -> TokenInfo:
     """Create a TokenInfo for testing."""
+    from elspeth.contracts import PipelineRow
+    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+    # Create OBSERVED contract from row data
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    pipeline_row = PipelineRow(row_data, contract)
+
     return TokenInfo(
         token_id=token_id,
         row_id=row_id,
-        row_data=row_data,
+        row_data=pipeline_row,
         branch_name=branch_name,
     )
 
@@ -86,10 +103,27 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
 
     # Make coalesce_tokens return a merged token
     def mock_coalesce_tokens(parents, merged_data, step_in_pipeline):
+        from elspeth.contracts import PipelineRow
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        # Create OBSERVED contract from merged data
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=object,
+                required=False,
+                source="inferred",
+            )
+            for key in merged_data
+        )
+        contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        pipeline_row = PipelineRow(merged_data, contract)
+
         return TokenInfo(
             token_id=f"merged-{parents[0].row_id}",
             row_id=parents[0].row_id,
-            row_data=merged_data,
+            row_data=pipeline_row,
             join_group_id=f"join-{parents[0].row_id}",
         )
 
@@ -551,6 +585,7 @@ class TestMergeDataProperties:
         executor.accept(token_a, "test_coalesce", step_in_pipeline=0)
         outcome = executor.accept(token_b, "test_coalesce", step_in_pipeline=0)
 
+        assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
 
         # All keys from both dicts should be in merged (last write wins for conflicts)
@@ -581,6 +616,7 @@ class TestMergeDataProperties:
         executor.accept(token_a, "test_coalesce", step_in_pipeline=0)
         outcome = executor.accept(token_b, "test_coalesce", step_in_pipeline=0)
 
+        assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
 
         # Should have branch names as top-level keys
@@ -610,10 +646,12 @@ class TestMergeDataProperties:
         executor.accept(token_selected, "test_coalesce", step_in_pipeline=0)
         outcome = executor.accept(token_other, "test_coalesce", step_in_pipeline=0)
 
+        assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
 
         # Should be exactly the selected branch's data
-        assert merged_data == data_selected, "select merge should use only selected branch"
+        # row_data is now a PipelineRow, so convert to dict for comparison
+        assert merged_data.to_dict() == data_selected, "select merge should use only selected branch"
 
 
 # =============================================================================
@@ -715,6 +753,7 @@ class TestCoalesceMetadataProperties:
             token = make_token(f"token-{i}", row_id, branch, {"field": i})
             outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
 
+        assert outcome.coalesce_metadata is not None
         arrival_order = outcome.coalesce_metadata["arrival_order"]
 
         # Verify chronological order

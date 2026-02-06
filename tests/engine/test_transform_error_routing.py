@@ -15,12 +15,22 @@ import pytest
 from elspeth.contracts import TokenInfo, TransformErrorReason
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext, TransformErrorToken
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestTransformBase, as_transform
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+
+
+def _make_contract() -> SchemaContract:
+    """Create a flexible schema contract for testing."""
+    return SchemaContract(
+        mode="FLEXIBLE",
+        fields=(),
+        locked=True,
+    )
 
 
 class MockTransform(_TestTransformBase):
@@ -32,7 +42,7 @@ class MockTransform(_TestTransformBase):
         self._result = result
         self._on_error = on_error
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         return self._result
 
 
@@ -79,7 +89,7 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data={"input": 1},
+            row_data=PipelineRow({"input": 1}, _make_contract()),
         )
 
         # Create row/token in landscape
@@ -87,7 +97,7 @@ class TestTransformErrorRouting:
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -101,7 +111,7 @@ class TestTransformErrorRouting:
 
         assert result.status == "success"
         assert result.row == {"value": 42}
-        assert updated_token.row_data == {"value": 42}
+        assert updated_token.row_data.to_dict() == {"value": 42}
 
     def test_error_result_with_on_error_routes_to_sink(self, setup_landscape: tuple[Any, Any, Any]) -> None:
         """TransformResult.error() with on_error routes to configured sink."""
@@ -144,13 +154,13 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data={"input": 1},
+            row_data=PipelineRow({"input": 1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -205,13 +215,13 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data={"input": 1},
+            row_data=PipelineRow({"input": 1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -259,13 +269,13 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data={"input": 1},
+            row_data=PipelineRow({"input": 1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -330,7 +340,7 @@ class TestTransformErrorRouting:
             node_id=node.node_id,
             landscape=recorder,
         )
-        ctx.record_transform_error = capture_record  # type: ignore[method-assign]
+        ctx.record_transform_error = capture_record  # type: ignore[method-assign,assignment]
         ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
 
         executor = TransformExecutor(recorder, SpanFactory())
@@ -338,13 +348,13 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data={"input": 1},
+            row_data=PipelineRow({"input": 1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -408,20 +418,20 @@ class TestTransformErrorRouting:
             node_id=node.node_id,
             landscape=recorder,
         )
-        ctx.record_transform_error = capture_record  # type: ignore[method-assign]
+        ctx.record_transform_error = capture_record  # type: ignore[method-assign,assignment]
 
         executor = TransformExecutor(recorder, SpanFactory())
 
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data={"input": 1},
+            row_data=PipelineRow({"input": 1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -462,7 +472,7 @@ class TestTransformErrorRouting:
             name = "buggy"
             _on_error = "error_sink"  # Configured but should NOT be used for bugs
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise KeyError("nonexistent_field")  # BUG!
 
         transform = BuggyTransform()
@@ -478,13 +488,13 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data={"input": 1},
+            row_data=PipelineRow({"input": 1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -538,13 +548,13 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data=original_row,
+            row_data=PipelineRow(original_row, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -603,13 +613,13 @@ class TestTransformErrorRouting:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok_123",
-            row_data={"input": 1},
+            row_data=PipelineRow({"input": 1}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)

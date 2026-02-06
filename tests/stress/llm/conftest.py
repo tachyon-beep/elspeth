@@ -7,6 +7,24 @@ LLM transforms against ChaosLLM HTTP server.
 
 from __future__ import annotations
 
+__all__ = [
+    "ChaosLLMHTTPFixture",
+    "StressTestContext",
+    "StressTestResult",
+    "generate_multi_query_rows",
+    "generate_test_rows",
+    "make_azure_llm_config",
+    "make_azure_multi_query_config",
+    "make_openrouter_llm_config",
+    "make_openrouter_multi_query_config",
+    "make_pipeline_row",
+    "make_plugin_context",
+    "make_token",
+    "stress_landscape_db",
+    "stress_test_context",
+    "verify_audit_integrity",
+]
+
 import uuid
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -15,7 +33,9 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts import PipelineRow
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.context import PluginContext
@@ -42,11 +62,35 @@ class StressTestContext:
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     """Create a TokenInfo for testing."""
+    contract = SchemaContract(mode="FLEXIBLE", fields=(), locked=True)
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},  # Not used in these tests
+        row_data=PipelineRow({}, contract),  # Not used in these tests
     )
+
+
+def make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED contract for testing.
+
+    Args:
+        data: Row data dictionary
+
+    Returns:
+        PipelineRow wrapping the data with appropriate schema contract
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 def make_plugin_context(
@@ -370,12 +414,12 @@ def verify_audit_integrity(
     """
 
     # Get all tokens for this run
-    with landscape._db.session() as session:
+    with landscape._db.connection() as conn:
         from sqlalchemy import select
 
         from elspeth.core.landscape.schema import tokens_table
 
-        result = session.execute(select(tokens_table).where(tokens_table.c.run_id == run_id))
+        result = conn.execute(select(tokens_table).where(tokens_table.c.run_id == run_id))
         tokens = list(result.fetchall())
 
     # Every row should have at least one token
@@ -385,10 +429,10 @@ def verify_audit_integrity(
         return False
 
     # Get outcomes
-    with landscape._db.session() as session:
+    with landscape._db.connection() as conn:
         from elspeth.core.landscape.schema import token_outcomes_table
 
-        result = session.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == run_id))
+        result = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == run_id))
         outcomes = list(result.fetchall())
 
     # Every token should have an outcome

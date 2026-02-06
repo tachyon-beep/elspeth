@@ -21,7 +21,6 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -33,7 +32,17 @@ if TYPE_CHECKING:
     from elspeth.telemetry import TelemetryManager
 
 from elspeth import __version__ as ENGINE_VERSION
-from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, PendingOutcome, RowOutcome, RunStatus, TokenInfo
+from elspeth.contracts import (
+    BatchPendingError,
+    ExportStatus,
+    NodeType,
+    PendingOutcome,
+    PipelineRow,
+    RowOutcome,
+    RunStatus,
+    SchemaContract,
+    TokenInfo,
+)
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.errors import OrchestrationInvariantError
@@ -70,7 +79,13 @@ from elspeth.engine.orchestrator.export import (
     export_landscape,
     reconstruct_schema_from_json,
 )
+from elspeth.engine.orchestrator.outcomes import (
+    accumulate_row_outcomes,
+    flush_coalesce_pending,
+    handle_coalesce_timeouts,
+)
 from elspeth.engine.orchestrator.types import (
+    ExecutionCounters,
     PipelineConfig,
     RouteValidationError,
     RowPlugin,
@@ -116,7 +131,7 @@ class Orchestrator:
         self,
         db: LandscapeDB,
         *,
-        event_bus: EventBusProtocol = None,  # type: ignore[assignment]
+        event_bus: EventBusProtocol | None = None,
         canonical_version: str = "sha256-rfc8785-v1",
         checkpoint_manager: CheckpointManager | None = None,
         checkpoint_config: RuntimeCheckpointConfig | None = None,
@@ -225,41 +240,162 @@ class Orchestrator:
         if self._checkpoint_manager is not None:
             self._checkpoint_manager.delete_checkpoints(run_id)
 
-    def _cleanup_transforms(self, config: PipelineConfig) -> None:
-        """Call close() on all transforms and gates.
+    def _write_pending_to_sinks(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        config: PipelineConfig,
+        ctx: PluginContext,
+        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+        sink_id_map: dict[SinkName, NodeID],
+        *,
+        on_token_written_factory: Callable[[str], Callable[[TokenInfo], None]] | None = None,
+    ) -> None:
+        """Write pending tokens to sinks using SinkExecutor.
 
-        Called in finally block to ensure cleanup happens even on failure.
+        Extracted from _execute_run() and _process_resumed_rows() to eliminate
+        duplication of the sink write orchestration pattern.
 
-        EXCEPTION TO "PLUGIN BUGS SHOULD CRASH" PRINCIPLE:
-        ---------------------------------------------------
-        Cleanup is best-effort even if individual close() fails. This violates
-        the general principle that plugin method exceptions should crash, but
-        attempts all cleanups, then raises if any failed. Per CLAUDE.md, plugins
-        are system-owned code and bugs must crash - but we collect errors first
-        to ensure all plugins get cleanup attempts before failing.
+        Args:
+            recorder: LandscapeRecorder for audit trail
+            run_id: Current run ID
+            config: Pipeline configuration
+            ctx: Plugin context
+            pending_tokens: Dict of sink_name -> list of (token, pending_outcome) pairs
+            sink_id_map: Maps SinkName -> NodeID for checkpoint callbacks
+            on_token_written_factory: Optional factory that creates per-sink checkpoint
+                callbacks. Takes sink_node_id, returns callback(TokenInfo) -> None.
+                When None (resume path), no checkpoint callbacks are used.
         """
+        from itertools import groupby
+
+        from elspeth.engine.executors import SinkExecutor
+
+        sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
+        # Step = transforms + config gates + 1 (for sink)
+        step = len(config.transforms) + len(config.gates) + 1
+
+        for sink_name, token_outcome_pairs in pending_tokens.items():
+            if token_outcome_pairs and sink_name in config.sinks:
+                sink = config.sinks[sink_name]
+                sink_node_id = sink_id_map[SinkName(sink_name)]
+
+                # Group tokens by pending_outcome for separate write() calls
+                # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
+                # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED
+                def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
+                    pending = pair[1]
+                    if pending is None:
+                        return (True, "", "")  # None sorts first
+                    return (False, pending.outcome.value, pending.error_hash or "")
+
+                sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
+
+                # Build on_token_written callback (or None for resume)
+                on_token_written: Callable[[TokenInfo], None] | None = None
+                if on_token_written_factory is not None:
+                    on_token_written = on_token_written_factory(sink_node_id)
+
+                for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                    group_tokens = [token for token, _ in group]
+                    sink_executor.write(
+                        sink=sink,
+                        tokens=group_tokens,
+                        ctx=ctx,
+                        step_in_pipeline=step,
+                        sink_name=sink_name,
+                        pending_outcome=pending_outcome,
+                        on_token_written=on_token_written,
+                    )
+
+    def _cleanup_plugins(
+        self,
+        config: PipelineConfig,
+        ctx: PluginContext,
+        *,
+        include_source: bool = True,
+    ) -> None:
+        """Clean up all plugins in the finally block.
+
+        Calls on_complete() on all plugins, then close() on transforms, sinks,
+        and optionally source. Collects all errors and raises after all cleanup
+        attempts complete.
+
+        Extracted from _execute_run() and _process_resumed_rows() to eliminate
+        duplication of the finally-block cleanup pattern.
+
+        Args:
+            config: Pipeline configuration
+            ctx: Plugin context
+            include_source: If True (default), calls on_complete() and close()
+                on the source. Set to False for resume path where source wasn't opened.
+
+        Raises:
+            RuntimeError: If any plugin cleanup hook fails. Chained from the
+                pending exception if one exists.
+        """
+        import sys
+
         import structlog
 
         logger = structlog.get_logger()
-        cleanup_errors: list[tuple[str, Exception]] = []
+        pending_exc = sys.exc_info()[1]
+        cleanup_errors: list[str] = []
 
+        def record_cleanup_error(hook: str, plugin_name: str, error: Exception) -> None:
+            logger.warning(
+                "Plugin cleanup hook failed",
+                hook=hook,
+                plugin=plugin_name,
+                error=str(error),
+                error_type=type(error).__name__,
+            )
+            cleanup_errors.append(f"{hook}({plugin_name}): {type(error).__name__}: {error}")
+
+        # Call on_complete for all plugins (even on error)
+        # Base classes provide no-op implementations, so no hasattr needed
+        for transform in config.transforms:
+            try:
+                transform.on_complete(ctx)
+            except Exception as e:
+                record_cleanup_error("transform.on_complete", transform.name, e)
+        for sink in config.sinks.values():
+            try:
+                sink.on_complete(ctx)
+            except Exception as e:
+                record_cleanup_error("sink.on_complete", sink.name, e)
+        if include_source:
+            try:
+                config.source.on_complete(ctx)
+            except Exception as e:
+                record_cleanup_error("source.on_complete", config.source.name, e)
+
+        # Close source (if included) and all sinks
+        if include_source:
+            try:
+                config.source.close()
+            except Exception as e:
+                record_cleanup_error("source.close", config.source.name, e)
+
+        # Close all transforms (release resources - file handles, connections, etc.)
         for transform in config.transforms:
             try:
                 transform.close()
             except Exception as e:
-                # Collect error but continue to attempt other cleanups
-                logger.warning(
-                    "Transform cleanup failed - plugin close() raised exception",
-                    transform=transform.name,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                )
-                cleanup_errors.append((transform.name, e))
+                record_cleanup_error("transform.close", transform.name, e)
 
-        # After attempting all cleanups, raise if any failed (plugins are system code)
+        # Close all sinks
+        for sink in config.sinks.values():
+            try:
+                sink.close()
+            except Exception as e:
+                record_cleanup_error("sink.close", sink.name, e)
+
         if cleanup_errors:
-            error_summary = "; ".join(f"{name}: {type(e).__name__}: {e}" for name, e in cleanup_errors)
-            raise RuntimeError(f"Plugin cleanup failed for {len(cleanup_errors)} transform(s): {error_summary}")
+            error_summary = "; ".join(cleanup_errors)
+            if pending_exc is not None:
+                raise RuntimeError(f"Plugin cleanup failed: {error_summary}") from pending_exc
+            raise RuntimeError(f"Plugin cleanup failed: {error_summary}")
 
     def _assign_plugin_node_ids(
         self,
@@ -303,10 +439,14 @@ class Orchestrator:
             transform.node_id = transform_id_map[seq]
 
         # Set node_id on sinks
+        # Note: Sinks not in graph are skipped (e.g., export sinks used post-run)
         for sink_name, sink in sinks.items():
-            if SinkName(sink_name) not in sink_id_map:
-                raise ValueError(f"Sink '{sink_name}' not found in graph. Available sinks: {list(sink_id_map.keys())}")
-            sink.node_id = sink_id_map[SinkName(sink_name)]
+            sink_name_typed = SinkName(sink_name)
+            if sink_name_typed not in sink_id_map:
+                # Sink not in execution graph - skip silently
+                # This happens for post-run sinks (e.g., landscape.export.sink)
+                continue
+            sink.node_id = sink_id_map[sink_name_typed]
 
     def _compute_coalesce_step_map(
         self,
@@ -405,11 +545,16 @@ class Orchestrator:
             # SourceProtocol requires output_schema - all sources have schemas (even dynamic ones)
             source_schema_json = json.dumps(config.source.output_schema.model_json_schema())
 
+            # Get source schema contract for resume PipelineRow wrapping
+            # This enables proper contract propagation when resuming from stored payloads
+            source_contract = config.source.get_schema_contract()
+
             recorder = LandscapeRecorder(self._db, payload_store=payload_store)
             run = recorder.begin_run(
                 config=config.config,
                 canonical_version=self._canonical_version,
                 source_schema_json=source_schema_json,
+                schema_contract=source_contract,
             )
 
             # Record secret resolutions in audit trail (deferred from pre-run loading)
@@ -615,9 +760,8 @@ class Orchestrator:
                 )
                 if pending_exc is None:
                     raise
-            finally:
-                # Always clean up transforms, even on failure
-                self._cleanup_transforms(config)
+            # NOTE: Transform/sink/source cleanup is handled by _cleanup_plugins()
+            # in _execute_run()'s finally block. No need for separate cleanup here.
 
     def _execute_run(
         self,
@@ -912,19 +1056,7 @@ class Orchestrator:
         )
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
-        from elspeth.engine.executors import SinkExecutor
-
-        rows_processed = 0
-        rows_succeeded = 0
-        rows_failed = 0
-        rows_routed = 0
-        rows_quarantined = 0
-        rows_forked = 0
-        rows_coalesced = 0
-        rows_coalesce_failed = 0
-        rows_expanded = 0
-        rows_buffered = 0
-        routed_destinations: Counter[str] = Counter()  # Track routing destinations
+        counters = ExecutionCounters()
         # Track (token, pending_outcome) pairs for deferred outcome recording
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
@@ -1027,7 +1159,7 @@ class Orchestrator:
                 # Nested try for PROCESS phase to catch iteration/processing failures
                 try:
                     for row_index, source_item in enumerate(source_iterator):
-                        rows_processed += 1
+                        counters.rows_processed += 1
 
                         # Record field resolution mapping on first iteration
                         # Must happen AFTER iterator advances because generators (like CSVSource.load())
@@ -1057,7 +1189,7 @@ class Orchestrator:
 
                         # Handle quarantined source rows - route directly to sink
                         if source_item.is_quarantined:
-                            rows_quarantined += 1
+                            counters.rows_quarantined += 1
                             # Route quarantined row to configured sink
                             # Per CLAUDE.md: plugin bugs must crash, no silent drops
                             quarantine_sink = source_item.quarantine_destination
@@ -1081,12 +1213,13 @@ class Orchestrator:
                                 )
 
                             # Destination validated - proceed with routing
-                            # Create a token for the quarantined row
-                            quarantine_token = processor.token_manager.create_initial_token(
+                            # Create a token for the quarantined row using specialized method
+                            # (quarantine rows don't have contracts - they failed validation)
+                            quarantine_token = processor.token_manager.create_quarantine_token(
                                 run_id=run_id,
                                 source_node_id=source_id,
                                 row_index=row_index,
-                                row_data=source_item.row,
+                                source_row=source_item,
                             )
 
                             # Emit RowCreated telemetry AFTER Landscape recording succeeds
@@ -1116,19 +1249,19 @@ class Orchestrator:
                             current_time = time.perf_counter()
                             time_since_last_progress = current_time - last_progress_time
                             should_emit = (
-                                rows_processed == 1  # First row - immediate feedback
-                                or rows_processed % progress_interval == 0  # Every 100 rows
+                                counters.rows_processed == 1  # First row - immediate feedback
+                                or counters.rows_processed % progress_interval == 0  # Every 100 rows
                                 or time_since_last_progress >= progress_time_interval  # Every 5 seconds
                             )
                             if should_emit:
                                 elapsed = current_time - start_time
                                 self._events.emit(
                                     ProgressEvent(
-                                        rows_processed=rows_processed,
+                                        rows_processed=counters.rows_processed,
                                         # Include routed rows in success count - they reached their destination
-                                        rows_succeeded=rows_succeeded + rows_routed,
-                                        rows_failed=rows_failed,
-                                        rows_quarantined=rows_quarantined,
+                                        rows_succeeded=counters.rows_succeeded + counters.rows_routed,
+                                        rows_failed=counters.rows_failed,
+                                        rows_quarantined=counters.rows_quarantined,
                                         elapsed_seconds=elapsed,
                                     )
                                 )
@@ -1138,9 +1271,6 @@ class Orchestrator:
                             ctx.operation_id = source_operation_id
                             # Skip normal processing - row is already handled
                             continue
-
-                        # Extract row data from SourceRow (all source items are SourceRow)
-                        row_data: dict[str, Any] = source_item.row
 
                         # ─────────────────────────────────────────────────────────────────
                         # Record schema contract after first VALID row
@@ -1191,20 +1321,11 @@ class Orchestrator:
                             default_sink_name=default_sink_name,
                             agg_transform_lookup=agg_transform_lookup,
                         )
-                        rows_succeeded += timeout_result.rows_succeeded
-                        rows_failed += timeout_result.rows_failed
-                        rows_routed += timeout_result.rows_routed
-                        rows_quarantined += timeout_result.rows_quarantined
-                        rows_coalesced += timeout_result.rows_coalesced
-                        rows_forked += timeout_result.rows_forked
-                        rows_expanded += timeout_result.rows_expanded
-                        rows_buffered += timeout_result.rows_buffered
-                        for dest, count in timeout_result.routed_destinations.items():
-                            routed_destinations[dest] += count
+                        counters.accumulate_flush_result(timeout_result)
 
                         results = processor.process_row(
                             row_index=row_index,
-                            row_data=row_data,
+                            source_row=source_item,
                             transforms=config.transforms,
                             ctx=ctx,
                         )
@@ -1216,130 +1337,44 @@ class Orchestrator:
                         # AFTER successful sink writes. A crash before sink write means:
                         # - Counters may be inflated (row counted but not persisted)
                         # - But recovery will correctly identify the unwritten rows
-                        for result in results:
-                            if result.outcome == RowOutcome.COMPLETED:
-                                rows_succeeded += 1
-                                # Fork children route to branch-named sink if it exists
-                                sink_name = default_sink_name
-                                if result.token.branch_name is not None and result.token.branch_name in config.sinks:
-                                    sink_name = result.token.branch_name
-
-                                # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                                # sink durability is achieved. Do NOT record here - that would violate
-                                # Invariant 3: "COMPLETED implies token has completed sink node_state"
-
-                                pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                            elif result.outcome == RowOutcome.ROUTED:
-                                rows_routed += 1
-                                # GateExecutor contract: ROUTED outcome always has sink_name set
-                                if result.sink_name is None:
-                                    raise RuntimeError("ROUTED outcome requires sink_name")
-                                routed_destinations[result.sink_name] += 1
-                                pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
-                            elif result.outcome == RowOutcome.FAILED:
-                                rows_failed += 1
-                            elif result.outcome == RowOutcome.QUARANTINED:
-                                rows_quarantined += 1
-                            elif result.outcome == RowOutcome.FORKED:
-                                rows_forked += 1
-                                # Children are counted separately when they reach terminal state
-                                pass
-                            elif result.outcome == RowOutcome.CONSUMED_IN_BATCH:
-                                # Aggregated - will be counted when batch flushes
-                                pass
-                            elif result.outcome == RowOutcome.COALESCED:
-                                # Merged token from coalesce - route to output sink
-                                rows_coalesced += 1
-                                rows_succeeded += 1
-                                # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                                # sink durability is achieved. Consumed tokens have COALESCED recorded
-                                # by CoalesceExecutor. The merged token's lineage is in join_group_id.
-                                pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                            elif result.outcome == RowOutcome.EXPANDED:
-                                # Deaggregation parent token - children counted separately
-                                rows_expanded += 1
-                            elif result.outcome == RowOutcome.BUFFERED:
-                                # Passthrough mode buffered token
-                                rows_buffered += 1
+                        accumulate_row_outcomes(results, counters, config.sinks, default_sink_name, pending_tokens)
 
                         # ─────────────────────────────────────────────────────────────────
                         # Check for timed-out coalesces after processing each row
                         # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
                         # ─────────────────────────────────────────────────────────────────
                         if coalesce_executor is not None:
-                            total_steps = len(config.transforms) + len(config.gates)
-                            for coalesce_name_str in coalesce_executor.get_registered_names():
-                                coalesce_name = CoalesceName(coalesce_name_str)
-                                coalesce_step = coalesce_step_map[coalesce_name]
-                                timed_out = coalesce_executor.check_timeouts(
-                                    coalesce_name=coalesce_name_str,
-                                    step_in_pipeline=coalesce_step,
-                                )
-                                for outcome in timed_out:
-                                    if outcome.merged_token is not None:
-                                        rows_coalesced += 1
-                                        # Check if merged token should continue downstream processing
-                                        if coalesce_step < total_steps:
-                                            # Continue processing through downstream nodes
-                                            continuation_results = processor.process_token(
-                                                token=outcome.merged_token,
-                                                transforms=config.transforms,
-                                                ctx=ctx,
-                                                start_step=coalesce_step,
-                                            )
-                                            for cont_result in continuation_results:
-                                                if cont_result.outcome == RowOutcome.COMPLETED:
-                                                    rows_succeeded += 1
-                                                    sink_name = default_sink_name
-                                                    if (
-                                                        cont_result.token.branch_name is not None
-                                                        and cont_result.token.branch_name in config.sinks
-                                                    ):
-                                                        sink_name = cont_result.token.branch_name
-                                                    pending_tokens[sink_name].append(
-                                                        (cont_result.token, PendingOutcome(RowOutcome.COMPLETED))
-                                                    )
-                                                elif cont_result.outcome == RowOutcome.ROUTED:
-                                                    rows_routed += 1
-                                                    # sink_name is guaranteed non-None for ROUTED outcome
-                                                    routed_sink = cont_result.sink_name or default_sink_name
-                                                    routed_destinations[routed_sink] += 1
-                                                    pending_tokens[routed_sink].append(
-                                                        (cont_result.token, PendingOutcome(RowOutcome.ROUTED))
-                                                    )
-                                                elif cont_result.outcome == RowOutcome.QUARANTINED:
-                                                    rows_quarantined += 1
-                                                elif cont_result.outcome == RowOutcome.FAILED:
-                                                    rows_failed += 1
-                                        else:
-                                            # No downstream nodes - send directly to sink
-                                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                                            # AFTER sink durability is achieved.
-                                            rows_succeeded += 1
-                                            pending_tokens[default_sink_name].append(
-                                                (outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED))
-                                            )
-                                    elif outcome.failure_reason:
-                                        rows_coalesce_failed += 1
+                            handle_coalesce_timeouts(
+                                coalesce_executor=coalesce_executor,
+                                coalesce_step_map=coalesce_step_map,
+                                processor=processor,
+                                config_transforms=config.transforms,
+                                config_gates=config.gates,
+                                config_sinks=config.sinks,
+                                ctx=ctx,
+                                counters=counters,
+                                pending_tokens=pending_tokens,
+                                default_sink_name=default_sink_name,
+                            )
 
                         # Emit progress every N rows or every M seconds (after outcome counters are updated)
                         # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
                         current_time = time.perf_counter()
                         time_since_last_progress = current_time - last_progress_time
                         should_emit = (
-                            rows_processed == 1  # First row - immediate feedback
-                            or rows_processed % progress_interval == 0  # Every 100 rows
+                            counters.rows_processed == 1  # First row - immediate feedback
+                            or counters.rows_processed % progress_interval == 0  # Every 100 rows
                             or time_since_last_progress >= progress_time_interval  # Every 5 seconds
                         )
                         if should_emit:
                             elapsed = current_time - start_time
                             self._events.emit(
                                 ProgressEvent(
-                                    rows_processed=rows_processed,
+                                    rows_processed=counters.rows_processed,
                                     # Include routed rows in success count - they reached their destination
-                                    rows_succeeded=rows_succeeded + rows_routed,
-                                    rows_failed=rows_failed,
-                                    rows_quarantined=rows_quarantined,
+                                    rows_succeeded=counters.rows_succeeded + counters.rows_routed,
+                                    rows_failed=counters.rows_failed,
+                                    rows_quarantined=counters.rows_quarantined,
                                     elapsed_seconds=elapsed,
                                 )
                             )
@@ -1388,71 +1423,22 @@ class Orchestrator:
                             default_sink_name=default_sink_name,
                             checkpoint_callback=checkpoint_callback,
                         )
-                        rows_succeeded += flush_result.rows_succeeded
-                        rows_failed += flush_result.rows_failed
-                        rows_routed += flush_result.rows_routed
-                        rows_quarantined += flush_result.rows_quarantined
-                        rows_coalesced += flush_result.rows_coalesced
-                        rows_forked += flush_result.rows_forked
-                        rows_expanded += flush_result.rows_expanded
-                        rows_buffered += flush_result.rows_buffered
-                        for dest, count in flush_result.routed_destinations.items():
-                            routed_destinations[dest] += count
+                        counters.accumulate_flush_result(flush_result)
 
                     # Flush pending coalesce operations at end-of-source
                     if coalesce_executor is not None:
-                        total_steps = len(config.transforms) + len(config.gates)
-                        # Convert CoalesceName -> str for CoalesceExecutor API
-                        flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
-                        pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
-
-                        # Handle any merged tokens from flush
-                        for outcome in pending_outcomes:
-                            if outcome.merged_token is not None:
-                                # Successful merge
-                                rows_coalesced += 1
-                                # Get the correct step for this coalesce
-                                # outcome.coalesce_name is guaranteed non-None when merged_token is not None
-                                coalesce_name = CoalesceName(outcome.coalesce_name)  # type: ignore[arg-type]
-                                coalesce_step = coalesce_step_map[coalesce_name]
-                                # Check if merged token should continue downstream processing
-                                if coalesce_step < total_steps:
-                                    # Continue processing through downstream nodes
-                                    continuation_results = processor.process_token(
-                                        token=outcome.merged_token,
-                                        transforms=config.transforms,
-                                        ctx=ctx,
-                                        start_step=coalesce_step,
-                                    )
-                                    for cont_result in continuation_results:
-                                        if cont_result.outcome == RowOutcome.COMPLETED:
-                                            rows_succeeded += 1
-                                            sink_name = default_sink_name
-                                            if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
-                                                sink_name = cont_result.token.branch_name
-                                            pending_tokens[sink_name].append((cont_result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                                        elif cont_result.outcome == RowOutcome.ROUTED:
-                                            rows_routed += 1
-                                            # sink_name is guaranteed non-None for ROUTED outcome
-                                            routed_sink = cont_result.sink_name or default_sink_name
-                                            routed_destinations[routed_sink] += 1
-                                            pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
-                                        elif cont_result.outcome == RowOutcome.QUARANTINED:
-                                            rows_quarantined += 1
-                                        elif cont_result.outcome == RowOutcome.FAILED:
-                                            rows_failed += 1
-                                else:
-                                    # No downstream nodes - send directly to sink
-                                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                                    # AFTER sink durability is achieved.
-                                    rows_succeeded += 1
-                                    pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
-                            elif outcome.failure_reason:
-                                # Coalesce failed (quorum_not_met, incomplete_branches)
-                                # Audit trail recorded by executor: each consumed token has
-                                # node_state with status="failed" and error_json explaining why.
-                                # Count failed coalesces for observability.
-                                rows_coalesce_failed += 1
+                        flush_coalesce_pending(
+                            coalesce_executor=coalesce_executor,
+                            coalesce_step_map=coalesce_step_map,
+                            processor=processor,
+                            config_transforms=config.transforms,
+                            config_gates=config.gates,
+                            config_sinks=config.sinks,
+                            ctx=ctx,
+                            counters=counters,
+                            pending_tokens=pending_tokens,
+                            default_sink_name=default_sink_name,
+                        )
 
                     # Source iteration complete - for loop ends here
 
@@ -1503,12 +1489,7 @@ class Orchestrator:
             # This ensures sink failures are not misattributed to the source operation.
             # ─────────────────────────────────────────────────────────────────────────
 
-            # Write to sinks using SinkExecutor
-            sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
-            # Step = transforms + config gates + 1 (for sink)
-            step = len(config.transforms) + len(config.gates) + 1
-
-            # Create checkpoint callback for post-sink checkpointing
+            # Create checkpoint callback factory for post-sink checkpointing
             # Captures processor to get aggregation state for crash recovery
             def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
                 def callback(token: TokenInfo) -> None:
@@ -1522,50 +1503,30 @@ class Orchestrator:
 
                 return callback
 
-            for sink_name, token_outcome_pairs in pending_tokens.items():
-                if token_outcome_pairs and sink_name in config.sinks:
-                    sink = config.sinks[sink_name]
-                    sink_node_id = sink_id_map[SinkName(sink_name)]
-
-                    # Group tokens by pending_outcome for separate write() calls
-                    # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
-                    from itertools import groupby
-
-                    # Sort by (outcome, error_hash) to enable groupby (None sorts first)
-                    # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED
-                    def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
-                        pending = pair[1]
-                        if pending is None:
-                            return (True, "", "")  # None sorts first
-                        return (False, pending.outcome.value, pending.error_hash or "")
-
-                    sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
-                    for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
-                        group_tokens = [token for token, _ in group]
-                        sink_executor.write(
-                            sink=sink,
-                            tokens=group_tokens,
-                            ctx=ctx,
-                            step_in_pipeline=step,
-                            sink_name=sink_name,
-                            pending_outcome=pending_outcome,
-                            on_token_written=checkpoint_after_sink(sink_node_id),
-                        )
+            self._write_pending_to_sinks(
+                recorder=recorder,
+                run_id=run_id,
+                config=config,
+                ctx=ctx,
+                pending_tokens=pending_tokens,
+                sink_id_map=sink_id_map,
+                on_token_written_factory=checkpoint_after_sink,
+            )
 
             # Emit final progress if we haven't emitted recently or row count not on interval
             # (RunSummary will show final summary regardless, but progress shows intermediate state)
             current_time = time.perf_counter()
             time_since_last_progress = current_time - last_progress_time
             # Emit if: not on progress_interval boundary OR >1s since last emission
-            if rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
+            if counters.rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
                 elapsed = current_time - start_time
                 self._events.emit(
                     ProgressEvent(
-                        rows_processed=rows_processed,
+                        rows_processed=counters.rows_processed,
                         # Include routed rows in success count - they reached their destination
-                        rows_succeeded=rows_succeeded + rows_routed,
-                        rows_failed=rows_failed,
-                        rows_quarantined=rows_quarantined,
+                        rows_succeeded=counters.rows_succeeded + counters.rows_routed,
+                        rows_failed=counters.rows_failed,
+                        rows_quarantined=counters.rows_quarantined,
                         elapsed_seconds=elapsed,
                     )
                 )
@@ -1574,77 +1535,12 @@ class Orchestrator:
             self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
 
         finally:
-            import sys
-
-            import structlog
-
-            logger = structlog.get_logger()
-            pending_exc = sys.exc_info()[1]
-            cleanup_errors: list[str] = []
-
-            def record_cleanup_error(hook: str, plugin_name: str, error: Exception) -> None:
-                logger.warning(
-                    "Plugin cleanup hook failed",
-                    hook=hook,
-                    plugin=plugin_name,
-                    error=str(error),
-                    error_type=type(error).__name__,
-                )
-                cleanup_errors.append(f"{hook}({plugin_name}): {type(error).__name__}: {error}")
-
-            # Call on_complete for all plugins (even on error)
-            # Base classes provide no-op implementations, so no hasattr needed
-            for transform in config.transforms:
-                try:
-                    transform.on_complete(ctx)
-                except Exception as e:
-                    record_cleanup_error("transform.on_complete", transform.name, e)
-            for sink in config.sinks.values():
-                try:
-                    sink.on_complete(ctx)
-                except Exception as e:
-                    record_cleanup_error("sink.on_complete", sink.name, e)
-            try:
-                config.source.on_complete(ctx)
-            except Exception as e:
-                record_cleanup_error("source.on_complete", config.source.name, e)
-
-            # Close source and all sinks
-            # SinkProtocol requires close() - if missing, that's a bug
-            try:
-                config.source.close()
-            except Exception as e:
-                record_cleanup_error("source.close", config.source.name, e)
-            for sink in config.sinks.values():
-                try:
-                    sink.close()
-                except Exception as e:
-                    record_cleanup_error("sink.close", sink.name, e)
-
-            if cleanup_errors:
-                error_summary = "; ".join(cleanup_errors)
-                if pending_exc is not None:
-                    raise RuntimeError(f"Plugin cleanup failed: {error_summary}") from pending_exc
-                raise RuntimeError(f"Plugin cleanup failed: {error_summary}")
+            self._cleanup_plugins(config, ctx, include_source=True)
 
         # Clear graph after execution completes
         self._current_graph = None
 
-        return RunResult(
-            run_id=run_id,
-            status=RunStatus.RUNNING,  # Will be updated to COMPLETED
-            rows_processed=rows_processed,
-            rows_succeeded=rows_succeeded,
-            rows_failed=rows_failed,
-            rows_routed=rows_routed,
-            rows_quarantined=rows_quarantined,
-            rows_forked=rows_forked,
-            rows_coalesced=rows_coalesced,
-            rows_coalesce_failed=rows_coalesce_failed,
-            rows_expanded=rows_expanded,
-            rows_buffered=rows_buffered,
-            routed_destinations=routed_destinations,
-        )
+        return counters.to_run_result(run_id)
 
     def resume(
         self,
@@ -1710,6 +1606,26 @@ class Orchestrator:
         schema_dict = json.loads(source_schema_json)
         source_schema_class = reconstruct_schema_from_json(schema_dict)
 
+        # PIPELINEROW MIGRATION: Retrieve contract from audit trail for row wrapping
+        # During resume, we need to wrap plain dicts in PipelineRow with contract
+        # This ensures type fidelity and maintains the same data structures as main run
+        schema_contract = recorder.get_run_contract(run_id)
+        if schema_contract is None:
+            # TIER-1 AUDIT INTEGRITY: Crash if contract is missing from audit trail
+            # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
+            # Inferring a contract from row data would:
+            # 1. Mask missing/corrupt audit data (evidence tampering)
+            # 2. Produce incomplete contracts (fields appearing later are omitted)
+            # 3. Violate the NO LEGACY CODE POLICY (no backward compatibility shims)
+            raise OrchestrationInvariantError(
+                f"Cannot resume run '{run_id}': schema contract is missing from audit trail. "
+                f"This indicates either:\n"
+                f"  1. The audit database is corrupt or incomplete\n"
+                f"  2. The run was started with a version that didn't record contracts\n"
+                f"Resume cannot proceed safely without the schema contract. "
+                f"The audit trail must be complete and trustworthy."
+            )
+
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
         if not unprocessed_rows:
@@ -1730,6 +1646,9 @@ class Orchestrator:
             )
 
         # 5. Process unprocessed rows
+        from elspeth.telemetry import RunFinished
+
+        resume_start_time = time.perf_counter()
         result = self._process_resumed_rows(
             recorder=recorder,
             run_id=run_id,
@@ -1739,13 +1658,43 @@ class Orchestrator:
             restored_aggregation_state=restored_state,
             settings=settings,
             payload_store=payload_store,
+            schema_contract=schema_contract,
         )
 
         # 6. Complete the run with reproducibility grade
         recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
         result.status = RunStatus.COMPLETED
 
-        # 7. Delete checkpoints on successful completion
+        # 7. Emit RunFinished telemetry (Bug fix #3: resume was missing this)
+        resume_duration_ms = (time.perf_counter() - resume_start_time) * 1000
+        self._emit_telemetry(
+            RunFinished(
+                timestamp=datetime.now(UTC),
+                run_id=run_id,
+                status=RunStatus.COMPLETED,
+                row_count=result.rows_processed,
+                duration_ms=resume_duration_ms,
+            )
+        )
+
+        # 8. Emit RunSummary event (Bug fix #4: resume was missing this)
+        total_duration = time.perf_counter() - resume_start_time
+        self._events.emit(
+            RunSummary(
+                run_id=run_id,
+                status=RunCompletionStatus.COMPLETED,
+                total_rows=result.rows_processed,
+                succeeded=result.rows_succeeded,
+                failed=result.rows_failed,
+                quarantined=result.rows_quarantined,
+                duration_seconds=total_duration,
+                exit_code=0,
+                routed=result.rows_routed,
+                routed_destinations=tuple(result.routed_destinations.items()),
+            )
+        )
+
+        # 9. Delete checkpoints on successful completion
         self._delete_checkpoints(run_id)
 
         return result
@@ -1761,6 +1710,7 @@ class Orchestrator:
         settings: ElspethSettings | None = None,
         *,
         payload_store: PayloadStore,
+        schema_contract: SchemaContract,
     ) -> RunResult:
         """Process unprocessed rows during resume.
 
@@ -1779,6 +1729,7 @@ class Orchestrator:
             restored_aggregation_state: Map of node_id -> state dict
             settings: Full settings (optional)
             payload_store: Optional PayloadStore for persisting source row payloads
+            schema_contract: SchemaContract for wrapping row data in PipelineRow
 
         Returns:
             RunResult with processing counts
@@ -1937,19 +1888,7 @@ class Orchestrator:
         )
 
         # Process rows - Buffer TOKENS
-        from elspeth.engine.executors import SinkExecutor
-
-        rows_processed = 0
-        rows_succeeded = 0
-        rows_failed = 0
-        rows_routed = 0
-        rows_quarantined = 0
-        rows_forked = 0
-        rows_coalesced = 0
-        rows_coalesce_failed = 0
-        rows_expanded = 0
-        rows_buffered = 0
-        routed_destinations: Counter[str] = Counter()  # Track routing destinations
+        counters = ExecutionCounters()
         # Track (token, pending_outcome) pairs for deferred outcome recording
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
@@ -1977,7 +1916,7 @@ class Orchestrator:
             #    support, but the current design prioritizes simplicity over edge-case
             #    optimization
             for row_id, _row_index, row_data in unprocessed_rows:
-                rows_processed += 1
+                counters.rows_processed += 1
 
                 # ─────────────────────────────────────────────────────────────────
                 # Check for timed-out aggregations BEFORE processing this row
@@ -1992,110 +1931,39 @@ class Orchestrator:
                     default_sink_name=default_sink_name,
                     agg_transform_lookup=agg_transform_lookup,
                 )
-                rows_succeeded += timeout_result.rows_succeeded
-                rows_failed += timeout_result.rows_failed
-                rows_routed += timeout_result.rows_routed
-                rows_quarantined += timeout_result.rows_quarantined
-                rows_coalesced += timeout_result.rows_coalesced
-                rows_forked += timeout_result.rows_forked
-                rows_expanded += timeout_result.rows_expanded
-                rows_buffered += timeout_result.rows_buffered
-                for dest, count in timeout_result.routed_destinations.items():
-                    routed_destinations[dest] += count
+                counters.accumulate_flush_result(timeout_result)
+
+                # Wrap row_data in PipelineRow with contract (PIPELINEROW MIGRATION)
+                # Row data from resume is a plain dict, but process_existing_row expects PipelineRow
+                pipeline_row = PipelineRow(data=row_data, contract=schema_contract)
 
                 results = processor.process_existing_row(
                     row_id=row_id,
-                    row_data=row_data,
+                    row_data=pipeline_row,
                     transforms=config.transforms,
                     ctx=ctx,
                 )
 
                 # Handle all results from this row
-                for result in results:
-                    if result.outcome == RowOutcome.COMPLETED:
-                        rows_succeeded += 1
-                        sink_name = default_sink_name
-                        if result.token.branch_name is not None and result.token.branch_name in config.sinks:
-                            sink_name = result.token.branch_name
-
-                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                        # sink durability is achieved. Do NOT record here - that would violate
-                        # Invariant 3: "COMPLETED implies token has completed sink node_state"
-
-                        pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                    elif result.outcome == RowOutcome.ROUTED:
-                        rows_routed += 1
-                        if result.sink_name is None:
-                            raise RuntimeError("ROUTED outcome requires sink_name")
-                        routed_destinations[result.sink_name] += 1
-                        pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
-                    elif result.outcome == RowOutcome.FAILED:
-                        rows_failed += 1
-                    elif result.outcome == RowOutcome.QUARANTINED:
-                        rows_quarantined += 1
-                    elif result.outcome == RowOutcome.FORKED:
-                        rows_forked += 1
-                    elif result.outcome == RowOutcome.CONSUMED_IN_BATCH:
-                        pass
-                    elif result.outcome == RowOutcome.COALESCED:
-                        rows_coalesced += 1
-                        rows_succeeded += 1
-                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                        # sink durability is achieved.
-                        pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                    elif result.outcome == RowOutcome.EXPANDED:
-                        rows_expanded += 1
-                    elif result.outcome == RowOutcome.BUFFERED:
-                        rows_buffered += 1
+                accumulate_row_outcomes(results, counters, config.sinks, default_sink_name, pending_tokens)
 
                 # ─────────────────────────────────────────────────────────────────
                 # Check for timed-out coalesces after processing each row
                 # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
                 # ─────────────────────────────────────────────────────────────────
                 if coalesce_executor is not None:
-                    total_steps = len(config.transforms) + len(config.gates)
-                    for coalesce_name_str in coalesce_executor.get_registered_names():
-                        coalesce_name = CoalesceName(coalesce_name_str)
-                        coalesce_step = coalesce_step_map[coalesce_name]
-                        timed_out = coalesce_executor.check_timeouts(
-                            coalesce_name=coalesce_name_str,
-                            step_in_pipeline=coalesce_step,
-                        )
-                        for outcome in timed_out:
-                            if outcome.merged_token is not None:
-                                rows_coalesced += 1
-                                # Check if merged token should continue downstream processing
-                                if coalesce_step < total_steps:
-                                    # Continue processing through downstream nodes
-                                    continuation_results = processor.process_token(
-                                        token=outcome.merged_token,
-                                        transforms=config.transforms,
-                                        ctx=ctx,
-                                        start_step=coalesce_step,
-                                    )
-                                    for cont_result in continuation_results:
-                                        if cont_result.outcome == RowOutcome.COMPLETED:
-                                            sink_name = default_sink_name
-                                            if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
-                                                sink_name = cont_result.token.branch_name
-                                            pending_tokens[sink_name].append((cont_result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                                        elif cont_result.outcome == RowOutcome.ROUTED:
-                                            rows_routed += 1
-                                            # sink_name is guaranteed non-None for ROUTED outcome
-                                            routed_sink = cont_result.sink_name or default_sink_name
-                                            routed_destinations[routed_sink] += 1
-                                            pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
-                                        elif cont_result.outcome == RowOutcome.QUARANTINED:
-                                            rows_quarantined += 1
-                                        elif cont_result.outcome == RowOutcome.FAILED:
-                                            rows_failed += 1
-                                else:
-                                    # No downstream nodes - send directly to sink
-                                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                                    # AFTER sink durability is achieved.
-                                    pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
-                            elif outcome.failure_reason:
-                                rows_coalesce_failed += 1
+                    handle_coalesce_timeouts(
+                        coalesce_executor=coalesce_executor,
+                        coalesce_step_map=coalesce_step_map,
+                        processor=processor,
+                        config_transforms=config.transforms,
+                        config_gates=config.gates,
+                        config_sinks=config.sinks,
+                        ctx=ctx,
+                        counters=counters,
+                        pending_tokens=pending_tokens,
+                        default_sink_name=default_sink_name,
+                    )
 
             # ─────────────────────────────────────────────────────────────────
             # CRITICAL: Flush remaining aggregation buffers at end-of-source
@@ -2111,164 +1979,37 @@ class Orchestrator:
                     default_sink_name=default_sink_name,
                     checkpoint_callback=None,
                 )
-                rows_succeeded += flush_result.rows_succeeded
-                rows_failed += flush_result.rows_failed
-                rows_routed += flush_result.rows_routed
-                rows_quarantined += flush_result.rows_quarantined
-                rows_coalesced += flush_result.rows_coalesced
-                rows_forked += flush_result.rows_forked
-                rows_expanded += flush_result.rows_expanded
-                rows_buffered += flush_result.rows_buffered
-                for dest, count in flush_result.routed_destinations.items():
-                    routed_destinations[dest] += count
+                counters.accumulate_flush_result(flush_result)
 
             # Flush pending coalesce operations
             if coalesce_executor is not None:
-                total_steps = len(config.transforms) + len(config.gates)
-                # Convert CoalesceName -> str for CoalesceExecutor API
-                flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
-                pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
+                flush_coalesce_pending(
+                    coalesce_executor=coalesce_executor,
+                    coalesce_step_map=coalesce_step_map,
+                    processor=processor,
+                    config_transforms=config.transforms,
+                    config_gates=config.gates,
+                    config_sinks=config.sinks,
+                    ctx=ctx,
+                    counters=counters,
+                    pending_tokens=pending_tokens,
+                    default_sink_name=default_sink_name,
+                )
 
-                for outcome in pending_outcomes:
-                    if outcome.merged_token is not None:
-                        rows_coalesced += 1
-                        # Get the correct step for this coalesce
-                        # outcome.coalesce_name is guaranteed non-None when merged_token is not None
-                        coalesce_name = CoalesceName(outcome.coalesce_name)  # type: ignore[arg-type]
-                        coalesce_step = coalesce_step_map[coalesce_name]
-                        # Check if merged token should continue downstream processing
-                        if coalesce_step < total_steps:
-                            # Continue processing through downstream nodes
-                            continuation_results = processor.process_token(
-                                token=outcome.merged_token,
-                                transforms=config.transforms,
-                                ctx=ctx,
-                                start_step=coalesce_step,
-                            )
-                            for cont_result in continuation_results:
-                                if cont_result.outcome == RowOutcome.COMPLETED:
-                                    rows_succeeded += 1
-                                    sink_name = default_sink_name
-                                    if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
-                                        sink_name = cont_result.token.branch_name
-                                    pending_tokens[sink_name].append((cont_result.token, PendingOutcome(RowOutcome.COMPLETED)))
-                                elif cont_result.outcome == RowOutcome.ROUTED:
-                                    rows_routed += 1
-                                    # sink_name is guaranteed non-None for ROUTED outcome
-                                    routed_sink = cont_result.sink_name or default_sink_name
-                                    routed_destinations[routed_sink] += 1
-                                    pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
-                                elif cont_result.outcome == RowOutcome.QUARANTINED:
-                                    rows_quarantined += 1
-                                elif cont_result.outcome == RowOutcome.FAILED:
-                                    rows_failed += 1
-                        else:
-                            # No downstream nodes - send directly to sink
-                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                            # AFTER sink durability is achieved.
-                            rows_succeeded += 1
-                            pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
-                    elif outcome.failure_reason:
-                        # Coalesce failed - audit trail already recorded by executor
-                        rows_coalesce_failed += 1
-
-            # Write to sinks using SinkExecutor
-            sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
-            step = len(config.transforms) + len(config.gates) + 1
-
-            for sink_name, token_outcome_pairs in pending_tokens.items():
-                if token_outcome_pairs and sink_name in config.sinks:
-                    sink = config.sinks[sink_name]
-
-                    # Group tokens by pending_outcome for separate write() calls
-                    # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED
-                    from itertools import groupby
-
-                    def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
-                        pending = pair[1]
-                        if pending is None:
-                            return (True, "", "")
-                        return (False, pending.outcome.value, pending.error_hash or "")
-
-                    sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
-                    for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
-                        group_tokens = [token for token, _ in group]
-                        sink_executor.write(
-                            sink=sink,
-                            tokens=group_tokens,
-                            ctx=ctx,
-                            step_in_pipeline=step,
-                            sink_name=sink_name,
-                            pending_outcome=pending_outcome,
-                        )
+            # Write to sinks (no checkpoint callbacks for resume path)
+            self._write_pending_to_sinks(
+                recorder=recorder,
+                run_id=run_id,
+                config=config,
+                ctx=ctx,
+                pending_tokens=pending_tokens,
+                sink_id_map=sink_id_map,
+            )
 
         finally:
-            import sys
-
-            import structlog
-
-            logger = structlog.get_logger()
-            pending_exc = sys.exc_info()[1]
-            cleanup_errors: list[str] = []
-
-            def record_cleanup_error(hook: str, plugin_name: str, error: Exception) -> None:
-                logger.warning(
-                    "Plugin cleanup hook failed",
-                    hook=hook,
-                    plugin=plugin_name,
-                    error=str(error),
-                    error_type=type(error).__name__,
-                )
-                cleanup_errors.append(f"{hook}({plugin_name}): {type(error).__name__}: {error}")
-
-            # Call on_complete for all plugins (even on error)
-            for transform in config.transforms:
-                try:
-                    transform.on_complete(ctx)
-                except Exception as e:
-                    record_cleanup_error("transform.on_complete", transform.name, e)
-            for sink in config.sinks.values():
-                try:
-                    sink.on_complete(ctx)
-                except Exception as e:
-                    record_cleanup_error("sink.on_complete", sink.name, e)
-
-            # Close all transforms (release resources - file handles, connections, etc.)
-            # Mirrors _cleanup_transforms() pattern from _execute_run()
-            for transform in config.transforms:
-                try:
-                    transform.close()
-                except Exception as e:
-                    record_cleanup_error("transform.close", transform.name, e)
-
-            # Close all sinks (NOT source - wasn't opened)
-            for sink in config.sinks.values():
-                try:
-                    sink.close()
-                except Exception as e:
-                    record_cleanup_error("sink.close", sink.name, e)
-
-            if cleanup_errors:
-                error_summary = "; ".join(cleanup_errors)
-                if pending_exc is not None:
-                    raise RuntimeError(f"Plugin cleanup failed: {error_summary}") from pending_exc
-                raise RuntimeError(f"Plugin cleanup failed: {error_summary}")
+            self._cleanup_plugins(config, ctx, include_source=False)
 
         # Clear graph after execution completes
         self._current_graph = None
 
-        return RunResult(
-            run_id=run_id,
-            status=RunStatus.RUNNING,  # Will be updated by caller
-            rows_processed=rows_processed,
-            rows_succeeded=rows_succeeded,
-            rows_failed=rows_failed,
-            rows_routed=rows_routed,
-            rows_quarantined=rows_quarantined,
-            rows_forked=rows_forked,
-            rows_coalesced=rows_coalesced,
-            rows_coalesce_failed=rows_coalesce_failed,
-            rows_expanded=rows_expanded,
-            rows_buffered=rows_buffered,
-            routed_destinations=routed_destinations,
-        )
+        return counters.to_run_result(run_id)

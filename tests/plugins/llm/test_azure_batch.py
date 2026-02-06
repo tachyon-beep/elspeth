@@ -9,13 +9,30 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from elspeth.contracts import BatchPendingError, Determinism
+from elspeth.contracts import BatchPendingError, Determinism, PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
 
 # Common schema config for dynamic field handling
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestBatchPendingError:
@@ -436,7 +453,7 @@ class TestAzureBatchLLMTransformSubmit:
         rows = [{"text": "hello"}, {"text": "world"}]
 
         with pytest.raises(BatchPendingError) as exc_info:
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         error = exc_info.value
         assert error.batch_id == "batch-456"
@@ -459,7 +476,7 @@ class TestAzureBatchLLMTransformSubmit:
         rows = [{"text": "hello"}]
 
         with pytest.raises(BatchPendingError):
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         # Verify checkpoint was saved
         checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
@@ -497,7 +514,7 @@ class TestAzureBatchLLMTransformSubmit:
         rows = [{"text": "hello"}]
 
         with pytest.raises(BatchPendingError):
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         # Check JSONL content
         call_args = mock_client.files.create.call_args
@@ -539,7 +556,7 @@ class TestAzureBatchLLMTransformSubmit:
         rows = [{"text": "hello"}]
 
         with pytest.raises(BatchPendingError):
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         # Check JSONL content
         call_args = mock_client.files.create.call_args
@@ -583,7 +600,7 @@ class TestAzureBatchLLMTransformSubmit:
         rows = [{"text": "Hello"}, {"text": "World"}]
 
         with pytest.raises(BatchPendingError):
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         # Verify checkpoint includes requests
         checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
@@ -625,7 +642,7 @@ class TestAzureBatchLLMTransformTemplateErrors:
         # All rows missing required_field
         rows = [{"other": "value1"}, {"other": "value2"}]
 
-        result = transform.process(rows, ctx)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         assert result.status == "error"
         assert result.reason is not None
@@ -664,7 +681,7 @@ class TestAzureBatchLLMTransformTemplateErrors:
         ]
 
         with pytest.raises(BatchPendingError):
-            transform.process(rows, ctx)
+            transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         # Checkpoint should have template_errors
         checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
@@ -728,7 +745,7 @@ class TestAzureBatchLLMTransformResume:
         rows = [{"text": "hello"}]
 
         with pytest.raises(BatchPendingError) as exc_info:
-            transform.process(rows, ctx_with_checkpoint)
+            transform.process([_make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
         error = exc_info.value
         assert error.batch_id == "batch-456"
@@ -762,7 +779,7 @@ class TestAzureBatchLLMTransformResume:
 
         rows = [{"text": "hello"}]
 
-        result = transform.process(rows, ctx_with_checkpoint)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
         assert result.status == "success"
         assert result.rows is not None
@@ -784,7 +801,7 @@ class TestAzureBatchLLMTransformResume:
 
         rows = [{"text": "hello"}]
 
-        result = transform.process(rows, ctx_with_checkpoint)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
         assert result.status == "error"
         assert result.reason is not None
@@ -803,7 +820,7 @@ class TestAzureBatchLLMTransformResume:
 
         rows = [{"text": "hello"}]
 
-        result = transform.process(rows, ctx_with_checkpoint)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
         assert result.status == "error"
         assert result.reason is not None
@@ -821,7 +838,7 @@ class TestAzureBatchLLMTransformResume:
 
         rows = [{"text": "hello"}]
 
-        result = transform.process(rows, ctx_with_checkpoint)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
         assert result.status == "error"
         assert result.reason is not None
@@ -854,7 +871,7 @@ class TestAzureBatchLLMTransformResume:
 
         rows = [{"text": "hello"}]
 
-        transform.process(rows, ctx_with_checkpoint)
+        transform.process([_make_pipeline_row(d) for d in rows], ctx_with_checkpoint)
 
         # Checkpoint should be cleared
         assert ctx_with_checkpoint._checkpoint == {}  # type: ignore[attr-defined]
@@ -903,7 +920,7 @@ class TestAzureBatchLLMTransformTimeout:
 
         rows = [{"text": "hello"}]
 
-        result = transform.process(rows, ctx)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         assert result.status == "error"
         assert result.reason is not None
@@ -953,7 +970,7 @@ class TestAzureBatchLLMTransformSingleRow:
         row = {"text": "hello"}
 
         with pytest.raises(BatchPendingError) as exc_info:
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
         assert exc_info.value.batch_id == "batch-456"
 
@@ -1053,7 +1070,7 @@ class TestAzureBatchLLMTransformResultAssembly:
 
         rows = [{"text": "a"}, {"text": "b"}, {"text": "c"}]
 
-        result = transform.process(rows, ctx)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         assert result.status == "success"
         assert result.rows is not None
@@ -1119,7 +1136,7 @@ class TestAzureBatchLLMTransformResultAssembly:
 
         rows = [{"text": "good"}, {"text": "bad"}]
 
-        result = transform.process(rows, ctx)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         assert result.status == "success"
         assert result.rows is not None
@@ -1144,18 +1161,12 @@ class TestAzureBatchLLMTransformAuditRecording:
         }
         transform = AzureBatchLLMTransform(config)
 
-        # Track recorded calls
-        recorded_calls: list[dict[str, Any]] = []
-
-        def capture_call(**kwargs: Any) -> MagicMock:
-            recorded_calls.append(kwargs)
-            return MagicMock()
-
         # Create mock context with state_id (simulates batch's aggregation state)
         ctx = MagicMock()
         ctx.run_id = "test-run"
         ctx.state_id = "batch-state-123"  # The batch's node_state
-        ctx.record_call = capture_call
+        # Use MagicMock for record_call to track invocations
+        ctx.record_call = MagicMock(return_value=MagicMock())
         ctx.get_checkpoint.return_value = {
             "batch_id": "azure-batch-789",
             "row_mapping": {
@@ -1189,7 +1200,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         mock_output_content = MagicMock()
         mock_output_content.text = output_jsonl
 
-        rows = [{"text": "Hello"}, {"text": "World"}]
+        rows = [_make_pipeline_row({"text": "Hello"}), _make_pipeline_row({"text": "World"})]
 
         with patch.object(transform, "_get_client") as mock_client:
             mock_client.return_value.files.content.return_value = mock_output_content
@@ -1201,21 +1212,35 @@ class TestAzureBatchLLMTransformAuditRecording:
         assert result.rows is not None
         assert len(result.rows) == 2
 
-        # Verify LLM calls were recorded
+        # Verify record_call was invoked correctly
         from elspeth.contracts import CallStatus, CallType
 
-        llm_calls = [c for c in recorded_calls if c.get("call_type") == CallType.LLM]
-        assert len(llm_calls) == 2, f"Expected 2 LLM calls, got {len(llm_calls)}"
+        # Verify record_call was invoked 3 times: 1 HTTP (file download) + 2 LLM (one per row)
+        assert ctx.record_call.call_count == 3, (
+            f"Expected record_call to be invoked 3 times (1 HTTP + 2 LLM), got {ctx.record_call.call_count}"
+        )
 
-        # Verify first LLM call has correct data
-        call1 = llm_calls[0]
-        assert "custom_id" in call1["request_data"]
-        assert call1["request_data"]["messages"][0]["content"] == "Analyze: Hello"
-        assert call1["status"] == CallStatus.SUCCESS
+        # Verify call arguments using call_args_list
+        calls = ctx.record_call.call_args_list
 
-        # Verify second LLM call
-        call2 = llm_calls[1]
-        assert call2["request_data"]["messages"][0]["content"] == "Analyze: World"
+        # First call should be HTTP (downloading output file)
+        http_call = calls[0].kwargs
+        assert http_call["call_type"] == CallType.HTTP
+        assert http_call["status"] == CallStatus.SUCCESS
+        assert http_call["request_data"]["operation"] == "files.content"
+
+        # Second call should be first LLM call
+        llm_call1 = calls[1].kwargs
+        assert llm_call1["call_type"] == CallType.LLM
+        assert "custom_id" in llm_call1["request_data"]
+        assert llm_call1["request_data"]["messages"][0]["content"] == "Analyze: Hello"
+        assert llm_call1["status"] == CallStatus.SUCCESS
+
+        # Third call should be second LLM call
+        llm_call2 = calls[2].kwargs
+        assert llm_call2["call_type"] == CallType.LLM
+        assert llm_call2["request_data"]["messages"][0]["content"] == "Analyze: World"
+        assert llm_call2["status"] == CallStatus.SUCCESS
 
     def test_download_results_records_failed_llm_calls_correctly(self) -> None:
         """LLM calls that failed should be recorded with ERROR status."""
@@ -1262,7 +1287,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         mock_output_content = MagicMock()
         mock_output_content.text = output_jsonl
 
-        rows = [{"text": "Good"}, {"text": "Bad"}]
+        rows = [_make_pipeline_row({"text": "Good"}), _make_pipeline_row({"text": "Bad"})]
 
         with patch.object(transform, "_get_client") as mock_client:
             mock_client.return_value.files.content.return_value = mock_output_content
@@ -1427,10 +1452,11 @@ class TestAzureBatchLLMTransformMissingResults:
 
         # Process with rows
         rows = [{"text": "Hello"}, {"text": "World"}]
-        result = transform.process(rows, ctx)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         # Result should succeed (partial results are allowed)
         assert result.status == "success"
+        assert result.rows is not None
         assert len(result.rows) == 2
 
         # First row should have response
@@ -1520,9 +1546,10 @@ class TestAzureBatchLLMTransformMissingResults:
         transform._client = mock_client
 
         rows = [{"text": "Hello"}]
-        result = transform.process(rows, ctx)
+        result = transform.process([_make_pipeline_row(d) for d in rows], ctx)
 
         assert result.status == "success"
+        assert result.rows is not None
         assert result.rows[0]["llm_response"] == "Analysis result"
 
         # Only SUCCESS calls for LLM, no ERROR LLM calls

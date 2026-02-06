@@ -101,6 +101,76 @@ class TestNodeStateRepositoryOpen:
         assert isinstance(result, NodeStateOpen)
         assert result.context_before_json is None
 
+    def test_load_crashes_on_open_with_output_hash(self) -> None:
+        """BUG #6: OPEN state with non-NULL output_hash should crash (Tier 1 violation).
+
+        OPEN states represent in-progress operations that haven't completed yet.
+        Having an output_hash means the operation finished, which contradicts OPEN status.
+        This indicates corrupted audit data that must be rejected immediately.
+        """
+        db_row = NodeStateRow(
+            state_id="state_1",
+            token_id="token_1",
+            node_id="node_1",
+            step_index=0,
+            attempt=1,
+            status="open",
+            input_hash="hash_in",
+            started_at=datetime.now(UTC),
+            output_hash="hash_out",  # INVALID - operation hasn't completed yet!
+        )
+
+        repo = NodeStateRepository(session=None)
+
+        with pytest.raises(ValueError, match=r"OPEN.*output_hash"):
+            repo.load(db_row)
+
+    def test_load_crashes_on_open_with_completed_at(self) -> None:
+        """BUG #6: OPEN state with non-NULL completed_at should crash (Tier 1 violation).
+
+        OPEN states represent in-progress operations. Having a completed_at timestamp
+        contradicts the OPEN status and indicates corrupted audit data.
+        """
+        db_row = NodeStateRow(
+            state_id="state_1",
+            token_id="token_1",
+            node_id="node_1",
+            step_index=0,
+            attempt=1,
+            status="open",
+            input_hash="hash_in",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),  # INVALID - still in progress!
+        )
+
+        repo = NodeStateRepository(session=None)
+
+        with pytest.raises(ValueError, match=r"OPEN.*completed_at"):
+            repo.load(db_row)
+
+    def test_load_crashes_on_open_with_duration(self) -> None:
+        """BUG #6: OPEN state with non-NULL duration_ms should crash (Tier 1 violation).
+
+        OPEN states represent in-progress operations. Duration is calculated when
+        the operation completes, so non-NULL duration contradicts OPEN status.
+        """
+        db_row = NodeStateRow(
+            state_id="state_1",
+            token_id="token_1",
+            node_id="node_1",
+            step_index=0,
+            attempt=1,
+            status="open",
+            input_hash="hash_in",
+            started_at=datetime.now(UTC),
+            duration_ms=100.0,  # INVALID - operation hasn't finished yet!
+        )
+
+        repo = NodeStateRepository(session=None)
+
+        with pytest.raises(ValueError, match=r"OPEN.*duration_ms"):
+            repo.load(db_row)
+
 
 class TestNodeStateRepositoryPending:
     """Tests for NodeStateRepository loading PENDING states."""
@@ -172,6 +242,33 @@ class TestNodeStateRepositoryPending:
         repo = NodeStateRepository(session=None)
 
         with pytest.raises(ValueError, match=r"PENDING.*completed_at"):
+            repo.load(db_row)
+
+    def test_load_crashes_on_pending_with_output_hash(self) -> None:
+        """BUG #6: PENDING state with non-NULL output_hash should crash (Tier 1 violation).
+
+        PENDING states represent operations waiting for batch processing results.
+        The operation has completed (duration_ms and completed_at are set), but
+        output isn't available yet (batching in progress). Having output_hash
+        contradicts PENDING status and indicates corrupted audit data.
+        """
+        db_row = NodeStateRow(
+            state_id="state_1",
+            token_id="token_1",
+            node_id="node_1",
+            step_index=0,
+            attempt=1,
+            status="pending",
+            input_hash="hash_in",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            duration_ms=100.0,
+            output_hash="hash_out",  # INVALID - batch not complete, no output yet!
+        )
+
+        repo = NodeStateRepository(session=None)
+
+        with pytest.raises(ValueError, match=r"PENDING.*output_hash"):
             repo.load(db_row)
 
 

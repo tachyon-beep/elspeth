@@ -21,6 +21,7 @@ from elspeth.contracts import Determinism
 
 if TYPE_CHECKING:
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
     from elspeth.plugins.context import PluginContext
     from elspeth.plugins.results import GateResult, TransformResult
@@ -66,6 +67,7 @@ class SourceProtocol(Protocol):
     name: str
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
@@ -140,24 +142,16 @@ class SourceProtocol(Protocol):
 
 @runtime_checkable
 class TransformProtocol(Protocol):
-    """Protocol for stateless row transforms.
+    """Protocol for stateless single-row transforms.
 
-    Transforms process rows and emit results. They can operate in two modes:
-    - Single row: process(row: dict, ctx) -> TransformResult
-    - Batch: process(rows: list[dict], ctx) -> TransformResult (if is_batch_aware=True)
+    Transforms process individual rows and emit results.
 
-    The engine decides which mode to use based on:
-    - is_batch_aware attribute (default False)
-    - Aggregation configuration in pipeline
-
-    For batch-aware transforms used in aggregation nodes:
-    - Engine buffers rows until trigger fires
-    - Engine calls process(rows: list[dict], ctx)
-    - Transform returns single aggregated result
+    For batch-aware transforms (is_batch_aware=True), use BatchTransformProtocol instead.
+    The engine uses is_batch_aware to decide whether to buffer rows and call the batch protocol.
 
     Lifecycle:
         - __init__(config): Called once at pipeline construction
-        - process(row, ctx): Called for each row (or batch if is_batch_aware)
+        - process(row, ctx): Called for each row
         - close(): Called at pipeline completion for cleanup
 
     Error Routing (WP-11.99b):
@@ -170,9 +164,10 @@ class TransformProtocol(Protocol):
             name = "enrich"
             input_schema = InputSchema
             output_schema = OutputSchema
+            is_batch_aware = False
 
-            def process(self, row: dict, ctx: PluginContext) -> TransformResult:
-                enriched = {**row, "timestamp": datetime.now().isoformat()}
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                enriched = {**row.to_dict(), "timestamp": datetime.now().isoformat()}
                 return TransformResult.success(
                     enriched,
                     success_reason={"action": "enriched", "fields_added": ["timestamp"]},
@@ -183,13 +178,14 @@ class TransformProtocol(Protocol):
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
     plugin_version: str
 
-    # Batch support (for aggregation nodes)
-    # When True, engine may pass list[dict] instead of single dict to process()
+    # Batch support flag (must be False for TransformProtocol)
+    # When True, transform must implement BatchTransformProtocol instead
     is_batch_aware: bool
 
     # Token creation flag for deaggregation
@@ -197,6 +193,12 @@ class TransformProtocol(Protocol):
     # and new tokens will be created for each output row.
     # When False, success_multi() is only valid in passthrough aggregation mode.
     creates_tokens: bool
+
+    # Schema evolution flag (P1-2026-02-05)
+    # When True, transform adds fields during execution and evolved contract
+    # should be recorded to audit trail (input fields + added fields).
+    # When False (default), transform does not add fields to schema.
+    transforms_adds_fields: bool
 
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig set this from config.
@@ -209,17 +211,17 @@ class TransformProtocol(Protocol):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: "PipelineRow",
         ctx: "PluginContext",
     ) -> "TransformResult":
         """Process a single row.
 
         Args:
-            row: Input row matching input_schema
+            row: Input row as PipelineRow (immutable, supports dual-name access)
             ctx: Plugin context
 
         Returns:
-            TransformResult with processed row or error
+            TransformResult with processed row dict or error
         """
         ...
 
@@ -229,6 +231,101 @@ class TransformProtocol(Protocol):
         Called once after all rows have been processed. Use for closing
         connections, flushing buffers, or releasing external resources.
         """
+        ...
+
+    # === Optional Lifecycle Hooks ===
+
+    def on_start(self, ctx: "PluginContext") -> None:
+        """Called at start of run."""
+        ...
+
+    def on_complete(self, ctx: "PluginContext") -> None:
+        """Called at end of run."""
+        ...
+
+
+@runtime_checkable
+class BatchTransformProtocol(Protocol):
+    """Protocol for batch-aware transforms.
+
+    Batch transforms receive lists of rows and emit results. Used in aggregation
+    nodes where the engine buffers rows until trigger fires.
+
+    The engine passes list[PipelineRow] - each row is guaranteed to be a PipelineRow
+    instance with its schema contract. Transforms should use row.to_dict() to get
+    mutable dicts when constructing output.
+
+    Lifecycle:
+        - __init__(config): Called once at pipeline construction
+        - process(rows, ctx): Called when trigger fires with buffered rows
+        - close(): Called at pipeline completion for cleanup
+
+    Error Routing (WP-11.99b):
+        Batch transforms that can return TransformResult.error() must set _on_error
+        to specify where errored batches go.
+
+    Example:
+        class BatchStats:
+            name = "batch_stats"
+            input_schema = InputSchema
+            output_schema = OutputSchema
+            is_batch_aware = True
+
+            def process(
+                self,
+                rows: list[PipelineRow],
+                ctx: PluginContext,
+            ) -> TransformResult:
+                total = sum(row["amount"] for row in rows)
+                return TransformResult.success(
+                    {"count": len(rows), "total": total},
+                    success_reason={"action": "aggregated"},
+                )
+    """
+
+    name: str
+    input_schema: type["PluginSchema"]
+    output_schema: type["PluginSchema"]
+    node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
+
+    # Metadata for Phase 3 audit/reproducibility
+    determinism: Determinism
+    plugin_version: str
+
+    # Batch support flag (must be True for BatchTransformProtocol)
+    is_batch_aware: bool
+
+    # Token creation flag for deaggregation
+    # When True, process() may return TransformResult.success_multi(rows)
+    # and new tokens will be created for each output row.
+    creates_tokens: bool
+
+    # Error routing configuration (WP-11.99b)
+    _on_error: str | None
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Initialize with configuration."""
+        ...
+
+    def process(
+        self,
+        rows: list["PipelineRow"],
+        ctx: "PluginContext",
+    ) -> "TransformResult":
+        """Process a batch of rows.
+
+        Args:
+            rows: List of input rows as PipelineRow instances
+            ctx: Plugin context
+
+        Returns:
+            TransformResult with aggregated result or multiple output rows
+        """
+        ...
+
+    def close(self) -> None:
+        """Clean up resources after pipeline completion."""
         ...
 
     # === Optional Lifecycle Hooks ===
@@ -268,20 +365,21 @@ class GateProtocol(Protocol):
                 self.fork_to = config.get("fork_to")  # None is valid (most gates don't fork)
                 self.node_id = None
 
-            def evaluate(self, row: dict, ctx: PluginContext) -> GateResult:
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                 # Direct field access - schema guarantees field exists
                 if row["suspicious"]:
                     return GateResult(
-                        row=row,
+                        row=row.to_dict(),
                         action=RoutingAction.route("review"),  # Resolved via routes config
                     )
-                return GateResult(row=row, action=RoutingAction.route("normal"))
+                return GateResult(row=row.to_dict(), action=RoutingAction.route("normal"))
     """
 
     name: str
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Routing configuration (set from GateSettings during instantiation)
     routes: dict[str, str]  # Maps route names to destinations
@@ -297,17 +395,17 @@ class GateProtocol(Protocol):
 
     def evaluate(
         self,
-        row: dict[str, Any],
+        row: "PipelineRow",
         ctx: "PluginContext",
     ) -> "GateResult":
         """Evaluate a row and decide routing.
 
         Args:
-            row: Input row
+            row: Input row as PipelineRow (immutable, supports dual-name access)
             ctx: Plugin context
 
         Returns:
-            GateResult with (possibly modified) row and routing action
+            GateResult with (possibly modified) row dict and routing action
         """
         ...
 
@@ -383,6 +481,7 @@ class CoalesceProtocol(Protocol):
     expected_branches: list[str]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
@@ -453,6 +552,7 @@ class SinkProtocol(Protocol):
     input_schema: type["PluginSchema"]
     idempotent: bool  # Can this sink handle retries safely?
     node_id: str | None  # Set by orchestrator after registration
+    config: dict[str, Any]  # Configuration dict stored by all plugins
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism

@@ -67,7 +67,7 @@ json_primitives = (
 # Recursive strategy for nested JSON structures (arrays and objects)
 json_values = st.recursive(
     json_primitives,
-    lambda children: (st.lists(children, max_size=10) | st.dictionaries(st.text(max_size=20), children, max_size=10)),
+    lambda children: st.lists(children, max_size=10) | st.dictionaries(st.text(max_size=20), children, max_size=10),
     max_leaves=50,
 )
 
@@ -95,8 +95,8 @@ messy_headers = st.text(
     min_size=1,
     max_size=100,
     alphabet=st.characters(
-        whitelist_categories=("L", "N", "P", "S", "Z"),  # Letters, Numbers, Punctuation, Symbols, Spaces
-        blacklist_categories=("Cc",),  # Exclude control characters
+        whitelist_categories=["L", "N", "P", "S", "Z"],  # Letters, Numbers, Punctuation, Symbols, Spaces
+        blacklist_categories=["Cc"],  # Exclude control characters
     ),
 ).filter(lambda s: any(c.isalnum() for c in s))
 
@@ -105,7 +105,7 @@ messy_headers = st.text(
 normalizable_headers = st.text(
     min_size=1,
     max_size=50,
-    alphabet=st.characters(whitelist_categories=("L", "N")),  # Letters and numbers only
+    alphabet=st.characters(whitelist_categories=["L", "N"]),  # Letters and numbers only
 ).filter(lambda s: s[0].isalpha() if s else False)  # Must start with letter
 
 # Python keywords (for testing keyword collision handling)
@@ -122,13 +122,13 @@ mutable_nested_data = st.dictionaries(
     keys=st.text(
         min_size=1,
         max_size=10,
-        alphabet=st.characters(whitelist_categories=("L",)),  # Letters only for clean keys
+        alphabet=st.characters(whitelist_categories=["L"]),  # Letters only for clean keys
     ),
     values=st.one_of(
         st.integers(),
         st.lists(st.integers(), min_size=1, max_size=5),
         st.dictionaries(
-            st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=("L",))),
+            st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=["L"])),
             st.integers(),
             min_size=1,
             max_size=3,
@@ -144,7 +144,7 @@ deeply_nested_data = st.recursive(
     lambda children: st.one_of(
         st.lists(children, min_size=1, max_size=3),
         st.dictionaries(
-            st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=("L",))),
+            st.text(min_size=1, max_size=5, alphabet=st.characters(whitelist_categories=["L"])),
             children,
             min_size=1,
             max_size=3,
@@ -244,14 +244,14 @@ class ListSource(_TestSourceBase):
     output_schema = PropertyTestSchema
 
     def __init__(self, data: list[dict[str, Any]]) -> None:
+        super().__init__()
         self._data = data
 
     def on_start(self, ctx: Any) -> None:
         pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._data:
-            yield SourceRow.valid(row)
+        yield from self.wrap_rows(self._data)
 
     def close(self) -> None:
         pass
@@ -268,6 +268,11 @@ class PassTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
+        from elspeth.contracts import PipelineRow
+
+        # Handle both dict (old tests) and PipelineRow (production) for backwards compat
+        if isinstance(row, PipelineRow):
+            return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
         return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
@@ -287,10 +292,18 @@ class ConditionalErrorTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
+        from elspeth.contracts import PipelineRow
+
+        # Handle both dict (old tests) and PipelineRow (production)
+        if isinstance(row, PipelineRow):
+            row_dict = row.to_dict()
+        else:
+            row_dict = row
+
         # Direct access - no defensive .get() per CLAUDE.md
-        if row["fail"]:
+        if row_dict["fail"]:
             return TransformResult.error({"reason": "property_test_error"})
-        return TransformResult.success(row, success_reason={"action": "test"})
+        return TransformResult.success(row_dict, success_reason={"action": "test"})
 
 
 class CollectSink(_TestSinkBase):

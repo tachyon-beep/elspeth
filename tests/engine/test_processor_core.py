@@ -11,8 +11,12 @@ Test plugins inherit from base classes (BaseTransform) because the processor
 uses isinstance() for type-safe plugin detection.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from elspeth.contracts import SourceRow
+
+from elspeth.contracts import PipelineRow
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
@@ -22,6 +26,29 @@ from elspeth.plugins.results import (
     TransformResult,
 )
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
 
 
 class TestRowProcessor:
@@ -71,7 +98,7 @@ class TestRowProcessor:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         class AddOneTransform(BaseTransform):
@@ -83,7 +110,7 @@ class TestRowProcessor:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -96,7 +123,7 @@ class TestRowProcessor:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 10},
+            source_row=make_source_row({"value": 10}),
             transforms=[
                 DoubleTransform(transform1.node_id),
                 AddOneTransform(transform2.node_id),
@@ -109,7 +136,9 @@ class TestRowProcessor:
         result = results[0]
 
         # 10 * 2 = 20, 20 + 1 = 21
-        assert result.final_data == {"value": 21}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"value": 21}
         assert result.outcome == RowOutcome.COMPLETED
 
         # === P1: Audit trail verification ===
@@ -165,7 +194,7 @@ class TestRowProcessor:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -178,7 +207,7 @@ class TestRowProcessor:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"name": "test"},
+            source_row=make_source_row({"name": "test"}),
             transforms=[EnricherTransform(transform.node_id)],
             ctx=ctx,
         )
@@ -187,7 +216,9 @@ class TestRowProcessor:
         assert len(results) == 1
         result = results[0]
 
-        assert result.final_data == {"name": "test", "enriched": True}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"name": "test", "enriched": True}
         assert result.outcome == RowOutcome.COMPLETED
         # Check identity preserved
         assert result.token.token_id is not None
@@ -222,7 +253,7 @@ class TestRowProcessor:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"passthrough": True},
+            source_row=make_source_row({"passthrough": True}),
             transforms=[],
             ctx=ctx,
         )
@@ -231,7 +262,9 @@ class TestRowProcessor:
         assert len(results) == 1
         result = results[0]
 
-        assert result.final_data == {"passthrough": True}
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"passthrough": True}
         assert result.outcome == RowOutcome.COMPLETED
 
     @staticmethod
@@ -249,10 +282,10 @@ class TestRowProcessor:
                 if on_err is not None:
                     self._on_error = on_err
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 if row.get("value", 0) < 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "negative values not allowed"})
-                return TransformResult.success(row, success_reason={"action": "validate"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "validate"})
 
         return ValidatorTransform(node_id, on_error)
 
@@ -315,7 +348,7 @@ class TestRowProcessor:
             with pytest.raises(RuntimeError) as exc_info:
                 processor.process_row(
                     row_index=0,
-                    row_data={"value": -5},
+                    source_row=make_source_row({"value": -5}),
                     transforms=[validator],
                     ctx=ctx,
                 )
@@ -325,7 +358,7 @@ class TestRowProcessor:
         # Case 2 & 3: on_error configured - should return result with expected outcome
         results = processor.process_row(
             row_index=0,
-            row_data={"value": -5},
+            source_row=make_source_row({"value": -5}),
             transforms=[validator],
             ctx=ctx,
         )
@@ -333,7 +366,9 @@ class TestRowProcessor:
         assert len(results) == 1
         result = results[0]
         assert result.outcome == expected_behavior
-        assert result.final_data == {"value": -5}  # Original data preserved
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"value": -5}  # Original data preserved
 
         # Audit trail verification differs by outcome
         if expected_behavior == RowOutcome.QUARANTINED:
@@ -389,7 +424,7 @@ class TestRowProcessorTokenIdentity:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"test": "data"},
+            source_row=make_source_row({"test": "data"}),
             transforms=[],
             ctx=ctx,
         )
@@ -402,7 +437,7 @@ class TestRowProcessorTokenIdentity:
         assert result.token is not None
         assert result.token.token_id is not None
         assert result.token.row_id is not None
-        assert result.token.row_data == {"test": "data"}
+        assert result.token.row_data.to_dict() == {"test": "data"}
 
     def test_step_counting_correct(self) -> None:
         """Step position is tracked correctly through pipeline."""
@@ -448,8 +483,8 @@ class TestRowProcessorTokenIdentity:
                 self.name = name  # type: ignore[misc]
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "identity"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
         processor = RowProcessor(
@@ -461,7 +496,7 @@ class TestRowProcessorTokenIdentity:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 1},
+            source_row=make_source_row({"value": 1}),
             transforms=[
                 IdentityTransform("t1", transform1.node_id),
                 IdentityTransform("t2", transform2.node_id),
@@ -527,7 +562,7 @@ class TestRowProcessorUnknownType:
         with pytest.raises(TypeError) as exc_info:
             processor.process_row(
                 row_index=0,
-                row_data={"value": 1},
+                source_row=make_source_row({"value": 1}),
                 transforms=[NotAPlugin()],
                 ctx=ctx,
             )

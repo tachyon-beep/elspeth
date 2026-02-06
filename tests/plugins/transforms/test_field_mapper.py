@@ -1,12 +1,30 @@
 """Tests for FieldMapper transform."""
 
+from typing import Any
+
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestFieldMapper:
@@ -16,18 +34,6 @@ class TestFieldMapper:
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """FieldMapper implements TransformProtocol."""
-        from elspeth.plugins.transforms.field_mapper import FieldMapper
-
-        transform = FieldMapper(
-            {
-                "schema": DYNAMIC_SCHEMA,
-                "mapping": {"old": "new"},
-            }
-        )
-        assert isinstance(transform, TransformProtocol)
 
     def test_has_required_attributes(self) -> None:
         """FieldMapper has name and schemas."""
@@ -47,7 +53,7 @@ class TestFieldMapper:
         )
         row = {"old_name": "value", "other": 123}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {"new_name": "value", "other": 123}
@@ -68,7 +74,7 @@ class TestFieldMapper:
         )
         row = {"first_name": "Alice", "last_name": "Smith", "id": 1}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {"firstName": "Alice", "lastName": "Smith", "id": 1}
@@ -86,7 +92,7 @@ class TestFieldMapper:
         )
         row = {"id": 1, "name": "alice", "secret": "password", "extra": "data"}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {"id": 1, "name": "alice"}
@@ -106,7 +112,7 @@ class TestFieldMapper:
         )
         row = {"other_field": "value"}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "error"
         assert "required_field" in str(result.reason)
@@ -124,7 +130,7 @@ class TestFieldMapper:
         )
         row = {"other_field": "value"}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {"other_field": "value"}
@@ -142,7 +148,7 @@ class TestFieldMapper:
         )
         row = {"exists": "value"}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
 
@@ -158,7 +164,7 @@ class TestFieldMapper:
         )
         row = {"id": 1, "meta": {"source": "api", "timestamp": 123}}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -177,7 +183,7 @@ class TestFieldMapper:
         )
         row = {"a": 1, "b": 2}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == row
@@ -209,7 +215,7 @@ class TestFieldMapper:
         )
 
         with pytest.raises(ValidationError):
-            transform.process({"count": "not_an_int"}, ctx)
+            transform.process(_make_pipeline_row({"count": "not_an_int"}), ctx)
 
     def test_validate_input_disabled_passes_wrong_type(self, ctx: PluginContext) -> None:
         """validate_input=False (default) passes wrong types through.
@@ -228,7 +234,7 @@ class TestFieldMapper:
         )
 
         # String passes through without validation
-        result = transform.process({"count": "not_an_int"}, ctx)
+        result = transform.process(_make_pipeline_row({"count": "not_an_int"}), ctx)
         assert result.status == "success"
         assert result.row is not None
         assert result.row["count"] == "not_an_int"
@@ -249,7 +255,7 @@ class TestFieldMapper:
         )
 
         # Any data passes with dynamic schema
-        result = transform.process({"anything": "goes", "count": "string"}, ctx)
+        result = transform.process(_make_pipeline_row({"anything": "goes", "count": "string"}), ctx)
         assert result.status == "success"
 
 
@@ -290,3 +296,85 @@ class TestFieldMapperOutputSchema:
         # Additionally verify extra fields are allowed (dynamic schema behavior)
         config = transform.output_schema.model_config
         assert config.get("extra") == "allow", "Output schema should allow extra fields (dynamic)"
+
+
+class TestFieldMapperContractPropagation:
+    """Tests for FieldMapper contract propagation."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_contract_contains_renamed_field(self, ctx: PluginContext) -> None:
+        """Output contract contains renamed field, not original field name."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "mapping": {"old_field": "new_field"},
+            }
+        )
+
+        row = _make_pipeline_row({"old_field": "value", "other": 42})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+
+        field_names = {f.normalized_name for f in result.contract.fields}
+        assert "new_field" in field_names
+        assert "old_field" not in field_names
+        assert "other" in field_names
+
+    def test_contract_reflects_field_removal(self, ctx: PluginContext) -> None:
+        """Output contract doesn't contain removed fields when select_only=True."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "mapping": {"keep_me": "kept"},
+                "select_only": True,
+            }
+        )
+
+        row = _make_pipeline_row({"keep_me": "value", "remove_me": 42, "also_remove": "bye"})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+
+        field_names = {f.normalized_name for f in result.contract.fields}
+        assert field_names == {"kept"}  # Only the mapped field should remain
+
+    def test_downstream_can_access_renamed_field(self, ctx: PluginContext) -> None:
+        """Downstream transforms can access renamed fields via contract."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        mapper = FieldMapper(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "mapping": {"source": "target"},
+            }
+        )
+
+        row = _make_pipeline_row({"source": "value", "other": 42})
+        result = mapper.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.contract is not None
+        assert result.row is not None
+        assert isinstance(result.row, dict)
+
+        # Create PipelineRow with output contract
+        output_row = PipelineRow(result.row, result.contract)
+
+        # Downstream access via contract should work
+        assert output_row["target"] == "value"
+        assert output_row["other"] == 42
+
+        # Original field name should not be accessible
+        with pytest.raises(KeyError, match="not found in schema contract"):
+            _ = output_row["source"]

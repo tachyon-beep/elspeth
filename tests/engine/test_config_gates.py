@@ -12,15 +12,14 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from elspeth.contracts import ArtifactDescriptor, GateName, PluginSchema, SourceRow
+from elspeth.contracts import GateName
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from tests.conftest import (
-    _TestSinkBase,
-    _TestSourceBase,
     as_sink,
     as_source,
 )
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 # =============================================================================
@@ -32,74 +31,6 @@ from tests.engine.orchestrator_test_helpers import build_production_graph
 def landscape_db() -> LandscapeDB:
     """Module-scoped in-memory LandscapeDB for config gate tests."""
     return LandscapeDB.in_memory()
-
-
-# =============================================================================
-# Shared Test Plugin Classes (P3 Fix: Deduplicate from individual tests)
-# =============================================================================
-
-
-class _ValueSchema(PluginSchema):
-    """Schema with integer value field."""
-
-    value: int
-
-
-class _CategorySchema(PluginSchema):
-    """Schema with string category field."""
-
-    category: str
-
-
-class _PrioritySchema(PluginSchema):
-    """Schema with integer priority field."""
-
-    priority: int
-
-
-class ListSource(_TestSourceBase):
-    """Test source that yields rows from a list.
-
-    This is the standard test source for config gate tests.
-    Provides rows from an in-memory list with configurable schema.
-    """
-
-    name = "list_source"
-    output_schema: type[PluginSchema] = _ValueSchema  # Default, can be overridden
-
-    def __init__(self, data: list[dict[str, Any]], schema: type[PluginSchema] | None = None) -> None:
-        super().__init__()
-        self._data = data
-        if schema is not None:
-            self.output_schema = schema
-
-    def load(self, ctx: Any) -> Any:
-        for row in self._data:
-            yield SourceRow.valid(row)
-
-    def close(self) -> None:
-        pass
-
-
-class CollectSink(_TestSinkBase):
-    """Test sink that collects rows into a list.
-
-    This is the standard test sink for config gate tests.
-    Collects all written rows for assertion after pipeline completion.
-    """
-
-    name = "collect"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.results: list[dict[str, Any]] = []
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(path="memory://collect", size_bytes=0, content_hash="")
-
-    def close(self) -> None:
-        pass
 
 
 # =============================================================================
@@ -345,7 +276,6 @@ class TestConfigGateIntegration:
 
         source = ListSource(
             [{"category": "A"}, {"category": "B"}, {"category": "A"}],
-            schema=_CategorySchema,
         )
         a_sink = CollectSink()
         b_sink = CollectSink()
@@ -444,7 +374,6 @@ class TestConfigGateIntegration:
         # 3 rows with priorities 1, 2, 1 -> expect 2 go to priority_1, 1 goes to priority_2
         source = ListSource(
             [{"priority": 1}, {"priority": 2}, {"priority": 1}],
-            schema=_PrioritySchema,
         )
         priority_1_sink = CollectSink()
         priority_2_sink = CollectSink()

@@ -646,6 +646,11 @@ class TestPurgePayloads:
                 self._storage[content_hash] = content
                 return content_hash
 
+            def retrieve(self, content_hash: str) -> bytes:
+                if content_hash not in self._storage:
+                    raise KeyError(content_hash)
+                return self._storage[content_hash]
+
             def exists(self, content_hash: str) -> bool:
                 return content_hash in self._storage
 
@@ -1526,8 +1531,8 @@ class TestPurgeUpdatesReproducibilityGrade:
         assert initial_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value
 
         # Purge the payload
-        result = manager.purge_payloads([payload_ref])
-        assert result.deleted_count == 1
+        purge_result = manager.purge_payloads([payload_ref])
+        assert purge_result.deleted_count == 1
 
         # Verify grade was degraded to ATTRIBUTABLE_ONLY
         with db.connection() as conn:
@@ -1835,6 +1840,11 @@ class TestPurgeUpdatesReproducibilityGrade:
                 self._storage[content_hash] = content
                 return content_hash
 
+            def retrieve(self, content_hash: str) -> bytes:
+                if content_hash not in self._storage:
+                    raise KeyError(content_hash)
+                return self._storage[content_hash]
+
             def exists(self, content_hash: str) -> bool:
                 return content_hash in self._storage
 
@@ -1929,6 +1939,11 @@ class TestPurgeUpdatesReproducibilityGrade:
                 content_hash = hashlib.sha256(content).hexdigest()
                 self._storage[content_hash] = content
                 return content_hash
+
+            def retrieve(self, content_hash: str) -> bytes:
+                if content_hash not in self._storage:
+                    raise KeyError(content_hash)
+                return self._storage[content_hash]
 
             def exists(self, content_hash: str) -> bool:
                 return content_hash in self._storage
@@ -2201,6 +2216,11 @@ class TestPurgeIOErrorHandling:
                 self._storage[content_hash] = content
                 return content_hash
 
+            def retrieve(self, content_hash: str) -> bytes:
+                if content_hash not in self._storage:
+                    raise KeyError(content_hash)
+                return self._storage[content_hash]
+
             def exists(self, content_hash: str) -> bool:
                 if content_hash in self._raise_on:
                     raise OSError(f"I/O error checking {content_hash}")
@@ -2254,6 +2274,11 @@ class TestPurgeIOErrorHandling:
                 content_hash = hashlib.sha256(content).hexdigest()
                 self._storage[content_hash] = content
                 return content_hash
+
+            def retrieve(self, content_hash: str) -> bytes:
+                if content_hash not in self._storage:
+                    raise KeyError(content_hash)
+                return self._storage[content_hash]
 
             def exists(self, content_hash: str) -> bool:
                 return content_hash in self._storage
@@ -2312,6 +2337,11 @@ class TestPurgeIOErrorHandling:
                 content_hash = hashlib.sha256(content).hexdigest()
                 self._storage[content_hash] = content
                 return content_hash
+
+            def retrieve(self, content_hash: str) -> bytes:
+                if content_hash not in self._storage:
+                    raise KeyError(content_hash)
+                return self._storage[content_hash]
 
             def exists(self, content_hash: str) -> bool:
                 return content_hash in self._storage

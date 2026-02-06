@@ -1511,7 +1511,7 @@ class TestEnumExhaustiveness:
 
     def test_routing_mode_all_values_known(self) -> None:
         """RoutingMode enum has exactly the expected values."""
-        expected_values = {"MOVE", "COPY"}
+        expected_values = {"MOVE", "COPY", "DIVERT"}
         actual_values = {e.name for e in RoutingMode}
         assert actual_values == expected_values
 

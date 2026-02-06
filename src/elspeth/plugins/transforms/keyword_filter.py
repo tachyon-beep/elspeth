@@ -6,11 +6,51 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
+
+# ReDoS detection: patterns with nested quantifiers cause catastrophic backtracking
+# on adversarial input. E.g., (a+)+ on "aaa...!" is O(2^n).
+#
+# Known limitations (defense-in-depth, not comprehensive):
+#   - Does not detect {n,} brace quantifiers inside groups: (a{2,})+
+#   - Cannot see past nested group boundaries: ((a+)b)+
+#   - Does not detect alternation-based attacks: (a|a)+
+#   - Does not detect overlapping character class repetition: [a-z]+[a-z]+
+# These gaps are mitigated by _MAX_PATTERN_LENGTH and the fact that patterns
+# come from operator-authored settings.yaml, not arbitrary user input.
+_NESTED_QUANTIFIER_RE = re.compile(
+    r"[+*]\)["  # quantified group followed by
+    r"+*{]"  # another quantifier
+    r"|"
+    r"\([^)]*[+*][^)]*\)["  # group containing quantifier, followed by
+    r"+*{]"  # another quantifier
+)
+
+# Maximum pattern length — long patterns increase backtracking risk
+_MAX_PATTERN_LENGTH = 1000
+
+
+def _validate_regex_safety(pattern: str) -> None:
+    """Reject regex patterns with known ReDoS-prone constructs.
+
+    Checks for nested quantifiers (the primary cause of catastrophic
+    backtracking) and excessive pattern length.
+
+    Args:
+        pattern: Regex pattern string to validate
+
+    Raises:
+        ValueError: If pattern contains ReDoS-prone constructs
+    """
+    if len(pattern) > _MAX_PATTERN_LENGTH:
+        raise ValueError(f"Regex pattern exceeds maximum length ({_MAX_PATTERN_LENGTH} chars): {pattern[:50]}...")
+    if _NESTED_QUANTIFIER_RE.search(pattern):
+        raise ValueError(f"Regex pattern contains nested quantifiers (ReDoS risk): {pattern}")
 
 
 class KeywordFilterConfig(TransformDataConfig):
@@ -79,6 +119,9 @@ class KeywordFilter(BaseTransform):
         self._on_error = cfg.on_error
 
         # Compile patterns at init - fail fast on invalid regex
+        # Validate for ReDoS-prone constructs before compiling
+        for pattern in cfg.blocked_patterns:
+            _validate_regex_safety(pattern)
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
         # Create schema
@@ -92,7 +135,7 @@ class KeywordFilter(BaseTransform):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Scan configured fields for blocked patterns.
@@ -105,13 +148,14 @@ class KeywordFilter(BaseTransform):
             TransformResult.success(row) if no patterns match
             TransformResult.error(reason) if any pattern matches
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        row_dict = row.to_dict()
+        fields_to_scan = self._get_fields_to_scan(row_dict)
 
         for field_name in fields_to_scan:
-            if field_name not in row:
+            if field_name not in row_dict:
                 continue  # Skip fields not present in this row
 
-            value = row[field_name]
+            value = row_dict[field_name]
 
             # Only scan string values
             if not isinstance(value, str):
@@ -134,8 +178,9 @@ class KeywordFilter(BaseTransform):
 
         # No matches - pass through unchanged
         return TransformResult.success(
-            row,
+            row_dict,
             success_reason={"action": "filtered"},
+            contract=row.contract,
         )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:

@@ -1,6 +1,5 @@
 """CheckpointManager for creating and loading checkpoints."""
 
-import json
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -9,6 +8,7 @@ from sqlalchemy import asc, delete, desc, select
 
 from elspeth.contracts import Checkpoint
 from elspeth.core.canonical import compute_full_topology_hash, stable_hash
+from elspeth.core.checkpoint.serialization import checkpoint_dumps
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import checkpoints_table
 
@@ -89,10 +89,12 @@ class CheckpointManager:
             created_at = datetime.now(UTC)
 
             # Prepare aggregation state JSON
-            # allow_nan=False rejects NaN/Infinity per CLAUDE.md audit integrity requirements
-            # Note: We use json.dumps instead of canonical_json to preserve type fidelity
-            # (canonical_json normalizes floats to integers, breaking round-trip for aggregation state)
-            agg_json = json.dumps(aggregation_state, allow_nan=False) if aggregation_state is not None else None
+            # checkpoint_dumps() handles:
+            # - datetime serialization with type tags for round-trip fidelity
+            # - NaN/Infinity rejection per CLAUDE.md audit integrity requirements
+            # Note: We don't use canonical_json because it normalizes floats to integers,
+            # breaking round-trip for aggregation state
+            agg_json = checkpoint_dumps(aggregation_state) if aggregation_state is not None else None
 
             # Compute topology hashes INSIDE transaction (Bug #1 fix)
             # This ensures hash matches graph state at exact moment of checkpoint creation

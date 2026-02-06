@@ -814,7 +814,7 @@ class TestResponseMetadata:
         config = ResponseConfig(mode="random")
         generator = ResponseGenerator(config)
 
-        request = {"messages": []}  # No model specified
+        request: dict[str, Any] = {"messages": []}  # No model specified
         response = generator.generate(request)
 
         assert response.model == "gpt-4"

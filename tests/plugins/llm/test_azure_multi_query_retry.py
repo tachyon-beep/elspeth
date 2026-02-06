@@ -15,6 +15,7 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import TransformResult
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.context import PluginContext
@@ -27,6 +28,26 @@ from .conftest import (
     make_plugin_context,
     make_token,
 )
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 def make_config(**overrides: Any) -> dict[str, Any]:
@@ -124,7 +145,7 @@ class TestRetryBehavior:
                 token = make_token("row-retry-1")
                 ctx = make_plugin_context(state_id="state-retry-1", token=token)
 
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()
@@ -182,7 +203,7 @@ class TestRetryBehavior:
                 token = make_token("row-timeout-1")
                 ctx = make_plugin_context(state_id="state-timeout-1", token=token)
 
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()
@@ -238,7 +259,7 @@ class TestRetryBehavior:
                 token = make_token("row-mixed-1")
                 ctx = make_plugin_context(state_id="state-mixed-1", token=token)
 
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()
@@ -284,7 +305,7 @@ class TestConcurrentRowProcessing:
         without interference from query-level pooling.
         """
         # Use consistent response for all queries
-        responses = [{"score": 85, "rationale": "R"}]
+        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "R"}]
 
         # Sequential query execution - focus on row pipelining
         config = make_config()
@@ -310,7 +331,7 @@ class TestConcurrentRowProcessing:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-100-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
             finally:
@@ -381,7 +402,7 @@ class TestConcurrentRowProcessing:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"concurrent-atomicity-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
             finally:
@@ -392,13 +413,13 @@ class TestConcurrentRowProcessing:
             # Verify atomicity: each row has 0 or 4 output fields
             for token, result, _state_id in collector.results:
                 assert isinstance(result, TransformResult)
-                row = result.row if result.row is not None else {}
+                output_row: dict[str, Any] = dict(result.row) if result.row is not None else {}
                 output_field_count = sum(
                     [
-                        "cs1_diagnosis_score" in row,
-                        "cs1_treatment_score" in row,
-                        "cs2_diagnosis_score" in row,
-                        "cs2_treatment_score" in row,
+                        "cs1_diagnosis_score" in output_row,
+                        "cs1_treatment_score" in output_row,
+                        "cs2_diagnosis_score" in output_row,
+                        "cs2_treatment_score" in output_row,
                     ]
                 )
 
@@ -462,7 +483,7 @@ class TestConcurrentRowProcessing:
                 }
                 token = make_token("row-0")
                 ctx = make_plugin_context(state_id="pool-util-0", token=token)
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
             finally:
@@ -547,7 +568,7 @@ class TestSequentialFallback:
                 token = make_token("row-seq-1")
                 ctx = make_plugin_context(state_id="state-seq-1", token=token)
 
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()
@@ -565,7 +586,11 @@ class TestSequentialFallback:
 
             # Verify it's an immediate failure, not a retry timeout
             # error is now a string extracted from the TransformErrorReason["error"] field
-            assert "Rate limit" in result.reason["failed_queries"][0]["error"]
+            failed_queries = result.reason["failed_queries"]
+            assert isinstance(failed_queries, list)
+            first_failure = failed_queries[0]
+            assert isinstance(first_failure, dict)  # QueryFailureDetail
+            assert "Rate limit" in first_failure["error"]
 
 
 class TestMemoryLeakPrevention:
@@ -600,7 +625,7 @@ class TestMemoryLeakPrevention:
         without interference from query-level pooling race conditions.
         """
         # Use consistent response for all queries
-        responses = [{"score": 90, "rationale": "Good"}]
+        responses: list[dict[str, Any] | str] = [{"score": 90, "rationale": "Good"}]
 
         # Sequential query execution - focus on client cleanup behavior
         config = make_config(max_capacity_retry_seconds=10)
@@ -626,7 +651,7 @@ class TestMemoryLeakPrevention:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-memory-leak-test-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 # BEFORE FIX: _llm_clients would contain 40 cached clients
                 # AFTER FIX: _llm_clients should be cleaned up to only batch client
@@ -692,7 +717,7 @@ class TestMemoryLeakPrevention:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-failure-cleanup-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 # Process batch - all rows will fail with retry timeout
                 transform.flush_batch_processing(timeout=30.0)
@@ -775,7 +800,7 @@ class TestLLMErrorRetry:
                 }
                 token = make_token("row-network-error-1")
                 ctx = make_plugin_context(state_id="network-error-retry", token=token)
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=30.0)
             finally:
                 transform.close()
@@ -834,7 +859,7 @@ class TestLLMErrorRetry:
                 }
                 token = make_token("row-content-policy-1")
                 ctx = make_plugin_context(state_id="content-policy-no-retry", token=token)
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()

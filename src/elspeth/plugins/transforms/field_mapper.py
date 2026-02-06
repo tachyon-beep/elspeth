@@ -11,7 +11,9 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -80,7 +82,7 @@ class FieldMapper(BaseTransform):
             allow_coercion=False,
         )
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Apply field mapping to row.
 
         Args:
@@ -94,19 +96,22 @@ class FieldMapper(BaseTransform):
             ValidationError: If validate_input=True and row fails schema validation.
                 This indicates a bug in the upstream source/transform.
         """
+        # Get dict representation for processing
+        row_dict = row.to_dict()
+
         # Optional input validation - crash on wrong types (source bug!)
         if self._validate_input and not self._schema_config.is_observed:
-            self.input_schema.model_validate(row)  # Raises on failure
+            self.input_schema.model_validate(row_dict)  # Raises on failure
 
         # Start with empty or copy depending on select_only
         if self._select_only:
             output: dict[str, Any] = {}
         else:
-            output = copy.deepcopy(row)
+            output = copy.deepcopy(row_dict)
 
         # Apply mappings
         for source, target in self._mapping.items():
-            value = get_nested_field(row, source)
+            value = get_nested_field(row_dict, source)
 
             if value is MISSING:
                 if self._strict:
@@ -125,11 +130,17 @@ class FieldMapper(BaseTransform):
         fields_modified: list[str] = []
         fields_added: list[str] = []
         for source, target in self._mapping.items():
-            if get_nested_field(row, source) is not MISSING:
-                if target in row:
+            if get_nested_field(row_dict, source) is not MISSING:
+                if target in row_dict:
                     fields_modified.append(target)
                 else:
                     fields_added.append(target)
+
+        # Update contract to reflect field mapping (renames and removals)
+        output_contract = narrow_contract_to_output(
+            input_contract=row.contract,
+            output_row=output,
+        )
 
         return TransformResult.success(
             output,
@@ -138,6 +149,7 @@ class FieldMapper(BaseTransform):
                 "fields_modified": fields_modified,
                 "fields_added": fields_added,
             },
+            contract=output_contract,
         )
 
     def close(self) -> None:

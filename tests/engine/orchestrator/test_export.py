@@ -191,3 +191,135 @@ class TestJsonSchemaToPythonType:
                 "field",
                 {"anyOf": [{"type": "string"}, {"type": "integer"}]},
             )
+
+
+class TestReconstructSchemaFromJson:
+    """Test reconstruct_schema_from_json handles all schema patterns.
+
+    Bug: P1-2026-02-05-resume-fails-for-observed-schemas-due-to-empt
+    """
+
+    # =========================================================================
+    # Observed/dynamic schemas (Bug fix: empty properties with additionalProperties)
+    # =========================================================================
+
+    def test_observed_schema_empty_properties_with_additional(self) -> None:
+        """Observed schema (empty properties, additionalProperties=true) reconstructs.
+
+        This is the normal JSON schema output for schema.mode=observed.
+        Previously raised ValueError, now returns dynamic schema.
+        """
+        from elspeth.engine.orchestrator.export import reconstruct_schema_from_json
+
+        schema_dict = {
+            "properties": {},
+            "additionalProperties": True,
+            "title": "DynamicSchema",
+            "type": "object",
+        }
+
+        result = reconstruct_schema_from_json(schema_dict)
+
+        # Should return a model class (not raise)
+        assert result is not None
+
+        # Model should accept any fields (extra="allow")
+        instance = result(foo="bar", baz=123, nested={"a": 1})
+        assert instance.foo == "bar"
+        assert instance.baz == 123
+        assert instance.nested == {"a": 1}
+
+    def test_observed_schema_validates_arbitrary_data(self) -> None:
+        """Reconstructed observed schema validates any row data."""
+        from elspeth.engine.orchestrator.export import reconstruct_schema_from_json
+
+        schema_dict = {
+            "properties": {},
+            "additionalProperties": True,
+            "type": "object",
+        }
+
+        schema_class = reconstruct_schema_from_json(schema_dict)
+
+        # Should accept any row-like data
+        row_data = {
+            "customer_id": "C001",
+            "amount": 123.45,
+            "status": True,
+            "tags": ["a", "b"],
+            "metadata": {"key": "value"},
+        }
+        instance = schema_class(**row_data)
+
+        assert instance.customer_id == "C001"
+        assert instance.amount == 123.45
+        assert instance.status is True
+        assert instance.tags == ["a", "b"]
+        assert instance.metadata == {"key": "value"}
+
+    def test_empty_properties_without_additional_raises(self) -> None:
+        """Empty properties WITHOUT additionalProperties=true raises error.
+
+        This is genuinely malformed - a fixed schema with no fields.
+        """
+        from elspeth.engine.orchestrator.export import reconstruct_schema_from_json
+
+        schema_dict = {
+            "properties": {},
+            "type": "object",
+            # No additionalProperties, or additionalProperties=false
+        }
+
+        with pytest.raises(ValueError, match="additionalProperties is not true"):
+            reconstruct_schema_from_json(schema_dict)
+
+    def test_empty_properties_with_additional_false_raises(self) -> None:
+        """Empty properties with additionalProperties=false raises error."""
+        from elspeth.engine.orchestrator.export import reconstruct_schema_from_json
+
+        schema_dict = {
+            "properties": {},
+            "additionalProperties": False,
+            "type": "object",
+        }
+
+        with pytest.raises(ValueError, match="additionalProperties is not true"):
+            reconstruct_schema_from_json(schema_dict)
+
+    # =========================================================================
+    # Fixed schemas with fields (existing functionality)
+    # =========================================================================
+
+    def test_fixed_schema_with_fields(self) -> None:
+        """Fixed schema with declared fields reconstructs correctly."""
+        from elspeth.engine.orchestrator.export import reconstruct_schema_from_json
+
+        schema_dict = {
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+            },
+            "required": ["name"],
+            "type": "object",
+        }
+
+        schema_class = reconstruct_schema_from_json(schema_dict)
+
+        # Required field must be provided
+        instance = schema_class(name="Alice", age=30)
+        assert instance.name == "Alice"
+        assert instance.age == 30
+
+        # Optional field can be omitted
+        instance2 = schema_class(name="Bob")
+        assert instance2.name == "Bob"
+        assert instance2.age is None
+
+    def test_missing_properties_key_raises(self) -> None:
+        """Schema without properties key raises error."""
+        from elspeth.engine.orchestrator.export import reconstruct_schema_from_json
+
+        schema_dict = {"type": "object"}  # No properties key
+
+        with pytest.raises(ValueError, match="no 'properties' field"):
+            reconstruct_schema_from_json(schema_dict)

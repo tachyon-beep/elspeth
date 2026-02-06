@@ -140,8 +140,9 @@ class TestAuditedHTTPClient:
         have different request_hash values to distinguish them in replay/verify mode.
         The raw secret values must NOT appear in the audit trail.
         """
-        # Set fingerprint key for deterministic testing
+        # Set fingerprint key for deterministic testing, ensure dev mode is off
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+        monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
         recorder = self._create_mock_recorder()
 
@@ -203,6 +204,7 @@ class TestAuditedHTTPClient:
         which produces a unique request_hash.
         """
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+        monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
         from elspeth.core.canonical import stable_hash
 
@@ -511,6 +513,7 @@ class TestAuditedHTTPClient:
         mock_response.status_code = 200
         mock_response.headers = httpx.Headers({"content-type": "application/json", "x-request-id": "req-456"})
         mock_response.content = b"{}"
+        mock_response.text = "{}"
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -607,6 +610,7 @@ class TestAuditedHTTPClient:
             }
         )
         mock_response.content = b"{}"
+        mock_response.text = "{}"
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -734,7 +738,7 @@ class TestAuditedHTTPClient:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json; charset=utf-8"}
         mock_response.content = b'{"choices": [{"message": {"content": "Hello"}}]}'
-        mock_response.json.return_value = {"choices": [{"message": {"content": "Hello"}}]}
+        mock_response.text = '{"choices": [{"message": {"content": "Hello"}}]}'
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -958,7 +962,7 @@ class TestAuditedHTTPClient:
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
         mock_response.content = json_str.encode("utf-8")
-        mock_response.json.return_value = large_json
+        mock_response.text = json_str
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -1024,3 +1028,517 @@ class TestAuditedHTTPClient:
         # Verify we can decode it back to original binary data
         decoded = base64.b64decode(recorded_body["_binary"])
         assert decoded == binary_data, "Decoded binary data doesn't match original"
+
+    def test_json_response_with_nan_recorded_as_parse_failure(self) -> None:
+        """JSON response containing NaN is recorded as parse failure.
+
+        This is a P1 bug fix (P1-2026-02-05): HTTP client must reject NaN/Infinity
+        at the Tier 3 boundary because canonicalization cannot handle them. Recording
+        as parse failure with raw text preserved ensures audit completeness without
+        crashing.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        # JSON with NaN (Python's json.loads accepts this)
+        json_with_nan = '{"value": NaN, "other": "data"}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_nan.encode("utf-8")
+        mock_response.text = json_with_nan
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            # Should NOT crash - should record as parse failure
+            response = client.post("https://api.example.com/endpoint")
+
+        # Response object is still returned to caller
+        assert response.status_code == 200
+
+        # Verify audit record was created successfully (not crashed)
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+
+        # Body should be recorded as parse failure with raw text
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert isinstance(recorded_body, dict)
+        assert recorded_body["_json_parse_failed"] is True
+        assert "NaN" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
+        assert recorded_body["_raw_text"] == json_with_nan
+
+    def test_json_response_with_infinity_recorded_as_parse_failure(self) -> None:
+        """JSON response containing Infinity is recorded as parse failure.
+
+        Similar to NaN test - Infinity is also non-canonicalizable and must be
+        rejected at the HTTP boundary.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        # JSON with Infinity (Python's json.loads accepts this)
+        json_with_infinity = '{"value": Infinity, "count": 42}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_infinity.encode("utf-8")
+        mock_response.text = json_with_infinity
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            # Should NOT crash - should record as parse failure
+            response = client.post("https://api.example.com/endpoint")
+
+        assert response.status_code == 200
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert recorded_body["_json_parse_failed"] is True
+        assert "Infinity" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
+        assert recorded_body["_raw_text"] == json_with_infinity
+
+    def test_json_response_with_negative_infinity_recorded_as_parse_failure(self) -> None:
+        """JSON response containing -Infinity is recorded as parse failure."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        json_with_neg_infinity = '{"value": -Infinity}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_neg_infinity.encode("utf-8")
+        mock_response.text = json_with_neg_infinity
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.post("https://api.example.com/endpoint")
+
+        assert response.status_code == 200
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert recorded_body["_json_parse_failed"] is True
+        assert recorded_body["_raw_text"] == json_with_neg_infinity
+
+    def test_json_response_with_nested_nan_recorded_as_parse_failure(self) -> None:
+        """JSON response with NaN nested in object/array is detected and rejected.
+
+        NaN can appear anywhere in the JSON structure - we must check recursively.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        # NaN nested in array within object
+        json_with_nested_nan = '{"data": {"values": [1, 2, NaN, 4]}}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_nested_nan.encode("utf-8")
+        mock_response.text = json_with_nested_nan
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.post("https://api.example.com/endpoint")
+
+        assert response.status_code == 200
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert recorded_body["_json_parse_failed"] is True
+        assert recorded_body["_raw_text"] == json_with_nested_nan
+
+    def test_valid_json_response_still_works(self) -> None:
+        """Ensure the NaN/Infinity fix doesn't break normal JSON parsing.
+
+        Regression test to verify that valid JSON (including edge cases like
+        null, empty objects, negative numbers) is still parsed correctly.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        # Valid JSON with edge cases
+        valid_json = '{"null_value": null, "negative": -42.5, "empty": {}, "array": [1, 2, 3]}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = valid_json.encode("utf-8")
+        mock_response.text = valid_json
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.post("https://api.example.com/endpoint")
+
+        assert response.status_code == 200
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+
+        # Should be parsed as dict, NOT as parse failure
+        assert isinstance(recorded_body, dict)
+        assert "_json_parse_failed" not in recorded_body
+        assert recorded_body["null_value"] is None
+        assert recorded_body["negative"] == -42.5
+        assert recorded_body["empty"] == {}
+        assert recorded_body["array"] == [1, 2, 3]
+
+
+class TestAuditedHTTPClientGet:
+    """Tests for AuditedHTTPClient.get() method."""
+
+    def _create_mock_recorder(self) -> MagicMock:
+        """Create a mock LandscapeRecorder."""
+        import itertools
+
+        recorder = MagicMock()
+        recorder.record_call = MagicMock()
+        counter = itertools.count()
+        recorder.allocate_call_index.side_effect = lambda _: next(counter)
+        return recorder
+
+    def test_successful_get_records_to_audit_trail(self) -> None:
+        """Successful HTTP GET is recorded to audit trail with full response body."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+            timeout=30.0,
+        )
+
+        # Mock httpx.Client with HTML response
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/html"}
+        mock_response.content = b"<html><body>Content</body></html>"
+        mock_response.text = "<html><body>Content</body></html>"
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.get("https://example.com/page")
+
+        # Verify response
+        assert response.status_code == 200
+        assert response.text == "<html><body>Content</body></html>"
+
+        # Verify audit record
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["state_id"] == "state_123"
+        assert call_kwargs["call_index"] == 0
+        assert call_kwargs["call_type"] == CallType.HTTP
+        assert call_kwargs["status"] == CallStatus.SUCCESS
+        assert call_kwargs["request_data"]["method"] == "GET"
+        assert call_kwargs["request_data"]["url"] == "https://example.com/page"
+        assert call_kwargs["request_data"]["params"] is None
+        assert call_kwargs["response_data"]["status_code"] == 200
+        assert call_kwargs["response_data"]["body"] == "<html><body>Content</body></html>"
+        assert call_kwargs["latency_ms"] > 0
+
+    def test_get_with_query_params(self) -> None:
+        """GET with query params records params in audit trail and passes to httpx."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b'{"result": "ok"}'
+        mock_response.text = '{"result": "ok"}'
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.get("https://api.example.com/search", params={"q": "test", "limit": 10})
+
+        # Verify response
+        assert response.status_code == 200
+
+        # Verify params were passed to httpx
+        mock_client.get.assert_called_once()
+        call_args = mock_client.get.call_args
+        assert call_args[0][0] == "https://api.example.com/search"
+        assert call_args[1]["params"] == {"q": "test", "limit": 10}
+
+        # Verify params were recorded in audit trail
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["request_data"]["params"] == {"q": "test", "limit": 10}
+
+    def test_get_with_base_url(self) -> None:
+        """GET with base_url prepends base to path correctly."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+            base_url="https://api.example.com",
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.get("/v1/resource")
+
+        # Verify full URL was recorded
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/resource"
+
+        # Verify httpx was called with full URL
+        mock_client.get.assert_called_once()
+        actual_url = mock_client.get.call_args[0][0]
+        assert actual_url == "https://api.example.com/v1/resource"
+
+    def test_get_failed_call_records_error(self) -> None:
+        """Failed HTTP GET call records error details."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.side_effect = httpx.ConnectError("Connection refused")
+            mock_client_class.return_value = mock_client
+
+            with pytest.raises(httpx.ConnectError):
+                client.get("https://example.com/page")
+
+        # Verify error was recorded
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["error"]["type"] == "ConnectError"
+        assert "Connection refused" in call_kwargs["error"]["message"]
+
+    def test_get_auth_headers_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GET requests fingerprint auth headers in audit trail."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+        monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
+
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+            headers={"Authorization": "Bearer secret-token"},
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.get("https://api.example.com/resource")
+
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_headers = call_kwargs["request_data"]["headers"]
+
+        # Auth header should be fingerprinted
+        assert "Authorization" in recorded_headers
+        assert "Bearer secret-token" not in recorded_headers["Authorization"]
+        assert recorded_headers["Authorization"].startswith("<fingerprint:")
+
+    def test_get_json_response_recorded_as_dict(self) -> None:
+        """GET with JSON response records parsed dict."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b'{"items": [1, 2, 3]}'
+        mock_response.text = '{"items": [1, 2, 3]}'
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.get("https://api.example.com/data")
+
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["response_data"]["body"] == {"items": [1, 2, 3]}
+
+    def test_get_4xx_response_recorded_as_error(self) -> None:
+        """GET with 4xx response is recorded with ERROR status."""
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 404
+        mock_response.headers = {"content-type": "text/plain"}
+        mock_response.content = b"Not Found"
+        mock_response.text = "Not Found"
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.get("https://example.com/missing")
+
+        # Response is still returned
+        assert response.status_code == 404
+
+        # Verify ERROR status was recorded
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["response_data"]["status_code"] == 404
+        assert call_kwargs["error"]["type"] == "HTTPError"
+        assert call_kwargs["error"]["status_code"] == 404
+
+    def test_get_json_response_with_nan_recorded_as_parse_failure(self) -> None:
+        """GET JSON response containing NaN is recorded as parse failure.
+
+        Ensures the NaN/Infinity fix applies to GET requests as well as POST.
+        """
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+        )
+
+        json_with_nan = '{"metric": NaN}'
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_with_nan.encode("utf-8")
+        mock_response.text = json_with_nan
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            response = client.get("https://api.example.com/metrics")
+
+        assert response.status_code == 200
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+
+        recorded_body = call_kwargs["response_data"]["body"]
+        assert recorded_body["_json_parse_failed"] is True
+        assert "NaN" in recorded_body["_error"] or "non-finite" in recorded_body["_error"]
+        assert recorded_body["_raw_text"] == json_with_nan

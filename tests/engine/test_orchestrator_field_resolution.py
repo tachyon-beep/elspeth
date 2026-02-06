@@ -10,16 +10,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy import select
 
-from elspeth.contracts import ArtifactDescriptor
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.schema import runs_table
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.sources.csv_source import CSVSource
-from tests.conftest import _TestSinkBase
+from tests.conftest import as_sink
+from tests.engine.conftest import CollectSink
 
 
 class TestFieldResolutionRecording:
@@ -48,33 +47,13 @@ class TestFieldResolutionRecording:
             }
         )
 
-        # Create sink using test helper
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
-
         sink = CollectSink()
 
         # Build config and graph
         config = PipelineConfig(
             source=source,
             transforms=[],
-            sinks={"default": sink},
+            sinks={"default": as_sink(sink)},
         )
 
         # Use helper to build graph
@@ -89,7 +68,7 @@ class TestFieldResolutionRecording:
         # Query the audit database for field resolution
         with db.engine.connect() as conn:
             row = conn.execute(select(runs_table.c.source_field_resolution_json).where(runs_table.c.run_id == result.run_id)).fetchone()
-
+            assert row is not None, "Run not found in database"
             resolution_json = row[0]
 
         # This is the key assertion - resolution must be recorded
@@ -134,31 +113,12 @@ class TestFieldResolutionRecording:
             }
         )
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
-
         sink = CollectSink()
 
         config = PipelineConfig(
             source=source,
             transforms=[],
-            sinks={"default": sink},
+            sinks={"default": as_sink(sink)},
         )
 
         from tests.engine.orchestrator_test_helpers import build_production_graph
@@ -171,7 +131,7 @@ class TestFieldResolutionRecording:
         # Query the audit database for field resolution
         with db.engine.connect() as conn:
             row = conn.execute(select(runs_table.c.source_field_resolution_json).where(runs_table.c.run_id == result.run_id)).fetchone()
-
+            assert row is not None, "Run not found in database"
             resolution_json = row[0]
 
         # Even without normalization, CSVSource records an identity mapping
@@ -219,31 +179,12 @@ class TestFieldResolutionRecording:
             }
         )
 
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
-
         sink = CollectSink()
 
         config = PipelineConfig(
             source=source,
             transforms=[],
-            sinks={"default": sink},
+            sinks={"default": as_sink(sink)},
         )
 
         from tests.engine.orchestrator_test_helpers import build_production_graph
@@ -256,7 +197,7 @@ class TestFieldResolutionRecording:
         # Query the audit database for field resolution
         with db.engine.connect() as conn:
             row = conn.execute(select(runs_table.c.source_field_resolution_json).where(runs_table.c.run_id == result.run_id)).fetchone()
-
+            assert row is not None, "Run not found in database"
             resolution_json = row[0]
 
         # KEY ASSERTION: Resolution must be recorded even for empty sources

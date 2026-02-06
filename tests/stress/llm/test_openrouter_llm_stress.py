@@ -32,6 +32,7 @@ from .conftest import (
     ChaosLLMHTTPFixture,
     generate_test_rows,
     make_openrouter_llm_config,
+    make_pipeline_row,
     make_token,
 )
 
@@ -45,7 +46,9 @@ class CollectingOutputPort:
     """
 
     def __init__(self) -> None:
-        self.results: list[tuple[dict[str, Any], TokenInfo]] = []
+        from elspeth.contracts import PipelineRow
+
+        self.results: list[tuple[dict[str, Any] | PipelineRow, TokenInfo]] = []
         self.errors: list[tuple[TransformErrorReason, TokenInfo]] = []
         self._lock = threading.Lock()
 
@@ -179,7 +182,7 @@ class TestOpenRouterLLMStress:
                 config={},
                 token=token,
             )
-            transform.accept(row, ctx)
+            transform.accept(make_pipeline_row(row), ctx)
 
         transform.flush_batch_processing()
         transform.close()
@@ -250,7 +253,7 @@ class TestOpenRouterLLMStress:
                 config={},
                 token=token,
             )
-            transform.accept(row, ctx)
+            transform.accept(make_pipeline_row(row), ctx)
 
         transform.flush_batch_processing()
         transform.close()
@@ -324,7 +327,7 @@ class TestOpenRouterLLMStress:
                 config={},
                 token=token,
             )
-            transform.accept(row, ctx)
+            transform.accept(make_pipeline_row(row), ctx)
 
         transform.flush_batch_processing()
         transform.close()

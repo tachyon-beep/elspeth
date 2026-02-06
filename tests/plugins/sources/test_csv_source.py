@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SourceProtocol
 
 # Dynamic schema config for tests - SourceDataConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -28,21 +27,6 @@ class TestCSVSource:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """CSVSource implements SourceProtocol."""
-        from elspeth.plugins.sources.csv_source import CSVSource
-
-        assert isinstance(CSVSource, type)
-        # Runtime check via Protocol
-        source = CSVSource(
-            {
-                "path": "/tmp/test.csv",
-                "schema": DYNAMIC_SCHEMA,
-                "on_validation_failure": QUARANTINE_SINK,
-            }
-        )
-        assert isinstance(source, SourceProtocol)
 
     def test_has_required_attributes(self) -> None:
         """CSVSource has name and output_schema."""

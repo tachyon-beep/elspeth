@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
-from typing import Any
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import httpx
@@ -17,7 +18,7 @@ from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.openrouter_multi_query import OpenRouterMultiQueryLLMTransform
 
-from .conftest import chaosllm_openrouter_http_responses
+from .conftest import _make_pipeline_row, chaosllm_openrouter_http_responses
 
 # Common schema config
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -56,12 +57,16 @@ def make_openrouter_response(content: dict[str, Any] | str) -> dict[str, Any] | 
     return content
 
 
+@contextmanager
 def mock_openrouter_http_responses(
     chaosllm_server,
-    responses: list[dict[str, Any] | str | httpx.Response],
-) -> Generator[Mock, None, None]:
+    responses: list[dict[str, Any] | str] | list[dict[str, Any] | str | httpx.Response],
+) -> Iterator[Mock]:
     """Mock HTTP client to return ChaosLLM-generated responses."""
-    return chaosllm_openrouter_http_responses(chaosllm_server, responses)
+    # Cast to the expected type for chaosllm_openrouter_http_responses
+    typed_responses = cast(list[dict[str, Any] | str | httpx.Response], responses)
+    with chaosllm_openrouter_http_responses(chaosllm_server, typed_responses) as mock_client:
+        yield mock_client
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
@@ -69,7 +74,7 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},  # Not used in these tests
+        row_data=_make_pipeline_row({}),
     )
 
 
@@ -144,7 +149,7 @@ class TestOpenRouterMultiQueryLLMTransformInit:
         ctx = make_plugin_context()
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
-            transform.process({"text": "hello"}, ctx)
+            transform.process(_make_pipeline_row({"text": "hello"}), ctx)
 
 
 class TestSingleQueryProcessing:
@@ -438,7 +443,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "case2 hist",
             }
 
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -474,7 +479,7 @@ class TestRowProcessingWithPipelining:
                 "original_field": "preserved",
             }
 
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -542,7 +547,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "hist",
             }
 
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             # Entire row fails
@@ -578,7 +583,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "hist",
             }
 
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -677,7 +682,7 @@ class TestMultiRowPipelining:
                         state_id=f"state-{i}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -704,7 +709,7 @@ class TestMultiRowPipelining:
         )
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
 
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
@@ -789,7 +794,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             # Should return error result, not raise exception
@@ -836,7 +841,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -846,6 +851,65 @@ class TestHTTPSpecificBehavior:
             assert result.reason is not None
             # The error cascades through query_failed
             assert "query_failed" in result.reason["reason"]
+
+    def test_handles_null_content_from_content_filtering(
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterMultiQueryLLMTransform,
+        collector: CollectorOutputPort,
+    ) -> None:
+        """Null content (content filtering) returns error instead of crashing.
+
+        P0-05: When OpenRouter returns null content due to content filtering,
+        content.strip() threw AttributeError: 'NoneType' has no attribute 'strip'.
+        Must return TransformResult.error() with reason 'content_filtered'.
+        """
+        response_data = {
+            "choices": [{"message": {"content": None, "role": "assistant"}}],
+            "model": "anthropic/claude-3-opus",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+        }
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = Mock()
+            mock_response = Mock(spec=httpx.Response)
+            mock_response.status_code = 200
+            mock_response.headers = {"content-type": "application/json"}
+            mock_response.json.return_value = response_data
+            mock_response.text = json.dumps(response_data)
+            mock_response.content = b""
+            mock_response.raise_for_status = Mock()
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
+            mock_client_class.return_value.__exit__ = Mock(return_value=None)
+
+            row = {
+                "cs1_bg": "data",
+                "cs1_sym": "data",
+                "cs1_hist": "data",
+                "cs2_bg": "data",
+                "cs2_sym": "data",
+                "cs2_hist": "data",
+            }
+
+            transform.accept(_make_pipeline_row(row), ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _state_id = collector.results[0]
+            assert isinstance(result, TransformResult), f"Expected TransformResult, got {type(result)}"
+            assert result.status == "error"
+            assert result.reason is not None
+            # Multi-query wraps per-query errors in a query_failed envelope
+            assert result.reason["reason"] == "query_failed"
+            # All queries should have failed with content_filtered
+            assert result.reason["succeeded_count"] == 0
+            for failed_query in result.reason["failed_queries"]:
+                # failed_query can be str | QueryFailureDetail - we check both forms
+                if isinstance(failed_query, dict):
+                    assert "content-filtered" in failed_query["error"]
+                else:
+                    assert "content-filtered" in failed_query
 
     def test_handles_missing_output_field_in_json(
         self,
@@ -868,7 +932,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -901,7 +965,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1

@@ -99,32 +99,44 @@ EXTERNAL DATA              PIPELINE DATA              AUDIT TRAIL
 Transforms that make external calls (LLM APIs, HTTP requests, database queries) create **mini Tier 3 boundaries** within their implementation:
 
 ```python
-def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     # row enters as Tier 2 (pipeline data - trust the schema)
 
     # External call creates Tier 3 boundary
     try:
         llm_response = self._llm_client.query(prompt)  # EXTERNAL DATA - zero trust
     except Exception as e:
-        return TransformResult.error({"reason": "llm_call_failed", "error": str(e)})
+        return TransformResult.error(
+            {"reason": "llm_call_failed", "error": str(e)},
+            retryable=True,
+        )
 
     # IMMEDIATELY validate at the boundary - don't let "their data" travel
     try:
         parsed = json.loads(llm_response.content)
     except json.JSONDecodeError:
-        return TransformResult.error({"reason": "invalid_json", "raw": llm_response.content[:200]})
+        return TransformResult.error(
+            {"reason": "invalid_json", "raw": llm_response.content[:200]},
+            retryable=False,
+        )
 
     # Validate structure type IMMEDIATELY
     if not isinstance(parsed, dict):
-        return TransformResult.error({
-            "reason": "invalid_json_type",
-            "expected": "object",
-            "actual": type(parsed).__name__
-        })
+        return TransformResult.error(
+            {
+                "reason": "invalid_json_type",
+                "expected": "object",
+                "actual": type(parsed).__name__
+            },
+            retryable=False,
+        )
 
     # NOW it's our data (Tier 2) - add to row and continue
-    row["llm_classification"] = parsed["category"]  # Safe - validated above
-    return TransformResult.success(row)
+    output = {**row.to_dict(), "llm_classification": parsed["category"]}  # Safe - validated above
+    return TransformResult.success(
+        output,
+        success_reason={"action": "llm_classified", "category": parsed["category"]},
+    )
 ```
 
 **The rule: Minimize the distance external data travels before you validate it.**
@@ -644,6 +656,29 @@ def canonical_json(obj: Any) -> str:
 
 Test cases must cover: `numpy.int64`, `numpy.float64`, `pandas.Timestamp`, `NaT`, `NaN`, `Infinity`.
 
+### PipelineRow to Dict Conversion
+
+**Always use `row.to_dict()` for explicit conversion.** While `dict(row)` works via duck typing, the explicit form is preferred for clarity.
+
+```python
+# PREFERRED - Explicit and clear intent
+output = row.to_dict()
+output["new_field"] = "value"
+return TransformResult.success(output)
+
+# AVOID - Works but implicit (duck typing via mapping protocol)
+output = dict(row)  # Loses contract metadata implicitly
+```
+
+**Why `to_dict()` is preferred:**
+
+- **Explicitness**: Makes the "conversion to plain dict" intention clear
+- **Contract awareness**: Signals that contract metadata is intentionally being discarded
+- **IDE support**: Better type checker and autocomplete support
+- **Consistency**: Matches established pattern in field_mapper, json_explode, truncate, etc.
+
+**Technical note:** PipelineRow implements Python's informal mapping protocol (`keys()`, `__getitem__()`, `__iter__()`), so `dict(row)` works correctly by duck typing. However, both approaches create a plain dict without contract metadata - the engine reconstructs PipelineRow from the transform's output schema/contract.
+
 ### Terminal Row States
 
 Every row reaches exactly one terminal state - no silent drops:
@@ -655,6 +690,8 @@ Every row reaches exactly one terminal state - no silent drops:
 - `COALESCED` - Merged in join
 - `QUARANTINED` - Failed, stored for investigation
 - `FAILED` - Failed, not recoverable
+- `EXPANDED` - Parent token for deaggregation (1→N expansion)
+- `BUFFERED` - Temporarily held in aggregation (non-terminal, becomes COMPLETED on flush)
 
 ### Retry Semantics
 
@@ -929,19 +966,29 @@ Even type-valid row data can cause operation failures. Wrap these operations:
 
 ```python
 # CORRECT - wrapping operations on their data
-def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     try:
         result = row["numerator"] / row["denominator"]  # Their data can be 0
     except ZeroDivisionError:
-        return TransformResult.error({"reason": "division_by_zero"})
-    return TransformResult.success({"result": result})
+        return TransformResult.error(
+            {"reason": "division_by_zero"},
+            retryable=False,
+        )
+    return TransformResult.success(
+        {"result": result},
+        success_reason={"action": "calculated"},
+    )
 
 # WRONG - wrapping access to OUR internal state
-def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     try:
         batch_avg = self._total / self._batch_count  # OUR bug if _batch_count is 0
     except ZeroDivisionError:
         batch_avg = 0  # NO! This hides our initialization bug
+    return TransformResult.success(
+        {"batch_avg": batch_avg},
+        success_reason={"action": "averaged"},
+    )
 ```
 
 **The distinction:** Wrapping `row["x"] / row["y"]` is correct because `row` is their data. Wrapping `self._x / self._y` is wrong because `self` is our code.

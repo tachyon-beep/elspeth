@@ -11,9 +11,10 @@ Test plugins inherit from base classes (BaseTransform)
 because the processor uses isinstance() for type-safe plugin detection.
 """
 
-from typing import Any
+from typing import Any, cast
 
-from elspeth.contracts import NodeType
+from elspeth.contracts import NodeType, PipelineRow, SourceRow
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -22,6 +23,28 @@ from elspeth.plugins.results import (
     TransformResult,
 )
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
 
 
 class TestProcessorBatchTransforms:
@@ -50,10 +73,25 @@ class TestProcessorBatchTransforms:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
-                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                    output_row = {"total": total}
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -106,7 +144,7 @@ class TestProcessorBatchTransforms:
         for i in range(3):
             result_list = processor.process_row(
                 row_index=i,
-                row_data={"value": i + 1},  # 1, 2, 3
+                source_row=make_source_row({"value": i + 1}),  # 1, 2, 3
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -119,7 +157,9 @@ class TestProcessorBatchTransforms:
         # The flush produces a NEW aggregated row that gets COMPLETED
         completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
         assert len(completed) == 1, f"Expected 1 completed row, got {len(completed)}"
-        assert completed[0].final_data == {"total": 6}
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"total": 6}
 
     def test_processor_batch_transform_without_aggregation_config(self) -> None:
         """Batch-aware transform without aggregation config uses single-row mode."""
@@ -143,7 +183,7 @@ class TestProcessorBatchTransforms:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Batch mode - sum all values
                     return TransformResult.success({"value": sum(r["value"] for r in rows)}, success_reason={"action": "test"})
@@ -188,14 +228,16 @@ class TestProcessorBatchTransforms:
         # Process row - should use single-row mode (double)
         result_list = processor.process_row(
             row_index=0,
-            row_data={"value": 5},
+            source_row=make_source_row({"value": 5}),
             transforms=[transform],
             ctx=ctx,
         )
 
         result = result_list[0]
         assert result.outcome == RowOutcome.COMPLETED
-        assert result.final_data == {"value": 10}  # Doubled, not summed
+        final_data = result.final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"value": 10}  # Doubled, not summed
 
     def test_processor_buffers_restored_on_recovery(self) -> None:
         """Processor restores buffer state from checkpoint."""
@@ -220,10 +262,25 @@ class TestProcessorBatchTransforms:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
-                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                    output_row = {"total": total}
+
+                    # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -281,9 +338,27 @@ class TestProcessorBatchTransforms:
         # Note: _version field required since Bug #12 checkpoint versioning fix
         # Note: elapsed_age_seconds required since Bug #6 timeout SLA preservation fix
         # Note: fire_offset fields required since P2-2026-02-01 trigger ordering fix
-        # Note: All lineage fields required in v1.1 format (values can be None)
+        # Note: All lineage fields required in v2.0 format (values can be None)
+        # Note: contract and contract_version required since PipelineRow migration (v2.0)
+
+        # Create contract for checkpoint restoration
+        checkpoint_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+        contract_version_hash = checkpoint_contract.version_hash()
+
         restored_buffer_state = {
-            "_version": "1.1",
+            "_version": "2.0",
             sum_node.node_id: {
                 "tokens": [
                     {
@@ -294,6 +369,7 @@ class TestProcessorBatchTransforms:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
+                        "contract_version": contract_version_hash,
                     },
                     {
                         "token_id": token1.token_id,
@@ -303,12 +379,14 @@ class TestProcessorBatchTransforms:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
+                        "contract_version": contract_version_hash,
                     },
                 ],
                 "batch_id": old_batch.batch_id,
                 "elapsed_age_seconds": 0.0,  # Bug #6: timeout elapsed time
                 "count_fire_offset": None,  # P2-2026-02-01: trigger ordering
                 "condition_fire_offset": None,  # P2-2026-02-01: trigger ordering
+                "contract": checkpoint_contract.to_checkpoint_format(),
             },
         }
 
@@ -334,7 +412,7 @@ class TestProcessorBatchTransforms:
         # - The flush produces a NEW row with the aggregated result
         result_list = processor.process_row(
             row_index=2,
-            row_data={"value": 3},  # Third value
+            source_row=make_source_row({"value": 3}),  # Third value
             transforms=[transform],
             ctx=ctx,
         )
@@ -346,7 +424,133 @@ class TestProcessorBatchTransforms:
 
         assert len(consumed) == 1, f"Expected 1 consumed, got {len(consumed)}"
         assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
-        assert completed[0].final_data == {"total": 6}  # 1 + 2 + 3
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
+
+    def test_batch_transform_receives_pipelinerow_objects(self) -> None:
+        """Batch transforms must receive PipelineRow objects, not plain dicts.
+
+        Regression test for P1 issues where aggregation executor passed plain dicts
+        to batch transforms, causing AttributeError when transforms called .to_dict().
+
+        This test explicitly calls .to_dict() on rows to catch the type mismatch.
+        Previous tests used r["value"] which works for both dict and PipelineRow,
+        so they didn't catch this bug.
+        """
+        from elspeth.contracts import Determinism
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+
+        class TypeCheckingBatchTransform(BaseTransform):
+            """Transform that explicitly calls .to_dict() on rows."""
+
+            name = "type_checker"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0"
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"mode": "observed"}})
+                self.node_id = node_id
+
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
+                """Process batch - explicitly calls .to_dict() to catch type errors."""
+                if isinstance(rows, list):
+                    # This will fail if rows are plain dicts instead of PipelineRow objects
+                    total = sum(r.to_dict()["value"] for r in rows)
+                    output_row = {"total": total}
+
+                    # Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "type_check"}, contract=contract)
+                # Single row mode - also call .to_dict()
+                row_dict = rows.to_dict()
+                return TransformResult.success(row_dict, success_reason={"action": "type_check"})
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        transform_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="type_checker",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        transform = TypeCheckingBatchTransform(node_id=transform_node.node_id)
+
+        # Configure aggregation with count trigger
+        aggregation_settings = {
+            NodeID(transform_node.node_id): AggregationSettings(
+                name="type_check_batch",
+                plugin="type_checker",
+                trigger=TriggerConfig(count=3),
+            )
+        }
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source_node.node_id),
+            edge_map={},
+            route_resolution_map={},
+            aggregation_settings=aggregation_settings,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process 3 rows to trigger batch flush
+        # This should NOT raise AttributeError if PipelineRow objects are passed
+        all_results = []
+        for i in range(3):
+            results = processor.process_row(
+                row_index=i,
+                source_row=make_source_row({"value": i + 1}),
+                transforms=[transform],
+                ctx=ctx,
+            )
+            all_results.extend(results)
+
+        # Verify the batch was processed successfully
+        # If transforms received dicts instead of PipelineRow, .to_dict() would have failed
+        # In transform mode, we expect 3 CONSUMED_IN_BATCH + 1 COMPLETED (the aggregated result)
+        consumed = [r for r in all_results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
+
+        assert len(consumed) == 3, f"Expected 3 consumed rows, got {len(consumed)}"
+        assert len(completed) == 1, f"Expected 1 completed row, got {len(completed)}"
+        final_data = completed[0].final_data
+        assert isinstance(final_data, PipelineRow)
+        assert final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
 
 
 class TestProcessorDeaggregation:
@@ -368,14 +572,32 @@ class TestProcessorDeaggregation:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                 # Expand each row into 2 rows
+                output_rows = [
+                    {**row, "copy": 1},
+                    {**row, "copy": 2},
+                ]
+
+                # Generate contract for multi-row output
+                fields = tuple(
+                    FieldContract(
+                        normalized_name=key,
+                        original_name=key,
+                        python_type=object,
+                        required=False,
+                        source="inferred",
+                    )
+                    for key in output_rows[0]
+                )
+                contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
                 return TransformResult.success_multi(
-                    [
-                        {**row, "copy": 1},
-                        {**row, "copy": 2},
-                    ],
+                    cast(list[dict[str, Any] | PipelineRow], output_rows),
                     success_reason={"action": "test"},
+                    contract=contract,
                 )
 
         # Setup real recorder
@@ -414,7 +636,7 @@ class TestProcessorDeaggregation:
         # Process a row through the expanding transform
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=make_source_row({"value": 42}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -455,8 +677,10 @@ class TestProcessorDeaggregation:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success_multi([row, row], success_reason={"action": "test"})  # But returns multi!
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                # Return multi-row output (but creates_tokens=False, so should raise)
+                # Convert row to dict to avoid PipelineRow canonicalization issues
+                return TransformResult.success_multi([{**row}, {**row}], success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -494,7 +718,7 @@ class TestProcessorDeaggregation:
         with pytest.raises(RuntimeError, match="creates_tokens=False"):
             processor.process_row(
                 row_index=0,
-                row_data={"value": 1},
+                source_row=make_source_row({"value": 1}),
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -531,7 +755,7 @@ class TestProcessorDeaggregation:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 # Bug in plugin: creates TransformResult with row=None (contract violation)
                 # This should NOT be masked by defensive {} substitution
                 result = TransformResult(
@@ -588,7 +812,7 @@ class TestProcessorDeaggregation:
         # Process first row - buffered (not flushed yet)
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 1},
+            source_row=make_source_row({"value": 1}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -599,7 +823,7 @@ class TestProcessorDeaggregation:
         with pytest.raises(RuntimeError, match="neither row nor rows contains data"):
             processor.process_row(
                 row_index=1,
-                row_data={"value": 2},
+                source_row=make_source_row({"value": 2}),
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -635,7 +859,7 @@ class TestProcessorDeaggregation:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 # Bug in plugin: creates TransformResult with row=None (contract violation)
                 result = TransformResult(
                     status="success",
@@ -691,7 +915,7 @@ class TestProcessorDeaggregation:
         # Process first row - buffered
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 1},
+            source_row=make_source_row({"value": 1}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -701,7 +925,7 @@ class TestProcessorDeaggregation:
         with pytest.raises(RuntimeError, match="neither row nor rows contains data"):
             processor.process_row(
                 row_index=1,
-                row_data={"value": 2},
+                source_row=make_source_row({"value": 2}),
                 transforms=[transform],
                 ctx=ctx,
             )

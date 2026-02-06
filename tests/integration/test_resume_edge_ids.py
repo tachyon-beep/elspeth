@@ -15,6 +15,7 @@ from sqlalchemy import select
 from elspeth.contracts import Determinism, NodeType
 from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -41,13 +42,13 @@ class SimpleGate(BaseGate):
         self.input_schema = schema
         self.output_schema = schema
 
-    def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+    def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
         """Route even IDs to sink_a, odd IDs to sink_b."""
         row_id = row.get("id", 0)
         if row_id % 2 == 0:
-            return GateResult(row=row, action=RoutingAction.route("route_to:sink_a"))
+            return GateResult(row=row.to_dict(), action=RoutingAction.route("route_to:sink_a"))
         else:
-            return GateResult(row=row, action=RoutingAction.route("route_to:sink_b"))
+            return GateResult(row=row.to_dict(), action=RoutingAction.route("route_to:sink_b"))
 
     def on_start(self, ctx: PluginContext) -> None:
         pass

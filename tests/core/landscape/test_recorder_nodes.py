@@ -74,7 +74,7 @@ class TestLandscapeRecorderNodes:
             recorder.register_node(
                 run_id=run.run_id,
                 plugin_name="bad",
-                node_type="transfom",  # Typo! Should fail fast
+                node_type="transfom",  # type: ignore[arg-type]  # Intentionally wrong type to test validation
                 plugin_version="1.0.0",
                 config={},
                 schema_config=DYNAMIC_SCHEMA,

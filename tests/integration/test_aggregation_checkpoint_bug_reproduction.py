@@ -18,7 +18,10 @@ import pytest
 
 from elspeth.contracts import (
     ArtifactDescriptor,
+    FieldContract,
+    PipelineRow,
     RunStatus,
+    SchemaContract,
 )
 from elspeth.core.config import (
     AggregationSettings,
@@ -53,13 +56,27 @@ class BatchCollectorTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
         if isinstance(row, list):
             # Batch mode - aggregate
             total = sum(r.get("value", 0) for r in row)
+            output = {"id": row[0].get("id"), "value": total, "count": len(row)}
+
+            # Provide contract for output (adds "count" field)
+            contract = SchemaContract(
+                mode="OBSERVED",
+                fields=(
+                    FieldContract(normalized_name="id", original_name="id", python_type=int, required=False, source="inferred"),
+                    FieldContract(normalized_name="value", original_name="value", python_type=int, required=False, source="inferred"),
+                    FieldContract(normalized_name="count", original_name="count", python_type=int, required=False, source="inferred"),
+                ),
+                locked=True,
+            )
+
             return TransformResult.success(
-                {"id": row[0].get("id"), "value": total, "count": len(row)},
+                output,
                 success_reason={"action": "batch"},
+                contract=contract,
             )
         else:
             # Single row - passthrough
@@ -173,7 +190,7 @@ class TestAggregationCheckpointFixVerification:
             aggregation_settings={
                 transform_node_id: agg_settings,
             },
-            coalesce_settings={},
+            coalesce_settings=[],
         )
 
         # Enable checkpoint every row
@@ -188,7 +205,6 @@ class TestAggregationCheckpointFixVerification:
             default_sink="output",
             transforms=[],
             gates=[],
-            aggregation={},
             checkpoint=checkpoint_settings,
         )
 
@@ -215,7 +231,7 @@ class TestAggregationCheckpointFixVerification:
             # Call the original
             return original_create_checkpoint(*args, **kwargs)
 
-        checkpoint_mgr.create_checkpoint = capture_create_checkpoint
+        checkpoint_mgr.create_checkpoint = capture_create_checkpoint  # type: ignore[method-assign]
 
         # Run pipeline with checkpointing enabled
         orchestrator = Orchestrator(

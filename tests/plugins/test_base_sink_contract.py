@@ -21,6 +21,8 @@ class StubSink(BaseSink):
         ctx: PluginContext,
     ) -> ArtifactDescriptor:
         return ArtifactDescriptor(
+            artifact_type="file",
+            path_or_uri="/test/output.csv",
             content_hash="abc123",
             size_bytes=0,
         )

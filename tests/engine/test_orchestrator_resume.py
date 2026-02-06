@@ -33,6 +33,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig, RunResult
 from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.null_source import NullSource
 from elspeth.plugins.transforms.passthrough import PassThrough
+from tests.conftest import as_transform
 
 
 class TestOrchestratorResumeRowProcessing:
@@ -221,6 +222,34 @@ class TestOrchestratorResumeRowProcessing:
 
             conn.commit()
 
+        # Store schema contract (required for PipelineRow wrapping during resume)
+        # Create contract matching the data schema ({"id": int, "value": str})
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=False,
+                    source="inferred",
+                ),
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=str,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+        recorder = LandscapeRecorder(landscape_db, payload_store=payload_store)
+        recorder.update_run_contract(run_id, contract)
+
         # Build graph matching the nodes created above
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -393,7 +422,7 @@ class TestOrchestratorResumeRowProcessing:
         # Python's type system enforces this as a required keyword-only argument,
         # so we get TypeError before any runtime validation
         with pytest.raises(TypeError, match=r"payload_store"):
-            orchestrator.resume(resume_point, config, fixture_graph)
+            orchestrator.resume(resume_point, config, fixture_graph)  # type: ignore[call-arg]
 
     def test_resume_returns_run_result_with_status(
         self,
@@ -546,22 +575,27 @@ class TestOrchestratorResumeCleanup:
         P3-2026-01-28: Bug fix ensures _process_resumed_rows() finally block
         calls transform.close() in addition to on_complete().
         """
+        from elspeth.contracts import PluginSchema
+        from elspeth.contracts.schema_contract import PipelineRow
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
 
         # Create tracking transform
+        class TestSchema(PluginSchema):
+            id: int
+
         class TrackingTransform(BaseTransform):
             name = "tracking"
-            input_schema = None  # type: ignore[assignment]
-            output_schema = None  # type: ignore[assignment]
+            input_schema = TestSchema
+            output_schema = TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.close_called = False
                 self.on_complete_called = False
 
-            def process(self, row: dict, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 self.on_complete_called = True
@@ -681,6 +715,26 @@ class TestOrchestratorResumeCleanup:
 
             conn.commit()
 
+        # Store schema contract (required for PipelineRow wrapping during resume)
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+        recorder = LandscapeRecorder(landscape_db, payload_store=payload_store)
+        recorder.update_run_contract(run_id, contract)
+
         # Build graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -717,7 +771,7 @@ class TestOrchestratorResumeCleanup:
 
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[tracking_transform],
+            transforms=[as_transform(tracking_transform)],
             sinks={
                 "default": JSONSink(
                     {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
@@ -751,23 +805,28 @@ class TestOrchestratorResumeCleanup:
         Verifies that the suppress(Exception) wrapper in the finally block
         allows close() to be called even when on_complete() fails.
         """
+        from elspeth.contracts import PluginSchema
+        from elspeth.contracts.schema_contract import PipelineRow
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
+
+        class TestSchema(PluginSchema):
+            id: int
 
         class FailingOnCompleteTransform(BaseTransform):
             """Transform where on_complete() raises but close() should still be called."""
 
             name = "failing_on_complete"
-            input_schema = None  # type: ignore[assignment]
-            output_schema = None  # type: ignore[assignment]
+            input_schema = TestSchema
+            output_schema = TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.close_called = False
                 self.on_complete_called = False
 
-            def process(self, row: dict, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 self.on_complete_called = True
@@ -883,6 +942,26 @@ class TestOrchestratorResumeCleanup:
 
             conn.commit()
 
+        # Store schema contract (required for PipelineRow wrapping during resume)
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+        recorder = LandscapeRecorder(landscape_db, payload_store=payload_store)
+        recorder.update_run_contract(run_id, contract)
+
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source-node-fail", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
@@ -915,7 +994,7 @@ class TestOrchestratorResumeCleanup:
 
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[failing_transform],
+            transforms=[as_transform(failing_transform)],
             sinks={
                 "default": JSONSink(
                     {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
@@ -935,3 +1014,222 @@ class TestOrchestratorResumeCleanup:
         # Assert: on_complete was called (and raised), but close() was STILL called
         assert failing_transform.on_complete_called, "on_complete() was not called"
         assert failing_transform.close_called, "close() must be called even when on_complete() raises"
+
+
+class TestOrchestratorResumeMissingContract:
+    """Tests for Orchestrator.resume() behavior when contract is missing.
+
+    P1-2026-02-05: Per CLAUDE.md Tier-1 trust model, missing contract is treated
+    as audit trail corruption. Resume must raise OrchestrationInvariantError.
+    """
+
+    @pytest.fixture
+    def landscape_db(self, tmp_path: Path) -> LandscapeDB:
+        """Create test database."""
+        return LandscapeDB(f"sqlite:///{tmp_path}/test.db")
+
+    @pytest.fixture
+    def payload_store(self, tmp_path: Path) -> FilesystemPayloadStore:
+        """Create test payload store."""
+        return FilesystemPayloadStore(tmp_path / "payloads")
+
+    @pytest.fixture
+    def checkpoint_manager(self, landscape_db: LandscapeDB) -> CheckpointManager:
+        """Create checkpoint manager."""
+        return CheckpointManager(landscape_db)
+
+    @pytest.fixture
+    def orchestrator(self, landscape_db: LandscapeDB, checkpoint_manager: CheckpointManager) -> Orchestrator:
+        """Create orchestrator with checkpoint manager."""
+        return Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_manager,
+        )
+
+    def test_resume_raises_on_missing_contract(
+        self,
+        landscape_db: LandscapeDB,
+        checkpoint_manager: CheckpointManager,
+        payload_store: FilesystemPayloadStore,
+        orchestrator: Orchestrator,
+        tmp_path: Path,
+    ) -> None:
+        """resume() raises OrchestrationInvariantError when schema contract is missing.
+
+        P1-2026-02-05: Per CLAUDE.md Tier-1 trust model:
+        - "Bad data in the audit trail = crash immediately"
+        - Missing contract is treated as audit trail corruption
+        - NO backward compatibility for pre-contract runs
+        """
+        from elspeth.contracts import ResumePoint
+        from elspeth.contracts.errors import OrchestrationInvariantError
+        from elspeth.plugins.sinks.json_sink import JSONSink
+        from elspeth.plugins.sources.null_source import NullSource
+        from elspeth.plugins.transforms.passthrough import PassThrough
+
+        # Set up a failed run WITHOUT a schema contract
+        run_id = "test-missing-contract"
+        now = datetime.now(UTC)
+
+        source_schema_json = json.dumps({"properties": {"id": {"type": "integer"}}, "required": ["id"]})
+
+        with landscape_db.engine.connect() as conn:
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=run_id,
+                    started_at=now,
+                    config_hash="test",
+                    settings_json="{}",
+                    canonical_version="sha256-rfc8785-v1",
+                    status=RunStatus.FAILED,
+                    source_schema_json=source_schema_json,
+                    # NOTE: schema_contract_json is NOT set - this is the key condition
+                )
+            )
+
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="source-node",
+                    run_id=run_id,
+                    plugin_name="null",
+                    node_type=NodeType.SOURCE,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="transform-node",
+                    run_id=run_id,
+                    plugin_name="passthrough",
+                    node_type=NodeType.TRANSFORM,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="sink-node",
+                    run_id=run_id,
+                    plugin_name="json",
+                    node_type=NodeType.SINK,
+                    plugin_version="1.0",
+                    determinism=Determinism.IO_WRITE,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id="e1",
+                    run_id=run_id,
+                    from_node_id="source-node",
+                    to_node_id="transform-node",
+                    label="continue",
+                    default_mode=RoutingMode.MOVE,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id="e2",
+                    run_id=run_id,
+                    from_node_id="transform-node",
+                    to_node_id="sink-node",
+                    label="continue",
+                    default_mode=RoutingMode.MOVE,
+                    created_at=now,
+                )
+            )
+
+            row_data = {"id": 0}
+            payload_bytes = json.dumps(row_data).encode("utf-8")
+            payload_ref = payload_store.store(payload_bytes)
+
+            conn.execute(
+                rows_table.insert().values(
+                    row_id="row-000",
+                    run_id=run_id,
+                    source_node_id="source-node",
+                    row_index=0,
+                    source_data_hash="hash0",
+                    source_data_ref=payload_ref,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id="tok-000",
+                    row_id="row-000",
+                    created_at=now,
+                )
+            )
+
+            conn.commit()
+
+        # Build graph
+        graph = ExecutionGraph()
+        schema_config = {"schema": {"mode": "observed"}}
+        graph.add_node("source-node", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("transform-node", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink-node", node_type=NodeType.SINK, plugin_name="json", config=schema_config)
+        graph.add_edge("source-node", "transform-node", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("transform-node", "sink-node", label="continue", mode=RoutingMode.MOVE)
+        graph._sink_id_map = {SinkName("default"): NodeID("sink-node")}
+        graph._transform_id_map = {0: NodeID("transform-node")}
+        graph._config_gate_id_map = {}
+        graph._route_resolution_map = {}
+        graph._default_sink = "default"
+
+        # Create checkpoint
+        checkpoint_manager.create_checkpoint(
+            run_id=run_id,
+            token_id="tok-000",
+            node_id="source-node",
+            sequence_number=0,
+            graph=graph,
+        )
+
+        # Get checkpoint object to construct ResumePoint
+        # We bypass can_resume() to test the orchestrator's own check
+        checkpoint = checkpoint_manager.get_latest_checkpoint(run_id)
+        assert checkpoint is not None
+
+        resume_point = ResumePoint(
+            checkpoint=checkpoint,
+            token_id="tok-000",
+            node_id="source-node",
+            sequence_number=0,
+            aggregation_state=None,
+        )
+
+        # Create config
+        output_path = tmp_path / "output.json"
+        config = PipelineConfig(
+            source=NullSource({}),
+            transforms=[PassThrough({"schema": {"mode": "observed"}})],
+            sinks={"default": JSONSink({"path": str(output_path), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"})},
+        )
+
+        # Act & Assert: Should raise OrchestrationInvariantError
+        with pytest.raises(OrchestrationInvariantError) as exc_info:
+            orchestrator.resume(
+                resume_point,
+                config,
+                graph,
+                payload_store=payload_store,
+            )
+
+        # Verify error message contains relevant information
+        error_msg = str(exc_info.value)
+        assert "missing" in error_msg.lower()
+        assert "contract" in error_msg.lower()
+        assert run_id in error_msg

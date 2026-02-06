@@ -14,9 +14,10 @@ from __future__ import annotations
 import hashlib
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from elspeth.contracts import RowOutcome, RowResult, TokenInfo, TransformResult
+from elspeth.contracts import RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
@@ -44,7 +45,21 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import GateProtocol, TransformProtocol
+from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, TransformProtocol
+
+
+def _extract_dict(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
+    """Extract dict from PipelineRow or pass through dict.
+
+    This is a legitimate boundary operation when we need to create a NEW
+    PipelineRow with a different contract. We're not hiding bugs - we're
+    converting between representations at a known boundary.
+    """
+    if isinstance(row, PipelineRow):
+        # Extract immutable dict from PipelineRow
+        return dict(row._data)
+    return row
+
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
@@ -84,7 +99,7 @@ class RowProcessor:
 
         result = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=SourceRow.valid({"value": 42}, contract=contract),
             transforms=[transform1, transform2],
             ctx=ctx,
         )
@@ -207,13 +222,15 @@ class RowProcessor:
 
         status = NodeStateStatus.COMPLETED if transform_result.status == "success" else NodeStateStatus.FAILED
 
+        # node_id is assigned by orchestrator before execution (see _assign_node_ids_to_plugins)
+        assert transform.node_id is not None, "node_id must be assigned by orchestrator before execution"
         self._emit_telemetry(
             TransformCompleted(
                 timestamp=datetime.now(UTC),
                 run_id=self._run_id,
                 row_id=token.row_id,
                 token_id=token.token_id,
-                node_id=transform.node_id,  # type: ignore[arg-type]
+                node_id=transform.node_id,
                 plugin_name=transform.name,
                 status=status,
                 duration_ms=transform_result.duration_ms or 0.0,
@@ -445,7 +462,7 @@ class RowProcessor:
         """
         return self._aggregation_executor.execute_flush(
             node_id=node_id,
-            transform=transform,
+            transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
             ctx=ctx,
             step_in_pipeline=step_in_pipeline,
             trigger_type=TriggerType.TIMEOUT,
@@ -497,7 +514,7 @@ class RowProcessor:
         # Execute flush with the specified trigger type
         result, buffered_tokens, _batch_id = self._aggregation_executor.execute_flush(
             node_id=node_id,
-            transform=transform,
+            transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
             ctx=ctx,
             step_in_pipeline=audit_step,
             trigger_type=trigger_type,
@@ -614,7 +631,17 @@ class RowProcessor:
                     f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
                 )
 
-            for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
+            # Contract validation for passthrough mode
+            if result.contract is None:
+                raise ValueError(
+                    f"Passthrough aggregation {transform.name} produced multi-row output but returned no contract. "
+                    f"Schema-changing aggregations must update contracts. This is a plugin bug."
+                )
+
+            # Convert output rows (plain dicts) to PipelineRow objects using contract
+            pipeline_rows = [PipelineRow(_extract_dict(row), result.contract) for row in result.rows]
+
+            for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                 # Update token with enriched data, preserving all lineage metadata
                 updated_token = token.with_updated_data(enriched_data)
 
@@ -682,9 +709,18 @@ class RowProcessor:
             # Create new tokens via expand_token using first buffered token as parent
             # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
             if buffered_tokens:
+                # B1: No fallback - schema-changing transforms MUST provide contract
+                # Per CLAUDE.md Three-Tier Trust Model: transforms are system code, bugs should crash
+                if result.contract is None:
+                    raise ValueError(
+                        f"Batch transform {transform.name} produced multi-row output but returned no contract. "
+                        f"Schema-changing transforms must update contracts. This is a plugin bug."
+                    )
+
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
-                    expanded_rows=output_rows,
+                    expanded_rows=[_extract_dict(row) for row in output_rows],
+                    output_contract=result.contract,
                     step_in_pipeline=audit_step,
                     run_id=self._run_id,
                     record_parent_outcome=False,
@@ -800,7 +836,7 @@ class RowProcessor:
             # Execute flush with full audit recording
             result, buffered_tokens, batch_id = self._aggregation_executor.execute_flush(
                 node_id=node_id,
-                transform=transform,
+                transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
                 ctx=ctx,
                 step_in_pipeline=step,
                 trigger_type=trigger_type,
@@ -920,6 +956,16 @@ class RowProcessor:
                         f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
                     )
 
+                # P1: Passthrough aggregations must provide contracts to enable PipelineRow conversion
+                if result.contract is None:
+                    raise ValueError(
+                        f"Batch transform {transform.name} produced multi-row output but returned no contract. "
+                        f"Schema-changing transforms must update contracts. This is a plugin bug."
+                    )
+
+                # Convert output rows (plain dicts) to PipelineRow objects using contract
+                pipeline_rows = [PipelineRow(_extract_dict(row), result.contract) for row in result.rows]
+
                 # Build COMPLETED results for all buffered tokens with enriched data
                 # Check if there are more transforms after this one
                 more_transforms = step < total_steps
@@ -937,7 +983,7 @@ class RowProcessor:
                     # p is current 0-indexed position). So transforms[step:] gives remaining.
                     # If there's a coalesce point, skip directly there (matches fork behavior).
                     continuation_start = coalesce_at_step if coalesce_at_step is not None else step
-                    for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
+                    for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
                         updated_token = token.with_updated_data(enriched_data)
                         child_items.append(
@@ -953,14 +999,15 @@ class RowProcessor:
                 else:
                     # No more transforms and no coalesce - return COMPLETED for all tokens
                     passthrough_results: list[RowResult] = []
-                    for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
+                    for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
                         updated_token = token.with_updated_data(enriched_data)
                         # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
+                        # Convert PipelineRow to dict for final_data (RowResult expects dict)
                         passthrough_results.append(
                             RowResult(
                                 token=updated_token,
-                                final_data=enriched_data,
+                                final_data=enriched_data.to_dict(),
                                 outcome=RowOutcome.COMPLETED,
                             )
                         )
@@ -1002,9 +1049,18 @@ class RowProcessor:
                 # Create new tokens via expand_token using triggering token as parent
                 # This establishes audit trail linkage
                 # NOTE: Don't record EXPANDED - triggering token gets CONSUMED_IN_BATCH below
+
+                # B1: No fallback - aggregations producing multi-row output MUST provide contract
+                if result.contract is None:
+                    raise ValueError(
+                        f"Aggregation {settings.name} produced multi-row output but returned no contract. "
+                        f"Schema-changing aggregations must update contracts. This is a plugin bug."
+                    )
+
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=current_token,
-                    expanded_rows=output_rows,
+                    expanded_rows=[_extract_dict(row) for row in output_rows],
+                    output_contract=result.contract,
                     step_in_pipeline=step,
                     run_id=self._run_id,
                     record_parent_outcome=False,
@@ -1253,7 +1309,7 @@ class RowProcessor:
     def process_row(
         self,
         row_index: int,
-        row_data: dict[str, Any],
+        source_row: SourceRow,
         transforms: list[Any],
         ctx: PluginContext,
         *,
@@ -1268,7 +1324,7 @@ class RowProcessor:
 
         Args:
             row_index: Position in source
-            row_data: Initial row data
+            source_row: SourceRow from source (must have contract)
             transforms: List of transform plugins
             ctx: Plugin context
             coalesce_at_step: Step index at which fork children should coalesce
@@ -1277,12 +1333,13 @@ class RowProcessor:
         Returns:
             List of RowResults, one per terminal token (parent + children)
         """
-        # Create initial token
+        # Create initial token from SourceRow
+        # TokenManager.create_initial_token() expects SourceRow and converts to PipelineRow
         token = self._token_manager.create_initial_token(
             run_id=self._run_id,
             source_node_id=self._source_node_id,
             row_index=row_index,
-            row_data=row_data,
+            source_row=source_row,
         )
 
         # Initialize work queue with initial token starting at step 0
@@ -1332,7 +1389,7 @@ class RowProcessor:
     def process_existing_row(
         self,
         row_id: str,
-        row_data: dict[str, Any],
+        row_data: PipelineRow,
         transforms: list[Any],
         ctx: PluginContext,
         *,
@@ -1589,10 +1646,12 @@ class RowProcessor:
 
                 # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
                 # (Landscape recording happens inside execute_gate)
+                # node_id is assigned by orchestrator before execution (see _assign_node_ids_to_plugins)
+                assert transform.node_id is not None, "node_id must be assigned by orchestrator before execution"
                 self._emit_gate_evaluated(
                     token=current_token,
                     gate_name=transform.name,
-                    gate_node_id=transform.node_id,  # type: ignore[arg-type]
+                    gate_node_id=transform.node_id,
                     routing_mode=outcome.result.action.mode,
                     destinations=self._get_gate_destinations(outcome),
                 )
@@ -1763,11 +1822,24 @@ class RowProcessor:
                         )
 
                     # Deaggregation: create child tokens for each output row
-                    # transform_result.rows is guaranteed non-None when is_multi_row is True
                     # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+
+                    # B1: No fallback - transforms producing multi-row output MUST provide contract
+                    # Per CLAUDE.md: Transforms are system code (Tier 1), bugs should crash immediately
+                    if transform_result.contract is None:
+                        raise ValueError(
+                            f"Transform {transform.name} produced multi-row output but returned no contract. "
+                            f"Schema-changing transforms must update contracts. This is a plugin bug."
+                        )
+
+                    # is_multi_row check above guarantees rows is not None
+                    assert transform_result.rows is not None, "is_multi_row guarantees rows is not None"
+                    # Convert any PipelineRow instances to dicts for TokenManager
+                    expanded_rows = [dict(r._data) if isinstance(r, PipelineRow) else r for r in transform_result.rows]
                     child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,
-                        expanded_rows=transform_result.rows,  # type: ignore[arg-type]
+                        expanded_rows=expanded_rows,
+                        output_contract=transform_result.contract,
                         step_in_pipeline=step,
                         run_id=self._run_id,
                     )

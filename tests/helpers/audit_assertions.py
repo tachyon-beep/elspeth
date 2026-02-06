@@ -93,4 +93,5 @@ def assert_batch_output_exists(
 
         assert result is not None, f"Batch {batch_id} has no entry in batch_outputs table."
 
-        return result.output_id
+        output_id: str = result.output_id
+        return output_id

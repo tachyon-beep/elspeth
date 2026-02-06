@@ -194,7 +194,8 @@ class TestCSVSinkHeaderModes:
 
         # Simulate orchestrator behavior: set contract on context, not sink
         ctx.contract = sample_contract
-        assert sink._output_contract is None  # Not explicitly set
+        # Use == instead of is to avoid mypy type narrowing that makes later code unreachable
+        assert sink._output_contract == None  # Not explicitly set  # noqa: E711
 
         sink.write([{"amount_usd": 100, "customer_id": "C001"}], ctx)
         sink.close()

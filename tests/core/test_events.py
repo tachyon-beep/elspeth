@@ -169,7 +169,7 @@ class TestNullEventBus:
         bus.emit(SampleEvent(value="test"))
 
 
-class SampleEventBusProtocol:
+class TestEventBusProtocol:
     """Tests for EventBusProtocol compatibility."""
 
     def test_eventbus_satisfies_protocol(self) -> None:
@@ -193,7 +193,7 @@ class SampleEventBusProtocol:
         accepts_protocol(NullEventBus())
 
 
-class SampleEventBusEdgeCases:
+class TestEventBusEdgeCases:
     """Edge case tests for EventBus."""
 
     def test_subscribe_same_handler_multiple_times(self) -> None:

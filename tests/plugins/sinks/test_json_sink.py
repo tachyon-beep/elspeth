@@ -1,12 +1,10 @@
-"""Tests for JSON sink plugin.
-
-NOTE: Protocol compliance tests (test_implements_protocol, test_has_required_attributes)
-are in conftest.py as parametrized tests covering all sink plugins.
-"""
+"""Tests for JSON sink plugin."""
 
 import hashlib
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -220,3 +218,59 @@ class TestJSONSink:
         assert artifact1.content_hash != artifact2.content_hash
 
         sink.close()
+
+    def test_json_array_atomic_write_preserves_data_on_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """JSON array mode uses atomic write - crash during write preserves prior data."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.json"
+        sink = JSONSink({"path": str(output_file), "format": "json", "schema": DYNAMIC_SCHEMA})
+
+        # First write succeeds - establishes file with data
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+        first_content = output_file.read_text()
+        assert json.loads(first_content) == [{"id": 1, "name": "alice"}]
+
+        # Simulate crash during second write: os.replace raises after temp file written
+        def crash_on_replace(src: str, dst: str) -> None:
+            # Remove temp file (simulating cleanup after crash) and raise
+            os.unlink(src)
+            raise OSError("Simulated crash during atomic replace")
+
+        with (
+            patch("os.replace", side_effect=crash_on_replace),
+            pytest.raises(OSError, match="Simulated crash"),
+        ):
+            sink.write([{"id": 2, "name": "bob"}], ctx)
+
+        # Original file is PRESERVED - this is the key assertion
+        surviving_content = output_file.read_text()
+        assert json.loads(surviving_content) == [{"id": 1, "name": "alice"}]
+        sink.close()
+
+    def test_json_array_no_temp_file_left_after_write(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Atomic write cleans up temp file after successful write."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.json"
+        sink = JSONSink({"path": str(output_file), "format": "json", "schema": DYNAMIC_SCHEMA})
+
+        sink.write([{"id": 1}], ctx)
+        sink.close()
+
+        # No .tmp file left behind
+        temp_file = output_file.with_suffix(".json.tmp")
+        assert not temp_file.exists()
+
+    def test_json_array_close_releases_buffered_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """close() releases buffered rows even without a persistent file handle."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.json"
+        sink = JSONSink({"path": str(output_file), "format": "json", "schema": DYNAMIC_SCHEMA})
+
+        sink.write([{"id": 1}, {"id": 2}, {"id": 3}], ctx)
+        assert len(sink._rows) == 3
+
+        sink.close()
+        assert len(sink._rows) == 0

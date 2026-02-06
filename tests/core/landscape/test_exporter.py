@@ -4,6 +4,7 @@
 import pytest
 
 from elspeth.contracts import BatchStatus, NodeStateStatus, NodeType, RoutingMode, RunStatus
+from elspeth.contracts.errors import TransformSuccessReason
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.exporter import LandscapeExporter
@@ -1001,3 +1002,264 @@ class TestLandscapeExporterTier1Corruption:
         # P1: Exporter must crash on invalid status, not return garbage
         with pytest.raises((ValueError, KeyError)):
             list(exporter.export_run(run.run_id))
+
+
+class TestLandscapeExporterCompleteness:
+    """BUG #9: Exporter must include ALL audit fields for complete export."""
+
+    def test_exporter_includes_node_state_context_fields(self) -> None:
+        """BUG #9: node_state exports must include context_before_json, context_after_json, error_json, success_reason_json.
+
+        These fields contain critical audit trail data:
+        - context_before_json: Plugin state before processing
+        - context_after_json: Plugin state after processing
+        - error_json: Failure details for FAILED states
+        - success_reason_json: Success metadata for COMPLETED states
+
+        Without these fields, exported audit trails can't fully investigate failures
+        or reproduce processing decisions.
+        """
+        from elspeth.contracts import Determinism
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="transform_1",
+            plugin_name="test",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id="transform_1",
+            row_index=0,
+            data={},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={},
+            context_before={"checkpoint": "step1"},  # Context data
+        )
+        success_reason: TransformSuccessReason = {"action": "validation_passed"}
+        recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data={"result": "ok"},
+            duration_ms=100.0,
+            context_after={"checkpoint": "step2"},  # Context data
+            success_reason=success_reason,  # Success metadata
+        )
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
+
+        exporter = LandscapeExporter(db)
+        records = list(exporter.export_run(run.run_id))
+
+        state_records = [r for r in records if r["record_type"] == "node_state"]
+        assert len(state_records) == 1
+
+        # BUG #9: These fields are currently missing from exports
+        state_record = state_records[0]
+        assert "context_before_json" in state_record, "context_before_json missing from export"
+        assert "context_after_json" in state_record, "context_after_json missing from export"
+        assert "error_json" in state_record, "error_json missing from export (should be None)"
+        assert "success_reason_json" in state_record, "success_reason_json missing from export"
+
+        # Verify values are correct (JSON string may have different spacing)
+        assert state_record["context_before_json"] is not None
+        assert "step1" in state_record["context_before_json"]
+        assert state_record["context_after_json"] is not None
+        assert "step2" in state_record["context_after_json"]
+        assert state_record["success_reason_json"] is not None
+        assert "validation_passed" in state_record["success_reason_json"]
+
+    def test_exporter_includes_operation_payload_refs(self) -> None:
+        """BUG #9: operation exports must include input_data_ref and output_data_ref.
+
+        Operations may store input/output data in the payload store.
+        Without these refs, exported audit trails can't access the full operation data.
+        """
+        from elspeth.contracts import Determinism
+        from elspeth.core.operations import track_operation
+        from elspeth.plugins.context import PluginContext
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={}, node_id=node.node_id, landscape=recorder)
+
+        with track_operation(
+            recorder=recorder,
+            run_id=run.run_id,
+            node_id=node.node_id,
+            operation_type="source_load",
+            ctx=ctx,
+            input_data={"path": "/input.csv"},
+        ) as handle:
+            handle.output_data = {"rows_loaded": 100}
+
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
+
+        exporter = LandscapeExporter(db)
+        records = list(exporter.export_run(run.run_id))
+
+        op_records = [r for r in records if r["record_type"] == "operation"]
+        assert len(op_records) == 1
+
+        # BUG #9: These fields are currently missing from exports
+        op_record = op_records[0]
+        assert "input_data_ref" in op_record, "input_data_ref missing from export"
+        assert "output_data_ref" in op_record, "output_data_ref missing from export"
+
+    def test_exporter_includes_call_payload_refs_and_timestamps(self) -> None:
+        """BUG #9: call exports must include request_ref, response_ref, error_json, created_at.
+
+        External calls may store request/response payloads and error details.
+        Without these fields, exported audit trails can't fully investigate call failures.
+        """
+        from elspeth.contracts import CallStatus, CallType, Determinism
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="transform_1",
+            plugin_name="test",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id="transform_1",
+            row_index=0,
+            data={},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={},
+        )
+        recorder.record_call(
+            state_id=state.state_id,
+            call_index=0,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_data={"prompt": "test"},
+            response_data={"completion": "result"},
+            latency_ms=100.0,
+        )
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
+
+        exporter = LandscapeExporter(db)
+        records = list(exporter.export_run(run.run_id))
+
+        call_records = [r for r in records if r["record_type"] == "call"]
+        assert len(call_records) == 1
+
+        # BUG #9: These fields are currently missing from exports
+        call_record = call_records[0]
+        assert "request_ref" in call_record, "request_ref missing from export"
+        assert "response_ref" in call_record, "response_ref missing from export"
+        assert "error_json" in call_record, "error_json missing from export"
+        assert "created_at" in call_record, "created_at missing from export"
+
+    def test_exporter_includes_routing_event_payload_refs(self) -> None:
+        """BUG #9: routing_event exports must include reason_ref and created_at.
+
+        Routing decisions may store detailed reasoning in the payload store.
+        Without reason_ref and created_at, exported audit trails can't fully investigate routing decisions.
+        """
+        from elspeth.contracts import Determinism
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        gate = recorder.register_node(
+            run_id=run.run_id,
+            node_id="gate",
+            plugin_name="test",
+            node_type=NodeType.GATE,
+            plugin_version="1.0.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="sink",
+            plugin_name="test",
+            node_type=NodeType.SINK,
+            plugin_version="1.0.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id="gate",
+            to_node_id="sink",
+            label="high_value",
+            mode=RoutingMode.MOVE,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=gate.node_id,
+            row_index=0,
+            data={},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=gate.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={},
+        )
+        recorder.record_routing_event(
+            state_id=state.state_id,
+            edge_id=edge.edge_id,
+            mode=RoutingMode.MOVE,
+            reason={"rule": "value > 1000", "matched_value": True},
+        )
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
+
+        exporter = LandscapeExporter(db)
+        records = list(exporter.export_run(run.run_id))
+
+        event_records = [r for r in records if r["record_type"] == "routing_event"]
+        assert len(event_records) == 1
+
+        # BUG #9: These fields are currently missing from exports
+        event_record = event_records[0]
+        assert "reason_ref" in event_record, "reason_ref missing from export"
+        assert "created_at" in event_record, "created_at missing from export"

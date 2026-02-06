@@ -748,6 +748,10 @@ class TestContractIntegrityVerification:
 
     def test_get_run_contract_verifies_hash(self) -> None:
         """get_run_contract() verifies hash integrity on retrieval."""
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import runs_table
+
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
 
@@ -771,11 +775,21 @@ class TestContractIntegrityVerification:
             schema_contract=contract,
         )
 
+        # Query database DIRECTLY to get the stored hash
+        with db.connection() as conn:
+            result = conn.execute(select(runs_table.c.schema_contract_hash).where(runs_table.c.run_id == run.run_id)).fetchone()
+            assert result is not None, "Run not found in database"
+            stored_hash = result[0]
+
+        # Retrieve contract via recorder
         retrieved = recorder.get_run_contract(run.run_id)
 
-        # Hash should match (integrity verified internally)
+        # Verify hash integrity: stored DB hash must match recomputed hash
         assert retrieved is not None
-        assert retrieved.version_hash() == contract.version_hash()
+        computed_hash = retrieved.version_hash()
+        assert stored_hash == computed_hash, f"Hash integrity violation: stored={stored_hash}, computed={computed_hash}"
+        # Also verify against original (should match if storage is correct)
+        assert computed_hash == contract.version_hash()
 
     def test_get_node_contracts_verifies_hash(self) -> None:
         """get_node_contracts() verifies hash integrity on retrieval."""

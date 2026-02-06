@@ -89,10 +89,12 @@ class TestPipelineRowAccess:
         assert "unknown" not in row
 
     def test_contains_with_extra_fields_in_flexible_mode(self) -> None:
-        """'in' returns False for extra fields not in contract, even if in data.
+        """'in' returns True for extra fields in FLEXIBLE mode (aligns with __getitem__).
 
-        Contract defines accessibility - extras exist in underlying data but
-        are NOT accessible via PipelineRow. Use to_dict() for raw access.
+        P2 fix: __contains__ must align with __getitem__ semantics. For FLEXIBLE/OBSERVED
+        contracts, __getitem__ allows access to extra fields, so __contains__ must return
+        True for those fields. This consistency is critical for gate expressions that check
+        membership before accessing fields ('field' in row then row['field']).
         """
         contract = SchemaContract(
             mode="FLEXIBLE",
@@ -104,11 +106,13 @@ class TestPipelineRowAccess:
 
         # Declared field is accessible
         assert "declared" in row
+        assert row["declared"] == 1
 
-        # Extra field is NOT accessible via PipelineRow (not in contract)
-        assert "extra" not in row
+        # Extra field IS accessible via PipelineRow in FLEXIBLE mode (aligns with __getitem__)
+        assert "extra" in row
+        assert row["extra"] == "value"  # __getitem__ allows this, so __contains__ must align
 
-        # But extras are still in underlying data (via to_dict)
+        # Extras are still in underlying data (via to_dict)
         assert "extra" in row.to_dict()
         assert row.to_dict()["extra"] == "value"
 
@@ -321,3 +325,90 @@ class TestPipelineRowJinja2Compatibility:
 
         if "nonexistent" in sample_row:
             pytest.fail("Should not enter block for missing field")
+
+
+class TestPipelineRowContainsGetitemConsistency:
+    """Test __contains__ / __getitem__ consistency (P2-2026-02-05 bug fix).
+
+    Gate expressions use 'field' in row checks via the 'in' operator. These must
+    align with __getitem__ behavior: if 'field in row' returns True, then
+    row['field'] must NOT raise KeyError.
+    """
+
+    def test_contains_and_getitem_consistency_for_declared_fields(self) -> None:
+        """__contains__ and __getitem__ agree on declared fields."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("declared", "Declared", int, True, "declared"),),
+            locked=True,
+        )
+        row = PipelineRow({"declared": 42}, contract)
+
+        # Declared field present in data
+        assert "declared" in row  # __contains__ returns True
+        assert row["declared"] == 42  # __getitem__ succeeds
+
+    def test_contains_and_getitem_consistency_for_extra_fields_flexible(self) -> None:
+        """__contains__ and __getitem__ agree on extra fields in FLEXIBLE mode."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("declared", "Declared", int, True, "declared"),),
+            locked=True,
+        )
+        row = PipelineRow({"declared": 1, "extra_field": "extra_value"}, contract)
+
+        # Extra field in FLEXIBLE mode
+        assert "extra_field" in row  # __contains__ returns True
+        assert row["extra_field"] == "extra_value"  # __getitem__ succeeds
+
+    def test_contains_and_getitem_consistency_for_extra_fields_observed(self) -> None:
+        """__contains__ and __getitem__ agree on extra fields in OBSERVED mode."""
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract("observed", "Observed", int, True, "inferred"),),
+            locked=True,
+        )
+        row = PipelineRow({"observed": 1, "extra_field": "extra_value"}, contract)
+
+        # Extra field in OBSERVED mode
+        assert "extra_field" in row  # __contains__ returns True
+        assert row["extra_field"] == "extra_value"  # __getitem__ succeeds
+
+    def test_contains_and_getitem_consistency_for_missing_fields(self) -> None:
+        """__contains__ and __getitem__ agree on missing fields."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("declared", "Declared", int, True, "declared"),),
+            locked=True,
+        )
+        row = PipelineRow({"declared": 1}, contract)
+
+        # Missing field
+        assert "missing" not in row  # __contains__ returns False
+        with pytest.raises(KeyError):
+            _ = row["missing"]  # __getitem__ raises KeyError
+
+    def test_gate_expression_pattern_with_extra_fields(self) -> None:
+        """Gate expressions can safely check membership before accessing extra fields.
+
+        This pattern is used in config gate expressions:
+            if 'llm_response' in row: return row['llm_response']
+
+        Before the P2 fix, 'llm_response' in row would return False (not in contract)
+        even though row['llm_response'] would succeed (FLEXIBLE mode allows extras).
+        This caused gates to mis-evaluate and potentially route rows incorrectly.
+        """
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("customer_id", "Customer ID", str, True, "declared"),),
+            locked=True,
+        )
+        # Simulate LLM transform adding response field not in contract
+        row = PipelineRow({"customer_id": "C001", "llm_response": "classified"}, contract)
+
+        # Gate pattern: check membership before access
+        if "llm_response" in row:
+            # This block MUST execute, and access MUST succeed
+            assert row["llm_response"] == "classified"
+        else:
+            pytest.fail("Gate mis-evaluated: 'llm_response' in row returned False but field is accessible")

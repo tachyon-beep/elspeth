@@ -576,3 +576,157 @@ class TestCheckpointManager:
                 sequence_number=0,
                 graph=empty_graph,
             )
+
+    def test_checkpoint_with_datetime_in_aggregation_state(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
+        """P1-2026-02-05: datetime values in aggregation state must serialize and restore correctly.
+
+        SchemaContract allows datetime as a valid field type, so aggregation buffers
+        can legally contain datetime values from PipelineRow.to_dict(). The checkpoint
+        serializer must handle this without raising TypeError.
+
+        Regression test for: P1-2026-02-05-checkpointmanager-cannot-serialize-aggregatio.md
+        """
+        from elspeth.core.checkpoint.serialization import checkpoint_loads
+
+        # Aggregation state with datetime (simulating buffered row data)
+        test_datetime = datetime(2026, 2, 5, 12, 30, 45, tzinfo=UTC)
+        agg_state = {
+            "node-001": {
+                "tokens": [
+                    {
+                        "token_id": "tok-001",
+                        "row_id": "row-001",
+                        "row_data": {
+                            "id": 1,
+                            "name": "test",
+                            "created_at": test_datetime,  # datetime field
+                        },
+                    }
+                ],
+                "batch_id": "batch-001",
+            },
+            "_version": "2.0",
+        }
+
+        # Create checkpoint - this would previously raise TypeError
+        checkpoint = manager.create_checkpoint(
+            run_id="run-001",
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=1,
+            graph=mock_graph,
+            aggregation_state=agg_state,
+        )
+
+        # Verify checkpoint was created
+        assert checkpoint.aggregation_state_json is not None
+
+        # Verify round-trip: deserialize and check datetime is restored
+        restored = checkpoint_loads(checkpoint.aggregation_state_json)
+        restored_datetime = restored["node-001"]["tokens"][0]["row_data"]["created_at"]
+
+        assert isinstance(restored_datetime, datetime), (
+            f"Expected datetime, got {type(restored_datetime).__name__}. Checkpoint serialization must preserve datetime type fidelity."
+        )
+        assert restored_datetime == test_datetime, (
+            f"Expected {test_datetime}, got {restored_datetime}. Checkpoint round-trip must preserve datetime value exactly."
+        )
+
+    def test_checkpoint_with_nested_datetime_in_aggregation_state(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
+        """datetime values nested in lists and dicts must also round-trip correctly."""
+        from elspeth.core.checkpoint.serialization import checkpoint_loads
+
+        dt1 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+        dt2 = datetime(2026, 6, 15, 12, 30, 0, tzinfo=UTC)
+
+        agg_state = {
+            "node-001": {
+                "tokens": [
+                    {
+                        "token_id": "tok-001",
+                        "row_id": "row-001",
+                        "row_data": {
+                            "dates": [dt1, dt2],  # datetime in list
+                            "metadata": {"updated_at": dt1},  # datetime in nested dict
+                        },
+                    }
+                ],
+                "batch_id": "batch-001",
+            },
+        }
+
+        checkpoint = manager.create_checkpoint(
+            run_id="run-001",
+            token_id="tok-001",
+            node_id="node-001",
+            sequence_number=1,
+            graph=mock_graph,
+            aggregation_state=agg_state,
+        )
+
+        assert checkpoint.aggregation_state_json is not None
+        restored = checkpoint_loads(checkpoint.aggregation_state_json)
+        row_data = restored["node-001"]["tokens"][0]["row_data"]
+
+        # Check list of datetimes
+        assert row_data["dates"][0] == dt1
+        assert row_data["dates"][1] == dt2
+        assert isinstance(row_data["dates"][0], datetime)
+
+        # Check nested dict datetime
+        assert row_data["metadata"]["updated_at"] == dt1
+        assert isinstance(row_data["metadata"]["updated_at"], datetime)
+
+    def test_checkpoint_rejects_nan_in_aggregation_state(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
+        """NaN values must be rejected per CLAUDE.md audit integrity requirements."""
+        agg_state = {
+            "node-001": {
+                "tokens": [
+                    {
+                        "token_id": "tok-001",
+                        "row_data": {"value": float("nan")},  # NaN is invalid
+                    }
+                ],
+            },
+        }
+
+        with pytest.raises(ValueError, match="non-finite float"):
+            manager.create_checkpoint(
+                run_id="run-001",
+                token_id="tok-001",
+                node_id="node-001",
+                sequence_number=1,
+                graph=mock_graph,
+                aggregation_state=agg_state,
+            )
+
+    def test_checkpoint_rejects_infinity_in_aggregation_state(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
+        """Infinity values must be rejected per CLAUDE.md audit integrity requirements."""
+        agg_state = {
+            "node-001": {
+                "tokens": [
+                    {
+                        "token_id": "tok-001",
+                        "row_data": {"value": float("inf")},  # Infinity is invalid
+                    }
+                ],
+            },
+        }
+
+        with pytest.raises(ValueError, match="non-finite float"):
+            manager.create_checkpoint(
+                run_id="run-001",
+                token_id="tok-001",
+                node_id="node-001",
+                sequence_number=1,
+                graph=mock_graph,
+                aggregation_state=agg_state,
+            )

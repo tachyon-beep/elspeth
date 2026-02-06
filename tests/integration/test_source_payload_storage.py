@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import NodeType, SourceRow
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.row_data import RowDataState
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -20,6 +21,21 @@ from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_sink,
 
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
+
+
+def _make_contract(data: dict[str, Any]) -> SchemaContract:
+    """Create a simple schema contract for test data."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 def _build_simple_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -75,6 +91,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
         output_schema = _TestSchema
 
         def __init__(self, data: list[dict[str, Any]]) -> None:
+            super().__init__()
             self._data = data
 
         def on_start(self, ctx: Any) -> None:
@@ -82,7 +99,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
 
         def load(self, ctx: Any) -> Any:
             for row in self._data:
-                yield SourceRow.valid(row)
+                yield SourceRow.valid(row, contract=_make_contract(row))
 
         def close(self) -> None:
             pass
@@ -92,6 +109,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
         name = "test_sink"
 
         def __init__(self) -> None:
+            super().__init__()
             self.received_rows: list[dict[str, Any]] = []
 
         def on_start(self, ctx: Any) -> None:

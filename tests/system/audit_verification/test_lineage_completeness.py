@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import Determinism, NodeType, PipelineRow, PluginSchema, RoutingMode
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -56,10 +56,10 @@ class _PassthroughTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
-        return TransformResult.success(row, success_reason={"action": "passthrough"})
+        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
 
 class _EnrichingTransform(BaseTransform):
@@ -73,10 +73,11 @@ class _EnrichingTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
-        enriched = {**row, "enriched": True, "processed_by": self.name}
+        row_dict = row.to_dict()
+        enriched = {**row_dict, "enriched": True, "processed_by": self.name}
         return TransformResult.success(enriched, success_reason={"action": "enrich"})
 
 
@@ -137,9 +138,7 @@ class TestLineageCompleteness:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"id": "row_1", "value": 100})
-                yield SourceRow.valid({"id": "row_2", "value": 200})
-                yield SourceRow.valid({"id": "row_3", "value": 300})
+                yield from self.wrap_rows([{"id": "row_1", "value": 100}, {"id": "row_2", "value": 200}, {"id": "row_3", "value": 300}])
 
             def close(self) -> None:
                 pass
@@ -191,8 +190,7 @@ class TestLineageCompleteness:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"id": "doc_1", "value": 10})
-                yield SourceRow.valid({"id": "doc_2", "value": 20})
+                yield from self.wrap_rows([{"id": "doc_1", "value": 10}, {"id": "doc_2", "value": 20}])
 
             def close(self) -> None:
                 pass
@@ -265,7 +263,7 @@ class TestLineageAfterRetention:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"id": "row_1", "value": 100})
+                yield from self.wrap_rows([{"id": "row_1", "value": 100}])
 
             def close(self) -> None:
                 pass
@@ -354,7 +352,7 @@ class TestExplainQueryFunctionality:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid(source_data)
+                yield from self.wrap_rows([source_data])
 
             def close(self) -> None:
                 pass
@@ -430,7 +428,7 @@ class TestExplainQueryFunctionality:
             output_schema = _InputSchema
 
             def load(self, ctx: Any) -> Any:
-                yield SourceRow.valid({"id": "history_row", "value": 100})
+                yield from self.wrap_rows([{"id": "history_row", "value": 100}])
 
             def close(self) -> None:
                 pass

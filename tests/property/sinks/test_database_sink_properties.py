@@ -63,7 +63,7 @@ class TestDatabaseSinkProperties:
             )
             ctx = PluginContext(run_id="test-run", config={})
             ctx.operation_id = "op-test"
-            ctx.landscape = _NullLandscape()
+            ctx.landscape = _NullLandscape()  # type: ignore[assignment]
 
             descriptor = sink.write(rows, ctx)
             sink.close()

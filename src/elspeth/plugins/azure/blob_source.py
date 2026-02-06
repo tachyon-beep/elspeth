@@ -327,6 +327,28 @@ class AzureBlobSource(BaseSource):
         # Set output_schema for protocol compliance
         self.output_schema = self._schema_class
 
+        # Create schema contract for PipelineRow support
+        # Strategy depends on format and schema mode:
+        # - CSV: needs field_resolution, so ContractBuilder created during load()
+        # - JSON/JSONL with FIXED/FLEXIBLE: contract locked immediately
+        # - JSON/JSONL with OBSERVED: ContractBuilder for first-row inference
+        from elspeth.contracts.contract_builder import ContractBuilder
+        from elspeth.contracts.schema_contract_factory import create_contract_from_config
+
+        if self._format == "csv":
+            # CSV needs field_resolution from headers - defer contract creation to load()
+            self._contract_builder = None
+        else:
+            # JSON/JSONL - no field normalization, identity mapping
+            initial_contract = create_contract_from_config(self._schema_config)
+            if initial_contract.locked:
+                # FIXED/FLEXIBLE - contract ready immediately
+                self.set_schema_contract(initial_contract)
+                self._contract_builder = None
+            else:
+                # OBSERVED - will lock after first valid row
+                self._contract_builder = ContractBuilder(initial_contract)
+
         # Lazy-loaded blob client
         self._blob_client: BlobClient | None = None
 
@@ -360,6 +382,9 @@ class AzureBlobSource(BaseSource):
         - Valid rows are yielded as SourceRow.valid()
         - Invalid rows are yielded as SourceRow.quarantined()
 
+        For OBSERVED schemas, the first valid row locks the contract with
+        inferred types. Subsequent rows validate against the locked contract.
+
         Yields:
             SourceRow for each row (valid or quarantined).
 
@@ -368,6 +393,8 @@ class AzureBlobSource(BaseSource):
             azure.core.exceptions.ResourceNotFoundError: If blob does not exist.
             azure.core.exceptions.ClientAuthenticationError: If connection fails.
         """
+        # Track first valid row for OBSERVED mode type inference
+        self._first_valid_row_processed = False
         # EXTERNAL SYSTEM: Azure Blob SDK calls - wrap with try/except
         # Record call for audit trail (ctx.operation_id is set by orchestrator)
         start_time = time.perf_counter()
@@ -521,6 +548,20 @@ class AzureBlobSource(BaseSource):
             if list(df.columns) != final_headers:
                 df.columns = final_headers
 
+        # Create contract now that field_resolution is known (CSV path)
+        if self._contract_builder is None and self._format == "csv":
+            from elspeth.contracts.contract_builder import ContractBuilder
+            from elspeth.contracts.schema_contract_factory import create_contract_from_config
+
+            initial_contract = create_contract_from_config(
+                self._schema_config,
+                field_resolution=self._field_resolution.resolution_mapping if self._field_resolution else None,
+            )
+            if initial_contract.locked:
+                self.set_schema_contract(initial_contract)
+            else:
+                self._contract_builder = ContractBuilder(initial_contract)
+
         # Log row count for operator visibility
         row_count = len(df)
         logger.info("Parsed %d rows from CSV blob '%s'", row_count, self._blob_path)
@@ -629,6 +670,9 @@ class AzureBlobSource(BaseSource):
     def _validate_and_yield(self, row: Any, ctx: PluginContext) -> Iterator[SourceRow]:
         """Validate a row and yield if valid, otherwise quarantine.
 
+        For OBSERVED schemas, the first valid row triggers type inference and
+        locks the contract. Subsequent rows validate against the locked contract.
+
         Args:
             row: Row data to validate. May be non-dict for malformed external
                  data (e.g., JSON arrays containing primitives).
@@ -640,7 +684,22 @@ class AzureBlobSource(BaseSource):
         try:
             # Validate and potentially coerce row data
             validated = self._schema_class.model_validate(row)
-            yield SourceRow.valid(validated.to_row())
+            validated_row = validated.to_row()
+
+            # For OBSERVED schemas, process first valid row to lock contract
+            if self._contract_builder is not None and not self._first_valid_row_processed:
+                # Use field_resolution from CSV if available, else identity mapping for JSON/JSONL
+                if self._field_resolution is not None:
+                    field_resolution_map = self._field_resolution.resolution_mapping
+                else:
+                    # JSON/JSONL without normalization - identity mapping
+                    field_resolution_map = {k: k for k in validated_row}
+
+                self._contract_builder.process_first_row(validated_row, field_resolution_map)
+                self.set_schema_contract(self._contract_builder.contract)
+                self._first_valid_row_processed = True
+
+            yield SourceRow.valid(validated_row, contract=self.get_schema_contract())
         except ValidationError as e:
             # Record validation failure in audit trail
             # This is a trust boundary: external data may be invalid

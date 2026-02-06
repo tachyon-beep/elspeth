@@ -121,6 +121,71 @@ class AggregationFlushResult:
         )
 
 
+@dataclass
+class ExecutionCounters:
+    """Mutable counters accumulated during pipeline execution.
+
+    Replaces the 11 loose counter variables + routed_destinations Counter
+    that were duplicated in both _execute_run() and _process_resumed_rows().
+
+    Mutable (not frozen) because counters are incremented row-by-row during
+    the processing loop. Frozen would require creating new instances on
+    every update.
+    """
+
+    rows_processed: int = 0
+    rows_succeeded: int = 0
+    rows_failed: int = 0
+    rows_routed: int = 0
+    rows_quarantined: int = 0
+    rows_forked: int = 0
+    rows_coalesced: int = 0
+    rows_coalesce_failed: int = 0
+    rows_expanded: int = 0
+    rows_buffered: int = 0
+    routed_destinations: Counter[str] = field(default_factory=Counter)
+
+    def accumulate_flush_result(self, result: AggregationFlushResult) -> None:
+        """Merge an AggregationFlushResult into these counters.
+
+        Replaces the 9 manual additions that appeared after every
+        check_aggregation_timeouts() and flush_remaining_aggregation_buffers() call.
+        """
+        self.rows_succeeded += result.rows_succeeded
+        self.rows_failed += result.rows_failed
+        self.rows_routed += result.rows_routed
+        self.rows_quarantined += result.rows_quarantined
+        self.rows_coalesced += result.rows_coalesced
+        self.rows_forked += result.rows_forked
+        self.rows_expanded += result.rows_expanded
+        self.rows_buffered += result.rows_buffered
+        for dest, count in result.routed_destinations.items():
+            self.routed_destinations[dest] += count
+
+    def to_run_result(self, run_id: str, status: RunStatus = RunStatus.RUNNING) -> RunResult:
+        """Build a RunResult from these counters.
+
+        Args:
+            run_id: The run identifier.
+            status: Run status (default RUNNING, caller updates to COMPLETED).
+        """
+        return RunResult(
+            run_id=run_id,
+            status=status,
+            rows_processed=self.rows_processed,
+            rows_succeeded=self.rows_succeeded,
+            rows_failed=self.rows_failed,
+            rows_routed=self.rows_routed,
+            rows_quarantined=self.rows_quarantined,
+            rows_forked=self.rows_forked,
+            rows_coalesced=self.rows_coalesced,
+            rows_coalesce_failed=self.rows_coalesce_failed,
+            rows_expanded=self.rows_expanded,
+            rows_buffered=self.rows_buffered,
+            routed_destinations=dict(self.routed_destinations),
+        )
+
+
 class RouteValidationError(Exception):
     """Raised when route configuration is invalid.
 

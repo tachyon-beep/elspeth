@@ -136,16 +136,30 @@ class DatadogExporter:
             )
 
         # Import and configure the tracer
-        # ddtrace 4.x uses environment variables for agent configuration
+        # ddtrace reads DD_AGENT_HOST/DD_TRACE_AGENT_PORT at init. We scope
+        # the env mutation: set before import, restore originals afterward.
         try:
             import os
 
-            from ddtrace import tracer  # type: ignore[attr-defined]
+            old_host = os.environ.get("DD_AGENT_HOST")
+            old_port = os.environ.get("DD_TRACE_AGENT_PORT")
 
-            # Set agent connection via environment variables (ddtrace 4.x API)
-            # These must be set before the tracer sends any spans
             os.environ["DD_AGENT_HOST"] = agent_host
             os.environ["DD_TRACE_AGENT_PORT"] = str(agent_port)
+
+            try:
+                from ddtrace import tracer  # type: ignore[attr-defined]
+            finally:
+                # Always restore original env, regardless of import outcome
+                # (ddtrace caches connection info internally at import time)
+                if old_host is None:
+                    os.environ.pop("DD_AGENT_HOST", None)
+                else:
+                    os.environ["DD_AGENT_HOST"] = old_host
+                if old_port is None:
+                    os.environ.pop("DD_TRACE_AGENT_PORT", None)
+                else:
+                    os.environ["DD_TRACE_AGENT_PORT"] = old_port
 
             self._tracer = tracer
         except ImportError as e:

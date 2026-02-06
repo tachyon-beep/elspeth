@@ -9,8 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+import structlog
+
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.type_normalization import normalize_type_for_contract
+
+log = structlog.get_logger()
 
 
 def propagate_contract(
@@ -69,6 +73,79 @@ def propagate_contract(
     return SchemaContract(
         mode=input_contract.mode,
         fields=input_contract.fields + tuple(new_fields),
+        locked=True,
+    )
+
+
+def narrow_contract_to_output(
+    input_contract: SchemaContract,
+    output_row: dict[str, Any],
+) -> SchemaContract:
+    """Narrow contract to match output row fields (handles field removal/renaming).
+
+    For transforms that remove or rename fields, we need to:
+    1. Remove fields not in output (e.g., JSONExplode removes array_field)
+    2. Add new fields in output (e.g., FieldMapper adds target, JSONExplode adds output_field)
+
+    Args:
+        input_contract: Contract from input row
+        output_row: Transform output data
+
+    Returns:
+        Contract containing fields from input that still exist + new fields
+
+    Note:
+        TODO: Extract shared field inference logic with propagate_contract() - 90% overlap
+    """
+    output_field_names = set(output_row.keys())
+
+    # Keep fields from input contract that exist in output
+    kept_fields = [fc for fc in input_contract.fields if fc.normalized_name in output_field_names]
+
+    # Find NEW fields in output (not in input contract)
+    existing_names = {f.normalized_name for f in input_contract.fields}
+    new_fields: list[FieldContract] = []
+    skipped_fields: list[str] = []
+
+    for name, value in output_row.items():
+        if name not in existing_names:
+            try:
+                python_type = normalize_type_for_contract(value)
+            except (TypeError, ValueError) as e:
+                # Skip non-primitive types or invalid values (NaN, Infinity)
+                # B4: Log skipped fields for observability
+                skipped_fields.append(name)
+                log.debug(
+                    "contract_field_skipped",
+                    field_name=name,
+                    reason=type(e).__name__,
+                    value_type=type(value).__name__,
+                )
+                continue
+
+            new_fields.append(
+                FieldContract(
+                    normalized_name=name,
+                    original_name=name,  # New fields have no original name
+                    python_type=python_type,
+                    required=False,  # Inferred fields are never required
+                    source="inferred",
+                )
+            )
+
+    # B4: Observability for contract modifications
+    log.debug(
+        "contract_narrowed",
+        input_field_count=len(input_contract.fields),
+        output_field_count=len(kept_fields) + len(new_fields),
+        fields_kept=[f.normalized_name for f in kept_fields],
+        fields_inferred=[f.normalized_name for f in new_fields],
+        fields_skipped=skipped_fields,
+    )
+
+    return SchemaContract(
+        mode=input_contract.mode,
+        fields=tuple(kept_fields + new_fields),
         locked=True,
     )
 

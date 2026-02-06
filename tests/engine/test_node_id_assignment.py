@@ -122,8 +122,8 @@ class TestNodeIdAssignment:
                 sink_id_map={},
             )
 
-    def test_assign_plugin_node_ids_raises_for_missing_sink(self) -> None:
-        """Should raise ValueError if sink name not in map."""
+    def test_assign_plugin_node_ids_skips_sink_not_in_map(self) -> None:
+        """Sinks not in sink_id_map are silently skipped (e.g., export sinks)."""
         db = MagicMock(spec=LandscapeDB)
         orchestrator = Orchestrator(db)
 
@@ -133,15 +133,17 @@ class TestNodeIdAssignment:
         sink = MagicMock()
         sink.node_id = None
 
-        with pytest.raises(ValueError, match="Sink 'output' not found"):
-            orchestrator._assign_plugin_node_ids(
-                source=source,
-                transforms=[],
-                sinks={"output": sink},
-                source_id=NodeID("source-1"),
-                transform_id_map={},
-                sink_id_map={},  # Missing mapping for "output"
-            )
+        orchestrator._assign_plugin_node_ids(
+            source=source,
+            transforms=[],
+            sinks={"output": sink},
+            source_id=NodeID("source-1"),
+            transform_id_map={},
+            sink_id_map={},  # Missing mapping for "output"
+        )
+
+        # Sink not in map should retain its original node_id (None)
+        assert sink.node_id is None
 
     def test_assign_plugin_node_ids_all_plugins_together(self) -> None:
         """Should correctly assign node_ids to all plugin types at once."""

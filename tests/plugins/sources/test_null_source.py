@@ -3,7 +3,6 @@
 import pytest
 
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SourceProtocol
 
 
 class TestNullSource:
@@ -31,22 +30,13 @@ class TestNullSource:
         source = NullSource({})
         assert source.name == "null"
 
-    def test_null_source_satisfies_protocol(self) -> None:
-        """NullSource satisfies SourceProtocol."""
-        from elspeth.plugins.sources.null_source import NullSource
-
-        source = NullSource({})
-        # This should not raise - source satisfies protocol
-        assert isinstance(source, SourceProtocol)
-
     def test_null_source_has_output_schema(self) -> None:
-        """NullSource has an output_schema attribute."""
+        """NullSource has an output_schema attribute that is a PluginSchema subclass."""
         from elspeth.contracts import PluginSchema
         from elspeth.plugins.sources.null_source import NullSource
 
         source = NullSource({})
-        assert hasattr(source, "output_schema")
-        # output_schema must be a PluginSchema subclass
+        # Direct access - no hasattr() per CLAUDE.md
         assert issubclass(source.output_schema, PluginSchema)
 
     def test_null_source_close_is_idempotent(self) -> None:
@@ -74,3 +64,75 @@ class TestNullSource:
         assert hasattr(source, "plugin_version")
         assert isinstance(source.plugin_version, str)
         assert source.plugin_version != ""
+
+    def test_null_source_schema_is_observed(self) -> None:
+        """NullSourceSchema must be recognized as observed by DAG validation.
+
+        Bug fix: P2-2026-02-05-nullsourceschema-treated-as-explicit-schema
+
+        NullSourceSchema must have extra="allow" to be recognized as observed.
+        The DAG validator checks: len(model_fields) == 0 AND model_config["extra"] == "allow"
+        Without this, resume execution graph validation fails when downstream
+        transforms have explicit input schemas.
+        """
+        from elspeth.plugins.sources.null_source import NullSourceSchema
+
+        # Structural observed check: no fields + extra="allow"
+        # This mirrors the check in dag.py:_is_observed_schema
+        assert len(NullSourceSchema.model_fields) == 0
+        assert NullSourceSchema.model_config["extra"] == "allow"
+
+    def test_null_source_schema_with_explicit_downstream_schema(self) -> None:
+        """Resume graph with NullSource and explicit downstream schema must validate.
+
+        Bug fix: P2-2026-02-05-nullsourceschema-treated-as-explicit-schema
+
+        This simulates a resume scenario where:
+        - NullSource (observed schema) is the source
+        - Downstream transform has explicit input schema with required fields
+
+        If NullSourceSchema is treated as explicit (extra="ignore"), validation fails
+        with "Missing fields" because an empty explicit schema cannot satisfy
+        required fields. With extra="allow" (observed), validation passes because
+        observed schemas bypass static type validation.
+        """
+        from pydantic import ConfigDict
+
+        from elspeth.contracts import NodeType, PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.sources.null_source import NullSourceSchema
+
+        # Create an explicit input schema with required fields
+        class ExplicitInputSchema(PluginSchema):
+            """Transform input schema that requires specific fields."""
+
+            model_config = ConfigDict(extra="forbid", strict=True)
+            customer_id: str
+            amount: int
+
+        # Build resume-like graph: NullSource -> Transform (explicit input) -> Sink
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="null",
+            output_schema=NullSourceSchema,
+        )
+        graph.add_node(
+            "transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="some_transform",
+            input_schema=ExplicitInputSchema,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv",
+        )
+        graph.add_edge("source", "transform", label="continue")
+        graph.add_edge("transform", "sink", label="continue")
+
+        # Validation should pass because NullSourceSchema is observed
+        # and observed schemas bypass static type validation (dag.py lines 1005-1008)
+        # Before the fix, this would raise GraphValidationError with "Missing fields: customer_id, amount"
+        graph.validate()  # Should not raise

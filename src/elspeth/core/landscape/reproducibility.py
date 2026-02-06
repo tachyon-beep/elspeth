@@ -13,7 +13,7 @@ Grades:
   via hashes, but cannot replay the run.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
 
 
-class ReproducibilityGrade(str, Enum):
+class ReproducibilityGrade(StrEnum):
     """Reproducibility levels for a completed run.
 
     Using str as base allows direct JSON serialization and comparison.
@@ -40,10 +40,10 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
     """Compute reproducibility grade from node determinism values.
 
     Logic:
-    - If any node has non-reproducible determinism (EXTERNAL_CALL, NON_DETERMINISTIC),
-      return REPLAY_REPRODUCIBLE
+    - If any node has non-reproducible determinism (EXTERNAL_CALL, NON_DETERMINISTIC,
+      IO_READ, IO_WRITE), return REPLAY_REPRODUCIBLE
     - Otherwise return FULL_REPRODUCIBLE
-    - DETERMINISTIC, SEEDED, IO_READ, IO_WRITE all count as reproducible
+    - Only DETERMINISTIC and SEEDED count as fully reproducible
     - Empty pipeline (no nodes) is trivially FULL_REPRODUCIBLE
 
     Args:
@@ -52,24 +52,42 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
 
     Returns:
         ReproducibilityGrade enum value
+
+    Raises:
+        ValueError: If any node has invalid determinism enum value (audit corruption)
     """
+    # Tier-1 audit data validation: Fetch ALL distinct determinism values
+    # and validate each is a valid Determinism enum member.
+    # Per Data Manifesto: "Bad data in the audit trail = crash immediately"
+    query_all = select(nodes_table.c.determinism).where(nodes_table.c.run_id == run_id).distinct()
+
+    with db.connection() as conn:
+        result = conn.execute(query_all)
+        determinism_values = [row[0] for row in result.fetchall()]
+
+    # Validate all determinism values are valid enum members
+    for det_value in determinism_values:
+        if det_value is None:
+            raise ValueError(f"NULL determinism value in nodes table for run {run_id} - audit data corruption")
+        try:
+            Determinism(det_value)
+        except ValueError:
+            raise ValueError(
+                f"Invalid determinism value '{det_value}' in nodes table for run {run_id} - "
+                f"expected one of {[d.value for d in Determinism]}"
+            ) from None
+
     # Determinism values that require replay (cannot reproduce from inputs alone)
+    # IO_READ/IO_WRITE are external/side-effectful - require captured data for replay
     non_reproducible = {
         Determinism.EXTERNAL_CALL.value,
         Determinism.NON_DETERMINISTIC.value,
+        Determinism.IO_READ.value,
+        Determinism.IO_WRITE.value,
     }
 
-    # Query for any non-reproducible nodes in this run
-    query = (
-        select(nodes_table.c.determinism)
-        .where(nodes_table.c.run_id == run_id)
-        .where(nodes_table.c.determinism.in_(non_reproducible))
-        .limit(1)  # We only need to know if ANY exist
-    )
-
-    with db.connection() as conn:
-        result = conn.execute(query)
-        has_non_reproducible = result.fetchone() is not None
+    # Check if any non-reproducible determinism values exist
+    has_non_reproducible = any(det in non_reproducible for det in determinism_values)
 
     if has_non_reproducible:
         return ReproducibilityGrade.REPLAY_REPRODUCIBLE

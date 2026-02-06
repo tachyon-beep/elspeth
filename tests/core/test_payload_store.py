@@ -74,6 +74,38 @@ class TestFilesystemPayloadStore:
 
         assert hash1 == hash2
 
+    def test_store_detects_corrupted_existing_file(self, tmp_path: Path) -> None:
+        """BUG #5: store() must verify existing files match expected hash.
+
+        If a file exists but is corrupted (bit rot, tampering, previous write failure),
+        store() must detect the mismatch and raise IntegrityError. Without this check,
+        the audit trail would reference a hash that doesn't match the actual content,
+        violating Tier-1 integrity.
+
+        This is the symmetric requirement to retrieve() which already verifies integrity.
+        """
+        from elspeth.contracts.payload_store import IntegrityError
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path)
+        original_content = b"original content"
+        content_hash = store.store(original_content)
+
+        # Corrupt the existing file (simulating bit rot, tampering, etc.)
+        file_path = tmp_path / content_hash[:2] / content_hash
+        corrupted_content = b"corrupted by bit rot"
+        file_path.write_bytes(corrupted_content)
+
+        # Attempt to store the original content again
+        # Since the file exists, store() does early return WITHOUT verification.
+        # This is the bug - it should verify the existing file matches the expected hash.
+        with pytest.raises(IntegrityError) as exc_info:
+            store.store(original_content)
+
+        # Error should indicate the mismatch
+        assert "integrity check failed" in str(exc_info.value).lower()
+        assert content_hash in str(exc_info.value)
+
     def test_creates_directory_structure(self, tmp_path: Path) -> None:
         from elspeth.core.payload_store import FilesystemPayloadStore
 

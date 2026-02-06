@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from elspeth.contracts import NodeType, PluginSchema, TokenInfo, TransformResult
 from elspeth.contracts.config import RuntimeRetryConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import node_states_table
@@ -28,6 +29,21 @@ from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
+
+
+def _make_contract(data: dict[str, Any]) -> SchemaContract:
+    """Create a contract from observed data fields."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class FlakyTransform(BaseTransform):
@@ -47,7 +63,7 @@ class FlakyTransform(BaseTransform):
         self.fail_count = 0
         self.max_fails = config.get("max_fails", 2)
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Fail max_fails times, then succeed."""
         self.fail_count += 1
         if self.fail_count <= self.max_fails:
@@ -70,7 +86,7 @@ class AlwaysFailTransform(BaseTransform):
         super().__init__(config)
         self.fail_count = 0
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Always fail with retryable error."""
         self.fail_count += 1
         raise ConnectionError(f"Permanent failure attempt {self.fail_count}")
@@ -139,8 +155,11 @@ class TestRetryAuditTrail:
         """Create a row and token for testing.
 
         Returns:
-            TokenInfo with row_id, token_id, and row_data
+            TokenInfo with row_id, token_id, and row_data as PipelineRow
         """
+        # Create contract for this data
+        contract = _make_contract(row_data)
+
         # Create the row record
         row = recorder.create_row(
             run_id=run_id,
@@ -152,10 +171,13 @@ class TestRetryAuditTrail:
         # Create the token record
         token = recorder.create_token(row_id=row.row_id)
 
+        # Wrap in PipelineRow
+        pipeline_row = PipelineRow(row_data, contract)
+
         return TokenInfo(
             token_id=token.token_id,
             row_id=row.row_id,
-            row_data=row_data,
+            row_data=pipeline_row,
             branch_name=None,
         )
 

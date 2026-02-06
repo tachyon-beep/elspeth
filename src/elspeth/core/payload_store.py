@@ -10,6 +10,7 @@ Uses content-addressable storage (hash-based) for:
 
 import hashlib
 import hmac
+import os
 import re
 from pathlib import Path
 
@@ -77,14 +78,50 @@ class FilesystemPayloadStore:
         return path
 
     def store(self, content: bytes) -> str:
-        """Store content and return its hash."""
+        """Store content and return its hash.
+
+        If file already exists, verifies integrity before returning hash.
+        This prevents corrupted files from being silently accepted.
+
+        Raises:
+            IntegrityError: If existing file doesn't match expected hash
+        """
         content_hash = hashlib.sha256(content).hexdigest()
         path = self._path_for_hash(content_hash)
 
-        # Idempotent: skip if already exists
-        if not path.exists():
+        if path.exists():
+            # BUG #5: Verify existing file matches expected hash
+            # Without this check, corrupted files (bit rot, tampering) would be
+            # silently accepted, violating Tier-1 audit integrity.
+            existing_content = path.read_bytes()
+            actual_hash = hashlib.sha256(existing_content).hexdigest()
+
+            # Use timing-safe comparison (same as retrieve())
+            if not hmac.compare_digest(actual_hash, content_hash):
+                raise payload_contracts.IntegrityError(
+                    f"Payload integrity check failed on store: existing file has hash {actual_hash}, expected {content_hash}"
+                )
+        else:
+            # File doesn't exist — atomic write via temp file to prevent
+            # partial/corrupted files on crash (Tier 1 integrity requirement)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
+            temp_path = path.with_suffix(".tmp")
+            try:
+                with open(temp_path, "wb") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temp_path, path)
+                # Fsync parent directory to ensure rename survives power loss
+                dir_fd = os.open(str(path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except BaseException:
+                if temp_path.exists():
+                    temp_path.unlink()
+                raise
 
         return content_hash
 

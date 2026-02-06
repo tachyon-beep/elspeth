@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -105,13 +106,13 @@ class BatchReplicate(BaseTransform):
             allow_coercion=False,
         )
 
-    def process(  # type: ignore[override]
-        self, rows: list[dict[str, Any]], ctx: PluginContext
+    def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
+        self, rows: list[PipelineRow], ctx: PluginContext
     ) -> TransformResult:
         """Replicate each row based on its copies field.
 
         Args:
-            rows: List of input rows (batch-aware receives list)
+            rows: List of input rows (batch-aware receives list[PipelineRow])
             ctx: Plugin context
 
         Returns:
@@ -125,7 +126,7 @@ class BatchReplicate(BaseTransform):
                 success_reason={"action": "processed", "metadata": {"empty_batch": True}},
             )
 
-        output_rows: list[dict[str, Any]] = []
+        output_rows: list[dict[str, Any] | PipelineRow] = []
 
         for row in rows:
             # Get copies count - field is optional, type must be correct if present
@@ -154,10 +155,29 @@ class BatchReplicate(BaseTransform):
 
             # Create copies of this row
             for copy_idx in range(copies):
-                output = dict(row)  # Shallow copy preserves original data
+                # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
+                output = row.to_dict()  # Shallow copy preserves original data
                 if self._include_copy_index:
                     output["copy_index"] = copy_idx
                 output_rows.append(output)
+
+        # Create OBSERVED contract from first output row
+        # Multi-row transforms must provide contracts for token expansion (processor.py:1826)
+        if output_rows:
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,  # OBSERVED mode - infer all as object type
+                    required=False,
+                    source="inferred",
+                )
+                for key in output_rows[0]
+            )
+            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        else:
+            # Empty output - create empty contract (shouldn't happen per validation)
+            output_contract = SchemaContract(mode="OBSERVED", fields=(), locked=True)
 
         # Return multiple rows - engine will create new tokens for each
         return TransformResult.success_multi(
@@ -166,6 +186,7 @@ class BatchReplicate(BaseTransform):
                 "action": "processed",
                 "fields_added": ["copy_index"] if self._include_copy_index else [],
             },
+            contract=output_contract,
         )
 
     def close(self) -> None:

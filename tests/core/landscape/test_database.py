@@ -387,6 +387,92 @@ class TestSchemaCompatibility:
         error_msg = str(exc_info.value)
         assert "foreign key" in error_msg.lower() or "Missing foreign keys" in error_msg
 
+    def test_missing_phase5_contract_columns_fails_validation(self, tmp_path: Path) -> None:
+        """BUG #8: Database missing Phase 5 schema contract audit columns should fail.
+
+        Phase 5 added schema contract tracking columns to runs and nodes tables:
+        - runs.schema_contract_json, runs.schema_contract_hash
+        - nodes.input_contract_json, nodes.output_contract_json
+
+        These columns are critical for audit trail integrity - without them,
+        we can't verify what schema contracts were in effect for a given run.
+
+        This test verifies that stale SQLite databases without these columns
+        are detected during schema validation, preventing runtime crashes.
+        """
+        import pytest
+        from sqlalchemy import create_engine, text
+
+        from elspeth.core.landscape.database import (
+            LandscapeDB,
+            SchemaCompatibilityError,
+        )
+
+        db_path = tmp_path / "old_schema_pre_phase5.db"
+
+        # Create pre-Phase5 schema with runs/nodes but missing contract columns
+        old_engine = create_engine(f"sqlite:///{db_path}")
+        with old_engine.begin() as conn:
+            # Create runs table WITHOUT Phase 5 contract columns
+            conn.execute(
+                text("""
+                CREATE TABLE runs (
+                    run_id TEXT PRIMARY KEY,
+                    started_at TIMESTAMP NOT NULL,
+                    completed_at TIMESTAMP,
+                    config_hash TEXT NOT NULL,
+                    settings_json TEXT NOT NULL,
+                    reproducibility_grade TEXT,
+                    canonical_version TEXT NOT NULL,
+                    source_schema_json TEXT,
+                    source_field_resolution_json TEXT,
+                    status TEXT NOT NULL,
+                    export_status TEXT,
+                    export_error TEXT,
+                    exported_at TIMESTAMP,
+                    export_format TEXT,
+                    export_sink TEXT
+                )
+            """)
+            )
+            # Note: schema_contract_json and schema_contract_hash are intentionally missing
+
+            # Create nodes table WITHOUT Phase 5 contract columns
+            conn.execute(
+                text("""
+                CREATE TABLE nodes (
+                    node_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    plugin_name TEXT NOT NULL,
+                    node_type TEXT NOT NULL,
+                    plugin_version TEXT NOT NULL,
+                    determinism TEXT NOT NULL,
+                    config_hash TEXT NOT NULL,
+                    config_json TEXT NOT NULL,
+                    schema_hash TEXT,
+                    sequence_in_pipeline INTEGER,
+                    registered_at TIMESTAMP NOT NULL,
+                    schema_mode TEXT,
+                    schema_fields_json TEXT,
+                    PRIMARY KEY (node_id, run_id)
+                )
+            """)
+            )
+            # Note: input_contract_json and output_contract_json are intentionally missing
+        old_engine.dispose()
+
+        # Schema validation should crash on missing Phase 5 columns
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            LandscapeDB(f"sqlite:///{db_path}")
+
+        error_msg = str(exc_info.value)
+        # Should report ALL four missing columns
+        assert "schema_contract_json" in error_msg
+        assert "schema_contract_hash" in error_msg
+        assert "input_contract_json" in error_msg
+        assert "output_contract_json" in error_msg
+        assert "schema is outdated" in error_msg.lower()
+
 
 class TestLandscapeJournal:
     """Tests for JSONL change journal."""

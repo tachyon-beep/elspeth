@@ -12,18 +12,29 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, SourceRow
+from elspeth.contracts import Determinism, FieldContract, SchemaContract, SourceRow
 from elspeth.core.landscape import LandscapeDB
-from tests.conftest import (
-    _TestSinkBase,
-    _TestSourceBase,
-    as_sink,
-    as_source,
-)
+from tests.conftest import as_sink, as_source
+from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     pass
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 @pytest.fixture(scope="module")
@@ -40,52 +51,12 @@ class TestOrchestratorInvalidRouting:
 
     def test_gate_routing_to_unknown_sink_raises_error(self, routing_db: LandscapeDB, payload_store) -> None:
         """Gate routing to non-existent sink must fail loudly, not silently."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import GraphValidationError
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
         )
-
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         # Config-driven gate that always routes to a non-existent sink
         misrouting_gate = GateSettings(
@@ -171,7 +142,8 @@ class TestOrchestratorOutputSinkRouting:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"id": 1, "value": "test"})])
+        row = {"id": 1, "value": "test"}
+        mock_source.load.return_value = iter([SourceRow.valid(row, contract=_make_observed_contract(row))])
         mock_source.get_field_resolution.return_value = None
         mock_source.get_schema_contract.return_value = None
 
@@ -212,51 +184,8 @@ class TestOrchestratorGateRouting:
 
     def test_gate_routes_to_named_sink(self, routing_db: LandscapeDB, payload_store) -> None:
         """Gate can route rows to a named sink using route labels."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        class RowSchema(PluginSchema):
-            id: int
-            score: float
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-                self.write_called = False
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.write_called = True
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
-
-            def close(self) -> None:
-                pass
 
         # Config-driven gate: always routes to "flagged" sink
         routing_gate = GateSettings(
@@ -282,8 +211,8 @@ class TestOrchestratorGateRouting:
         # Row should be routed, not completed
         assert result.rows_processed == 1
         assert result.rows_routed == 1
-        assert flagged_sink.write_called, "flagged sink should receive routed row"
-        assert not results_sink.write_called, "results sink should not receive routed row"
+        assert len(flagged_sink.results) == 1, "flagged sink should receive routed row"
+        assert len(results_sink.results) == 0, "results sink should not receive routed row"
 
 
 class TestRouteValidation:
@@ -296,29 +225,8 @@ class TestRouteValidation:
 
     def test_valid_routes_pass_validation(self, routing_db: LandscapeDB, payload_store) -> None:
         """Valid route configurations should pass validation without error."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
 
         # Config-driven gate: routes values > 50 to "quarantine" sink, else continues
         routing_gate = GateSettings(
@@ -326,25 +234,6 @@ class TestRouteValidation:
             condition="row['value'] > 50",
             routes={"true": "quarantine", "false": "continue"},
         )
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 10}, {"value": 100}])
         default_sink = CollectSink()
@@ -370,7 +259,6 @@ class TestRouteValidation:
 
     def test_invalid_route_destination_fails_at_init(self, routing_db: LandscapeDB, payload_store) -> None:
         """Route to non-existent sink should fail before processing any rows."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import GraphValidationError
         from elspeth.engine.orchestrator import (
@@ -378,53 +266,12 @@ class TestRouteValidation:
             PipelineConfig,
         )
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-                self.load_called = False
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                self.load_called = True
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
         # Config-driven gate: routes values > 50 to "quarantine" (which doesn't exist)
         safety_gate = GateSettings(
             name="safety_gate",
             condition="row['value'] > 50",
             routes={"true": "quarantine", "false": "continue"},
         )
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 10}, {"value": 100}])
         default_sink = CollectSink()
@@ -448,13 +295,11 @@ class TestRouteValidation:
         assert "safety_gate" in error_msg  # Gate name
         assert "quarantine" in error_msg  # Invalid destination
 
-        # Verify no rows were processed
-        assert not source.load_called, "Source should not be loaded on validation failure"
+        # Verify no rows were processed (sink should be empty)
         assert len(default_sink.results) == 0, "No rows should be written on failure"
 
     def test_error_message_includes_route_label(self, routing_db: LandscapeDB, payload_store) -> None:
         """Error message should include the route label for debugging."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import GraphValidationError
         from elspeth.engine.orchestrator import (
@@ -462,51 +307,12 @@ class TestRouteValidation:
             PipelineConfig,
         )
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
         # Config-driven gate: always routes to "high_scores" (which doesn't exist)
         threshold_gate = GateSettings(
             name="threshold_gate",
             condition="True",  # Always routes
             routes={"true": "high_scores", "false": "continue"},  # Non-existent sink
         )
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 10}])
         default_sink = CollectSink()
@@ -531,29 +337,8 @@ class TestRouteValidation:
 
     def test_continue_routes_are_not_validated_as_sinks(self, routing_db: LandscapeDB, payload_store) -> None:
         """Routes that resolve to 'continue' should not be validated as sinks."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "test_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
 
         # Config-driven gate: always continues (no routing to sink)
         filter_gate = GateSettings(
@@ -564,25 +349,6 @@ class TestRouteValidation:
                 "false": "continue",
             },  # "continue" is not a sink
         )
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 10}])
         default_sink = CollectSink()

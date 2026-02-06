@@ -127,8 +127,9 @@ class SanitizedWebhookUrl:
     ) -> "SanitizedWebhookUrl":
         """Create sanitized URL from raw webhook URL.
 
-        Handles both:
+        Handles:
         - Query parameter tokens (e.g., ?token=xxx, ?api_key=xxx)
+        - Fragment tokens (e.g., #access_token=xxx) - common in OAuth implicit flow
         - Basic Auth credentials (e.g., https://user:pass@host/path)
 
         The fingerprint is computed from ONLY the secret values (not the full URL),
@@ -153,14 +154,25 @@ class SanitizedWebhookUrl:
         parsed = urlparse(url)
         query_params = parse_qs(parsed.query, keep_blank_values=True)
 
+        # Parse fragment as query params (e.g., #access_token=xxx&state=yyy)
+        # SECURITY: OAuth implicit flow and some APIs put tokens in fragments
+        fragment_params = parse_qs(parsed.fragment, keep_blank_values=True)
+
         # Track which sensitive keys are present (even if empty)
-        has_sensitive_keys = any(k.lower() in SENSITIVE_PARAMS for k in query_params)
+        has_sensitive_query_keys = any(k.lower() in SENSITIVE_PARAMS for k in query_params)
+        has_sensitive_fragment_keys = any(k.lower() in SENSITIVE_PARAMS for k in fragment_params)
 
         # Collect only non-empty sensitive values for fingerprinting
         sensitive_values: list[str] = []
 
         # Check query params for sensitive keys
         for key, values in query_params.items():
+            if key.lower() in SENSITIVE_PARAMS:
+                # Only add non-empty values to fingerprint
+                sensitive_values.extend(v for v in values if v)
+
+        # Check fragment params for sensitive keys
+        for key, values in fragment_params.items():
             if key.lower() in SENSITIVE_PARAMS:
                 # Only add non-empty values to fingerprint
                 sensitive_values.extend(v for v in values if v)
@@ -174,8 +186,8 @@ class SanitizedWebhookUrl:
         if parsed.password:
             sensitive_values.append(parsed.password)
 
-        # If no sensitive keys or Basic Auth found, return URL unchanged
-        if not has_sensitive_keys and not has_basic_auth:
+        # If no sensitive keys in query, fragment, or Basic Auth found, return URL unchanged
+        if not has_sensitive_query_keys and not has_sensitive_fragment_keys and not has_basic_auth:
             return cls(sanitized_url=url, fingerprint=None)
 
         # Compute fingerprint only if there are non-empty values
@@ -211,6 +223,9 @@ class SanitizedWebhookUrl:
         # Remove sensitive query params
         sanitized_params = {k: v for k, v in query_params.items() if k.lower() not in SENSITIVE_PARAMS}
 
+        # Remove sensitive fragment params
+        sanitized_fragment_params = {k: v for k, v in fragment_params.items() if k.lower() not in SENSITIVE_PARAMS}
+
         # Reconstruct netloc without ANY Basic Auth credentials
         # SECURITY: Strip entire userinfo section when credentials present
         if has_basic_auth:
@@ -224,6 +239,10 @@ class SanitizedWebhookUrl:
         else:
             netloc = parsed.netloc
 
+        # Reconstruct fragment from sanitized params
+        # Only include fragment if there are remaining params
+        sanitized_fragment = urlencode(sanitized_fragment_params, doseq=True) if sanitized_fragment_params else ""
+
         # Reconstruct URL without secrets
         sanitized = urlunparse(
             (
@@ -232,7 +251,7 @@ class SanitizedWebhookUrl:
                 parsed.path,
                 parsed.params,
                 urlencode(sanitized_params, doseq=True) if sanitized_params else "",
-                parsed.fragment,
+                sanitized_fragment,
             )
         )
 

@@ -18,7 +18,6 @@ are created for that batch.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -30,14 +29,13 @@ from elspeth.contracts import (
     NodeID,
     NodeStateStatus,
     NodeType,
-    PluginSchema,
     RoutingMode,
     RowOutcome,
     RunStatus,
     SinkName,
-    SourceRow,
 )
 from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -47,11 +45,31 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
     _TestSinkBase,
-    _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
+from tests.engine.conftest import CollectSink, ListSource, _TestSchema
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -151,26 +169,6 @@ class TestCheckpointDurability:
         # Track checkpoints during the run (before they're deleted)
         checkpoint_count_during_write: list[int] = []
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class TrackingSink(_TestSinkBase):
             """Sink that tracks checkpoint creation timing."""
 
@@ -200,14 +198,14 @@ class TestCheckpointDurability:
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -300,28 +298,6 @@ class TestCheckpointDurability:
         # Track which rows are written during resume
         written_during_resume: list[dict[str, Any]] = []
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            """Source that yields from provided data list."""
-
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class TrackingSink(_TestSinkBase):
             """Sink that tracks all written rows."""
 
@@ -347,14 +323,14 @@ class TestCheckpointDurability:
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         # --- Phase 1: Simulate a partial run with crash ---
         # We manually create the database state that would exist if:
@@ -367,7 +343,7 @@ class TestCheckpointDurability:
         # Create the run with source schema for resume type restoration
         import json as json_lib
 
-        source_schema_json = json_lib.dumps(RowSchema.model_json_schema())
+        source_schema_json = json_lib.dumps(_TestSchema.model_json_schema())
         run = recorder.begin_run(config={}, canonical_version="v1", source_schema_json=source_schema_json)
         run_id = run.run_id
 
@@ -429,17 +405,19 @@ class TestCheckpointDurability:
         all_rows = [{"value": i} for i in range(5)]
         row_ids = []
         token_ids = []
+        schema_contract_recorded = False
 
         for i, row_data in enumerate(all_rows):
             # Store payload
             payload_ref = payload_store.store(json.dumps(row_data).encode("utf-8"))
 
             # Create row with payload reference
+            pipeline_row = _make_pipeline_row(row_data)
             row = recorder.create_row(
                 run_id=run_id,
                 source_node_id="source",
                 row_index=i,
-                data=row_data,
+                data=pipeline_row.to_dict(),
                 payload_ref=payload_ref,
             )
             row_ids.append(row.row_id)
@@ -447,6 +425,12 @@ class TestCheckpointDurability:
             # Create token for the row
             token = recorder.create_token(row_id=row.row_id)
             token_ids.append(token.token_id)
+
+            # Store schema contract on first row (matches production behavior)
+            # Resume requires this contract to wrap row data in PipelineRow
+            if not schema_contract_recorded:
+                recorder.update_run_contract(run_id, pipeline_row.contract)
+                schema_contract_recorded = True
 
         # Build graph for checkpoint topology validation
         test_graph = ExecutionGraph()
@@ -598,26 +582,6 @@ class TestCheckpointDurability:
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class FailingSink(_TestSinkBase):
             """Sink that always fails."""
 
@@ -637,14 +601,14 @@ class TestCheckpointDurability:
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -688,35 +652,15 @@ class TestCheckpointDurability:
         # We'll capture the checkpoint state before completion deletes them
         captured_checkpoints: list[Any] = []
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class DoubleTransform(BaseTransform):
             name = "double"
-            input_schema = RowSchema
-            output_schema = RowSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         class CapturingSink(_TestSinkBase):
@@ -794,26 +738,6 @@ class TestCheckpointDurability:
         checkpoints_before_write: list[int] = []
         checkpoints_after_write: list[int] = []
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class TimingSink(_TestSinkBase):
             """Sink that records checkpoint count before/after write."""
 
@@ -847,14 +771,14 @@ class TestCheckpointDurability:
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(3)])
         transform = PassthroughTransform()
@@ -903,26 +827,6 @@ class TestCheckpointTimingInvariants:
 
         captured_checkpoints: list[Any] = []
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
         class CapturingSink(_TestSinkBase):
             name = "capturing_sink"
 
@@ -949,14 +853,14 @@ class TestCheckpointTimingInvariants:
 
         class PassthroughTransform(BaseTransform):
             name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         # Process 5 rows
         source = ListSource([{"value": i} for i in range(5)])
@@ -1004,63 +908,12 @@ class TestCheckpointTimingInvariants:
         checkpoint_settings = CheckpointSettings(enabled=False)
         checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
-
-            def close(self) -> None:
-                pass
-
-        class PassthroughTransform(BaseTransform):
-            name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
-
         source = ListSource([{"value": i} for i in range(5)])
-        transform = PassthroughTransform()
         sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[as_transform(transform)],
+            transforms=[],
             sinks={"default": as_sink(sink)},
         )
 
@@ -1085,63 +938,12 @@ class TestCheckpointTimingInvariants:
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
         checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
-
-            def close(self) -> None:
-                pass
-
-        class PassthroughTransform(BaseTransform):
-            name = "passthrough"
-            input_schema = RowSchema
-            output_schema = RowSchema
-
-            def __init__(self) -> None:
-                super().__init__({"schema": {"mode": "observed"}})
-
-            def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "passthrough"})
-
         source = ListSource([{"value": i} for i in range(3)])
-        transform = PassthroughTransform()
         sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[as_transform(transform)],
+            transforms=[],
             sinks={"default": as_sink(sink)},
         )
 

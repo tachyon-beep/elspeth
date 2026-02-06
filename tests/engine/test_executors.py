@@ -33,6 +33,7 @@ from elspeth.contracts import (
 from elspeth.contracts.enums import Determinism, NodeType, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -60,6 +61,26 @@ if TYPE_CHECKING:
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 # =============================================================================
@@ -142,7 +163,7 @@ class TestGateOutcome:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
         result = GateResult(
             row={"x": 1},
@@ -164,18 +185,18 @@ class TestGateOutcome:
         parent_token = TokenInfo(
             row_id="row-1",
             token_id="parent",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
         child_a = TokenInfo(
             row_id="row-1",
             token_id="child-a",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
             branch_name="path_a",
         )
         child_b = TokenInfo(
             row_id="row-1",
             token_id="child-b",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
             branch_name="path_b",
         )
 
@@ -199,7 +220,7 @@ class TestGateOutcome:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
         result = GateResult(
             row={"x": 1},
@@ -274,7 +295,7 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"input": 1},
+            row_data=_make_pipeline_row({"input": 1}),
         )
 
         # Create row/token in landscape
@@ -282,7 +303,7 @@ class TestTransformExecutor:
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -296,7 +317,7 @@ class TestTransformExecutor:
         )
 
         assert result.status == "success"
-        assert updated_token.row_data == {"output": 42}
+        assert updated_token.row_data.to_dict() == {"output": 42}
         assert error_sink is None
 
     def test_execute_populates_audit_fields(
@@ -329,14 +350,14 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"input": 1},
+            row_data=_make_pipeline_row({"input": 1}),
         )
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -387,14 +408,14 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"input": 1},
+            row_data=_make_pipeline_row({"input": 1}),
         )
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -430,7 +451,7 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"input": 1},
+            row_data=_make_pipeline_row({"input": 1}),
         )
 
         executor = TransformExecutor(recorder, span_factory)
@@ -468,10 +489,10 @@ class MockGate:
         self._action = action or RoutingAction.continue_()
         self._raises = raises
 
-    def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+    def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
         if self._raises is not None:
             raise self._raises
-        return GateResult(row=row, action=self._action)
+        return GateResult(row=row.to_dict(), action=self._action)
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -536,14 +557,14 @@ class TestGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -613,14 +634,14 @@ class TestGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -674,14 +695,14 @@ class TestGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -720,7 +741,7 @@ class TestGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
 
         executor = GateExecutor(recorder, span_factory)
@@ -741,6 +762,40 @@ class TestGateExecutor:
 
 class TestAggregationExecutor:
     """Tests for AggregationExecutor class."""
+
+    def _make_test_contract(self) -> SchemaContract:
+        """Create a test contract for PipelineRow wrapping."""
+        return SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=int,
+                    required=False,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+    def _make_token_with_pipeline_row(
+        self,
+        row_id: str,
+        token_id: str,
+        row_data: dict[str, Any],
+        contract: SchemaContract | None = None,
+        branch_name: str | None = None,
+    ) -> TokenInfo:
+        """Create a TokenInfo with PipelineRow-wrapped row_data."""
+        if contract is None:
+            contract = self._make_test_contract()
+        return TokenInfo(
+            row_id=row_id,
+            token_id=token_id,
+            row_data=PipelineRow(row_data, contract),
+            branch_name=branch_name,
+        )
 
     def _register_agg_node(self, recorder: LandscapeRecorder, run_id: str) -> tuple[NodeID, AggregationSettings]:
         """Helper to register an aggregation node and return settings."""
@@ -796,11 +851,13 @@ class TestAggregationExecutor:
             )
             recorder.create_token(row_id=row.row_id, token_id=f"tok-{i}")
 
+        contract = self._make_test_contract()
         for i in range(3):
-            token = TokenInfo(
+            token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
                 row_data={"value": i},
+                contract=contract,
             )
             executor.buffer_row(node_id, token)
 
@@ -846,21 +903,24 @@ class TestAggregationExecutor:
             recorder.create_token(row_id=row.row_id, token_id=f"tok-{i}")
 
         # Buffer 2 rows - not enough
+        contract = self._make_test_contract()
         for i in range(2):
-            token = TokenInfo(
+            token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
                 row_data={"value": i},
+                contract=contract,
             )
             executor.buffer_row(node_id, token)
 
         assert not executor.should_flush(node_id)
 
         # Buffer 1 more - now should flush
-        token = TokenInfo(
+        token = self._make_token_with_pipeline_row(
             row_id="row-2",
             token_id="tok-2",
             row_data={"value": 2},
+            contract=contract,
         )
         executor.buffer_row(node_id, token)
 
@@ -905,11 +965,13 @@ class TestAggregationExecutor:
             )
             recorder.create_token(row_id=row.row_id, token_id=f"tok-{i}")
 
+        contract = self._make_test_contract()
         for i in range(2):
-            token = TokenInfo(
+            token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
                 row_data={"value": i},
+                contract=contract,
             )
             executor.buffer_row(node_id, token)
 
@@ -955,7 +1017,7 @@ class TestAggregationExecutor:
         )
         recorder.create_token(row_id=row.row_id, token_id="tok-1")
 
-        token = TokenInfo(
+        token = self._make_token_with_pipeline_row(
             row_id="row-1",
             token_id="tok-1",
             row_data={"value": 1},
@@ -1008,11 +1070,13 @@ class TestAggregationExecutor:
             recorder.create_token(row_id=row.row_id, token_id=f"tok-{i}")
 
         # Buffer some rows
+        contract = self._make_test_contract()
         for i in range(3):
-            token = TokenInfo(
+            token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
                 row_data={"value": i},
+                contract=contract,
                 branch_name="main" if i == 0 else None,
             )
             executor.buffer_row(node_id, token)
@@ -1122,8 +1186,8 @@ class TestSinkExecutor:
         )
 
         tokens = [
-            TokenInfo(row_id="row-1", token_id="tok-1", row_data={"x": 1}),
-            TokenInfo(row_id="row-2", token_id="tok-2", row_data={"x": 2}),
+            TokenInfo(row_id="row-1", token_id="tok-1", row_data=_make_pipeline_row({"x": 1})),
+            TokenInfo(row_id="row-2", token_id="tok-2", row_data=_make_pipeline_row({"x": 2})),
         ]
 
         # Create rows and tokens in landscape
@@ -1132,7 +1196,7 @@ class TestSinkExecutor:
                 run_id=run.run_id,
                 source_node_id=node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1179,8 +1243,8 @@ class TestSinkExecutor:
         )
 
         tokens = [
-            TokenInfo(row_id="row-1", token_id="tok-1", row_data={"x": 1}),
-            TokenInfo(row_id="row-2", token_id="tok-2", row_data={"x": 2}),
+            TokenInfo(row_id="row-1", token_id="tok-1", row_data=_make_pipeline_row({"x": 1})),
+            TokenInfo(row_id="row-2", token_id="tok-2", row_data=_make_pipeline_row({"x": 2})),
         ]
 
         for i, token in enumerate(tokens):
@@ -1188,7 +1252,7 @@ class TestSinkExecutor:
                 run_id=run.run_id,
                 source_node_id=node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1224,7 +1288,7 @@ class TestSinkExecutor:
         )
 
         tokens = [
-            TokenInfo(row_id="row-1", token_id="tok-1", row_data={"x": 1}),
+            TokenInfo(row_id="row-1", token_id="tok-1", row_data=_make_pipeline_row({"x": 1})),
         ]
 
         executor = SinkExecutor(recorder, span_factory, run.run_id)
@@ -1267,8 +1331,8 @@ class TestSinkExecutor:
         )
 
         tokens = [
-            TokenInfo(row_id="row-1", token_id="tok-1", row_data={"x": 1}),
-            TokenInfo(row_id="row-2", token_id="tok-2", row_data={"x": 2}),
+            TokenInfo(row_id="row-1", token_id="tok-1", row_data=_make_pipeline_row({"x": 1})),
+            TokenInfo(row_id="row-2", token_id="tok-2", row_data=_make_pipeline_row({"x": 2})),
         ]
 
         for i, token in enumerate(tokens):
@@ -1276,7 +1340,7 @@ class TestSinkExecutor:
                 run_id=run.run_id,
                 source_node_id=node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1340,7 +1404,7 @@ class TestTransformCanonicalValidation:
         class NaNTransform(_TestTransformBase):
             """Transform that returns NaN - violates canonical contract."""
 
-            name: ClassVar[str] = "nan_transform"
+            name = "nan_transform"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
@@ -1361,14 +1425,14 @@ class TestTransformCanonicalValidation:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1407,7 +1471,7 @@ class TestTransformCanonicalValidation:
         class InfTransform(_TestTransformBase):
             """Transform that returns Infinity - violates canonical contract."""
 
-            name: ClassVar[str] = "inf_transform"
+            name = "inf_transform"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
@@ -1428,14 +1492,14 @@ class TestTransformCanonicalValidation:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1470,7 +1534,7 @@ class TestTransformCanonicalValidation:
         class ValidTransform(_TestTransformBase):
             """Transform that returns valid canonical data."""
 
-            name: ClassVar[str] = "valid_transform"
+            name = "valid_transform"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
@@ -1499,14 +1563,14 @@ class TestTransformCanonicalValidation:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1522,5 +1586,6 @@ class TestTransformCanonicalValidation:
         )
 
         assert result.status == "success"
-        assert updated_token.row_data["string"] == "hello"
-        assert updated_token.row_data["int"] == 42
+        row_dict = updated_token.row_data.to_dict()
+        assert row_dict["string"] == "hello"
+        assert row_dict["int"] == 42

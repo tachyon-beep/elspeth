@@ -8,6 +8,7 @@ from elspeth.tui.screens.explain_screen import (
     InvalidStateTransitionError,
     LoadedState,
     LoadingFailedState,
+    ScreenState,
     UninitializedState,
 )
 
@@ -347,9 +348,11 @@ class TestExplainScreenStateTransitions:
         # load() should transition to LoadedState
         screen.load(db, run.run_id)
 
-        assert isinstance(screen.state, LoadedState)
-        assert screen.state.run_id == run.run_id
-        assert screen.state.db is db
+        # Re-read state with explicit type annotation to break mypy's type narrowing
+        new_state: ScreenState = screen.state
+        assert isinstance(new_state, LoadedState)
+        assert new_state.run_id == run.run_id
+        assert new_state.db is db
 
     def test_load_from_uninitialized_fails_gracefully(self) -> None:
         """load() from UninitializedState → LoadingFailedState on db error."""
@@ -451,8 +454,10 @@ class TestExplainScreenStateTransitions:
         # retry() should now succeed (patch removed, real get_nodes works)
         screen.retry()
 
-        assert isinstance(screen.state, LoadedState)
-        assert screen.state.run_id == run.run_id
+        # Re-read state with explicit type annotation to break mypy's type narrowing
+        new_state: ScreenState = screen.state
+        assert isinstance(new_state, LoadedState)
+        assert new_state.run_id == run.run_id
 
     def test_retry_from_loading_failed_still_fails(self) -> None:
         """retry() from LoadingFailedState → LoadingFailedState on persistent error."""
@@ -541,7 +546,9 @@ class TestExplainScreenStateTransitions:
 
         screen.clear()
 
-        assert isinstance(screen.state, UninitializedState)
+        # Re-read state with explicit type annotation to break mypy's type narrowing
+        new_state: ScreenState = screen.state
+        assert isinstance(new_state, UninitializedState)
 
     def test_clear_from_loading_failed_state(self) -> None:
         """clear() from LoadingFailedState → UninitializedState."""
@@ -563,7 +570,9 @@ class TestExplainScreenStateTransitions:
 
         screen.clear()
 
-        assert isinstance(screen.state, UninitializedState)
+        # Re-read state with explicit type annotation to break mypy's type narrowing
+        new_state: ScreenState = screen.state
+        assert isinstance(new_state, UninitializedState)
 
     def test_clear_from_uninitialized_is_idempotent(self) -> None:
         """clear() from UninitializedState → UninitializedState (no-op)."""
@@ -665,8 +674,12 @@ class TestExplainScreenStateTransitions:
 
         # User gives up and clears
         screen.clear()
-        assert isinstance(screen.state, UninitializedState)
+        # Re-read state with explicit type annotation to break mypy's type narrowing
+        cleared_state: ScreenState = screen.state
+        assert isinstance(cleared_state, UninitializedState)
 
         # Try loading fresh (now works)
         screen.load(db, run.run_id)
-        assert isinstance(screen.state, LoadedState)
+        # Re-read state again after load() mutation
+        loaded_state: ScreenState = screen.state
+        assert isinstance(loaded_state, LoadedState)

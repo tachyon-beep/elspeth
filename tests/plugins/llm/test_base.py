@@ -1,12 +1,14 @@
 # tests/plugins/llm/test_base.py
 """Tests for base LLM transform."""
 
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
@@ -19,6 +21,19 @@ from elspeth.plugins.llm.base import BaseLLMTransform, LLMConfig
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def wrap_in_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Wrap dict in PipelineRow with FLEXIBLE contract for testing.
+
+    Uses FLEXIBLE mode to allow access to any fields in the data.
+    """
+    contract = SchemaContract(
+        fields=(),  # No declared fields
+        mode="FLEXIBLE",
+        locked=True,
+    )
+    return PipelineRow(data, contract)
 
 
 def create_test_transform_class(
@@ -364,7 +379,7 @@ class TestBaseLLMTransformProcess:
         )
 
         # Missing required_field should return error
-        result = transform.process({"other_field": "value"}, ctx)
+        result = transform.process(wrap_in_pipeline_row({"other_field": "value"}), ctx)
 
         assert result.status == "error"
         assert result.reason is not None
@@ -385,7 +400,7 @@ class TestBaseLLMTransformProcess:
             }
         )
 
-        result = transform.process({"text": "hello"}, ctx)
+        result = transform.process(wrap_in_pipeline_row({"text": "hello"}), ctx)
 
         assert result.status == "error"
         assert result.reason is not None
@@ -414,7 +429,7 @@ class TestBaseLLMTransformProcess:
 
         # Exception propagates for engine retry (not converted to TransformResult)
         with pytest.raises(RateLimitError) as exc_info:
-            transform.process({"text": "hello"}, ctx)
+            transform.process(wrap_in_pipeline_row({"text": "hello"}), ctx)
 
         assert "Rate limit exceeded" in str(exc_info.value)
 
@@ -437,7 +452,7 @@ class TestBaseLLMTransformProcess:
             }
         )
 
-        result = transform.process({"text": "hello"}, ctx)
+        result = transform.process(wrap_in_pipeline_row({"text": "hello"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -471,7 +486,7 @@ class TestBaseLLMTransformProcess:
             }
         )
 
-        result = transform.process({"text": "hello"}, ctx)
+        result = transform.process(wrap_in_pipeline_row({"text": "hello"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -500,7 +515,7 @@ class TestBaseLLMTransformProcess:
             }
         )
 
-        transform.process({"text": "hello"}, ctx)
+        transform.process(wrap_in_pipeline_row({"text": "hello"}), ctx)
 
         # Verify messages passed to client
         call_args = mock_client.chat_completion.call_args
@@ -529,7 +544,7 @@ class TestBaseLLMTransformProcess:
             }
         )
 
-        transform.process({"text": "hello"}, ctx)
+        transform.process(wrap_in_pipeline_row({"text": "hello"}), ctx)
 
         call_args = mock_client.chat_completion.call_args
         messages = call_args.kwargs["messages"]
@@ -556,7 +571,7 @@ class TestBaseLLMTransformProcess:
             }
         )
 
-        transform.process({"text": "hello"}, ctx)
+        transform.process(wrap_in_pipeline_row({"text": "hello"}), ctx)
 
         call_args = mock_client.chat_completion.call_args
         assert call_args.kwargs["model"] == "gpt-4"
@@ -585,7 +600,7 @@ class TestBaseLLMTransformProcess:
 
         # Exception propagates for engine retry
         with pytest.raises(LLMClientError) as exc_info:
-            transform.process({"text": "hello"}, ctx)
+            transform.process(wrap_in_pipeline_row({"text": "hello"}), ctx)
 
         assert exc_info.value.retryable is True
         assert "Server overloaded" in str(exc_info.value)

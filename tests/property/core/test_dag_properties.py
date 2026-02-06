@@ -16,6 +16,7 @@ import networkx as nx
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts.types import NodeID
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
 # =============================================================================
@@ -407,7 +408,8 @@ class TestGraphConsistencyProperties:
         assert source is not None
 
         nx_graph = graph.get_nx_graph()
-        reachable = set(nx.descendants(nx_graph, source)) | {source}
+        # Cast to set[NodeID] since nx.descendants returns set[str] but our graph uses NodeID
+        reachable: set[NodeID] = {NodeID(n) for n in nx.descendants(nx_graph, source)} | {source}
 
         all_nodes = {info.node_id for info in graph.get_nodes()}
         assert reachable == all_nodes, f"Not all nodes reachable from source. Unreachable: {all_nodes - reachable}"
@@ -679,12 +681,12 @@ class TestGuaranteedFieldsProperties:
 
     @given(
         g1=st.frozensets(
-            st.text(min_size=1, max_size=6, alphabet=st.characters(whitelist_categories=("L",))),
+            st.text(min_size=1, max_size=6, alphabet=st.characters(whitelist_categories=["L"])),
             min_size=1,
             max_size=3,
         ),
         g2=st.frozensets(
-            st.text(min_size=1, max_size=6, alphabet=st.characters(whitelist_categories=("L",))),
+            st.text(min_size=1, max_size=6, alphabet=st.characters(whitelist_categories=["L"])),
             min_size=1,
             max_size=3,
         ),

@@ -93,7 +93,9 @@ from tests.fixtures.chaosllm import pytest_configure as _chaosllm_pytest_configu
 
 if TYPE_CHECKING:
     from elspeth.contracts import TransformResult
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.plugins.protocols import (
+        BatchTransformProtocol,
         GateProtocol,
         SinkProtocol,
         SourceProtocol,
@@ -107,7 +109,7 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture(autouse=True)
-def _auto_close_telemetry_managers():
+def _auto_close_telemetry_managers() -> Iterator[None]:
     """Automatically close all TelemetryManager instances created during tests.
 
     TelemetryManager starts a non-daemon background thread for async export.
@@ -133,10 +135,10 @@ def _auto_close_telemetry_managers():
     from elspeth.telemetry.manager import TelemetryManager
 
     # Track managers AND their original queues
-    created_managers: list[tuple[TelemetryManager, queue_module.Queue]] = []
+    created_managers: list[tuple[TelemetryManager, queue_module.Queue[Any]]] = []
     original_init = TelemetryManager.__init__
 
-    def tracking_init(self: TelemetryManager, *args, **kwargs) -> None:
+    def tracking_init(self: TelemetryManager, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
         # Store manager AND its original queue (in case tests replace _queue)
         created_managers.append((self, self._queue))
@@ -508,12 +510,32 @@ class _TestSourceBase:
 
     def __init__(self) -> None:
         """Initialize test source with empty config."""
-        self.config = {"schema": {"mode": "observed"}}
+        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
+        self._schema_contract: SchemaContract | None = None  # Track contract for audit trail
 
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
         """Wrap plain dicts in SourceRow.valid() as required by source protocol."""
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
         for row in rows:
-            yield SourceRow.valid(row)
+            # Create observed schema contract for this row
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in row
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+            # Store first contract for audit trail (needed for resume)
+            if self._schema_contract is None:
+                self._schema_contract = contract
+
+            yield SourceRow.valid(row, contract=contract)
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
@@ -534,13 +556,13 @@ class _TestSourceBase:
         """
         return None
 
-    def get_schema_contract(self) -> Any:
+    def get_schema_contract(self) -> "SchemaContract | None":
         """Return schema contract for audit trail.
 
-        Test sources don't have contracts by default, so return None.
-        Override in test classes that need to provide contracts.
+        Returns the contract created from the first row processed.
+        This is needed for resume operations to work correctly.
         """
-        return None
+        return self._schema_contract
 
 
 class CallbackSource(_TestSourceBase):
@@ -609,8 +631,22 @@ class CallbackSource(_TestSourceBase):
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         """Yield rows with callbacks between them for clock advancement."""
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
         for i, row in enumerate(self._rows):
-            yield SourceRow.valid(row)
+            # Create contract for this row
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in row
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+            yield SourceRow.valid(row, contract=contract)
             # Called when generator resumes (after row i processed, before row i+1 yields)
             if self._after_yield_callback is not None:
                 self._after_yield_callback(i)
@@ -664,7 +700,7 @@ class _TestSinkBase:
 
     def __init__(self) -> None:
         """Initialize test sink with empty config."""
-        self.config = {"schema": {"mode": "observed"}}
+        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
@@ -724,11 +760,12 @@ class _TestTransformBase:
     plugin_version = "1.0.0"
     is_batch_aware: bool = False
     creates_tokens: bool = False
+    transforms_adds_fields: bool = False
     _on_error: str | None = None
 
     def __init__(self) -> None:
         """Initialize test transform with empty config."""
-        self.config = {"schema": {"mode": "observed"}}
+        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
@@ -767,6 +804,11 @@ def as_transform(transform: Any) -> "TransformProtocol":
     return cast("TransformProtocol", transform)
 
 
+def as_batch_transform(transform: Any) -> "BatchTransformProtocol":
+    """Cast a test batch transform to BatchTransformProtocol."""
+    return cast("BatchTransformProtocol", transform)
+
+
 def as_sink(sink: Any) -> "SinkProtocol":
     """Cast a test sink to SinkProtocol."""
     return cast("SinkProtocol", sink)
@@ -775,6 +817,36 @@ def as_sink(sink: Any) -> "SinkProtocol":
 def as_gate(gate: Any) -> "GateProtocol":
     """Cast a test gate to GateProtocol."""
     return cast("GateProtocol", gate)
+
+
+def create_observed_contract(row: dict[str, Any]) -> "SchemaContract":
+    """Create an OBSERVED schema contract from a row for test aggregations.
+
+    Args:
+        row: Output row from aggregation
+
+    Returns:
+        SchemaContract with all fields marked as observed, object type, optional
+
+    Usage:
+        # In aggregation transform
+        rows = [{"total": 100, "count": 3}]
+        contract = create_observed_contract(rows[0])
+        return TransformResult.success_multi(rows, contract=contract, success_reason={...})
+    """
+    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 def as_transform_result(result: Any) -> "TransformResult":

@@ -18,7 +18,7 @@ from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
 from pydantic import ValidationError
 
 from elspeth import __version__
-from elspeth.contracts import AggregationName, ExecutionResult, ProgressEvent
+from elspeth.contracts import ExecutionResult, ProgressEvent
 from elspeth.contracts.events import (
     PhaseCompleted,
     PhaseError,
@@ -411,11 +411,18 @@ def run(
         raise typer.Exit(1) from None
 
     # NEW: Build and validate graph from plugin instances
+    # Exclude export sink from graph - it's used post-run, not during pipeline execution.
+    # The export sink receives audit records after the run completes, not pipeline data.
+    execution_sinks = plugins["sinks"]
+    if config.landscape.export.enabled and config.landscape.export.sink:
+        export_sink_name = config.landscape.export.sink
+        execution_sinks = {k: v for k, v in plugins["sinks"].items() if k != export_sink_name}
+
     try:
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
             transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
+            sinks=execution_sinks,
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
             default_sink=config.default_sink,
@@ -672,318 +679,6 @@ def explain(
             db.close()
 
 
-def _execute_pipeline(
-    config: ElspethSettings,
-    graph: ExecutionGraph,
-    verbose: bool = False,
-    output_format: Literal["console", "json"] = "console",
-) -> ExecutionResult:
-    """Execute a pipeline from configuration.
-
-    NOTE: This function is deprecated in favor of _execute_pipeline_with_instances.
-    Telemetry wiring added for P3-2026-02-01 fix.
-
-    Args:
-        config: Validated ElspethSettings instance.
-        graph: Validated ExecutionGraph instance (must be pre-validated).
-        verbose: Show detailed output.
-        output_format: Output format ('console' or 'json').
-
-    Returns:
-        ExecutionResult with run_id, status, rows_processed.
-    """
-    from elspeth.core.landscape import LandscapeDB
-    from elspeth.engine import Orchestrator, PipelineConfig
-
-    # Get plugin manager for dynamic plugin lookup
-    manager = _get_plugin_manager()
-
-    # Instantiate source via PluginManager
-    source_plugin = config.source.plugin
-    source_options = dict(config.source.options)
-
-    source_cls = manager.get_source_by_name(source_plugin)
-    source: SourceProtocol = source_cls(source_options)
-
-    # Instantiate sinks via PluginManager
-    sinks: dict[str, SinkProtocol] = {}
-    for sink_name, sink_settings in config.sinks.items():
-        sink_plugin = sink_settings.plugin
-        sink_options = dict(sink_settings.options)
-
-        sink_cls = manager.get_sink_by_name(sink_plugin)
-        sinks[sink_name] = sink_cls(sink_options)
-
-    # Get database URL from settings
-    db_url = config.landscape.url
-    db = LandscapeDB.from_url(
-        db_url,
-        dump_to_jsonl=config.landscape.dump_to_jsonl,
-        dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
-        dump_to_jsonl_fail_on_error=config.landscape.dump_to_jsonl_fail_on_error,
-        dump_to_jsonl_include_payloads=config.landscape.dump_to_jsonl_include_payloads,
-        dump_to_jsonl_payload_base_path=(
-            str(config.payload_store.base_path)
-            if config.landscape.dump_to_jsonl_payload_base_path is None
-            else config.landscape.dump_to_jsonl_payload_base_path
-        ),
-    )
-
-    # Create payload store for audit compliance
-    # (CLAUDE.md: "Source entry - Raw data stored before any processing")
-    from elspeth.core.payload_store import FilesystemPayloadStore
-
-    if config.payload_store.backend != "filesystem":
-        typer.echo(
-            f"Error: Unsupported payload store backend '{config.payload_store.backend}'. Only 'filesystem' is currently supported.",
-            err=True,
-        )
-        raise typer.Exit(1)
-    payload_store = FilesystemPayloadStore(config.payload_store.base_path)
-
-    # Initialize rate_limit_registry to None so it's defined in finally block
-    rate_limit_registry = None
-
-    try:
-        # Instantiate transforms from transforms via PluginManager
-        transforms: list[RowPlugin] = []
-        for plugin_config in config.transforms:
-            plugin_name = plugin_config.plugin
-            plugin_options = dict(plugin_config.options)
-
-            transform_cls = manager.get_transform_by_name(plugin_name)
-            transforms.append(transform_cls(plugin_options))
-
-        # Use the validated graph passed from run() command
-        # NOTE: Graph is already validated - do not rebuild it here
-        # Build aggregation_settings dict (node_id -> AggregationSettings)
-        # Also instantiate aggregation transforms and add to transforms list
-        from elspeth.core.config import AggregationSettings
-
-        aggregation_settings: dict[str, AggregationSettings] = {}
-        agg_id_map = graph.get_aggregation_id_map()
-        for agg_config in config.aggregations:
-            node_id = agg_id_map[AggregationName(agg_config.name)]
-            aggregation_settings[node_id] = agg_config
-
-            # Instantiate the aggregation transform plugin via PluginManager
-            plugin_name = agg_config.plugin
-            transform_cls = manager.get_transform_by_name(plugin_name)
-
-            # Merge aggregation options with schema from config
-            agg_options = dict(agg_config.options)
-            transform = transform_cls(agg_options)
-
-            # Set node_id so processor can identify this as an aggregation node
-            transform.node_id = node_id
-
-            # Add to transforms list (after row_plugins transforms)
-            transforms.append(transform)
-
-        # Build PipelineConfig with resolved configuration for audit
-        pipeline_config = PipelineConfig(
-            source=source,
-            transforms=transforms,
-            sinks=sinks,
-            config=resolve_config(config),
-            gates=list(config.gates),  # Config-driven gates
-            aggregation_settings=aggregation_settings,  # Aggregation configurations
-        )
-
-        if verbose:
-            typer.echo("Starting pipeline execution...")
-
-        # Create event bus and subscribe progress formatter
-        from elspeth.core import EventBus
-
-        event_bus = EventBus()
-
-        # Choose formatters based on output format
-        if output_format == "json":
-            import json
-
-            # JSON formatters - output structured JSON for each event
-            def _format_phase_started_json(event: PhaseStarted) -> None:
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "phase_started",
-                            "phase": event.phase.value,
-                            "action": event.action.value,
-                            "target": event.target,
-                        }
-                    )
-                )
-
-            def _format_phase_completed_json(event: PhaseCompleted) -> None:
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "phase_completed",
-                            "phase": event.phase.value,
-                            "duration_seconds": event.duration_seconds,
-                        }
-                    )
-                )
-
-            def _format_phase_error_json(event: PhaseError) -> None:
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "phase_error",
-                            "phase": event.phase.value,
-                            "error": event.error_message,
-                            "target": event.target,
-                        }
-                    ),
-                    err=True,
-                )
-
-            def _format_run_summary_json(event: RunSummary) -> None:
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "run_completed",
-                            "run_id": event.run_id,
-                            "status": event.status.value,
-                            "total_rows": event.total_rows,
-                            "succeeded": event.succeeded,
-                            "failed": event.failed,
-                            "quarantined": event.quarantined,
-                            "duration_seconds": event.duration_seconds,
-                            "exit_code": event.exit_code,
-                        }
-                    )
-                )
-
-            def _format_progress_json(event: ProgressEvent) -> None:
-                rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "progress",
-                            "rows_processed": event.rows_processed,
-                            "rows_succeeded": event.rows_succeeded,
-                            "rows_failed": event.rows_failed,
-                            "rows_quarantined": event.rows_quarantined,
-                            "elapsed_seconds": event.elapsed_seconds,
-                            "rows_per_second": rate,
-                        }
-                    )
-                )
-
-            # Subscribe JSON formatters
-            event_bus.subscribe(PhaseStarted, _format_phase_started_json)
-            event_bus.subscribe(PhaseCompleted, _format_phase_completed_json)
-            event_bus.subscribe(PhaseError, _format_phase_error_json)
-            event_bus.subscribe(RunSummary, _format_run_summary_json)
-            event_bus.subscribe(ProgressEvent, _format_progress_json)
-
-        else:  # console format (default)
-            # Console formatters for human-readable output
-            def _format_phase_started(event: PhaseStarted) -> None:
-                target_info = f" → {event.target}" if event.target else ""
-                typer.echo(f"[{event.phase.value.upper()}] {event.action.value.capitalize()}{target_info}...")
-
-            def _format_phase_completed(event: PhaseCompleted) -> None:
-                duration_str = f"{event.duration_seconds:.2f}s" if event.duration_seconds < 60 else f"{event.duration_seconds / 60:.1f}m"
-                typer.echo(f"[{event.phase.value.upper()}] ✓ Completed in {duration_str}")
-
-            def _format_phase_error(event: PhaseError) -> None:
-                target_info = f" ({event.target})" if event.target else ""
-                typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
-
-            def _format_run_summary(event: RunSummary) -> None:
-                status_symbols = {
-                    "completed": "✓",
-                    "partial": "⚠",
-                    "failed": "✗",
-                }
-                symbol = status_symbols[event.status.value]
-                # Build routed summary with destination breakdown
-                routed_summary = ""
-                if event.routed > 0:
-                    dest_parts = [f"{name}:{count}" for name, count in event.routed_destinations]
-                    dest_str = ", ".join(dest_parts) if dest_parts else ""
-                    routed_summary = f" | →{event.routed:,} routed"
-                    if dest_str:
-                        routed_summary += f" ({dest_str})"
-                typer.echo(
-                    f"\n{symbol} Run {event.status.value.upper()}: "
-                    f"{event.total_rows:,} rows processed | "
-                    f"✓{event.succeeded:,} succeeded | "
-                    f"✗{event.failed:,} failed | "
-                    f"⚠{event.quarantined:,} quarantined"
-                    f"{routed_summary} | "
-                    f"{event.duration_seconds:.2f}s total"
-                )
-
-            def _format_progress(event: ProgressEvent) -> None:
-                rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
-                typer.echo(
-                    f"  Processing: {event.rows_processed:,} rows | "
-                    f"{rate:.0f} rows/sec | "
-                    f"✓{event.rows_succeeded:,} ✗{event.rows_failed} ⚠{event.rows_quarantined}"
-                )
-
-            # Subscribe console formatters
-            event_bus.subscribe(PhaseStarted, _format_phase_started)
-            event_bus.subscribe(PhaseCompleted, _format_phase_completed)
-            event_bus.subscribe(PhaseError, _format_phase_error)
-            event_bus.subscribe(RunSummary, _format_run_summary)
-            event_bus.subscribe(ProgressEvent, _format_progress)
-
-        # Create runtime configs for external calls and checkpointing
-        from elspeth.contracts.config.runtime import (
-            RuntimeCheckpointConfig,
-            RuntimeConcurrencyConfig,
-            RuntimeRateLimitConfig,
-            RuntimeTelemetryConfig,
-        )
-        from elspeth.core.checkpoint import CheckpointManager
-        from elspeth.core.rate_limit import RateLimitRegistry
-        from elspeth.telemetry import create_telemetry_manager
-
-        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
-        rate_limit_registry = RateLimitRegistry(rate_limit_config)
-        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
-        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
-        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
-        telemetry_manager = create_telemetry_manager(telemetry_config)
-
-        # Create checkpoint manager if checkpointing is enabled
-        checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
-
-        # Execute via Orchestrator (creates full audit trail)
-        orchestrator = Orchestrator(
-            db,
-            event_bus=event_bus,
-            rate_limit_registry=rate_limit_registry,
-            concurrency_config=concurrency_config,
-            checkpoint_manager=checkpoint_manager,
-            checkpoint_config=checkpoint_config,
-            telemetry_manager=telemetry_manager,
-        )
-        result = orchestrator.run(
-            pipeline_config,
-            graph=graph,
-            settings=config,
-            payload_store=payload_store,
-        )
-
-        return {
-            "run_id": result.run_id,
-            "status": result.status,  # RunStatus enum (str subclass)
-            "rows_processed": result.rows_processed,
-        }
-    finally:
-        if rate_limit_registry is not None:
-            rate_limit_registry.close()
-        if telemetry_manager is not None:
-            telemetry_manager.close()
-        db.close()
-
-
 def _execute_pipeline_with_instances(
     config: ElspethSettings,
     graph: ExecutionGraph,
@@ -1061,6 +756,7 @@ def _execute_pipeline_with_instances(
 
     # Initialize rate_limit_registry to None so it's defined in finally block
     rate_limit_registry = None
+    telemetry_manager = None
 
     try:
         # Build PipelineConfig with pre-instantiated plugins

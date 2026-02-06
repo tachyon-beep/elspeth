@@ -279,7 +279,8 @@ class JSONSink(BaseSink):
             # Write immediately (file is rewritten on each write for JSON format)
             self._write_json_array()
 
-        # Flush to ensure content is on disk for hashing
+        # JSONL path: flush persistent file handle to ensure content is on disk for hashing.
+        # JSON array path: no-op — _write_json_array handles its own fsync via atomic write.
         if self._file is not None:
             self._file.flush()
 
@@ -308,13 +309,36 @@ class JSONSink(BaseSink):
             self._file.write("\n")
 
     def _write_json_array(self) -> None:
-        """Write buffered rows as JSON array (rewrite mode)."""
-        if self._file is None:
-            # Handle kept open for streaming writes, closed in close()
-            self._file = open(self._path, "w", encoding=self._encoding)  # noqa: SIM115
-        self._file.seek(0)
-        self._file.truncate()
-        json.dump(self._rows, self._file, indent=self._indent)
+        """Write buffered rows as JSON array (atomic write via temp file).
+
+        Uses write-to-temp + fsync + os.replace() + dir fsync to prevent
+        data loss on crash. The temp file is in the same directory to
+        guarantee same-filesystem atomic rename on POSIX.
+
+        On any failure, the temp file is cleaned up to prevent stale
+        artifacts. The original file remains untouched until os.replace()
+        succeeds.
+        """
+        temp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        try:
+            with open(temp_path, "w", encoding=self._encoding) as f:
+                json.dump(self._rows, f, indent=self._indent)
+                f.flush()
+                os.fsync(f.fileno())
+            # Atomic replace — file transitions directly from old content to new
+            os.replace(temp_path, self._path)
+            # Fsync parent directory to ensure the rename is durable on power loss
+            dir_fd = os.open(str(self._path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except BaseException:
+            # Clean up temp file on any failure (serialization, fsync, replace)
+            # so stale .tmp files don't accumulate
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
 
     def _compute_file_hash(self) -> str:
         """Compute SHA-256 hash of the file contents."""
@@ -330,21 +354,20 @@ class JSONSink(BaseSink):
         CRITICAL: Ensures data survives process crash and power loss.
         Called by orchestrator BEFORE creating checkpoints.
 
-        This guarantees:
-        - OS buffer flushed to disk (file.flush())
-        - Filesystem metadata persisted (os.fsync())
-        - Data durable on storage device
+        JSONL format: flushes the persistent file handle and fsyncs.
+        JSON array format: no-op — _write_json_array already fsyncs
+        via the atomic write pattern (temp file + fsync + os.replace).
         """
         if self._file is not None:
             self._file.flush()
             os.fsync(self._file.fileno())
 
     def close(self) -> None:
-        """Close the file handle."""
+        """Close the file handle and release buffered rows."""
         if self._file is not None:
             self._file.close()
             self._file = None
-            self._rows = []
+        self._rows = []
 
     # === Display Header Support ===
 

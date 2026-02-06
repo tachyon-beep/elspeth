@@ -11,7 +11,6 @@ from elspeth.contracts import ArtifactDescriptor
 from elspeth.plugins.azure.blob_sink import AzureBlobSink
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SinkProtocol
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -102,11 +101,6 @@ def make_config(
 
 class TestAzureBlobSinkProtocol:
     """Tests for AzureBlobSink protocol compliance."""
-
-    def test_implements_protocol(self, mock_container_client: MagicMock) -> None:
-        """AzureBlobSink implements SinkProtocol."""
-        sink = AzureBlobSink(make_config())
-        assert isinstance(sink, SinkProtocol)
 
     def test_has_required_attributes(self, mock_container_client: MagicMock) -> None:
         """AzureBlobSink has name and input_schema."""
@@ -858,3 +852,136 @@ class TestAzureBlobSinkAuthClientCreation:
 
             # Verify from_connection_string was called
             mock_service_client_cls.from_connection_string.assert_called_once_with(TEST_CONNECTION_STRING)
+
+
+class TestAzureBlobSinkSchemaValidation:
+    """Tests for schema mode validation in Azure Blob Sink.
+
+    Mirrors test_csv_sink.py flexible mode tests to ensure consistent behavior
+    across all sinks. Flexible mode should include declared fields + extras.
+    """
+
+    def test_flexible_mode_includes_extras_from_first_row(self, ctx: PluginContext) -> None:
+        """Flexible mode includes declared fields + extras from first row.
+
+        This is the documented behavior: flexible mode should accept at least
+        the declared fields, plus any extras present in the data (e.g., LLM metadata).
+        """
+        # Schema declares only 'id', but row has 'id', 'name', 'llm_response'
+        flexible_schema = {"mode": "flexible", "fields": ["id: int"]}
+        sink = AzureBlobSink(
+            {
+                "connection_string": TEST_CONNECTION_STRING,
+                "container": TEST_CONTAINER,
+                "blob_path": TEST_BLOB_PATH,
+                "format": "csv",
+                "schema": flexible_schema,
+            }
+        )
+
+        # Mock the Azure client
+        with patch.object(sink, "_get_container_client") as mock_get_client:
+            mock_blob_client = MagicMock()
+            mock_container = MagicMock()
+            mock_container.get_blob_client.return_value = mock_blob_client
+            mock_get_client.return_value = mock_container
+
+            # Write row with declared field + two extras
+            sink.write([{"id": 1, "name": "alice", "llm_response": "classification"}], ctx)
+
+            # Verify upload_blob was called
+            assert mock_blob_client.upload_blob.called
+            uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+            uploaded_str = uploaded_content.decode("utf-8")
+
+        # Verify all fields are in CSV output (declared + extras)
+        lines = uploaded_str.strip().split("\n")
+        header = lines[0]
+
+        # All three fields should be present in header
+        assert "id" in header, "Declared field 'id' should be present"
+        assert "name" in header, "Extra field 'name' from row should be present"
+        assert "llm_response" in header, "Extra field 'llm_response' from row should be present"
+
+        sink.close()
+
+    def test_flexible_mode_declared_fields_come_first(self, ctx: PluginContext) -> None:
+        """Flexible mode should place declared fields before extras for predictability."""
+        # Schema declares 'id' and 'name'
+        flexible_schema = {"mode": "flexible", "fields": ["id: int", "name: str"]}
+        sink = AzureBlobSink(
+            {
+                "connection_string": TEST_CONNECTION_STRING,
+                "container": TEST_CONTAINER,
+                "blob_path": TEST_BLOB_PATH,
+                "format": "csv",
+                "schema": flexible_schema,
+            }
+        )
+
+        # Mock the Azure client
+        with patch.object(sink, "_get_container_client") as mock_get_client:
+            mock_blob_client = MagicMock()
+            mock_container = MagicMock()
+            mock_container.get_blob_client.return_value = mock_blob_client
+            mock_get_client.return_value = mock_container
+
+            # Row has extras interspersed
+            sink.write([{"extra1": "a", "id": 1, "extra2": "b", "name": "alice"}], ctx)
+
+            uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+            uploaded_str = uploaded_content.decode("utf-8")
+
+        # Verify declared fields come first in header order
+        lines = uploaded_str.strip().split("\n")
+        # Strip any Windows line endings
+        header_fields = [field.strip() for field in lines[0].split(",")]
+
+        # Declared fields should be first (in schema order)
+        assert header_fields[0] == "id", "First declared field should be first"
+        assert header_fields[1] == "name", "Second declared field should be second"
+        # Extras come after (order not guaranteed among extras)
+        assert set(header_fields[2:]) == {"extra1", "extra2"}, "Extra fields should follow declared fields"
+
+        sink.close()
+
+    def test_fixed_mode_rejects_extras_in_schema_validation(self, ctx: PluginContext) -> None:
+        """Fixed mode should only include declared fields, extras are schema validation errors.
+
+        NOTE: The actual rejection happens during schema validation when the row is validated
+        against the Pydantic schema. This test verifies that if extras somehow get through,
+        they won't appear in the output.
+        """
+        # Schema declares only 'id' and 'name' in fixed mode
+        fixed_schema = {"mode": "fixed", "fields": ["id: int", "name: str"]}
+        sink = AzureBlobSink(
+            {
+                "connection_string": TEST_CONNECTION_STRING,
+                "container": TEST_CONTAINER,
+                "blob_path": TEST_BLOB_PATH,
+                "format": "csv",
+                "schema": fixed_schema,
+            }
+        )
+
+        # Mock the Azure client
+        with patch.object(sink, "_get_container_client") as mock_get_client:
+            mock_blob_client = MagicMock()
+            mock_container = MagicMock()
+            mock_container.get_blob_client.return_value = mock_blob_client
+            mock_get_client.return_value = mock_container
+
+            # Write row with only declared fields (extras would be rejected by schema)
+            sink.write([{"id": 1, "name": "alice"}], ctx)
+
+            uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+            uploaded_str = uploaded_content.decode("utf-8")
+
+        # Verify only declared fields are in output
+        lines = uploaded_str.strip().split("\n")
+        # Strip any Windows line endings
+        header_fields = [field.strip() for field in lines[0].split(",")]
+
+        assert set(header_fields) == {"id", "name"}, "Fixed mode should only include declared fields"
+
+        sink.close()

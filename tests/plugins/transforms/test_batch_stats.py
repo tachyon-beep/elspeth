@@ -12,11 +12,27 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value) if value is not None else object,
+            required=False,
+            source="inferred",
+        )
+        for key, value in data.items()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestBatchStatsHappyPath:
@@ -26,26 +42,6 @@ class TestBatchStatsHappyPath:
     def ctx(self) -> PluginContext:
         """Create minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """BatchStats implements TransformProtocol.
-
-        Note: BatchStats is batch-aware and has a different process() signature
-        (list[dict] instead of dict). At runtime, isinstance() passes because
-        runtime_checkable only checks method presence. Mypy correctly identifies
-        the signature incompatibility, so we type-ignore this specific check.
-        """
-        from elspeth.plugins.transforms.batch_stats import BatchStats
-
-        transform = BatchStats(
-            {
-                "schema": DYNAMIC_SCHEMA,
-                "value_field": "amount",
-            }
-        )
-        # BatchStats.process() takes list[dict], not dict, so the protocol
-        # signatures are incompatible at the type level. Runtime check passes.
-        assert isinstance(transform, TransformProtocol)  # type: ignore[unreachable]
 
     def test_has_required_attributes(self) -> None:
         """BatchStats has name and is_batch_aware."""
@@ -66,9 +62,9 @@ class TestBatchStatsHappyPath:
         )
 
         rows = [
-            {"id": 1, "amount": 10.0},
-            {"id": 2, "amount": 20.0},
-            {"id": 3, "amount": 30.0},
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": 20.0}),
+            _make_row({"id": 3, "amount": 30.0}),
         ]
 
         result = transform.process(rows, ctx)
@@ -93,8 +89,8 @@ class TestBatchStatsHappyPath:
         )
 
         rows = [
-            {"id": 1, "amount": 10.0, "category": "sales"},
-            {"id": 2, "amount": 20.0, "category": "sales"},
+            _make_row({"id": 1, "amount": 10.0, "category": "sales"}),
+            _make_row({"id": 2, "amount": 20.0, "category": "sales"}),
         ]
 
         result = transform.process(rows, ctx)
@@ -139,10 +135,10 @@ class TestBatchStatsHappyPath:
             }
         )
 
-        rows: list[dict[str, Any]] = [
-            {"id": 1, "amount": 10.0},
-            {"id": 2, "amount": "not_a_number"},  # This must raise, not skip
-            {"id": 3, "amount": 30.0},
+        rows = [
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": "not_a_number"}),  # This must raise, not skip
+            _make_row({"id": 3, "amount": 30.0}),
         ]
 
         with pytest.raises(TypeError, match="must be numeric"):

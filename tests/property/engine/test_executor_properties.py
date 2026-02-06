@@ -18,13 +18,14 @@ inputs, not just specific test cases.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.contracts import RoutingAction, TransformErrorReason, TransformResult
+from elspeth.contracts import PipelineRow, RoutingAction, TransformErrorReason, TransformResult
 from elspeth.contracts.enums import RoutingKind, RoutingMode
+from elspeth.contracts.errors import ConfigGateReason, PluginGateReason
 from tests.property.conftest import (
     branch_names,
     dict_keys,
@@ -52,7 +53,7 @@ config_gate_reasons = st.fixed_dictionaries(
 )
 
 # PluginGateReason: rule + matched_value + optional threshold fields
-plugin_gate_reasons = st.fixed_dictionaries(
+plugin_gate_reasons: st.SearchStrategy[dict[str, Any]] = st.fixed_dictionaries(
     {
         "rule": st.text(min_size=1, max_size=100),
         "matched_value": json_primitives,
@@ -89,7 +90,7 @@ _test_error_categories = [
     "property_test_error",
 ]
 
-error_reasons = st.fixed_dictionaries(
+error_reasons: st.SearchStrategy[dict[str, Any]] = st.fixed_dictionaries(
     {"reason": st.sampled_from(_test_error_categories)},
     optional={
         "error": st.text(min_size=1, max_size=100),
@@ -147,7 +148,7 @@ class TestTransformResultProperties:
 
         Multi-row output must preserve each row exactly as provided.
         """
-        result = TransformResult.success_multi(rows, success_reason={"action": "test"})
+        result = TransformResult.success_multi(cast(list[dict[str, Any] | PipelineRow], rows), success_reason={"action": "test"})
 
         assert result.status == "success"
         assert result.row is None
@@ -279,7 +280,7 @@ class TestRoutingActionProperties:
 
     @given(reason=routing_reasons)
     @settings(max_examples=100)
-    def test_continue_action_has_no_destination(self, reason: dict[str, Any] | None) -> None:
+    def test_continue_action_has_no_destination(self, reason: ConfigGateReason | PluginGateReason | None) -> None:
         """Property: CONTINUE action always has empty destinations.
 
         Continue means "proceed to next node in pipeline" - there's no
@@ -294,7 +295,7 @@ class TestRoutingActionProperties:
 
     @given(label=route_labels, reason=routing_reasons)
     @settings(max_examples=100)
-    def test_route_action_contains_correct_sink_name(self, label: str, reason: dict[str, Any] | None) -> None:
+    def test_route_action_contains_correct_sink_name(self, label: str, reason: ConfigGateReason | PluginGateReason | None) -> None:
         """Property: ROUTE action contains exactly the specified sink name.
 
         Route labels are semantic identifiers (e.g., "above", "below") that
@@ -310,7 +311,7 @@ class TestRoutingActionProperties:
 
     @given(paths=multiple_branches, reason=routing_reasons)
     @settings(max_examples=100)
-    def test_fork_action_contains_all_branch_names(self, paths: list[str], reason: dict[str, Any] | None) -> None:
+    def test_fork_action_contains_all_branch_names(self, paths: list[str], reason: ConfigGateReason | PluginGateReason | None) -> None:
         """Property: FORK_TO_PATHS action contains all specified branch names.
 
         Fork operations create child tokens for each branch. All branch names
@@ -327,7 +328,7 @@ class TestRoutingActionProperties:
 
     @given(reason=routing_reasons)
     @settings(max_examples=50)
-    def test_continue_uses_move_mode(self, reason: dict[str, Any] | None) -> None:
+    def test_continue_uses_move_mode(self, reason: ConfigGateReason | PluginGateReason | None) -> None:
         """Property: CONTINUE always uses MOVE mode.
 
         Continue is semantically a move - the token proceeds on its current
@@ -421,7 +422,9 @@ class TestRoutingActionReasonImmutability:
         The frozen dataclass prevents reassignment; deep copy prevents
         external mutation via retained references.
         """
-        action = RoutingAction.continue_(reason=reason)
+        # Cast arbitrary dict to PluginGateReason for type checking
+        # This test verifies immutability behavior, not reason content
+        action = RoutingAction.continue_(reason=cast(PluginGateReason, reason))
 
         # Reason is a dict (TypedDict compatible)
         assert isinstance(action.reason, dict)
@@ -437,12 +440,15 @@ class TestRoutingActionReasonImmutability:
         shared mutable state corrupts audit records.
         """
         original_reason = dict(reason)
-        action = RoutingAction.continue_(reason=reason)
+        # Cast arbitrary dict to PluginGateReason for type checking
+        # This test verifies immutability behavior, not reason content
+        action = RoutingAction.continue_(reason=cast(PluginGateReason, reason))
 
         # Mutate the original
         reason["__after_creation__"] = True
 
         # Action's reason should not be affected
+        assert action.reason is not None
         assert "__after_creation__" not in action.reason
         assert action.reason == original_reason
 
@@ -472,7 +478,7 @@ class TestRoutingModeEnumProperties:
         assert mode == mode.value
 
     def test_routing_mode_expected_members(self) -> None:
-        """Property: RoutingMode has exactly MOVE and COPY."""
-        expected = {"MOVE", "COPY"}
+        """Property: RoutingMode has exactly MOVE, COPY, and DIVERT."""
+        expected = {"MOVE", "COPY", "DIVERT"}
         actual = {m.name for m in RoutingMode}
         assert actual == expected

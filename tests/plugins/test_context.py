@@ -468,23 +468,41 @@ class TestTokenField:
     def test_token_accepts_token_info(self) -> None:
         """PluginContext accepts TokenInfo via token parameter."""
         from elspeth.contracts.identity import TokenInfo
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
         from elspeth.plugins.context import PluginContext
 
-        token = TokenInfo(row_id="row-1", token_id="token-row-1", row_data={"x": 1})
+        # Create PipelineRow for TokenInfo
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract(normalized_name="x", original_name="x", python_type=int, required=False, source="inferred"),),
+            locked=True,
+        )
+        row_data = PipelineRow({"x": 1}, contract)
+
+        token = TokenInfo(row_id="row-1", token_id="token-row-1", row_data=row_data)
         ctx = PluginContext(run_id="test-run", config={}, token=token)
 
         assert ctx.token is not None
         assert ctx.token is token  # Same object reference
         assert ctx.token.row_id == "row-1"
         assert ctx.token.token_id == "token-row-1"
-        assert ctx.token.row_data == {"x": 1}
+        assert ctx.token.row_data.to_dict() == {"x": 1}
 
     def test_token_identity_preserved_on_access(self) -> None:
         """Token identity is preserved - multiple accesses return same object."""
         from elspeth.contracts.identity import TokenInfo
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
         from elspeth.plugins.context import PluginContext
 
-        token = TokenInfo(row_id="row-42", token_id="token-42", row_data={"value": 100})
+        # Create PipelineRow for TokenInfo
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract(normalized_name="value", original_name="value", python_type=int, required=False, source="inferred"),),
+            locked=True,
+        )
+        row_data = PipelineRow({"value": 100}, contract)
+
+        token = TokenInfo(row_id="row-42", token_id="token-42", row_data=row_data)
         ctx = PluginContext(run_id="test-run", config={}, token=token)
 
         # Multiple accesses should return the exact same object
@@ -496,13 +514,22 @@ class TestTokenField:
     def test_token_can_be_mutated_after_construction(self) -> None:
         """Token field can be set after construction (engine sets it per-row)."""
         from elspeth.contracts.identity import TokenInfo
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
         from elspeth.plugins.context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={})
         assert ctx.token is None
 
+        # Create PipelineRow for TokenInfo
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract(normalized_name="data", original_name="data", python_type=str, required=False, source="inferred"),),
+            locked=True,
+        )
+        row_data = PipelineRow({"data": "test"}, contract)
+
         # Engine sets token before calling batch transforms
-        token = TokenInfo(row_id="row-99", token_id="token-99", row_data={"data": "test"})
+        token = TokenInfo(row_id="row-99", token_id="token-99", row_data=row_data)
         ctx.token = token
 
         assert ctx.token is token
@@ -522,13 +549,14 @@ class TestRecordCallTelemetryResponseHash:
         Bug: Using truthiness check (if response_data) causes empty responses
         to emit response_hash=None, breaking telemetry/audit correlation.
         """
+        # Set up telemetry callback to capture emitted events
+        from typing import Any
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        # Set up telemetry callback to capture emitted events
-        emitted_events: list = []
+        emitted_events: list[Any] = []
 
         def capture_telemetry(event):
             emitted_events.append(event)
@@ -565,12 +593,13 @@ class TestRecordCallTelemetryResponseHash:
 
     def test_empty_list_response_gets_hashed(self) -> None:
         """Empty list [] response should emit response_hash in telemetry."""
+        from typing import Any
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        emitted_events: list = []
+        emitted_events: list[Any] = []
 
         def capture_telemetry(event):
             emitted_events.append(event)
@@ -586,12 +615,12 @@ class TestRecordCallTelemetryResponseHash:
             telemetry_emit=capture_telemetry,
         )
 
-        # Empty list response
+        # Empty results in dict - type-correct representation of no SQL rows
         ctx.record_call(
             call_type=CallType.SQL,
             provider="database",
             request_data={"query": "SELECT * FROM empty_table"},
-            response_data=[],  # Empty list - no results
+            response_data={"rows": []},  # Empty results in dict structure (type-correct)
             latency_ms=10.0,
             status=CallStatus.SUCCESS,
         )
@@ -601,12 +630,13 @@ class TestRecordCallTelemetryResponseHash:
 
     def test_empty_string_response_gets_hashed(self) -> None:
         """Empty string '' response should emit response_hash in telemetry."""
+        from typing import Any
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        emitted_events: list = []
+        emitted_events: list[Any] = []
 
         def capture_telemetry(event):
             emitted_events.append(event)
@@ -622,12 +652,12 @@ class TestRecordCallTelemetryResponseHash:
             telemetry_emit=capture_telemetry,
         )
 
-        # Empty string response (e.g., HTTP 204 No Content)
+        # Empty body in dict (e.g., HTTP 204 No Content as dict structure)
         ctx.record_call(
             call_type=CallType.HTTP,
             provider="api.example.com",
             request_data={"method": "DELETE"},
-            response_data="",  # Empty string - valid 204 response
+            response_data={"body": ""},  # Empty body in dict structure (type-correct)
             latency_ms=25.0,
             status=CallStatus.SUCCESS,
         )
@@ -637,12 +667,13 @@ class TestRecordCallTelemetryResponseHash:
 
     def test_none_response_does_not_get_hashed(self) -> None:
         """None response should emit response_hash=None (no response data)."""
+        from typing import Any
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.plugins.context import PluginContext
 
-        emitted_events: list = []
+        emitted_events: list[Any] = []
 
         def capture_telemetry(event):
             emitted_events.append(event)

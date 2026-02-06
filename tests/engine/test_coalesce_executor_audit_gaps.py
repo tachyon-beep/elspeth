@@ -10,11 +10,14 @@ References:
 - Integration seam analysis Issue #1 (partially fixed)
 """
 
+from typing import Any
+
 import pytest
 
-from elspeth.contracts import NodeType, Run, TokenInfo
+from elspeth.contracts import NodeType, Run, SourceRow, TokenInfo
 from elspeth.contracts.enums import RowOutcome
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.coalesce_executor import CoalesceExecutor
@@ -22,6 +25,35 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
+
+
+def _make_source_row(data: dict[str, Any]) -> SourceRow:
+    """Create a SourceRow with OBSERVED schema for testing.
+
+    Helper to create valid SourceRow that can be passed to create_initial_token.
+    """
+    pipeline_row = _make_pipeline_row(data)
+    return SourceRow.valid(data, contract=pipeline_row.contract)
 
 
 @pytest.fixture
@@ -107,7 +139,7 @@ class TestCoalesceAuditGap1a:
             run_id=run.run_id,
             source_node_id=source_node.node_id,
             row_index=0,
-            row_data={"value": 100},
+            source_row=_make_source_row({"value": 100}),
         )
         children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
@@ -120,13 +152,13 @@ class TestCoalesceAuditGap1a:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data={"value": 100, "a_result": 1},
+            row_data=_make_pipeline_row({"value": 100, "a_result": 1}),
             branch_name="path_a",
         )
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data={"value": 100, "b_result": 2},
+            row_data=_make_pipeline_row({"value": 100, "b_result": 2}),
             branch_name="path_b",
         )
 
@@ -229,7 +261,7 @@ class TestCoalesceAuditGap1b:
             run_id=run.run_id,
             source_node_id=source_node.node_id,
             row_index=0,
-            row_data={"value": 100},
+            source_row=_make_source_row({"value": 100}),
         )
         children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
@@ -242,13 +274,13 @@ class TestCoalesceAuditGap1b:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data={"value": 100, "a_result": 1},
+            row_data=_make_pipeline_row({"value": 100, "a_result": 1}),
             branch_name="path_a",
         )
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data={"value": 100, "b_result": 2},
+            row_data=_make_pipeline_row({"value": 100, "b_result": 2}),
             branch_name="path_b",
         )
 
@@ -371,7 +403,7 @@ class TestCoalesceAuditGap2:
             run_id=run.run_id,
             source_node_id=source_node.node_id,
             row_index=0,
-            row_data={"value": 100},
+            source_row=_make_source_row({"value": 100}),
         )
         children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
@@ -393,13 +425,13 @@ class TestCoalesceAuditGap2:
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data={"value": 100, "b_result": 2},
+            row_data=_make_pipeline_row({"value": 100, "b_result": 2}),
             branch_name="path_b",
         )
         token_c = TokenInfo(
             row_id=children[2].row_id,
             token_id=children[2].token_id,
-            row_data={"value": 100, "c_result": 3},
+            row_data=_make_pipeline_row({"value": 100, "c_result": 3}),
             branch_name="path_c",
         )
 
@@ -528,7 +560,7 @@ class TestCoalesceTimeoutAuditGap:
             run_id=run.run_id,
             source_node_id=source_node.node_id,
             row_index=0,
-            row_data={"value": 100},
+            source_row=_make_source_row({"value": 100}),
         )
         children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
@@ -541,7 +573,7 @@ class TestCoalesceTimeoutAuditGap:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data={"value": 100, "a_result": 1},
+            row_data=_make_pipeline_row({"value": 100, "a_result": 1}),
             branch_name="path_a",
         )
 

@@ -86,10 +86,9 @@ class TestResumeSchemaRequired:
         """Verify resume fails early if source doesn't provide schema.
 
         Scenario:
-        1. Create a source plugin that doesn't set _schema_class
-        2. Create run with checkpoint (simulating partial run)
-        3. Attempt to resume
-        4. Verify: Fails with clear error message (Bug #4 fix)
+        1. Create run WITHOUT storing source schema (simulating old run)
+        2. Attempt to retrieve schema via recorder.get_source_schema()
+        3. Verify: Fails with clear error message (Bug #4 fix)
 
         This is Bug #4 fix: resume REQUIRES schema to preserve type fidelity.
         Without schema, resumed rows would have degraded types (str instead of
@@ -99,7 +98,7 @@ class TestResumeSchemaRequired:
         checkpoint_mgr = test_env["checkpoint_manager"]
         db = test_env["db"]
 
-        # 1. Create run and register nodes
+        # 1. Create run WITHOUT storing source schema (simulating old run)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Register nodes using raw SQL
@@ -163,31 +162,15 @@ class TestResumeSchemaRequired:
         # Mark run as failed (so it can be resumed)
         recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
-        # 3. Verify that attempting to get schema from source without _schema_class returns None
-        source_without_schema = SourceWithoutSchema(config={})
-        source_schema_class = getattr(source_without_schema, "_schema_class", None)
+        # 3. Test production code: recorder.get_source_schema() should raise ValueError
+        with pytest.raises(ValueError) as exc_info:
+            recorder.get_source_schema(run.run_id)
 
-        # This should be None - source doesn't provide schema
-        assert source_schema_class is None, "Source should not have _schema_class"
+        # 4. Verify error message is clear and helpful
+        error_msg = str(exc_info.value)
+        assert run.run_id in error_msg
+        assert "has no source schema stored" in error_msg
+        assert "Cannot resume without schema" in error_msg
+        assert "type fidelity" in error_msg
 
-        # 4. Verify that validation would catch this
-        # The validation code from orchestrator (lines 1349-1355)
-        if source_schema_class is None:
-            # This is what the orchestrator does - fail early with clear error
-            with pytest.raises(ValueError) as exc_info:
-                raise ValueError(
-                    f"Resume failed: Source plugin '{source_without_schema.name}' does not provide schema class. "
-                    f"Resume requires type restoration via source._schema_class attribute. "
-                    f"Source plugin must set _schema_class during initialization. "
-                    f"Cannot resume without schema - type fidelity would be violated."
-                )
-
-            # 5. Verify error message is clear and helpful
-            error_msg = str(exc_info.value)
-            assert "Resume failed" in error_msg
-            assert "does not provide schema class" in error_msg
-            assert "source_without_schema" in error_msg
-            assert "_schema_class" in error_msg
-            assert "type fidelity" in error_msg
-
-        # SUCCESS: Validation catches missing schema early with clear error message
+        # SUCCESS: Production code catches missing schema early with clear error message

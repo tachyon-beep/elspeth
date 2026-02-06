@@ -16,6 +16,8 @@ NOTE: AcceptResult tests deleted in aggregation structural cleanup.
 Aggregation is now engine-controlled via batch-aware transforms.
 """
 
+from typing import Any
+
 import pytest
 
 from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo, TransformErrorReason
@@ -26,8 +28,19 @@ from elspeth.contracts.results import (
     RowResult,
     TransformResult,
 )
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 from elspeth.engine.retry import MaxRetriesExceeded
+
+
+def _make_observed_contract() -> SchemaContract:
+    """Create an OBSERVED schema contract for tests."""
+    return SchemaContract(mode="OBSERVED", fields=())
+
+
+def _wrap_dict_as_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Wrap dict as PipelineRow with OBSERVED contract for tests."""
+    return PipelineRow(data, _make_observed_contract())
 
 
 class TestTransformResultMultiRow:
@@ -35,7 +48,7 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_multi_row_success(self) -> None:
         """TransformResult.success_multi returns multiple rows."""
-        rows = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}]
+        rows: list[dict[str, Any] | PipelineRow] = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}]
         result = TransformResult.success_multi(rows, success_reason={"action": "test"})
 
         assert result.status == "success"
@@ -276,7 +289,7 @@ class TestRowResult:
 
     def test_creation(self) -> None:
         """RowResult stores token, data, outcome, and optional sink_name."""
-        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data={"x": 1})
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
         result = RowResult(
             token=token,
             final_data={"x": 1, "processed": True},
@@ -290,7 +303,7 @@ class TestRowResult:
 
     def test_routed_with_sink_name(self) -> None:
         """ROUTED outcome includes sink_name."""
-        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data={"x": 1})
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
         result = RowResult(
             token=token,
             final_data={"x": 1},
@@ -652,7 +665,7 @@ class TestRowResultWithFailureInfo:
 
     def test_failed_outcome_with_failure_info(self) -> None:
         """FAILED outcome includes FailureInfo error details."""
-        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data={"x": 1})
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
         error = FailureInfo(
             exception_type="MaxRetriesExceeded",
             message="Max retries (3) exceeded",

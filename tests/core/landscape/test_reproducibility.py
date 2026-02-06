@@ -147,3 +147,111 @@ class TestReproducibilityGradeComparison:
 
         # Should not raise - just returns silently
         update_grade_after_purge(db, "nonexistent_run_id")
+
+
+class TestComputeGradeValidation:
+    """Verify compute_grade validates determinism enum values (Tier-1 crash-on-corruption)."""
+
+    def test_compute_grade_crashes_on_invalid_determinism_value(self) -> None:
+        """compute_grade raises ValueError when node has invalid determinism enum.
+
+        Per Data Manifesto (Tier-1): "Bad data in the audit trail = crash immediately"
+        Invalid enum values must crash, not be silently treated as reproducible.
+        """
+        from sqlalchemy import text
+
+        from elspeth.contracts import Determinism, NodeType
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.reproducibility import compute_grade
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Register a node with valid determinism
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="field_mapper",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+            determinism=Determinism.DETERMINISTIC,
+        )
+
+        # Corrupt the determinism value in the audit database
+        with db.connection() as conn:
+            conn.execute(
+                text("UPDATE nodes SET determinism = 'garbage_value' WHERE node_id = :node_id"),
+                {"node_id": node.node_id},
+            )
+
+        # compute_grade should crash on invalid determinism enum value
+        with pytest.raises(ValueError, match="garbage_value"):
+            compute_grade(db, run.run_id)
+
+    def test_compute_grade_io_read_requires_replay(self) -> None:
+        """Runs with IO_READ nodes are graded REPLAY_REPRODUCIBLE, not FULL_REPRODUCIBLE.
+
+        Per determinism contract: IO_READ is external/side-effectful, requires capture/replay.
+        """
+        from elspeth.contracts import Determinism, NodeType
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.reproducibility import (
+            ReproducibilityGrade,
+            compute_grade,
+        )
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Register a node with IO_READ determinism
+        recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+            determinism=Determinism.IO_READ,
+        )
+
+        grade = compute_grade(db, run.run_id)
+        assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
+
+    def test_compute_grade_io_write_requires_replay(self) -> None:
+        """Runs with IO_WRITE nodes are graded REPLAY_REPRODUCIBLE, not FULL_REPRODUCIBLE.
+
+        Per determinism contract: IO_WRITE is external/side-effectful, requires capture/replay.
+        """
+        from elspeth.contracts import Determinism, NodeType
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.reproducibility import (
+            ReproducibilityGrade,
+            compute_grade,
+        )
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Register a node with IO_WRITE determinism
+        recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+            determinism=Determinism.IO_WRITE,
+        )
+
+        grade = compute_grade(db, run.run_id)
+        assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE

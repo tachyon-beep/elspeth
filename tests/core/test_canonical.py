@@ -11,36 +11,6 @@ import pandas as pd
 import pytest
 
 
-class TestNormalizeValue:
-    """Test _normalize_value handles Python primitives."""
-
-    def test_string_passthrough(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        assert _normalize_value("hello") == "hello"
-
-    def test_int_passthrough(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        assert _normalize_value(42) == 42
-
-    def test_float_passthrough(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        assert _normalize_value(3.14) == 3.14
-
-    def test_none_passthrough(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        assert _normalize_value(None) is None
-
-    def test_bool_passthrough(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        assert _normalize_value(True) is True
-        assert _normalize_value(False) is False
-
-
 class TestNanInfinityRejection:
     """NaN and Infinity must be rejected, not silently converted.
 
@@ -234,6 +204,64 @@ class TestSpecialTypeConversion:
         result = _normalize_value(Decimal("123.456789012345"))
         assert result == "123.456789012345"
         assert type(result) is str
+
+
+class TestUnsupportedTypeRejection:
+    """Unsupported types must be rejected during canonical serialization.
+
+    Edge case: Types not explicitly handled by _normalize_value() pass through
+    normalization unchanged and fail at RFC 8785 serialization boundary with TypeError.
+    This is defense-in-depth - external system data must be validated at ingress.
+    """
+
+    def test_uuid_rejected_during_serialization(self) -> None:
+        """UUID objects are not JSON-serializable and must fail at serialization boundary."""
+        from uuid import UUID
+
+        import rfc8785
+
+        from elspeth.core.canonical import canonical_json
+
+        obj = {"id": UUID("550e8400-e29b-41d4-a716-446655440000")}
+
+        # UUID passes through _normalize_value but fails at rfc8785.dumps()
+        with pytest.raises(rfc8785.CanonicalizationError, match="unsupported type"):
+            canonical_json(obj)
+
+    def test_custom_class_instance_rejected(self) -> None:
+        """Custom class instances must fail canonical serialization.
+
+        Documents that application-specific types must be converted to primitives
+        (str, int, dict, etc.) before reaching canonical_json().
+        """
+        import rfc8785
+
+        from elspeth.core.canonical import canonical_json
+
+        class CustomData:
+            def __init__(self, value: int) -> None:
+                self.value = value
+
+        obj = {"data": CustomData(42)}
+
+        # Custom class passes through _normalize_value but fails at rfc8785.dumps()
+        with pytest.raises(rfc8785.CanonicalizationError, match="unsupported type"):
+            canonical_json(obj)
+
+    def test_set_rejected_during_serialization(self) -> None:
+        """Set objects are not JSON-serializable (order non-deterministic).
+
+        Documents that collections must be converted to lists before canonicalization.
+        """
+        import rfc8785
+
+        from elspeth.core.canonical import canonical_json
+
+        obj = {"tags": {"red", "green", "blue"}}
+
+        # set passes through _normalize_value but fails at rfc8785.dumps()
+        with pytest.raises(rfc8785.CanonicalizationError, match="unsupported type"):
+            canonical_json(obj)
 
 
 class TestRecursiveNormalization:

@@ -182,7 +182,7 @@ coalesce:
     branches:
       - branch_high
       - branch_low
-    strategy: first_complete
+    policy: first
 
 sinks:
   output:
@@ -358,7 +358,7 @@ coalesce:
     branches:
       - branch_high
       - branch_low
-    strategy: first_complete
+    policy: first
 
 sinks:
   output:

@@ -1,8 +1,4 @@
-"""Tests for CSV sink plugin.
-
-NOTE: Protocol compliance tests (test_implements_protocol, test_has_required_attributes)
-are in conftest.py as parametrized tests covering all sink plugins.
-"""
+"""Tests for CSV sink plugin."""
 
 import csv
 import hashlib

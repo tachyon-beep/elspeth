@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from elspeth.contracts import ExceptionResult, TransformResult
     from elspeth.contracts.identity import TokenInfo
+    from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.plugins.context import PluginContext
 
 
@@ -152,9 +153,9 @@ class BatchTransformMixin:
 
     def accept_row(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
-        processor: Callable[[dict[str, Any], PluginContext], TransformResult],
+        processor: Callable[[PipelineRow, PluginContext], TransformResult],
     ) -> None:
         """Accept a row for processing.
 
@@ -201,9 +202,9 @@ class BatchTransformMixin:
         self,
         ticket: RowTicket,
         token: TokenInfo,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
-        processor: Callable[[dict[str, Any], PluginContext], TransformResult],
+        processor: Callable[[PipelineRow, PluginContext], TransformResult],
     ) -> None:
         """Worker thread: process row and mark complete.
 

@@ -25,6 +25,7 @@ from pydantic import Field
 
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
@@ -337,16 +338,16 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     def process(
         self,
-        row: dict[str, Any] | list[dict[str, Any]],
+        row: PipelineRow | list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Process batch of rows in parallel.
 
-        When is_batch_aware=True, the engine passes list[dict].
-        For single-row fallback, the engine passes dict.
+        When is_batch_aware=True and configured as aggregation, the engine passes list[PipelineRow].
+        For single-row fallback (non-aggregation), the engine passes PipelineRow.
 
         Args:
-            row: Single row dict OR list of row dicts (batch)
+            row: Single PipelineRow OR list[PipelineRow] (batch mode)
             ctx: Plugin context
 
         Returns:
@@ -360,7 +361,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     def _process_single(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row (fallback for non-batch mode).
@@ -376,10 +377,12 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            # Propagate success_reason from batch result
+            # Propagate success_reason AND contract from batch result
+            # Contract is critical for downstream transforms to access LLM-added fields
             return TransformResult.success(
                 result.rows[0],
                 success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
+                contract=result.contract,
             )
         elif result.status == "error":
             return result
@@ -398,7 +401,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     def _process_batch(
         self,
-        rows: list[dict[str, Any]],
+        rows: list[PipelineRow],
         ctx: PluginContext,
     ) -> TransformResult:
         """Process batch of rows in parallel via ThreadPoolExecutor.
@@ -436,7 +439,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             ThreadPoolExecutor(max_workers=self._pool_size) as executor,
         ):
             # Submit all rows with shared client
-            futures = {executor.submit(self._process_single_row, idx, row, ctx, client): idx for idx, row in enumerate(rows)}
+            futures = {executor.submit(self._process_single_row, idx, row.to_dict(), ctx, client): idx for idx, row in enumerate(rows)}
 
             # Collect results - catch only transport exceptions, let plugin bugs crash
             for future in as_completed(futures):
@@ -449,7 +452,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Assemble output rows in original order
         # Every row gets an output (success or with error markers) - no rows are dropped
-        output_rows: list[dict[str, Any]] = []
+        output_rows: list[dict[str, Any] | PipelineRow] = []
 
         for idx in range(len(rows)):
             if idx not in results:
@@ -460,7 +463,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
             if isinstance(result, Exception):
                 # Unexpected exception (httpx transport errors caught in as_completed loop)
-                output_row = dict(rows[idx])
+                output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
                     "reason": "unexpected_exception",
@@ -471,7 +474,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
             elif "error" in result:
                 # Row-level error from _process_single_row
-                output_row = dict(rows[idx])
+                output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = result["error"]
                 output_rows.append(output_row)
@@ -480,9 +483,31 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 # Success
                 output_rows.append(result)
 
+        # Create OBSERVED contract from first output row
+        # Batch transforms don't have access to input contracts (architectural gap),
+        # so we infer an OBSERVED contract from the output data
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        if output_rows:
+            first_row = output_rows[0]
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,  # Use object for dynamic typing
+                    required=False,
+                    source="inferred",
+                )
+                for key in first_row
+            )
+            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        else:
+            output_contract = None
+
         return TransformResult.success_multi(
             output_rows,
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
+            contract=output_contract,
         )
 
     def _process_single_row(
@@ -719,7 +744,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         )
 
         # 7. Build output row (OUR CODE - let exceptions crash)
-        output = dict(row)
+        # row is already a dict (converted by caller on line 442)
+        output: dict[str, Any] = dict(row)
         output[self._response_field] = content
         output[f"{self._response_field}_usage"] = usage
         output[f"{self._response_field}_template_hash"] = rendered.template_hash

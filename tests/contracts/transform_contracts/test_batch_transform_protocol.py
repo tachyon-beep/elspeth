@@ -35,6 +35,7 @@ import contextlib
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 
@@ -42,12 +43,37 @@ import pytest
 
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching import OutputPort
 from elspeth.plugins.batching.mixin import BatchTransformMixin
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.protocols import TransformProtocol
 
 if TYPE_CHECKING:
     pass
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    # Create OBSERVED schema that accepts any fields
+    # Use object type for all fields (OBSERVED mode is permissive)
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,  # OBSERVED mode - accept any type
+            required=False,
+            source="inferred",
+        )
+        for key, value in data.items()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class CollectingOutputPort(OutputPort):
@@ -59,10 +85,10 @@ class CollectingOutputPort(OutputPort):
         self._lock = threading.Lock()
         self._emit_event = threading.Event()
 
-    def emit(self, token: TokenInfo, result: TransformResult, state_id: str | None) -> None:
+    def emit(self, token: TokenInfo, result: TransformResult | ExceptionResult, state_id: str | None) -> None:
         """Collect the emitted result."""
         with self._lock:
-            self.results.append((token, result, state_id))
+            self.results.append((token, result, state_id))  # type: ignore[arg-type]
             self.emit_count += 1
             self._emit_event.set()
 
@@ -96,10 +122,11 @@ class BatchTransformContractTestBase(ABC):
 
     @pytest.fixture
     @abstractmethod
-    def batch_transform(self) -> BatchTransformMixin:
+    def batch_transform(self) -> TransformProtocol:
         """Provide a configured batch transform instance (not yet connected/started).
 
         The transform should NOT have connect_output() called yet.
+        Must implement TransformProtocol and use BatchTransformMixin.
         """
         raise NotImplementedError
 
@@ -129,10 +156,11 @@ class BatchTransformContractTestBase(ABC):
             ctx.landscape = Mock()
             ctx.landscape.record_call = Mock()
             ctx.landscape.allocate_call_index = Mock(return_value=0)
+            contract = SchemaContract(mode="FLEXIBLE", fields=(), locked=True)
             ctx.token = TokenInfo(
                 token_id=f"token-{counter:03d}",
                 row_id=f"row-{counter:03d}",
-                row_data=valid_input.copy(),
+                row_data=PipelineRow(valid_input.copy(), contract),
             )
             return ctx
 
@@ -141,13 +169,13 @@ class BatchTransformContractTestBase(ABC):
     @pytest.fixture
     def started_transform(
         self,
-        batch_transform: BatchTransformMixin,
+        batch_transform: TransformProtocol,
         output_port: CollectingOutputPort,
         mock_ctx_factory: Any,
-    ) -> BatchTransformMixin:
+    ) -> Generator[TransformProtocol, None, None]:
         """Provide a fully initialized and started batch transform."""
-        # Connect output port
-        batch_transform.connect_output(output_port)
+        # Connect output port (BatchTransformMixin method)
+        batch_transform.connect_output(output_port)  # type: ignore[attr-defined]
 
         # Start lifecycle
         ctx = mock_ctx_factory()
@@ -162,7 +190,7 @@ class BatchTransformContractTestBase(ABC):
     # BatchTransformMixin Detection
     # =========================================================================
 
-    def test_transform_uses_batch_mixin(self, batch_transform: BatchTransformMixin) -> None:
+    def test_transform_uses_batch_mixin(self, batch_transform: TransformProtocol) -> None:
         """Contract: Transform MUST use BatchTransformMixin."""
         assert isinstance(batch_transform, BatchTransformMixin), (
             f"Transform {type(batch_transform).__name__} does not use BatchTransformMixin"
@@ -172,38 +200,38 @@ class BatchTransformContractTestBase(ABC):
     # Protocol Attribute Contracts (from TransformProtocol)
     # =========================================================================
 
-    def test_transform_has_name(self, batch_transform: BatchTransformMixin) -> None:
+    def test_transform_has_name(self, batch_transform: TransformProtocol) -> None:
         """Contract: Transform MUST have a 'name' attribute."""
         assert hasattr(batch_transform, "name")
         assert isinstance(batch_transform.name, str)
         assert len(batch_transform.name) > 0
 
-    def test_transform_has_input_schema(self, batch_transform: BatchTransformMixin) -> None:
+    def test_transform_has_input_schema(self, batch_transform: TransformProtocol) -> None:
         """Contract: Transform MUST have an 'input_schema' attribute that is a PluginSchema subclass."""
         assert isinstance(batch_transform.input_schema, type)
         assert issubclass(batch_transform.input_schema, PluginSchema)
 
-    def test_transform_has_output_schema(self, batch_transform: BatchTransformMixin) -> None:
+    def test_transform_has_output_schema(self, batch_transform: TransformProtocol) -> None:
         """Contract: Transform MUST have an 'output_schema' attribute that is a PluginSchema subclass."""
         assert isinstance(batch_transform.output_schema, type)
         assert issubclass(batch_transform.output_schema, PluginSchema)
 
-    def test_transform_has_determinism(self, batch_transform: BatchTransformMixin) -> None:
+    def test_transform_has_determinism(self, batch_transform: TransformProtocol) -> None:
         """Contract: Transform MUST have a 'determinism' attribute."""
         assert hasattr(batch_transform, "determinism")
         assert isinstance(batch_transform.determinism, Determinism)
 
-    def test_transform_has_plugin_version(self, batch_transform: BatchTransformMixin) -> None:
+    def test_transform_has_plugin_version(self, batch_transform: TransformProtocol) -> None:
         """Contract: Transform MUST have a 'plugin_version' attribute."""
         assert hasattr(batch_transform, "plugin_version")
         assert isinstance(batch_transform.plugin_version, str)
 
-    def test_transform_has_batch_awareness_flag(self, batch_transform: BatchTransformMixin) -> None:
+    def test_transform_has_batch_awareness_flag(self, batch_transform: TransformProtocol) -> None:
         """Contract: Transform MUST have 'is_batch_aware' attribute."""
         assert hasattr(batch_transform, "is_batch_aware")
         assert isinstance(batch_transform.is_batch_aware, bool)
 
-    def test_transform_has_creates_tokens_flag(self, batch_transform: BatchTransformMixin) -> None:
+    def test_transform_has_creates_tokens_flag(self, batch_transform: TransformProtocol) -> None:
         """Contract: Transform MUST have 'creates_tokens' attribute."""
         assert hasattr(batch_transform, "creates_tokens")
         assert isinstance(batch_transform.creates_tokens, bool)
@@ -214,7 +242,7 @@ class BatchTransformContractTestBase(ABC):
 
     def test_connect_output_required_before_accept(
         self,
-        batch_transform: BatchTransformMixin,
+        batch_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
     ) -> None:
@@ -224,7 +252,8 @@ class BatchTransformContractTestBase(ABC):
 
         try:
             with pytest.raises((RuntimeError, AttributeError, ValueError)):
-                batch_transform.accept(valid_input, ctx)
+                pipeline_row = _make_pipeline_row(valid_input)
+                batch_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
         finally:
             # Cleanup attempt (may fail, that's ok)
             with contextlib.suppress(Exception):
@@ -232,15 +261,15 @@ class BatchTransformContractTestBase(ABC):
 
     def test_connect_output_cannot_be_called_twice(
         self,
-        batch_transform: BatchTransformMixin,
+        batch_transform: TransformProtocol,
         output_port: CollectingOutputPort,
     ) -> None:
         """Contract: connect_output() MUST fail if called twice."""
-        batch_transform.connect_output(output_port)
+        batch_transform.connect_output(output_port)  # type: ignore[attr-defined]
 
         try:
             with pytest.raises((RuntimeError, ValueError)):
-                batch_transform.connect_output(CollectingOutputPort())
+                batch_transform.connect_output(CollectingOutputPort())  # type: ignore[attr-defined]
         finally:
             batch_transform.close()
 
@@ -250,18 +279,19 @@ class BatchTransformContractTestBase(ABC):
 
     def test_accept_returns_none(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
     ) -> None:
         """Contract: accept() MUST return None (results via OutputPort)."""
         ctx = mock_ctx_factory()
-        result = started_transform.accept(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        result = started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
         assert result is None, f"accept() should return None, got {type(result)}"
 
     def test_accept_requires_token_in_context(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
     ) -> None:
         """Contract: accept() MUST fail if ctx.token is None."""
@@ -271,7 +301,8 @@ class BatchTransformContractTestBase(ABC):
         ctx.token = None  # No token!
 
         with pytest.raises(ValueError, match="token"):
-            started_transform.accept(valid_input, ctx)
+            pipeline_row = _make_pipeline_row(valid_input)
+            started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
     # =========================================================================
     # Result Delivery Contracts
@@ -279,14 +310,15 @@ class BatchTransformContractTestBase(ABC):
 
     def test_results_arrive_via_output_port(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
         output_port: CollectingOutputPort,
     ) -> None:
         """Contract: Results MUST eventually arrive through OutputPort."""
         ctx = mock_ctx_factory()
-        started_transform.accept(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         # Wait for result
         arrived = output_port.wait_for_results(1, timeout=10.0)
@@ -297,14 +329,15 @@ class BatchTransformContractTestBase(ABC):
 
     def test_result_is_transform_result(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
         output_port: CollectingOutputPort,
     ) -> None:
         """Contract: Emitted result MUST be a TransformResult."""
         ctx = mock_ctx_factory()
-        started_transform.accept(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         output_port.wait_for_results(1, timeout=10.0)
         results = output_port.get_results()
@@ -314,7 +347,7 @@ class BatchTransformContractTestBase(ABC):
 
     def test_result_includes_correct_token(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
         output_port: CollectingOutputPort,
@@ -322,7 +355,8 @@ class BatchTransformContractTestBase(ABC):
         """Contract: Emitted result MUST include the submitted token."""
         ctx = mock_ctx_factory()
         submitted_token = ctx.token
-        started_transform.accept(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         output_port.wait_for_results(1, timeout=10.0)
         results = output_port.get_results()
@@ -334,7 +368,7 @@ class BatchTransformContractTestBase(ABC):
 
     def test_result_includes_correct_state_id(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
         output_port: CollectingOutputPort,
@@ -342,7 +376,8 @@ class BatchTransformContractTestBase(ABC):
         """Contract: Emitted result MUST include the correct state_id."""
         ctx = mock_ctx_factory()
         submitted_state_id = ctx.state_id
-        started_transform.accept(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         output_port.wait_for_results(1, timeout=10.0)
         results = output_port.get_results()
@@ -356,7 +391,7 @@ class BatchTransformContractTestBase(ABC):
 
     def test_results_arrive_in_fifo_order(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
         output_port: CollectingOutputPort,
@@ -367,7 +402,8 @@ class BatchTransformContractTestBase(ABC):
         for _ in range(5):
             ctx = mock_ctx_factory()
             submitted_tokens.append(ctx.token.token_id)
-            started_transform.accept(valid_input.copy(), ctx)
+            pipeline_row = _make_pipeline_row(valid_input.copy())
+            started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         # Wait for all results
         arrived = output_port.wait_for_results(5, timeout=30.0)
@@ -385,12 +421,12 @@ class BatchTransformContractTestBase(ABC):
 
     def test_close_is_idempotent(
         self,
-        batch_transform: BatchTransformMixin,
+        batch_transform: TransformProtocol,
         output_port: CollectingOutputPort,
         mock_ctx_factory: Any,
     ) -> None:
         """Contract: close() MUST be safe to call multiple times."""
-        batch_transform.connect_output(output_port)
+        batch_transform.connect_output(output_port)  # type: ignore[attr-defined]
         batch_transform.on_start(mock_ctx_factory())
 
         # close() should not raise on first call
@@ -402,12 +438,12 @@ class BatchTransformContractTestBase(ABC):
 
     def test_on_start_does_not_raise(
         self,
-        batch_transform: BatchTransformMixin,
+        batch_transform: TransformProtocol,
         output_port: CollectingOutputPort,
         mock_ctx_factory: Any,
     ) -> None:
         """Contract: on_start() lifecycle hook MUST not raise."""
-        batch_transform.connect_output(output_port)
+        batch_transform.connect_output(output_port)  # type: ignore[attr-defined]
         ctx = mock_ctx_factory()
 
         try:
@@ -417,7 +453,7 @@ class BatchTransformContractTestBase(ABC):
 
     def test_on_complete_does_not_raise(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
         output_port: CollectingOutputPort,
@@ -425,7 +461,8 @@ class BatchTransformContractTestBase(ABC):
         """Contract: on_complete() lifecycle hook MUST not raise."""
         # Process something first
         ctx = mock_ctx_factory()
-        started_transform.accept(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
         output_port.wait_for_results(1, timeout=10.0)
 
         # on_complete should not raise
@@ -441,7 +478,7 @@ class BatchTransformFIFOStressTestBase(BatchTransformContractTestBase):
 
     def test_fifo_order_under_concurrent_load(
         self,
-        started_transform: BatchTransformMixin,
+        started_transform: TransformProtocol,
         valid_input: dict[str, Any],
         mock_ctx_factory: Any,
         output_port: CollectingOutputPort,
@@ -452,7 +489,8 @@ class BatchTransformFIFOStressTestBase(BatchTransformContractTestBase):
         for _ in range(20):
             ctx = mock_ctx_factory()
             submitted_tokens.append(ctx.token.token_id)
-            started_transform.accept(valid_input.copy(), ctx)
+            pipeline_row = _make_pipeline_row(valid_input.copy())
+            started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         # Wait for all results
         arrived = output_port.wait_for_results(20, timeout=60.0)

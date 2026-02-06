@@ -20,11 +20,12 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
-from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
+from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
@@ -37,6 +38,7 @@ from elspeth.plugins.llm.multi_query import (
     OutputFieldType,
     QuerySpec,
     ResponseFormat,
+    validate_multi_query_key_collisions,
 )
 from elspeth.plugins.llm.openrouter import OpenRouterConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -126,6 +128,12 @@ class OpenRouterMultiQueryConfig(OpenRouterConfig):
         # Pydantic will handle nested OutputFieldConfig parsing
         return v
 
+    @model_validator(mode="after")
+    def validate_no_output_key_collisions(self) -> OpenRouterMultiQueryConfig:
+        """Validate no duplicate names or reserved suffix collisions."""
+        validate_multi_query_key_collisions(self.case_studies, self.criteria, self.output_mapping)
+        return self
+
     def build_json_schema(self) -> dict[str, Any]:
         """Build JSON Schema for structured outputs.
 
@@ -182,6 +190,7 @@ class OpenRouterMultiQueryConfig(OpenRouterConfig):
                     output_prefix=f"{case_study.name}_{criterion.name}",
                     criterion_data=criterion.to_template_data(),
                     case_study_data=case_study.to_template_data(),
+                    max_tokens=criterion.max_tokens,
                 )
                 specs.append(spec)
 
@@ -815,6 +824,17 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 retryable=False,
             )
 
+        # 8c. Check for content filtering (null content from provider)
+        if content is None:
+            return TransformResult.error(
+                {
+                    "reason": "content_filtered",
+                    "error": "LLM returned null content (likely content-filtered by provider)",
+                    "query": spec.output_prefix,
+                },
+                retryable=False,
+            )
+
         # OpenRouter can return {"usage": null} or omit usage entirely.
         # dict.get("usage", {}) only returns {} when key is MISSING, not when value is null.
         # The `or {}` ensures we get an empty dict for both missing AND null cases.
@@ -927,7 +947,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             success_reason={"action": "enriched", "fields_added": fields_added},
         )
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
 
         Submits the row to the batch processing pipeline. Returns quickly
@@ -935,7 +955,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         the output port in FIFO order.
 
         Args:
-            row: Input row with all case study fields
+            row: Input row with all case study fields as PipelineRow
             ctx: Plugin context with token and landscape
 
         Raises:
@@ -953,7 +973,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Not supported - use accept() for row-level pipelining.
@@ -970,7 +990,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
     def _process_row(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row with all queries. Called by worker threads.
@@ -981,7 +1001,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         for query-level parallelism.
 
         Args:
-            row: Input row with all case study fields
+            row: Input row with all case study fields as PipelineRow
             ctx: Plugin context with state_id for audit trail
 
         Returns:
@@ -992,11 +1012,17 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         import time
 
+        # Extract dict from PipelineRow for internal processing
+        row_data = row.to_dict()
+
+        # Store contract for propagation
+        input_contract = row.contract
+
         token_id = ctx.token.token_id if ctx.token else "unknown"
         start_time = time.monotonic()
 
         try:
-            result = self._process_single_row_internal(row, ctx.state_id)
+            result = self._process_single_row_internal(row_data, ctx.state_id)
 
             # Record in Langfuse using v3 nested context managers (after processing)
             latency_ms = (time.monotonic() - start_time) * 1000
@@ -1012,6 +1038,16 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 succeeded_count=succeeded,
                 latency_ms=latency_ms,
             )
+
+            # Propagate contract on success
+            if result.status == "success" and result.row is not None:
+                # Convert PipelineRow to dict for contract propagation
+                output_row = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
+                result.contract = propagate_contract(
+                    input_contract=input_contract,
+                    output_row=output_row,
+                    transform_adds_fields=True,  # Multi-query transforms add multiple output fields
+                )
 
             return result
         finally:
@@ -1029,19 +1065,22 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         Used by both single-row and batch processing paths.
 
         Args:
-            row: Input row with all case study fields
+            row: Input row dict with all case study fields
             state_id: State ID for audit trail
 
         Returns:
             TransformResult with all query results merged, or error
         """
+        # Use row dict directly (already converted by caller)
+        row_dict = row
+
         # Execute all queries (parallel or sequential)
         # P3-2026-02-02: Parallel mode returns pool context for audit trail
         pool_context: dict[str, Any] | None = None
         if self._executor is not None:
-            results, pool_context = self._execute_queries_parallel(row, state_id)
+            results, pool_context = self._execute_queries_parallel(row_dict, state_id)
         else:
-            results = self._execute_queries_sequential(row, state_id)
+            results = self._execute_queries_sequential(row_dict, state_id)
 
         # Check for failures (all-or-nothing for this row)
         failed = [(spec, r) for spec, r in zip(self._query_specs, results, strict=True) if r.status != "success"]
@@ -1070,7 +1109,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
         # Merge all results into output row
-        output = dict(row)
+        # Use explicit to_dict() conversion (preferred pattern for PipelineRow)
+        output = row_dict.copy()
         for result in results:
             # Check for row presence: successful results should always have a row,
             # but TransformResult supports multi-output scenarios where row may be

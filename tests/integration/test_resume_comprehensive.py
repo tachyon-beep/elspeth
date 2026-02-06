@@ -42,6 +42,40 @@ from elspeth.plugins.transforms.passthrough import PassThrough
 class TestResumeComprehensive:
     """Comprehensive end-to-end resume integration tests."""
 
+    @staticmethod
+    def _create_schema_contract(fields: list[tuple[str, type]]) -> tuple[str, str]:
+        """Create schema contract JSON and hash for test runs.
+
+        Helper to avoid repetition in test setup. Creates contract with given fields.
+
+        Args:
+            fields: List of (field_name, python_type) tuples
+
+        Returns:
+            Tuple of (schema_contract_json, schema_contract_hash)
+        """
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        field_contracts = tuple(
+            FieldContract(
+                normalized_name=name,
+                original_name=name,
+                python_type=py_type,
+                required=True,
+                source="declared",
+            )
+            for name, py_type in fields
+        )
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=field_contracts,
+            locked=True,
+        )
+        audit_record = ContractAuditRecord.from_contract(contract)
+        return audit_record.to_json(), contract.version_hash()
+
     @pytest.fixture
     def test_env(self, tmp_path: Path) -> dict[str, Any]:
         """Set up test environment with database and payload store."""
@@ -99,6 +133,35 @@ class TestResumeComprehensive:
             {"properties": {"id": {"type": "integer"}, "value": {"type": "string"}}, "required": ["id", "value"]}
         )
 
+        # PIPELINEROW MIGRATION: Create schema contract for resume
+        # Resume now requires a contract to wrap row data in PipelineRow
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=str,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+        audit_record = ContractAuditRecord.from_contract(contract)
+        schema_contract_json = audit_record.to_json()
+        schema_contract_hash = contract.version_hash()
+
         with db.engine.begin() as conn:
             # Create run
             conn.execute(
@@ -110,6 +173,8 @@ class TestResumeComprehensive:
                     canonical_version="v1",
                     status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
 
@@ -430,6 +495,14 @@ class TestResumeComprehensive:
             }
         )
 
+        # PIPELINEROW MIGRATION: Create schema contract
+        schema_contract_json, schema_contract_hash = self._create_schema_contract(
+            [
+                ("id", int),
+                ("timestamp", datetime),
+            ]
+        )
+
         # Create graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -450,6 +523,8 @@ class TestResumeComprehensive:
                     canonical_version="v1",
                     status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
 
@@ -551,10 +626,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": strict_schema}
-        resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        resume_schema_config: dict[str, Any] = {"schema": strict_schema}
+        resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=resume_schema_config)
+        resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=resume_schema_config)
+        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=resume_schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -623,6 +698,15 @@ class TestResumeComprehensive:
             }
         )
 
+        # PIPELINEROW MIGRATION: Create schema contract
+        # Note: We use float here as Decimal is not in VALID_FIELD_TYPES
+        schema_contract_json, schema_contract_hash = self._create_schema_contract(
+            [
+                ("id", int),
+                ("amount", float),  # Decimal coerces to float in contracts
+            ]
+        )
+
         # Create graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -643,6 +727,8 @@ class TestResumeComprehensive:
                     canonical_version="v1",
                     status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
 
@@ -744,10 +830,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": strict_schema}
-        resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        resume_schema_config: dict[str, Any] = {"schema": strict_schema}
+        resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=resume_schema_config)
+        resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=resume_schema_config)
+        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=resume_schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -812,6 +898,15 @@ class TestResumeComprehensive:
             }
         )
 
+        # PIPELINEROW MIGRATION: Create schema contract
+        # Arrays use object type (any) in contracts
+        schema_contract_json, schema_contract_hash = self._create_schema_contract(
+            [
+                ("id", int),
+                ("tags", object),  # Arrays use 'any'/object type
+            ]
+        )
+
         # Create graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -832,6 +927,8 @@ class TestResumeComprehensive:
                     canonical_version="v1",
                     status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
 
@@ -1002,6 +1099,14 @@ class TestResumeComprehensive:
             }
         )
 
+        # PIPELINEROW MIGRATION: Create schema contract
+        schema_contract_json, schema_contract_hash = self._create_schema_contract(
+            [
+                ("id", int),
+                ("metadata", object),  # Nested objects use 'any'/object type
+            ]
+        )
+
         # Create graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"mode": "observed"}}
@@ -1022,6 +1127,8 @@ class TestResumeComprehensive:
                     canonical_version="v1",
                     status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
 
@@ -1199,6 +1306,9 @@ class TestResumeComprehensive:
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
+        # Create a minimal schema contract for the run record
+        schema_contract_json, schema_contract_hash = self._create_schema_contract([("id", int), ("location", str)])
+
         with db.engine.begin() as conn:
             # Create run with unsupported schema
             conn.execute(
@@ -1210,6 +1320,8 @@ class TestResumeComprehensive:
                     canonical_version="v1",
                     status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
                 )
             )
 

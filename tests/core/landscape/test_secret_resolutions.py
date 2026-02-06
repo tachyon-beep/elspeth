@@ -122,11 +122,18 @@ class TestRecordSecretResolutions:
             },
         ]
 
+        # Build reference mapping BEFORE calling recorder (it strips secret_value)
+        env_var_to_secret: dict[str, str] = {str(r["env_var_name"]): str(r["secret_value"]) for r in resolutions}
+
         recorder.record_secret_resolutions(
             run_id=run.run_id,
             resolutions=resolutions,
             fingerprint_key=fingerprint_key,
         )
+
+        # Verify secret_value was stripped from input dicts
+        for r in resolutions:
+            assert "secret_value" not in r
 
         # Verify all stored
         with db.connection() as conn:
@@ -144,7 +151,6 @@ class TestRecordSecretResolutions:
         assert len(resolution_ids) == 3
 
         # Verify each has correct fingerprint
-        env_var_to_secret = {r["env_var_name"]: r["secret_value"] for r in resolutions}
         for row in rows:
             expected_fp = secret_fingerprint(env_var_to_secret[row.env_var_name], key=fingerprint_key)
             assert row.fingerprint == expected_fp

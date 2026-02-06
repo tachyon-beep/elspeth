@@ -7,7 +7,7 @@ import itertools
 import json
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
@@ -16,10 +16,27 @@ if TYPE_CHECKING:
     import httpx
 
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
 
 # Common schema config used across LLM tests
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 def make_azure_multi_query_config(**overrides: Any) -> dict[str, Any]:
@@ -60,7 +77,7 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},  # Not used in these tests
+        row_data=_make_pipeline_row({}),
     )
 
 
@@ -127,7 +144,7 @@ def chaosllm_azure_openai_client(
     template_override: str | None = None,
     usage_override: dict[str, int] | None = None,
     side_effect: Exception | None = None,
-) -> Generator[Mock, None, None]:
+) -> Iterator[Mock]:
     """Patch AzureOpenAI to use ChaosLLM response generation (no HTTP)."""
 
     def make_response(**kwargs: Any) -> Mock:
@@ -161,7 +178,7 @@ def chaosllm_azure_openai_responses(
     responses: list[dict[str, Any] | str],
     *,
     usage_override: dict[str, int] | None = None,
-) -> Generator[Mock, None, None]:
+) -> Iterator[Mock]:
     """Patch AzureOpenAI to return a sequence of ChaosLLM-generated JSON responses."""
     response_cycle = itertools.cycle(responses)
     lock = threading.Lock()
@@ -198,7 +215,7 @@ def chaosllm_azure_openai_sequence(
     response_factory,
     *,
     usage_override: dict[str, int] | None = None,
-) -> Generator[tuple[Mock, list[int], Mock], None, None]:
+) -> Iterator[tuple[Mock, list[int], Mock]]:
     """Patch AzureOpenAI with a response factory (supports delays)."""
     call_count = [0]
     lock = threading.Lock()
@@ -291,7 +308,7 @@ def chaosllm_openrouter_http_responses(
     headers: dict[str, str] | None = None,
     usage_override: dict[str, int] | None = None,
     side_effect: Exception | None = None,
-) -> Generator[Mock, None, None]:
+) -> Iterator[Mock]:
     """Patch httpx.Client to return ChaosLLM-generated responses (no HTTP)."""
     import httpx
 

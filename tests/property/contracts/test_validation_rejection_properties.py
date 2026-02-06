@@ -133,17 +133,19 @@ class TestEnumRejection:
 
     @given(
         invalid_value=st.text(min_size=1, max_size=20).filter(
-            lambda s: s
-            not in (
-                "completed",
-                "routed",
-                "forked",
-                "failed",
-                "quarantined",
-                "consumed_in_batch",
-                "coalesced",
-                "expanded",
-                "buffered",
+            lambda s: (
+                s
+                not in (
+                    "completed",
+                    "routed",
+                    "forked",
+                    "failed",
+                    "quarantined",
+                    "consumed_in_batch",
+                    "coalesced",
+                    "expanded",
+                    "buffered",
+                )
             )
         )
     )

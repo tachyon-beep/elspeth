@@ -6,10 +6,27 @@ import pytest
 
 from elspeth.contracts import NodeType, PendingOutcome, RowOutcome
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from tests.conftest import as_sink
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED mode contract."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=name,
+            original_name=f"'{name}'",
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for name in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=False)
+    return PipelineRow(data, contract)
 
 
 def make_mock_sink(
@@ -99,13 +116,13 @@ class TestSinkExecutor:
             token = TokenInfo(
                 row_id=f"row-{i}",
                 token_id=f"token-{i}",
-                row_data={"value": i * 10},
+                row_data=_make_pipeline_row({"value": i * 10}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=sink_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -229,13 +246,13 @@ class TestSinkExecutor:
             token = TokenInfo(
                 row_id=f"row-{i}",
                 token_id=f"token-{i}",
-                row_data={"value": i},
+                row_data=_make_pipeline_row({"value": i}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=sink_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -318,13 +335,13 @@ class TestSinkExecutor:
                 token = TokenInfo(
                     row_id=f"row-{idx}",
                     token_id=f"token-{idx}",
-                    row_data={"batch": batch_num, "index": i},
+                    row_data=_make_pipeline_row({"batch": batch_num, "index": i}),
                 )
                 row = recorder.create_row(
                     run_id=run.run_id,
                     source_node_id=sink_node.node_id,
                     row_index=idx,
-                    data=token.row_data,
+                    data=token.row_data.to_dict(),
                     row_id=token.row_id,
                 )
                 recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -389,13 +406,13 @@ class TestSinkExecutor:
             token = TokenInfo(
                 row_id=f"row-{i}",
                 token_id=f"token-{i}",
-                row_data={"index": i},
+                row_data=_make_pipeline_row({"index": i}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=sink_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -473,13 +490,13 @@ class TestSinkExecutor:
             token = TokenInfo(
                 row_id=f"row-{i}",
                 token_id=f"token-{i}",
-                row_data={"value": i * 10},
+                row_data=_make_pipeline_row({"value": i * 10}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=sink_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -585,13 +602,13 @@ class TestSinkExecutor:
             token = TokenInfo(
                 row_id=f"row-{i}",
                 token_id=f"token-{i}",
-                row_data={"value": i * 10},
+                row_data=_make_pipeline_row({"value": i * 10}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=sink_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -677,12 +694,12 @@ class TestSinkExecutor:
         ctx = PluginContext(run_id=run.run_id, config={})
         executor = SinkExecutor(recorder, SpanFactory(), run.run_id)
 
-        token = TokenInfo(row_id="row-0", token_id="token-0", row_data={"x": 1})
+        token = TokenInfo(row_id="row-0", token_id="token-0", row_data=_make_pipeline_row({"x": 1}))
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=sink_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)

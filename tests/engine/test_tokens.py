@@ -1,11 +1,42 @@
 # tests/engine/test_tokens.py
 """Tests for TokenManager."""
 
-from elspeth.contracts import NodeType
+from typing import Any
+
+from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
+
+
+def _make_observed_contract(*field_names: str) -> SchemaContract:
+    """Create an OBSERVED mode contract with specified fields."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=name,
+            original_name=f"'{name}'",
+            python_type=object,  # Accept any type
+            required=False,
+            source="inferred",
+        )
+        for name in field_names
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+
+def _make_source_row(data: dict[str, Any]) -> SourceRow:
+    """Create a SourceRow with an OBSERVED contract containing all data fields."""
+    contract = _make_observed_contract(*data.keys())
+    return SourceRow.valid(data, contract=contract)
+
+
+def _make_pipeline_row(data: dict[str, Any], contract: SchemaContract | None = None) -> PipelineRow:
+    """Create a PipelineRow with an OBSERVED contract if not provided."""
+    if contract is None:
+        contract = _make_observed_contract(*data.keys())
+    return PipelineRow(data, contract)
 
 
 class TestTokenManager:
@@ -33,12 +64,13 @@ class TestTokenManager:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 42},
+            source_row=_make_source_row({"value": 42}),
         )
 
         assert token_info.row_id is not None
         assert token_info.token_id is not None
-        assert token_info.row_data == {"value": 42}
+        assert isinstance(token_info.row_data, PipelineRow)
+        assert token_info.row_data.to_dict() == {"value": 42}
 
     def test_fork_token(self) -> None:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -61,7 +93,7 @@ class TestTokenManager:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 42},
+            source_row=_make_source_row({"value": 42}),
         )
 
         # step_in_pipeline is required - Orchestrator/RowProcessor is the authority
@@ -76,8 +108,9 @@ class TestTokenManager:
         assert len(children) == 2
         assert children[0].branch_name == "stats"
         assert children[1].branch_name == "classifier"
-        # Children inherit row_data
-        assert children[0].row_data == {"value": 42}
+        # Children inherit row_data (as PipelineRow)
+        assert isinstance(children[0].row_data, PipelineRow)
+        assert children[0].row_data.to_dict() == {"value": 42}
 
     def test_update_row_data(self) -> None:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -100,15 +133,15 @@ class TestTokenManager:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"x": 1},
+            source_row=_make_source_row({"x": 1}),
         )
 
-        updated = manager.update_row_data(
-            token_info,
-            new_data={"x": 1, "y": 2},
-        )
+        # Create new PipelineRow for update
+        new_row = _make_pipeline_row({"x": 1, "y": 2})
+        updated = manager.update_row_data(token_info, new_data=new_row)
 
-        assert updated.row_data == {"x": 1, "y": 2}
+        assert isinstance(updated.row_data, PipelineRow)
+        assert updated.row_data.to_dict() == {"x": 1, "y": 2}
         assert updated.token_id == token_info.token_id  # Same token
 
 
@@ -138,7 +171,7 @@ class TestTokenManagerCoalesce:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 42},
+            source_row=_make_source_row({"value": 42}),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -151,34 +184,39 @@ class TestTokenManagerCoalesce:
         # Update children with branch-specific data
         stats_token = manager.update_row_data(
             children[0],
-            new_data={"value": 42, "mean": 10.5},
+            new_data=_make_pipeline_row({"value": 42, "mean": 10.5}),
         )
         classifier_token = manager.update_row_data(
             children[1],
-            new_data={"value": 42, "label": "A"},
+            new_data=_make_pipeline_row({"value": 42, "label": "A"}),
         )
 
-        # Coalesce the branches
+        # Coalesce the branches (merged_data is now PipelineRow)
         merged = manager.coalesce_tokens(
             parents=[stats_token, classifier_token],
-            merged_data={"value": 42, "mean": 10.5, "label": "A"},
+            merged_data=_make_pipeline_row({"value": 42, "mean": 10.5, "label": "A"}),
             step_in_pipeline=3,
         )
 
         assert merged.token_id is not None
         assert merged.row_id == initial.row_id
-        assert merged.row_data == {"value": 42, "mean": 10.5, "label": "A"}
+        assert isinstance(merged.row_data, PipelineRow)
+        assert merged.row_data.to_dict() == {"value": 42, "mean": 10.5, "label": "A"}
 
 
 class TestTokenManagerForkIsolation:
-    """Test that forked tokens have isolated row_data (no shared mutable objects)."""
+    """Test that forked tokens have isolated row_data (no shared mutable objects).
+
+    Note: PipelineRow is immutable (MappingProxyType), so we test isolation
+    via to_dict() and verify deepcopy produces independent copies.
+    """
 
     def test_fork_nested_data_isolation(self) -> None:
-        """Forked children must not share nested mutable objects.
+        """Forked children must have independent copies of nested data.
 
         Bug: P2-2026-01-20-forked-token-row-data-shallow-copy-leaks-nested-mutations
         When row_data contains nested dicts/lists, shallow copy causes siblings
-        to share nested objects. Mutating one affects all.
+        to share nested objects. Deepcopy via PipelineRow.__deepcopy__ prevents this.
         """
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
@@ -202,7 +240,7 @@ class TestTokenManagerForkIsolation:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"payload": {"x": 1, "y": 2}, "items": [1, 2, 3]},
+            source_row=_make_source_row({"payload": {"x": 1, "y": 2}, "items": [1, 2, 3]}),
         )
 
         # Fork to two branches
@@ -216,13 +254,17 @@ class TestTokenManagerForkIsolation:
         child_a = children[0]
         child_b = children[1]
 
-        # Mutate nested data in child_a
-        child_a.row_data["payload"]["x"] = 999
-        child_a.row_data["items"].append(4)
+        # Get dict copy from child_a - PipelineRow is immutable so we verify via to_dict()
+        dict_a = child_a.row_data.to_dict()
 
-        # Bug: child_b should NOT be affected, but shallow copy means it is
-        assert child_b.row_data["payload"]["x"] == 1, "Nested dict mutation leaked to sibling!"
-        assert child_b.row_data["items"] == [1, 2, 3], "Nested list mutation leaked to sibling!"
+        # Mutate dict_a's nested data
+        dict_a["payload"]["x"] = 999
+        dict_a["items"].append(4)
+
+        # Get fresh dict from child_b - should be unaffected
+        dict_b_fresh = child_b.row_data.to_dict()
+        assert dict_b_fresh["payload"]["x"] == 1, "Nested dict mutation leaked to sibling!"
+        assert dict_b_fresh["items"] == [1, 2, 3], "Nested list mutation leaked to sibling!"
 
     def test_fork_with_custom_nested_data_isolation(self) -> None:
         """Custom row_data in fork should also be deep copied."""
@@ -246,11 +288,11 @@ class TestTokenManagerForkIsolation:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 1},
+            source_row=_make_source_row({"value": 1}),
         )
 
-        # Fork with custom nested row_data
-        custom_data = {"nested": {"key": "original"}}
+        # Fork with custom nested row_data (as PipelineRow)
+        custom_data = _make_pipeline_row({"nested": {"key": "original"}})
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["a", "b"],
@@ -259,11 +301,13 @@ class TestTokenManagerForkIsolation:
             row_data=custom_data,
         )
 
-        # Mutate one child's nested data
-        children[0].row_data["nested"]["key"] = "modified"
+        # Get dict copies and mutate one
+        dict_0 = children[0].row_data.to_dict()
+        dict_0["nested"]["key"] = "modified"
 
         # Siblings should be isolated
-        assert children[1].row_data["nested"]["key"] == "original"
+        dict_1 = children[1].row_data.to_dict()
+        assert dict_1["nested"]["key"] == "original"
 
 
 class TestTokenManagerExpandIsolation:
@@ -271,14 +315,16 @@ class TestTokenManagerExpandIsolation:
 
     Mirrors TestTokenManagerForkIsolation - both fork_token and expand_token
     create sibling tokens that must have independent data.
+
+    Note: PipelineRow is immutable, so we test isolation via to_dict().
     """
 
     def test_expand_nested_data_isolation(self) -> None:
-        """Expanded children must not share nested mutable objects.
+        """Expanded children must have independent copies of nested data.
 
         Bug: P2-2026-01-21-expand-token-shared-row-data
         When expanded_rows contain nested dicts/lists, shallow copy causes siblings
-        to share nested objects. Mutating one affects all.
+        to share nested objects. Deepcopy in expand_token prevents this.
         """
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.tokens import TokenManager
@@ -302,7 +348,7 @@ class TestTokenManagerExpandIsolation:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"original": "data"},
+            source_row=_make_source_row({"original": "data"}),
         )
 
         # Expand with NESTED data (common from batch aggregations)
@@ -314,6 +360,7 @@ class TestTokenManagerExpandIsolation:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
+            output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             step_in_pipeline=1,
             run_id=run.run_id,
         )
@@ -321,13 +368,15 @@ class TestTokenManagerExpandIsolation:
         child_a = children[0]
         child_b = children[1]
 
-        # Mutate nested data in child_a
-        child_a.row_data["payload"]["x"] = 999
-        child_a.row_data["items"].append(4)
+        # Get dict copies and mutate one
+        dict_a = child_a.row_data.to_dict()
+        dict_a["payload"]["x"] = 999
+        dict_a["items"].append(4)
 
-        # Bug: child_b should NOT be affected
-        assert child_b.row_data["payload"]["x"] == 10, "Nested dict mutation leaked to sibling!"
-        assert child_b.row_data["items"] == [10, 20, 30], "Nested list mutation leaked to sibling!"
+        # Get fresh dict from child_b - should be unaffected
+        dict_b = child_b.row_data.to_dict()
+        assert dict_b["payload"]["x"] == 10, "Nested dict mutation leaked to sibling!"
+        assert dict_b["items"] == [10, 20, 30], "Nested list mutation leaked to sibling!"
 
     def test_expand_shared_input_isolation(self) -> None:
         """Expanded tokens must be isolated even when input rows share objects.
@@ -355,7 +404,7 @@ class TestTokenManagerExpandIsolation:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 1},
+            source_row=_make_source_row({"value": 1}),
         )
 
         # Simulate plugin using dict(row) shallow copy - SHARED nested object
@@ -368,17 +417,20 @@ class TestTokenManagerExpandIsolation:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
+            output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             step_in_pipeline=1,
             run_id=run.run_id,
         )
 
-        # Mutate nested data in child 0
-        children[0].row_data["meta"]["version"] = 999
-        children[0].row_data["meta"]["tags"].append("mutated")
+        # Get dict copies and mutate one
+        dict_0 = children[0].row_data.to_dict()
+        dict_0["meta"]["version"] = 999
+        dict_0["meta"]["tags"].append("mutated")
 
-        # Child 1 must NOT see the mutation
-        assert children[1].row_data["meta"]["version"] == 1, "Shared object mutation leaked!"
-        assert children[1].row_data["meta"]["tags"] == ["a", "b"], "Shared list mutation leaked!"
+        # Get fresh dict from child 1 - must NOT see the mutation
+        dict_1 = children[1].row_data.to_dict()
+        assert dict_1["meta"]["version"] == 1, "Shared object mutation leaked!"
+        assert dict_1["meta"]["tags"] == ["a", "b"], "Shared list mutation leaked!"
 
     def test_expand_deep_nesting_isolation(self) -> None:
         """Test isolation with deeply nested structures (3+ levels)."""
@@ -402,7 +454,7 @@ class TestTokenManagerExpandIsolation:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 1},
+            source_row=_make_source_row({"value": 1}),
         )
 
         # Deep nesting: dict -> list -> dict -> list
@@ -414,15 +466,18 @@ class TestTokenManagerExpandIsolation:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
+            output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             step_in_pipeline=1,
             run_id=run.run_id,
         )
 
-        # Mutate at the deepest level
-        children[0].row_data["level1"]["level2"][0]["level3"][0] = "MUTATED"
+        # Get dict copies and mutate at the deepest level
+        dict_0 = children[0].row_data.to_dict()
+        dict_0["level1"]["level2"][0]["level3"][0] = "MUTATED"
 
         # Sibling must be unaffected
-        assert children[1].row_data["level1"]["level2"][0]["level3"][0] == "deep_value"
+        dict_1 = children[1].row_data.to_dict()
+        assert dict_1["level1"]["level2"][0]["level3"][0] == "deep_value"
 
 
 class TestTokenManagerEdgeCases:
@@ -450,19 +505,19 @@ class TestTokenManagerEdgeCases:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 42},
+            source_row=_make_source_row({"value": 42}),
         )
 
-        # Fork with custom row_data
+        # Fork with custom row_data (as PipelineRow)
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["branch_a"],
             step_in_pipeline=1,
             run_id=run.run_id,
-            row_data={"value": 42, "forked": True},
+            row_data=_make_pipeline_row({"value": 42, "forked": True}),
         )
 
-        assert children[0].row_data == {"value": 42, "forked": True}
+        assert children[0].row_data.to_dict() == {"value": 42, "forked": True}
 
     def test_update_preserves_branch_name(self) -> None:
         """update_row_data preserves branch_name."""
@@ -486,7 +541,7 @@ class TestTokenManagerEdgeCases:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"x": 1},
+            source_row=_make_source_row({"x": 1}),
         )
 
         children, _fork_group_id = manager.fork_token(
@@ -498,7 +553,7 @@ class TestTokenManagerEdgeCases:
 
         updated = manager.update_row_data(
             children[0],
-            new_data={"x": 1, "y": 2},
+            new_data=_make_pipeline_row({"x": 1, "y": 2}),
         )
 
         assert updated.branch_name == "my_branch"
@@ -532,7 +587,7 @@ class TestTokenManagerEdgeCases:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"x": 1},
+            source_row=_make_source_row({"x": 1}),
         )
 
         # Fork to get a token with fork_group_id
@@ -551,11 +606,11 @@ class TestTokenManagerEdgeCases:
         # Update the forked token's row data
         updated = manager.update_row_data(
             forked_token,
-            new_data={"x": 1, "y": 2},
+            new_data=_make_pipeline_row({"x": 1, "y": 2}),
         )
 
         # ALL lineage fields must be preserved
-        assert updated.row_data == {"x": 1, "y": 2}, "row_data should be updated"
+        assert updated.row_data.to_dict() == {"x": 1, "y": 2}, "row_data should be updated"
         assert updated.token_id == forked_token.token_id, "token_id must be preserved"
         assert updated.row_id == forked_token.row_id, "row_id must be preserved"
         assert updated.branch_name == "stats_branch", "branch_name must be preserved"
@@ -583,13 +638,14 @@ class TestTokenManagerEdgeCases:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"original": "data"},
+            source_row=_make_source_row({"original": "data"}),
         )
 
         # Expand to get tokens with expand_group_id
         expanded_children, expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=[{"id": 1}, {"id": 2}],
+            output_contract=_make_observed_contract("id"),
             step_in_pipeline=2,
             run_id=run.run_id,
         )
@@ -601,7 +657,7 @@ class TestTokenManagerEdgeCases:
         # Update the expanded token's row data
         updated = manager.update_row_data(
             expanded_token,
-            new_data={"id": 1, "processed": True},
+            new_data=_make_pipeline_row({"id": 1, "processed": True}),
         )
 
         # expand_group_id must be preserved
@@ -629,7 +685,7 @@ class TestTokenManagerEdgeCases:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 42},
+            source_row=_make_source_row({"value": 42}),
         )
 
         # Fork and then coalesce to get a token with join_group_id
@@ -642,7 +698,7 @@ class TestTokenManagerEdgeCases:
 
         merged = manager.coalesce_tokens(
             parents=children,
-            merged_data={"value": 42, "merged": True},
+            merged_data=_make_pipeline_row({"value": 42, "merged": True}),
             step_in_pipeline=3,
         )
 
@@ -652,7 +708,7 @@ class TestTokenManagerEdgeCases:
         # Update the merged token's row data
         updated = manager.update_row_data(
             merged,
-            new_data={"value": 42, "merged": True, "enriched": "yes"},
+            new_data=_make_pipeline_row({"value": 42, "merged": True, "enriched": "yes"}),
         )
 
         # join_group_id must be preserved
@@ -681,13 +737,13 @@ class TestTokenManagerEdgeCases:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"id": 1},
+            source_row=_make_source_row({"id": 1}),
         )
         token2 = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=1,
-            row_data={"id": 2},
+            source_row=_make_source_row({"id": 2}),
         )
 
         assert token1.row_id != token2.row_id
@@ -719,7 +775,7 @@ class TestTokenManagerStepInPipeline:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 42},
+            source_row=_make_source_row({"value": 42}),
         )
 
         # Fork with step_in_pipeline=2
@@ -760,7 +816,7 @@ class TestTokenManagerStepInPipeline:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"value": 42},
+            source_row=_make_source_row({"value": 42}),
         )
 
         # Fork and then coalesce
@@ -773,7 +829,7 @@ class TestTokenManagerStepInPipeline:
 
         merged = manager.coalesce_tokens(
             parents=children,
-            merged_data={"value": 42, "merged": True},
+            merged_data=_make_pipeline_row({"value": 42, "merged": True}),
             step_in_pipeline=3,
         )
 
@@ -810,7 +866,7 @@ class TestTokenManagerExpand:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"original": "data"},
+            source_row=_make_source_row({"original": "data"}),
         )
 
         expanded_rows = [
@@ -823,6 +879,7 @@ class TestTokenManagerExpand:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
+            output_contract=_make_observed_contract(*expanded_rows[0].keys()),
             step_in_pipeline=2,
             run_id=run.run_id,
         )
@@ -835,10 +892,11 @@ class TestTokenManagerExpand:
             assert child.row_id == parent.row_id
             assert child.token_id != parent.token_id
 
-        # Each child has its expanded row data
-        assert children[0].row_data == {"id": 1, "value": "a"}
-        assert children[1].row_data == {"id": 2, "value": "b"}
-        assert children[2].row_data == {"id": 3, "value": "c"}
+        # Each child has its expanded row data (as PipelineRow)
+        assert isinstance(children[0].row_data, PipelineRow)
+        assert children[0].row_data.to_dict() == {"id": 1, "value": "a"}
+        assert children[1].row_data.to_dict() == {"id": 2, "value": "b"}
+        assert children[2].row_data.to_dict() == {"id": 3, "value": "c"}
 
         # Verify parent relationships in database
         for i, child in enumerate(children):
@@ -871,7 +929,7 @@ class TestTokenManagerExpand:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={},
+            source_row=_make_source_row({}),
         )
 
         # Fork to get a token with branch_name
@@ -886,6 +944,7 @@ class TestTokenManagerExpand:
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=[{"a": 1}, {"a": 2}],
+            output_contract=_make_observed_contract("a"),
             step_in_pipeline=2,
             run_id=run.run_id,
         )
@@ -915,12 +974,13 @@ class TestTokenManagerExpand:
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            row_data={"x": 1},
+            source_row=_make_source_row({"x": 1}),
         )
 
         children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=[{"a": 1}, {"a": 2}],
+            output_contract=_make_observed_contract("a"),
             step_in_pipeline=5,
             run_id=run.run_id,
         )

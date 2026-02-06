@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from elspeth.contracts import NodeStateStatus, NodeType, RunStatus
+from elspeth.contracts import NodeStateStatus, NodeType, RowOutcome, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -597,3 +597,57 @@ class TestExplainFunction:
         # explain() MUST crash on this corruption - silent recovery is NOT acceptable
         with pytest.raises(ValueError, match=r"parent token.*not found|missing parent|audit.*integrity"):
             explain(recorder, run_id=run.run_id, token_id=child_token.token_id)
+
+    def test_explain_crashes_on_token_with_group_id_but_no_parents(self) -> None:
+        """explain raises ValueError when token has fork/join/expand group ID but no token_parents.
+
+        Per Data Manifesto (Tier-1): Missing parent relationships are audit integrity violations.
+        If a token has fork_group_id, join_group_id, or expand_group_id, it MUST have parent
+        relationships recorded in token_parents. Empty parent list indicates audit corruption.
+        """
+        import pytest
+
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.lineage import explain
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={"id": 1},
+        )
+
+        # Create token WITH fork_group_id but WITHOUT using fork_token()
+        # This simulates audit corruption - group ID set but no parent relationships recorded
+        token = recorder.create_token(row_id=row.row_id)
+
+        # Manually set fork_group_id to simulate the corruption
+        with db.connection() as conn:
+            from elspeth.core.landscape.schema import tokens_table
+
+            conn.execute(tokens_table.update().where(tokens_table.c.token_id == token.token_id).values(fork_group_id="fork-group-1"))
+
+        # Record a terminal outcome so explain() can find this token
+        recorder.record_token_outcome(
+            run_id=run.run_id,
+            token_id=token.token_id,
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output",
+        )
+
+        # explain() MUST crash - token has fork_group_id but no parent relationships
+        with pytest.raises(ValueError, match=r"fork_group_id.*no parent|missing parent.*fork"):
+            explain(recorder, run_id=run.run_id, token_id=token.token_id)

@@ -18,6 +18,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import TransformResult
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
@@ -31,9 +32,29 @@ from .conftest import (
 )
 
 
-def make_mock_llm_response(score: int, rationale: str, delay_ms: float = 0) -> Mock:
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
+
+
+def make_mock_llm_response(score: int, rationale: str, delay_ms: float = 0) -> tuple[dict[str, Any], float] | dict[str, Any]:
     """Create a ChaosLLM payload with optional artificial delay."""
-    payload = {"score": score, "rationale": rationale}
+    payload: dict[str, Any] = {"score": score, "rationale": rationale}
     return (payload, delay_ms) if delay_ms > 0 else payload
 
 
@@ -52,7 +73,7 @@ class TestLoadScenarios:
 
         def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
             """Simulate LLM response with 50ms latency."""
-            return make_mock_llm_response(
+            return make_mock_llm_response(  # type: ignore[return-value]
                 score=85 + (call_index % 10),
                 rationale=f"Response {call_index}",
                 delay_ms=50,
@@ -88,7 +109,7 @@ class TestLoadScenarios:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-load-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=60.0)
                 elapsed = time.time() - start_time
@@ -136,7 +157,7 @@ class TestLoadScenarios:
             """Run test with given pool_size, return (elapsed_time, total_calls)."""
 
             def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
-                return make_mock_llm_response(
+                return make_mock_llm_response(  # type: ignore[return-value]
                     score=85,
                     rationale=f"Response {call_index}",
                     delay_ms=50,
@@ -173,7 +194,7 @@ class TestLoadScenarios:
                         }
                         token = make_token(f"row-{i}")
                         ctx = make_plugin_context(state_id=f"state-{i}", token=token)
-                        transform.accept(row, ctx)
+                        transform.accept(_make_pipeline_row(row), ctx)
 
                     transform.flush_batch_processing(timeout=30.0)
                     elapsed = time.time() - start_time
@@ -216,7 +237,7 @@ class TestLoadScenarios:
 
         def response_factory(_call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
             # Return small responses (shouldn't accumulate much memory)
-            return make_mock_llm_response(
+            return make_mock_llm_response(  # type: ignore[return-value]
                 score=85,
                 rationale="Short response",
                 delay_ms=10,
@@ -254,7 +275,7 @@ class TestLoadScenarios:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-mem-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=60.0)
 
@@ -325,7 +346,7 @@ class TestLoadScenarios:
                 }
                 token = make_token("row-rate-limit")
                 ctx = make_plugin_context(state_id="rate-limit-test", token=token)
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
                 # Process will fail because one of the 4 queries hits rate limit
@@ -345,7 +366,7 @@ class TestLoadScenarios:
         """Verify LLM client caching works correctly."""
 
         def response_factory(call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
-            return make_mock_llm_response(score=85, rationale=f"Response {call_index}")
+            return make_mock_llm_response(score=85, rationale=f"Response {call_index}")  # type: ignore[return-value]
 
         with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
             _mock_client,
@@ -380,7 +401,7 @@ class TestLoadScenarios:
                     token = make_token(f"row-{i}")
                     # Use same state_id to test client caching per state
                     ctx = make_plugin_context(state_id="shared-state", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -459,7 +480,7 @@ class TestRowAtomicity:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"atomicity-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
 
@@ -552,7 +573,7 @@ class TestRowAtomicity:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"high-failure-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
 
@@ -641,7 +662,7 @@ class TestRowAtomicity:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"concurrent-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
 
@@ -686,7 +707,7 @@ class TestProfilingInstrumentation:
             """Simulate variable query latency."""
             delay = random.uniform(20, 80)
             query_times.append(delay)
-            return make_mock_llm_response(score=85, rationale="OK", delay_ms=delay)
+            return make_mock_llm_response(score=85, rationale="OK", delay_ms=delay)  # type: ignore[return-value]
 
         with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
             _mock_client,
@@ -717,7 +738,7 @@ class TestProfilingInstrumentation:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"timing-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
 
@@ -749,7 +770,7 @@ class TestProfilingInstrumentation:
 
         def response_factory(_call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
             # Instant responses to isolate batch processing overhead
-            return make_mock_llm_response(score=85, rationale="OK", delay_ms=0)
+            return make_mock_llm_response(score=85, rationale="OK", delay_ms=0)  # type: ignore[return-value]
 
         with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
             _mock_client,
@@ -782,7 +803,7 @@ class TestProfilingInstrumentation:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"overhead-{i}", token=token)
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
                 elapsed = time.time() - start_time

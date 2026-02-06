@@ -14,11 +14,41 @@ from typing import Any
 import pytest
 
 from elspeth.contracts.enums import BatchStatus, Determinism, NodeType, RunStatus
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+
+
+def _make_contract(data: dict[str, Any]) -> SchemaContract:
+    """Create a contract from observed data fields."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+
+def _create_test_schema_contract() -> SchemaContract:
+    """Create a minimal schema contract for test run creation."""
+    field_contracts = (
+        FieldContract(
+            normalized_name="test_field",
+            original_name="test_field",
+            python_type=str,
+            required=True,
+            source="declared",
+        ),
+    )
+    return SchemaContract(fields=field_contracts, mode="FIXED", locked=True)
 
 
 class TestAggregationRecoveryIntegration:
@@ -67,6 +97,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"aggregation": {"trigger": {"count": 3}}},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         # Register nodes using raw SQL to avoid schema_config requirement
@@ -162,6 +193,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"aggregations": ["sum", "count"]},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         # Register multiple aggregation nodes
@@ -234,6 +266,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"test": "order_preservation"},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         self._register_nodes_raw(db, run.run_id)
@@ -291,6 +324,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"test": "retry_validation"},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         self._register_nodes_raw(db, run.run_id)
@@ -418,6 +452,7 @@ class TestAggregationRecoveryIntegration:
         run = recorder.begin_run(
             config={"aggregation": {"trigger": {"timeout_seconds": 60}}},
             canonical_version="sha256-rfc8785-v1",
+            schema_contract=_create_test_schema_contract(),
         )
 
         self._register_nodes_raw(db, run.run_id)
@@ -456,7 +491,10 @@ class TestAggregationRecoveryIntegration:
         assert evaluator.should_trigger() is False
 
         # Create checkpoint with aggregation state
-        # Note: token format must match v1.1 checkpoint schema (all fields required)
+        # Note: token format must match v2.0 checkpoint schema (includes contract)
+        # Create a contract for the checkpoint
+        contract = _make_contract({"id": 0, "value": 0})
+        contract_version = contract.version_hash()
         sum_agg_state: dict[str, Any] = {
             "tokens": [
                 {
@@ -467,6 +505,7 @@ class TestAggregationRecoveryIntegration:
                     "fork_group_id": None,
                     "join_group_id": None,
                     "expand_group_id": None,
+                    "contract_version": contract_version,  # v2.0: required for contract reference
                 }
                 for t in tokens
             ],
@@ -474,9 +513,10 @@ class TestAggregationRecoveryIntegration:
             "elapsed_age_seconds": evaluator.get_age_seconds(),  # Bug #6 fix: store elapsed time
             "count_fire_offset": evaluator.get_count_fire_offset(),  # P2-2026-02-01
             "condition_fire_offset": evaluator.get_condition_fire_offset(),  # P2-2026-02-01
+            "contract": contract.to_checkpoint_format(),  # v2.0: contract required for PipelineRow restoration
         }
         agg_state: dict[str, Any] = {
-            "_version": "1.1",  # Required checkpoint version
+            "_version": "2.0",  # Required checkpoint version
             "sum_aggregator": sum_agg_state,
         }
 

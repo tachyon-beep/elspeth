@@ -7,13 +7,16 @@ to NodeInfo, and that _get_schema_config_from_node() prioritizes these computed
 configs over raw config dict parsing.
 """
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
 from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.dag import ExecutionGraph
+
+if TYPE_CHECKING:
+    pass
 
 
 class MockTransformWithSchemaConfig:
@@ -23,6 +26,7 @@ class MockTransformWithSchemaConfig:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
+    _on_error: str | None = None
 
     def __init__(self) -> None:
         # Computed schema config with guaranteed and audit fields
@@ -41,6 +45,7 @@ class MockTransformWithoutSchemaConfig:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed", "guaranteed_fields": ["config_field"]}}
+    _on_error: str | None = None
 
 
 class MockSource:
@@ -49,6 +54,7 @@ class MockSource:
     name = "mock_source"
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
+    _on_validation_failure = "discard"
 
 
 class MockSink:
@@ -67,7 +73,7 @@ class TestOutputSchemaConfigPropagation:
         transform = MockTransformWithSchemaConfig()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),
+            source=MockSource(),  # type: ignore[arg-type]
             transforms=[transform],  # type: ignore[list-item]
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
@@ -92,7 +98,7 @@ class TestOutputSchemaConfigPropagation:
         transform = MockTransformWithoutSchemaConfig()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),
+            source=MockSource(),  # type: ignore[arg-type]
             transforms=[transform],  # type: ignore[list-item]
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
@@ -306,6 +312,7 @@ class MockAggregationTransform:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
+    _on_error: str | None = None
 
     def __init__(self) -> None:
         self._output_schema_config = SchemaConfig(
@@ -334,7 +341,7 @@ class TestAggregationSchemaConfigPropagation:
         )
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),
+            source=MockSource(),  # type: ignore[arg-type]
             transforms=[],
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={"test_agg": (transform, agg_settings)},  # type: ignore[dict-item]

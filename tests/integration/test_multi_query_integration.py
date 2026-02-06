@@ -18,6 +18,7 @@ import pytest
 from elspeth.contracts import NodeType, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
@@ -26,6 +27,29 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with observed schema contract for testing.
+
+    Args:
+        data: Row data as plain dict
+
+    Returns:
+        PipelineRow with contract
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data=data, contract=contract)
 
 
 def make_full_config() -> dict[str, Any]:
@@ -168,7 +192,9 @@ def create_token_in_recorder(
         row_id=row_id,
     )
     recorder.create_token(row_id=row.row_id, token_id=token_id)
-    return TokenInfo(row_id=row_id, token_id=token_id, row_data=row_data)
+    # Wrap row_data in PipelineRow with contract
+    pipeline_row = _make_pipeline_row(row_data)
+    return TokenInfo(row_id=row_id, token_id=token_id, row_data=pipeline_row)
 
 
 class TestMultiQueryIntegration:

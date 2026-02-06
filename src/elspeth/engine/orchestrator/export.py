@@ -87,10 +87,9 @@ def export_landscape(
         # Multi-file CSV export: one file per record type
         # CSV export writes files directly (not via sink.write), so we need
         # the path from sink config. CSV format requires file-based sink.
-        # Note: SinkProtocol doesn't define config, but all concrete sinks have it
-        if "path" not in sink.config:  # type: ignore[attr-defined]
+        if "path" not in sink.config:
             raise ValueError(f"CSV export requires file-based sink with 'path' in config, but sink '{sink_name}' has no path configured")
-        artifact_path: str = sink.config["path"]  # type: ignore[attr-defined]
+        artifact_path: str = sink.config["path"]
         _export_csv_multifile(
             exporter=exporter,
             run_id=run_id,
@@ -182,7 +181,7 @@ def reconstruct_schema_from_json(schema_dict: dict[str, Any]) -> type:
     Raises:
         ValueError: If schema is malformed, empty, or contains unsupported types
     """
-    from pydantic import create_model
+    from pydantic import ConfigDict, create_model
 
     from elspeth.contracts import PluginSchema
 
@@ -194,11 +193,22 @@ def reconstruct_schema_from_json(schema_dict: dict[str, Any]) -> type:
         )
     properties = schema_dict["properties"]
 
+    # Handle observed/dynamic schemas: empty properties with additionalProperties=true
+    # This is the normal JSON schema output for schema.mode=observed (dynamic schemas)
+    # See schema_factory._create_dynamic_schema for the creation side
     if not properties:
+        if schema_dict.get("additionalProperties") is True:
+            # Dynamic schema - accepts any fields, no fixed properties
+            return create_model(
+                "RestoredDynamicSchema",
+                __base__=PluginSchema,
+                __config__=ConfigDict(extra="allow"),
+            )
+        # Empty properties WITHOUT additionalProperties=true is genuinely malformed
         raise ValueError(
-            "Resume failed: Schema has zero fields defined. "
-            "Cannot resume with empty schema - this would silently discard all row data. "
-            "The original source schema must have at least one field."
+            "Resume failed: Schema has zero fields defined and additionalProperties is not true. "
+            "Cannot resume with empty fixed schema - this would silently discard all row data. "
+            "For dynamic schemas, additionalProperties must be true."
         )
 
     # "required" is optional in JSON Schema spec - empty list is valid default

@@ -20,12 +20,13 @@ from pydantic import ConfigDict
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.telemetry.events import RunStarted
-from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
+from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 from tests.telemetry.fixtures import MockTelemetryConfig, TelemetryTestExporter
 
@@ -36,6 +37,21 @@ if TYPE_CHECKING:
 # =============================================================================
 # Test Helpers
 # =============================================================================
+
+
+def _make_contract(data: dict[str, Any]) -> SchemaContract:
+    """Create a simple schema contract for test data."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=k,
+            original_name=k,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for k in data
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class DynamicSchema(PluginSchema):
@@ -56,7 +72,7 @@ class SimpleSource(_TestSourceBase):
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
         for row in self._rows:
-            yield SourceRow.valid(row)
+            yield SourceRow.valid(row, contract=_make_contract(row))
 
 
 class SimpleTransform:
@@ -71,10 +87,18 @@ class SimpleTransform:
     node_id: str | None = None
     is_batch_aware = False
     creates_tokens = False
+    transforms_adds_fields = False
     _on_error: str | None = None
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row, success_reason="passthrough")
+        # Extract data dict from PipelineRow if needed
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        if isinstance(row, PipelineRow):
+            row_data = row.to_dict()
+        else:
+            row_data = row
+        return TransformResult.success(row_data, success_reason={"action": "passthrough"})
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -144,7 +168,7 @@ class TestOrchestratorWiresTelemetryToContext:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[SimpleTransform()],
+            transforms=[as_transform(SimpleTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -186,6 +210,16 @@ class TestOrchestratorWiresTelemetryToContext:
 
             name = "callback_capturing"
 
+            def process(self, row: Any, ctx: Any) -> TransformResult:
+                # Extract data dict from PipelineRow
+                from elspeth.contracts.schema_contract import PipelineRow
+
+                if isinstance(row, PipelineRow):
+                    row_data = row.to_dict()
+                else:
+                    row_data = row
+                return TransformResult.success(row_data, success_reason={"action": "passthrough"})
+
             def on_start(self, ctx: Any) -> None:
                 nonlocal captured_callback
                 captured_callback = ctx.telemetry_emit
@@ -199,7 +233,7 @@ class TestOrchestratorWiresTelemetryToContext:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[CallbackCapturingTransform()],
+            transforms=[as_transform(CallbackCapturingTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -242,7 +276,7 @@ class TestOrchestratorWiresTelemetryToContext:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[SimpleTransform()],
+            transforms=[as_transform(SimpleTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -277,7 +311,7 @@ class TestNoTelemetryWithoutManager:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[SimpleTransform()],
+            transforms=[as_transform(SimpleTransform())],
             sinks={"output": as_sink(sink)},
         )
 
@@ -312,7 +346,7 @@ class TestNoTelemetryWithoutManager:
 
         pipeline_config = PipelineConfig(
             source=as_source(source),
-            transforms=[CallbackCapturingTransform()],
+            transforms=[as_transform(CallbackCapturingTransform())],
             sinks={"output": as_sink(sink)},
         )
 

@@ -244,3 +244,58 @@ class TestSourceQuarantineRouting:
         output_file = tmp_path / "output.json"
         data = json.loads(output_file.read_text())
         assert len(data) == 2  # alice and carol only
+
+
+class TestTransformErrorSinkRouting:
+    """Tests for sinks only reachable via transform on_error divert edges.
+
+    Verifies that a sink referenced only by on_error doesn't break DAG
+    validation. The __error_N__ divert edge makes it reachable in the graph.
+    """
+
+    def test_dedicated_error_sink_does_not_break_graph(self, tmp_path: Path) -> None:
+        """A sink only referenced by on_error must not break DAG validation."""
+        input_csv = tmp_path / "input.csv"
+        input_csv.write_text("id,value\n1,good\n2,bad\n3,ok\n")
+
+        config = {
+            "source": {
+                "plugin": "csv",
+                "options": {
+                    "path": str(input_csv),
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            },
+            "transforms": [
+                {
+                    "plugin": "passthrough",
+                    "options": {"on_error": "errors", "schema": {"mode": "observed"}},
+                },
+            ],
+            "sinks": {
+                "default": {
+                    "plugin": "json",
+                    "options": {
+                        "path": str(tmp_path / "output.json"),
+                        "schema": {"mode": "observed"},
+                    },
+                },
+                "errors": {
+                    "plugin": "json",
+                    "options": {
+                        "path": str(tmp_path / "errors.json"),
+                        "schema": {"mode": "observed"},
+                    },
+                },
+            },
+            "default_sink": "default",
+        }
+
+        config_path = tmp_path / "settings.yaml"
+        config_path.write_text(yaml.dump(config))
+
+        from elspeth.cli import app
+
+        result = runner.invoke(app, ["run", "-s", str(config_path), "--execute"])
+        assert result.exit_code == 0, f"Pipeline failed: {result.output}"

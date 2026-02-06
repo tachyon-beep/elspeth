@@ -13,7 +13,8 @@ Gates are config-driven using GateSettings.
 
 from typing import Any
 
-from elspeth.contracts import NodeType, RunStatus
+from elspeth.contracts import NodeStateStatus, NodeType, SourceRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB
@@ -23,8 +24,50 @@ from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
 )
-from tests.conftest import as_transform
+from tests.conftest import as_transform, create_observed_contract
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
+
+
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
 
 
 class TestRowProcessorCoalesce:
@@ -175,8 +218,8 @@ class TestRowProcessorCoalesce:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "sentiment": "positive"}, success_reason={"action": "enrich"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success({**row.to_dict(), "sentiment": "positive"}, success_reason={"action": "enrich"})
 
         class EnrichB(BaseTransform):
             name = "enrich_b"
@@ -187,8 +230,8 @@ class TestRowProcessorCoalesce:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "entities": ["ACME"]}, success_reason={"action": "enrich"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success({**row.to_dict(), "entities": ["ACME"]}, success_reason={"action": "enrich"})
 
         # Config-driven fork gate
         fork_gate_config = GateSettings(
@@ -227,7 +270,7 @@ class TestRowProcessorCoalesce:
         # 4. Coalesce both paths (merged token COALESCED)
         results = processor.process_row(
             row_index=0,
-            row_data={"text": "ACME earnings"},
+            source_row=make_source_row({"text": "ACME earnings"}),
             transforms=[
                 EnrichA(transform_a.node_id),
                 EnrichB(transform_b.node_id),
@@ -358,8 +401,8 @@ class TestRowProcessorCoalesce:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "sentiment": "positive"}, success_reason={"action": "enrich"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success({**row.to_dict(), "sentiment": "positive"}, success_reason={"action": "enrich"})
 
         class EnrichB(BaseTransform):
             name = "enrich_b"
@@ -370,8 +413,8 @@ class TestRowProcessorCoalesce:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "entities": ["ACME"]}, success_reason={"action": "enrich"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                return TransformResult.success({**row.to_dict(), "entities": ["ACME"]}, success_reason={"action": "enrich"})
 
         # Config-driven fork gate
         fork_gate_config = GateSettings(
@@ -406,7 +449,7 @@ class TestRowProcessorCoalesce:
         # Process the row through enrich -> fork -> coalesce
         results = processor.process_row(
             row_index=0,
-            row_data={"text": "ACME earnings"},
+            source_row=make_source_row({"text": "ACME earnings"}),
             transforms=[
                 EnrichA(transform_a.node_id),
                 EnrichB(transform_b.node_id),
@@ -466,7 +509,7 @@ class TestRowProcessorCoalesce:
             assert len(coalesce_states) == 1, "Child token should have exactly one coalesce node_state"
 
             coalesce_state = coalesce_states[0]
-            assert coalesce_state.status == RunStatus.COMPLETED
+            assert coalesce_state.status == NodeStateStatus.COMPLETED
 
         # === Audit Trail: Verify merged token has join_group_id ===
         merged_token_record = recorder.get_token(merged_token.token_id)
@@ -545,7 +588,7 @@ class TestRowProcessorCoalesce:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"text": "ACME earnings report"},
+            source_row=make_source_row({"text": "ACME earnings report"}),
         )
         children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
@@ -559,7 +602,7 @@ class TestRowProcessorCoalesce:
         sentiment_token = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data={"text": "ACME earnings report", "sentiment": "positive"},
+            row_data=_make_pipeline_row({"text": "ACME earnings report", "sentiment": "positive"}),
             branch_name="sentiment",
         )
         outcome1 = coalesce_executor.accept(sentiment_token, "merger", step_in_pipeline=3)
@@ -569,7 +612,7 @@ class TestRowProcessorCoalesce:
         entities_token = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data={"text": "ACME earnings report", "entities": ["ACME"]},
+            row_data=_make_pipeline_row({"text": "ACME earnings report", "entities": ["ACME"]}),
             branch_name="entities",
         )
         outcome2 = coalesce_executor.accept(entities_token, "merger", step_in_pipeline=3)
@@ -593,13 +636,13 @@ class TestRowProcessorCoalesce:
 
         # Verify merged data contains sentiment and entities but not summary
         merged_data = outcome.merged_token.row_data
-        assert "sentiment" in merged_data
+        assert "sentiment" in merged_data.to_dict()
         assert merged_data["sentiment"] == "positive"
-        assert "entities" in merged_data
+        assert "entities" in merged_data.to_dict()
         assert merged_data["entities"] == ["ACME"]
         # summary never arrived, so its data is NOT in merged result
         # (The original text field should be there from union merge)
-        assert "text" in merged_data
+        assert "text" in merged_data.to_dict()
 
         # Verify coalesce metadata shows partial merge
         assert outcome.coalesce_metadata is not None
@@ -673,7 +716,7 @@ class TestRowProcessorCoalesce:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"text": "test input"},
+            source_row=make_source_row({"text": "test input"}),
         )
         children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
@@ -686,7 +729,7 @@ class TestRowProcessorCoalesce:
         fast_token = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data={"text": "test input", "fast_result": "fast done"},
+            row_data=_make_pipeline_row({"text": "test input", "fast_result": "fast done"}),
             branch_name="fast",
         )
         outcome1 = coalesce_executor.accept(fast_token, "merger", step_in_pipeline=3)
@@ -699,7 +742,7 @@ class TestRowProcessorCoalesce:
         medium_token = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data={"text": "test input", "medium_result": "medium done"},
+            row_data=_make_pipeline_row({"text": "test input", "medium_result": "medium done"}),
             branch_name="medium",
         )
         outcome2 = coalesce_executor.accept(medium_token, "merger", step_in_pipeline=3)
@@ -711,8 +754,8 @@ class TestRowProcessorCoalesce:
 
         # Verify merged data using nested strategy
         merged_data = outcome2.merged_token.row_data
-        assert "fast" in merged_data, "Merged data should have 'fast' branch"
-        assert "medium" in merged_data, "Merged data should have 'medium' branch"
+        assert "fast" in merged_data.to_dict(), "Merged data should have 'fast' branch"
+        assert "medium" in merged_data.to_dict(), "Merged data should have 'medium' branch"
         assert "slow" not in merged_data, "Merged data should NOT have 'slow' branch"
 
         # Check nested structure contains expected data
@@ -748,7 +791,7 @@ class TestRowProcessorCoalesce:
         slow_token = TokenInfo(
             row_id=children[2].row_id,
             token_id=children[2].token_id,
-            row_data={"text": "test input", "slow_result": "slow done"},
+            row_data=_make_pipeline_row({"text": "test input", "slow_result": "slow done"}),
             branch_name="slow",
         )
         outcome3 = coalesce_executor.accept(slow_token, "merger", step_in_pipeline=3)
@@ -844,7 +887,7 @@ class TestRowProcessorCoalesce:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"text": "Document for nested processing"},
+            source_row=make_source_row({"text": "Document for nested processing"}),
         )
 
         # === Level 1: Fork to path_a and path_b (gate1) ===
@@ -890,20 +933,24 @@ class TestRowProcessorCoalesce:
         enriched_a1 = TokenInfo(
             row_id=path_a1_token.row_id,
             token_id=path_a1_token.token_id,
-            row_data={
-                "text": "Document for nested processing",
-                "sentiment": "positive",
-            },
+            row_data=_make_pipeline_row(
+                {
+                    "text": "Document for nested processing",
+                    "sentiment": "positive",
+                }
+            ),
             branch_name="path_a1",
         )
         # A2 adds entity extraction
         enriched_a2 = TokenInfo(
             row_id=path_a2_token.row_id,
             token_id=path_a2_token.token_id,
-            row_data={
-                "text": "Document for nested processing",
-                "entities": ["ACME", "2024"],
-            },
+            row_data=_make_pipeline_row(
+                {
+                    "text": "Document for nested processing",
+                    "entities": ["ACME", "2024"],
+                }
+            ),
             branch_name="path_a2",
         )
 
@@ -925,7 +972,7 @@ class TestRowProcessorCoalesce:
         assert enriched_a2.token_id in consumed_inner_ids
 
         # Verify inner merged data has nested structure
-        inner_merged_data = inner_merged_token.row_data
+        inner_merged_data = inner_merged_token.row_data.to_dict()
         assert "path_a1" in inner_merged_data
         assert "path_a2" in inner_merged_data
         assert inner_merged_data["path_a1"]["sentiment"] == "positive"
@@ -935,10 +982,12 @@ class TestRowProcessorCoalesce:
         enriched_b = TokenInfo(
             row_id=path_b_token.row_id,
             token_id=path_b_token.token_id,
-            row_data={
-                "text": "Document for nested processing",
-                "category": "financial",
-            },
+            row_data=_make_pipeline_row(
+                {
+                    "text": "Document for nested processing",
+                    "category": "financial",
+                }
+            ),
             branch_name="path_b",
         )
 
@@ -948,7 +997,7 @@ class TestRowProcessorCoalesce:
         inner_for_outer = TokenInfo(
             row_id=inner_merged_token.row_id,
             token_id=inner_merged_token.token_id,
-            row_data=inner_merged_token.row_data,
+            row_data=_make_pipeline_row(inner_merged_token.row_data.to_dict()),
             branch_name="path_a_merged",  # Assign branch for outer coalesce
         )
 
@@ -969,7 +1018,7 @@ class TestRowProcessorCoalesce:
         assert enriched_b.token_id in consumed_outer_ids
 
         # === Verify final merged data has complete nested hierarchy ===
-        final_data = outer_merged_token.row_data
+        final_data = outer_merged_token.row_data.to_dict()
         assert "path_a_merged" in final_data
         assert "path_b" in final_data
 
@@ -1119,8 +1168,6 @@ class TestRowProcessorCoalesce:
             name="test_coalesce",
             branches=["fast", "slow"],
             policy="first",
-            strategy="overwrite",
-            primary_branch="fast",
         )
         coalesce_executor.register_coalesce(coalesce_settings, coalesce_node.node_id)
 
@@ -1137,7 +1184,7 @@ class TestRowProcessorCoalesce:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"text": "test"},
+            source_row=make_source_row({"text": "test"}),
         )
 
         # Fork into fast and slow branches
@@ -1152,13 +1199,13 @@ class TestRowProcessorCoalesce:
         fast_token = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data={"text": "test", "fast_result": "done"},
+            row_data=_make_pipeline_row({"text": "test", "fast_result": "done"}),
             branch_name="fast",
         )
         slow_token = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data={"text": "test", "slow_result": "done"},
+            row_data=_make_pipeline_row({"text": "test", "slow_result": "done"}),
             branch_name="slow",
         )
 
@@ -1353,11 +1400,13 @@ class TestAggregationCoalesceMetadataPropagation:
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
 
-            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+            def process(self, row: PipelineRow | list[PipelineRow], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
-                    total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total}, success_reason={"action": "aggregate"})
-                return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
+                    total = sum(r.to_dict().get("value", 0) for r in row)
+                    output_row = {"total": total}
+                    contract = create_observed_contract(output_row)
+                    return TransformResult.success(output_row, success_reason={"action": "aggregate"}, contract=contract)
+                return TransformResult.success(dict(row.to_dict()), success_reason={"action": "passthrough"})
 
         agg_transform = as_transform(BatchAggForCoalesce())
 
@@ -1436,7 +1485,7 @@ class TestAggregationCoalesceMetadataPropagation:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
         )
 
         # Fork to create a token with branch_name
@@ -1467,7 +1516,7 @@ class TestAggregationCoalesceMetadataPropagation:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=1,
-            row_data={"id": 2, "value": 200},
+            source_row=make_source_row({"id": 2, "value": 200}),
         )
         forked_tokens2, _fork_group_id2 = token_manager.fork_token(
             parent_token=source_token2,
@@ -1642,7 +1691,7 @@ class TestCoalesceSelectBranchFailure:
         # This should NOT raise an IntegrityError
         results = processor.process_row(
             row_index=0,
-            row_data={"text": "test"},
+            source_row=make_source_row({"text": "test"}),
             transforms=[],
             ctx=ctx,
         )

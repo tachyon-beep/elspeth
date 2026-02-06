@@ -57,7 +57,6 @@ class TestRunWithTransforms:
             "transforms": [
                 {
                     "plugin": "passthrough",
-                    "type": "transform",
                     "options": {"schema": DYNAMIC_SCHEMA},
                 }
             ],
@@ -89,7 +88,6 @@ class TestRunWithTransforms:
             "transforms": [
                 {
                     "plugin": "field_mapper",
-                    "type": "transform",
                     "options": {
                         "schema": DYNAMIC_SCHEMA,
                         "mapping": {"name": "full_name", "score": "test_score"},
@@ -124,12 +122,10 @@ class TestRunWithTransforms:
             "transforms": [
                 {
                     "plugin": "passthrough",
-                    "type": "transform",
                     "options": {"schema": DYNAMIC_SCHEMA},
                 },
                 {
                     "plugin": "field_mapper",
-                    "type": "transform",
                     "options": {
                         "schema": DYNAMIC_SCHEMA,
                         "mapping": {"name": "person_name"},

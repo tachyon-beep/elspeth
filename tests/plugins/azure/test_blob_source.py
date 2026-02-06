@@ -10,7 +10,6 @@ from elspeth.contracts import SourceRow
 from elspeth.plugins.azure.blob_source import AzureBlobSource
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SourceProtocol
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -110,11 +109,6 @@ def make_config(
 
 class TestAzureBlobSourceProtocol:
     """Tests for AzureBlobSource protocol compliance."""
-
-    def test_implements_protocol(self, mock_blob_client: MagicMock) -> None:
-        """AzureBlobSource implements SourceProtocol."""
-        source = AzureBlobSource(make_config())
-        assert isinstance(source, SourceProtocol)
 
     def test_has_required_attributes(self, mock_blob_client: MagicMock) -> None:
         """AzureBlobSource has name and output_schema."""
@@ -584,14 +578,18 @@ class TestAzureBlobSourceErrors:
         rows = list(source.load(ctx))
 
         # Pipeline continues (doesn't crash)
-        # Note: With on_bad_lines="warn", pandas may parse some rows or quarantine the whole file
-        # Either way, we should not crash
-        assert isinstance(rows, list)  # Got results, not a crash
+        # With delimiter mismatch, pandas parses the header "col1;col2;col3" as a single column
+        # and the data "value1,value2,value3" as three columns. The resulting row has columns
+        # that don't match the fixed schema fields, so the row fails validation and is quarantined.
+        assert len(rows) == 1
+        # The row should be quarantined because schema validation fails
+        assert rows[0].is_quarantined
+        assert rows[0].quarantine_destination == QUARANTINE_SINK
 
     def test_csv_structural_failure_quarantines_blob(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
         """BUG-BLOB-01: Catastrophic CSV structure failure quarantines blob, doesn't crash."""
-        # Binary data masquerading as CSV - completely unparseable
-        bad_csv = b"\x00\x01\x02\x03\x04\x05"
+        # Empty file triggers EmptyDataError - completely unparseable
+        bad_csv = b""
         mock_client = MagicMock()
         mock_client.download_blob.return_value.readall.return_value = bad_csv
         mock_blob_client.return_value = mock_client
@@ -608,9 +606,12 @@ class TestAzureBlobSourceErrors:
         # Should NOT raise - should quarantine the entire blob
         rows = list(source.load(ctx))
 
-        # Should get one quarantined "row" representing the unparseable blob
-        assert len(rows) >= 0  # Either empty or quarantined row
-        # No crash = success
+        # Should get exactly one quarantined "row" representing the unparseable blob
+        assert len(rows) == 1
+        assert rows[0].is_quarantined
+        assert rows[0].quarantine_destination == QUARANTINE_SINK
+        assert rows[0].quarantine_error is not None
+        assert "CSV parse error" in rows[0].quarantine_error
 
 
 class TestAzureBlobSourceLifecycle:

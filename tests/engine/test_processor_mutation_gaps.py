@@ -13,16 +13,60 @@ Mutant gaps addressed:
 
 from typing import Any
 
-from elspeth.contracts import Determinism, NodeType, RoutingMode, TriggerType
+from elspeth.contracts import Determinism, NodeType, PipelineRow, RoutingMode, SourceRow, TriggerType
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.engine.executors import GateOutcome
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import RowOutcome, TransformResult
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    DEPRECATED: Use make_source_row() for process_row() calls.
+    This helper creates raw PipelineRow for internal token construction tests.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class PassthroughTransform(BaseTransform):
@@ -39,7 +83,7 @@ class PassthroughTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
         self.node_id = node_id
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
 
 
@@ -57,12 +101,28 @@ class BatchTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
         self.node_id = node_id
 
-    def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow | list[PipelineRow], ctx: PluginContext) -> TransformResult:
         if isinstance(row, list):
             total = sum(r.get("value", 0) for r in row)
+            output_row = {"id": "batch", "value": total, "count": len(row)}
+
+            # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in output_row
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
             return TransformResult.success(
-                {"id": "batch", "value": total, "count": len(row)},
+                output_row,
                 success_reason={"action": "batch"},
+                contract=contract,
             )
         return TransformResult.success(dict(row), success_reason={"action": "single"})
 
@@ -128,7 +188,7 @@ class TestTriggerTypeFallback:
         def mock_get_trigger_type(node_id: NodeID) -> TriggerType | None:
             return None
 
-        processor._aggregation_executor.get_trigger_type = mock_get_trigger_type
+        processor._aggregation_executor.get_trigger_type = mock_get_trigger_type  # type: ignore[method-assign]
 
         transform = BatchTransform(agg_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -136,7 +196,7 @@ class TestTriggerTypeFallback:
         # Process first row - should buffer
         results1 = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -146,12 +206,12 @@ class TestTriggerTypeFallback:
         assert results1[0].outcome == RowOutcome.CONSUMED_IN_BATCH
 
         # Force should_flush to return True for second row
-        processor._aggregation_executor.should_flush = lambda node_id: True
+        processor._aggregation_executor.should_flush = lambda node_id: True  # type: ignore[method-assign]
 
         # Process second row with forced flush
         results2 = processor.process_row(
             row_index=1,
-            row_data={"id": 2, "value": 200},
+            source_row=make_source_row({"id": 2, "value": 200}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -214,7 +274,7 @@ class TestStepBoundaryConditions:
         # Single transform - should complete, not queue more work
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -274,7 +334,7 @@ class TestStepBoundaryConditions:
         # Two transforms - should process both and complete
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform1, transform2],
             ctx=ctx,
         )
@@ -328,7 +388,7 @@ class TestStepBoundaryConditions:
         # Three transforms - should complete successfully
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=transforms,
             ctx=ctx,
         )
@@ -436,7 +496,7 @@ class TestForkRoutingPaths:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -478,25 +538,16 @@ class TestForkRoutingPaths:
             aggregation_settings={},
         )
 
-        # Create a mock GateOutcome with sink_name set
-        from dataclasses import dataclass
-
+        # Create a GateOutcome with sink_name set
         from elspeth.contracts.enums import RoutingKind
         from elspeth.contracts.routing import RoutingAction
         from elspeth.engine.tokens import TokenInfo
         from elspeth.plugins.results import GateResult
 
-        @dataclass
-        class MockGateOutcome:
-            result: GateResult
-            updated_token: TokenInfo
-            sink_name: str | None
-            child_tokens: list[TokenInfo]
-
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         gate_result = GateResult(
@@ -508,7 +559,7 @@ class TestForkRoutingPaths:
             ),
         )
 
-        outcome = MockGateOutcome(
+        outcome = GateOutcome(
             result=gate_result,
             updated_token=parent_token,
             sink_name="error_sink",
@@ -546,24 +597,15 @@ class TestForkRoutingPaths:
             aggregation_settings={},
         )
 
-        from dataclasses import dataclass
-
         from elspeth.contracts.enums import RoutingKind
         from elspeth.contracts.routing import RoutingAction
         from elspeth.engine.tokens import TokenInfo
         from elspeth.plugins.results import GateResult
 
-        @dataclass
-        class MockGateOutcome:
-            result: GateResult
-            updated_token: TokenInfo
-            sink_name: str | None
-            child_tokens: list[TokenInfo]
-
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         gate_result = GateResult(
@@ -575,7 +617,7 @@ class TestForkRoutingPaths:
             ),
         )
 
-        outcome = MockGateOutcome(
+        outcome = GateOutcome(
             result=gate_result,
             updated_token=parent_token,
             sink_name=None,
@@ -613,37 +655,28 @@ class TestForkRoutingPaths:
             aggregation_settings={},
         )
 
-        from dataclasses import dataclass
-
         from elspeth.contracts.enums import RoutingKind
         from elspeth.contracts.routing import RoutingAction
         from elspeth.engine.tokens import TokenInfo
         from elspeth.plugins.results import GateResult
 
-        @dataclass
-        class MockGateOutcome:
-            result: GateResult
-            updated_token: TokenInfo
-            sink_name: str | None
-            child_tokens: list[TokenInfo]
-
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         child_tokens = [
             TokenInfo(
                 row_id="row1",
                 token_id="child_a",
-                row_data={"id": 1},
+                row_data=_make_pipeline_row({"id": 1}),
                 branch_name="path_a",
             ),
             TokenInfo(
                 row_id="row1",
                 token_id="child_b",
-                row_data={"id": 1},
+                row_data=_make_pipeline_row({"id": 1}),
                 branch_name="path_b",
             ),
         ]
@@ -657,7 +690,7 @@ class TestForkRoutingPaths:
             ),
         )
 
-        outcome = MockGateOutcome(
+        outcome = GateOutcome(
             result=gate_result,
             updated_token=parent_token,
             sink_name=None,
@@ -827,7 +860,7 @@ class TestIterationGuards:
         # Process a row - should complete without hitting iteration limit
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -882,7 +915,7 @@ class TestIterationGuards:
         # Process through 5 transforms - should complete successfully
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=transforms,
             ctx=ctx,
         )
@@ -910,7 +943,7 @@ class TestCoalesceStepCalculations:
         token = TokenInfo(
             row_id="row1",
             token_id="token1",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         # Create work item with specific step
@@ -936,7 +969,7 @@ class TestCoalesceStepCalculations:
         token = TokenInfo(
             row_id="row1",
             token_id="token1",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
             branch_name="left_branch",
         )
 
@@ -1042,7 +1075,7 @@ class TestErrorHandlingPaths:
 
         # Simulate a transform failure
         error_result = TransformResult.error(
-            reason={"error": "Test failure", "code": "TEST_001"},
+            reason={"reason": "test_error", "error": "Test failure"},
         )
 
         # TransformResult uses status literal, not is_error property

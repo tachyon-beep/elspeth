@@ -109,7 +109,7 @@ class TestLandscapeRecorderRunStatusValidation:
             recorder.begin_run(
                 config={},
                 canonical_version="v1",
-                status="runnign",  # String not accepted - enum required
+                status="runnign",  # type: ignore[arg-type]  # Intentionally wrong type to test validation
             )
 
     def test_complete_run_with_enum_status(self) -> None:

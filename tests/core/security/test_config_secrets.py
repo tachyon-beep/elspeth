@@ -49,6 +49,8 @@ class TestKeyVaultSource:
         """Key Vault secrets are loaded and injected into environment."""
         # Clean up any existing env var
         monkeypatch.delenv("AZURE_OPENAI_KEY", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         mock_secret = MagicMock()
         mock_secret.value = "secret-api-key-123"
@@ -71,8 +73,11 @@ class TestKeyVaultSource:
         assert os.environ["AZURE_OPENAI_KEY"] == "secret-api-key-123"
         mock_client.get_secret.assert_called_once_with("azure-openai-key")
 
-    def test_keyvault_returns_resolution_records(self) -> None:
+    def test_keyvault_returns_resolution_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Resolution records contain all required audit fields."""
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
+
         mock_secret = MagicMock()
         mock_secret.value = "test-secret-value"
 
@@ -116,6 +121,8 @@ class TestKeyVaultSource:
         """Multiple secrets are loaded in a single call."""
         monkeypatch.delenv("API_KEY_1", raising=False)
         monkeypatch.delenv("API_KEY_2", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         def mock_get_secret(name: str) -> MagicMock:
             secret = MagicMock()
@@ -147,6 +154,8 @@ class TestKeyVaultSource:
     def test_keyvault_overrides_existing_env_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Key Vault values override existing environment variables."""
         monkeypatch.setenv("OVERRIDE_ME", "original-dev-value")
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         mock_secret = MagicMock()
         mock_secret.value = "production-keyvault-value"
@@ -172,9 +181,12 @@ class TestKeyVaultSource:
 class TestErrorHandling:
     """Test error handling with clear, actionable messages."""
 
-    def test_keyvault_missing_secret_fails_fast(self) -> None:
+    def test_keyvault_missing_secret_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """SecretNotFoundError is wrapped in SecretLoadError with clear message."""
         from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
+
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         mock_client = MagicMock()
         mock_client.get_secret.side_effect = AzureResourceNotFoundError("Secret not found")
@@ -199,9 +211,12 @@ class TestErrorHandling:
         assert "not found" in error_msg
         assert "MY_KEY" in error_msg
 
-    def test_keyvault_auth_failure_fails_fast(self) -> None:
+    def test_keyvault_auth_failure_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Auth errors produce clear messages with remediation guidance."""
         from azure.core.exceptions import ClientAuthenticationError
+
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         mock_client = MagicMock()
         mock_client.get_secret.side_effect = ClientAuthenticationError("DefaultAzureCredential failed")
@@ -226,9 +241,12 @@ class TestErrorHandling:
         assert "prod-vault.vault.azure.net" in error_msg
         assert "DefaultAzureCredential" in error_msg
 
-    def test_error_message_includes_vault_url_and_secret_name(self) -> None:
+    def test_error_message_includes_vault_url_and_secret_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Error messages include vault URL and secret name for debugging."""
         from azure.core.exceptions import HttpResponseError
+
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         mock_client = MagicMock()
         error = HttpResponseError("Service unavailable")
@@ -255,8 +273,132 @@ class TestErrorHandling:
         assert "debug-secret-name" in error_msg
         assert "DEBUG_KEY" in error_msg
 
-    def test_azure_sdk_not_installed_shows_helpful_error(self) -> None:
+    def test_missing_fingerprint_key_fails_before_keyvault_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing ELSPETH_FINGERPRINT_KEY causes SecretLoadError before any Key Vault call.
+
+        P1-2026-02-05: Without fingerprint key, audit recording would fail later,
+        leaving secret resolution events unrecorded. This test verifies we fail fast
+        BEFORE making any Key Vault API calls.
+        """
+        # Ensure fingerprint key is NOT in environment
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+
+        # Track whether Key Vault was called
+        keyvault_called = False
+
+        def track_keyvault_call(*args, **kwargs):
+            nonlocal keyvault_called
+            keyvault_called = True
+            mock_secret = MagicMock()
+            mock_secret.value = "should-not-reach-here"
+            return mock_secret
+
+        mock_client = MagicMock()
+        mock_client.get_secret.side_effect = track_keyvault_call
+
+        # Config does NOT include ELSPETH_FINGERPRINT_KEY in mapping
+        config = SecretsConfig(
+            source="keyvault",
+            vault_url="https://test-vault.vault.azure.net",
+            mapping={"MY_API_KEY": "my-api-key-secret"},
+        )
+
+        with (
+            patch(
+                "elspeth.core.security.secret_loader._get_keyvault_client",
+                return_value=mock_client,
+            ),
+            pytest.raises(SecretLoadError) as exc_info,
+        ):
+            load_secrets_from_config(config)
+
+        # Verify error message is clear and actionable
+        error_msg = str(exc_info.value)
+        assert "ELSPETH_FINGERPRINT_KEY" in error_msg
+        assert "required" in error_msg.lower()
+        assert "audit trail" in error_msg.lower()
+
+        # CRITICAL: Key Vault was never called - we failed BEFORE the fetch
+        assert not keyvault_called, "Key Vault should NOT be called when fingerprint key is missing"
+
+    def test_fingerprint_key_in_mapping_allows_keyvault_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When ELSPETH_FINGERPRINT_KEY is in mapping, secrets load normally.
+
+        This tests the case where the fingerprint key itself is loaded from Key Vault.
+        The key must be in the mapping, which means it will be loaded first.
+        """
+        # Ensure fingerprint key is NOT in environment initially
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("MY_API_KEY", raising=False)
+
+        def mock_get_secret(name: str) -> MagicMock:
+            secret = MagicMock()
+            if name == "elspeth-fingerprint-key":
+                secret.value = "fingerprint-key-from-vault"
+            else:
+                secret.value = f"value-for-{name}"
+            return secret
+
+        mock_client = MagicMock()
+        mock_client.get_secret.side_effect = mock_get_secret
+
+        # Config INCLUDES ELSPETH_FINGERPRINT_KEY in mapping
+        config = SecretsConfig(
+            source="keyvault",
+            vault_url="https://test-vault.vault.azure.net",
+            mapping={
+                "ELSPETH_FINGERPRINT_KEY": "elspeth-fingerprint-key",
+                "MY_API_KEY": "my-api-key-secret",
+            },
+        )
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            resolutions = load_secrets_from_config(config)
+
+        # Both secrets loaded successfully
+        assert len(resolutions) == 2
+        assert os.environ["ELSPETH_FINGERPRINT_KEY"] == "fingerprint-key-from-vault"
+        assert os.environ["MY_API_KEY"] == "value-for-my-api-key-secret"
+
+    def test_fingerprint_key_in_env_allows_keyvault_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When ELSPETH_FINGERPRINT_KEY is already in environment, secrets load normally."""
+        # Set fingerprint key in environment
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "env-fingerprint-key")
+        monkeypatch.delenv("MY_API_KEY", raising=False)
+
+        mock_secret = MagicMock()
+        mock_secret.value = "api-key-value"
+
+        mock_client = MagicMock()
+        mock_client.get_secret.return_value = mock_secret
+
+        # Config does NOT include ELSPETH_FINGERPRINT_KEY in mapping (it's in env)
+        config = SecretsConfig(
+            source="keyvault",
+            vault_url="https://test-vault.vault.azure.net",
+            mapping={"MY_API_KEY": "my-api-key-secret"},
+        )
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            resolutions = load_secrets_from_config(config)
+
+        # Secret loaded successfully
+        assert len(resolutions) == 1
+        assert os.environ["MY_API_KEY"] == "api-key-value"
+        # Fingerprint key unchanged
+        assert os.environ["ELSPETH_FINGERPRINT_KEY"] == "env-fingerprint-key"
+
+    def test_azure_sdk_not_installed_shows_helpful_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ImportError produces helpful installation guidance."""
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
+
         config = SecretsConfig(
             source="keyvault",
             vault_url="https://test-vault.vault.azure.net",
@@ -288,6 +430,8 @@ class TestEdgeCases:
     def test_keyvault_secret_with_unicode_characters(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Unicode characters in secrets are preserved correctly."""
         monkeypatch.delenv("UNICODE_KEY", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         unicode_value = "secret-with-\u00e9\u00e8\u00ea-unicode-\u4e2d\u6587-\u0420\u0443\u0441\u0441\u043a\u0438\u0439"
 
@@ -315,6 +459,8 @@ class TestEdgeCases:
     def test_keyvault_secret_with_newlines(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Multiline secrets (e.g., private keys) are preserved correctly."""
         monkeypatch.delenv("MULTILINE_KEY", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         multiline_value = """-----BEGIN RSA PRIVATE KEY-----
 MIIEpQIBAAKCAQEA0Z3VS5JJcds3xfn/
@@ -347,6 +493,8 @@ ygWyZbTbDqpVlTTSV1+xJ0VU1NM/X2rL
     def test_keyvault_very_long_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Very long secrets (25KB) are supported."""
         monkeypatch.delenv("LONG_KEY", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         # 25KB secret (Key Vault limit is 25KB)
         long_value = "x" * 25 * 1024
@@ -379,6 +527,8 @@ class TestIdempotency:
     def test_load_secrets_idempotent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Calling load_secrets_from_config twice is safe and produces same env result."""
         monkeypatch.delenv("IDEMPOTENT_KEY", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         mock_secret = MagicMock()
         mock_secret.value = "idempotent-value"
@@ -417,6 +567,8 @@ class TestIdempotency:
     def test_resolution_records_independent_per_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Each call returns its own resolution records (independent objects)."""
         monkeypatch.delenv("RECORD_KEY", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         mock_secret = MagicMock()
         mock_secret.value = "consistent-value"
@@ -512,6 +664,8 @@ landscape:
         """With source='keyvault', secrets are injected before ${VAR} resolution."""
         # Clean env to ensure we're testing the injection path
         monkeypatch.delenv("TEST_API_KEY", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         # Mock Key Vault response
         mock_secret = MagicMock()
@@ -573,6 +727,8 @@ landscape:
         from elspeth.core.security.secret_loader import SecretNotFoundError
 
         monkeypatch.delenv("MISSING_KEY", raising=False)
+        # P1-2026-02-05: Fingerprint key required for audit recording
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
 
         mock_client = MagicMock()
         mock_client.get_secret.side_effect = SecretNotFoundError("missing-secret", "https://test-vault.vault.azure.net")

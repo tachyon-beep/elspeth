@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
@@ -23,6 +24,26 @@ from .conftest import (
 from .conftest import (
     make_azure_multi_query_config as make_config,
 )
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestAzureMultiQueryLLMTransformInit:
@@ -64,7 +85,7 @@ class TestAzureMultiQueryLLMTransformInit:
         ctx = make_plugin_context()
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
-            transform.process({"text": "hello"}, ctx)
+            transform.process(_make_pipeline_row({"text": "hello"}), ctx)
 
 
 class TestSingleQueryProcessing:
@@ -72,7 +93,7 @@ class TestSingleQueryProcessing:
 
     def test_process_single_query_renders_template(self, chaosllm_server) -> None:
         """Single query renders template with input fields and criterion."""
-        responses = [{"score": 85, "rationale": "Good diagnosis"}]
+        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "Good diagnosis"}]
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
             transform = AzureMultiQueryLLMTransform(make_config())
@@ -100,7 +121,7 @@ class TestSingleQueryProcessing:
 
     def test_process_single_query_parses_json_response(self, chaosllm_server) -> None:
         """Single query parses JSON and returns mapped fields."""
-        responses = [{"score": 85, "rationale": "Excellent assessment"}]
+        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "Excellent assessment"}]
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses):
             transform = AzureMultiQueryLLMTransform(make_config())
@@ -260,7 +281,7 @@ class TestRowProcessingWithPipelining:
     ) -> None:
         """Successful row emits results with all query outputs merged."""
         # 4 queries (2 case studies x 2 criteria)
-        responses = [
+        responses: list[dict[str, Any] | str] = [
             {"score": 85, "rationale": "CS1 diagnosis"},
             {"score": 90, "rationale": "CS1 treatment"},
             {"score": 75, "rationale": "CS2 diagnosis"},
@@ -268,7 +289,7 @@ class TestRowProcessingWithPipelining:
         ]
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
-            row = {
+            row_data = {
                 "cs1_bg": "case1 bg",
                 "cs1_sym": "case1 sym",
                 "cs1_hist": "case1 hist",
@@ -276,7 +297,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_sym": "case2 sym",
                 "cs2_hist": "case2 hist",
             }
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row_data), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -301,7 +322,7 @@ class TestRowProcessingWithPipelining:
         chaosllm_server,
     ) -> None:
         """Output row preserves original input fields."""
-        responses = [
+        responses: list[dict[str, Any] | str] = [
             {"score": 85, "rationale": "R1"},
             {"score": 90, "rationale": "R2"},
             {"score": 75, "rationale": "R3"},
@@ -309,7 +330,7 @@ class TestRowProcessingWithPipelining:
         ]
 
         with chaosllm_azure_openai_responses(chaosllm_server, responses):
-            row = {
+            row_data = {
                 "cs1_bg": "bg1",
                 "cs1_sym": "sym1",
                 "cs1_hist": "hist1",
@@ -318,7 +339,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "hist2",
                 "original_field": "preserved",
             }
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row_data), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -339,7 +360,7 @@ class TestRowProcessingWithPipelining:
         chaosllm_server,
     ) -> None:
         """All-or-nothing: if any query fails, entire row fails."""
-        responses = [
+        responses: list[dict[str, Any] | str] = [
             {"score": 85, "rationale": "ok"},
             {"score": 85, "rationale": "ok"},
             {"score": 85, "rationale": "ok"},
@@ -355,7 +376,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_sym": "sym",
                 "cs2_hist": "hist",
             }
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -380,7 +401,7 @@ class TestRowProcessingWithPipelining:
         )
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
 
     def test_connect_output_cannot_be_called_twice(
         self,
@@ -442,7 +463,7 @@ class TestMultiRowPipelining:
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, [response]):
                 for i in range(3):
-                    row = {
+                    row_data = {
                         "row_id": f"row-{i}",
                         "cs1_bg": f"r{i}",
                         "cs1_sym": f"r{i}",
@@ -459,7 +480,7 @@ class TestMultiRowPipelining:
                         state_id=f"state-{i}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row_data), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -490,7 +511,7 @@ class TestMultiRowPipelining:
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
         created_state_ids: list[str] = []
 
         # Patch _get_llm_client to track state_ids
@@ -505,7 +526,7 @@ class TestMultiRowPipelining:
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
-                    row = {
+                    row_data = {
                         "cs1_bg": f"r{i}",
                         "cs1_sym": f"r{i}",
                         "cs1_hist": f"r{i}",
@@ -521,7 +542,7 @@ class TestMultiRowPipelining:
                         state_id=f"batch-{i:03d}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row_data), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -547,12 +568,12 @@ class TestMultiRowPipelining:
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
-                    row = {
+                    row_data = {
                         "cs1_bg": f"r{i}",
                         "cs1_sym": f"r{i}",
                         "cs1_hist": f"r{i}",
@@ -568,7 +589,7 @@ class TestMultiRowPipelining:
                         state_id=f"batch-{i:03d}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row_data), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -647,11 +668,11 @@ class TestSequentialMode:
         # Verify no executor created (sequential mode)
         assert transform._executor is None
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row = {
+                row_data = {
                     "cs1_bg": "r1",
                     "cs1_sym": "r1",
                     "cs1_hist": "r1",
@@ -667,7 +688,7 @@ class TestSequentialMode:
                     state_id="batch-seq-001",
                     token=token,
                 )
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row_data), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -692,12 +713,12 @@ class TestSequentialMode:
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
-                    row = {
+                    row_data = {
                         "cs1_bg": f"r{i}",
                         "cs1_sym": f"r{i}",
                         "cs1_hist": f"r{i}",
@@ -713,7 +734,7 @@ class TestSequentialMode:
                         state_id=f"batch-seq-{i:03d}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row_data), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -761,11 +782,11 @@ class TestPoolMetadataAuditIntegration:
         transform.connect_output(collector, max_pending=10)
 
         # 4 queries per row (2 case studies x 2 criteria)
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row = {
+                row_data = {
                     "cs1_bg": "bg1",
                     "cs1_sym": "sym1",
                     "cs1_hist": "hist1",
@@ -781,7 +802,7 @@ class TestPoolMetadataAuditIntegration:
                     state_id="state-pool-001",
                     token=token,
                 )
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row_data), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -829,11 +850,11 @@ class TestPoolMetadataAuditIntegration:
         transform.on_start(init_ctx)
         transform.connect_output(collector, max_pending=10)
 
-        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+        responses: list[dict[str, Any] | str] = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
 
         try:
             with chaosllm_azure_openai_responses(chaosllm_server, responses):
-                row = {
+                row_data = {
                     "cs1_bg": "bg1",
                     "cs1_sym": "sym1",
                     "cs1_hist": "hist1",
@@ -849,12 +870,14 @@ class TestPoolMetadataAuditIntegration:
                     state_id="state-ordering-001",
                     token=token,
                 )
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row_data), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
 
         _, result, _ = collector.results[0]
+        # Type narrow: result from batch processing should be TransformResult, not ExceptionResult
+        assert isinstance(result, TransformResult)
         assert result.context_after is not None
 
         # Verify query_ordering is present
@@ -872,3 +895,7 @@ class TestPoolMetadataAuditIntegration:
             assert isinstance(entry["submit_index"], int)
             assert isinstance(entry["complete_index"], int)
             assert isinstance(entry["buffer_wait_ms"], float)
+
+
+# Removed test_azure_multi_query_with_pipeline_row - duplicate of existing accept() API tests
+# The transform raises NotImplementedError for process() and directs to accept() API

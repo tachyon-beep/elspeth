@@ -12,7 +12,7 @@ uses isinstance() for type-safe plugin detection.
 
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import NodeType, RoutingMode
+from elspeth.contracts import FieldContract, NodeType, PipelineRow, RoutingMode, SchemaContract, SourceRow
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -24,6 +24,21 @@ from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestRowProcessorWorkQueue:
@@ -38,7 +53,7 @@ class TestRowProcessorWorkQueue:
         import pytest
 
         import elspeth.engine.processor as proc_module
-        from elspeth.contracts import TokenInfo
+        from elspeth.contracts import SourceRow, TokenInfo
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor, _WorkItem
         from elspeth.engine.spans import SpanFactory
@@ -89,7 +104,7 @@ class TestRowProcessorWorkQueue:
             with pytest.raises(RuntimeError, match=r"Work queue exceeded \d+ iterations"):
                 processor.process_row(
                     row_index=0,
-                    row_data={"value": 42},
+                    source_row=SourceRow.valid({"value": 42}, contract=_make_observed_contract({"value": 42})),
                     transforms=[],
                     ctx=ctx,
                 )
@@ -158,7 +173,7 @@ class TestRowProcessorWorkQueue:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success({**row, "processed": True}, success_reason={"action": "processed"})
 
         # Config-driven fork gate
@@ -189,7 +204,7 @@ class TestRowProcessorWorkQueue:
         # Process row - should return multiple results (parent + children)
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=SourceRow.valid({"value": 42}, contract=_make_observed_contract({"value": 42})),
             transforms=[transform],
             ctx=ctx,
         )
@@ -239,7 +254,7 @@ class TestRowProcessorRetry:
         """Transform exceptions are retried up to max_attempts."""
         from unittest.mock import Mock
 
-        from elspeth.contracts import TransformResult
+        from elspeth.contracts import SourceRow, TransformResult
         from elspeth.contracts.config import RuntimeRetryConfig
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.retry import RetryManager
@@ -258,7 +273,7 @@ class TestRowProcessorRetry:
                 Mock(
                     token_id="t1",
                     row_id="r1",
-                    row_data={"result": "ok"},
+                    source_row=SourceRow.valid({"result": "ok"}, contract=_make_observed_contract({"result": "ok"})),
                     branch_name=None,
                 ),
                 None,  # error_sink
@@ -430,7 +445,7 @@ class TestRowProcessorRetry:
     def test_max_retries_exceeded_returns_failed_outcome(self, landscape_db: "LandscapeDB") -> None:
         """When all retries exhausted, process_row returns FAILED outcome."""
 
-        from elspeth.contracts import RowOutcome
+        from elspeth.contracts import RowOutcome, SourceRow
         from elspeth.contracts.config import RuntimeRetryConfig
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeRecorder
@@ -470,7 +485,7 @@ class TestRowProcessorRetry:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise ConnectionError("Network always down")
 
         # Create processor with retry (max 2 attempts, fast delays for test)
@@ -489,7 +504,7 @@ class TestRowProcessorRetry:
         # Process should return FAILED, not raise MaxRetriesExceeded
         results = processor.process_row(
             row_index=0,
-            row_data={"x": 1},
+            source_row=SourceRow.valid({"x": 1}, contract=_make_observed_contract({"x": 1})),
             transforms=[AlwaysFailsTransform(transform_node.node_id)],
             ctx=ctx,
         )
@@ -601,7 +616,7 @@ class TestNoRetryAuditCompleteness:
                 # Explicitly set _on_error (normally done by config mixins)
                 self._on_error = "error_sink"
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise LLMClientError("Rate limit exceeded", retryable=True)
 
         # No retry manager - single attempt
@@ -619,7 +634,7 @@ class TestNoRetryAuditCompleteness:
         # Process should return error result (not raise)
         results = processor.process_row(
             row_index=0,
-            row_data={"x": 1},
+            source_row=SourceRow.valid({"x": 1}, contract=_make_observed_contract({"x": 1})),
             transforms=[RateLimitedTransform(transform_node.node_id)],
             ctx=ctx,
         )
@@ -698,7 +713,7 @@ class TestNoRetryAuditCompleteness:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 raise ConnectionError("Network unreachable")
 
         # No retry manager - single attempt
@@ -716,7 +731,7 @@ class TestNoRetryAuditCompleteness:
         with pytest.raises(RuntimeError) as exc_info:
             processor.process_row(
                 row_index=0,
-                row_data={"x": 1},
+                source_row=SourceRow.valid({"x": 1}, contract=_make_observed_contract({"x": 1})),
                 transforms=[NetworkFailTransform(transform_node.node_id)],
                 ctx=ctx,
             )

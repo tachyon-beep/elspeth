@@ -11,6 +11,7 @@ Per CLAUDE.md Test Path Integrity: These tests use production code paths
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,24 +22,53 @@ from elspeth.contracts import (
     propagate_contract,
 )
 from elspeth.contracts.errors import ContractMergeError
+from elspeth.plugins.context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
+
+if TYPE_CHECKING:
+    from elspeth.plugins.context import ValidationErrorToken
 from elspeth.plugins.sources.csv_source import CSVSource
 
 
-class MockContext:
-    """Minimal context for integration testing.
-
-    Implements the PluginContext interface methods used by sources and sinks.
-    """
+class _TestablePluginContext(PluginContext):
+    """PluginContext subclass with validation error tracking for tests."""
 
     def __init__(self) -> None:
-        self.validation_errors: list[dict] = []
-        # Mock attributes that sinks may access
-        self.landscape = None
-        self.run_id = "test-run-001"
+        super().__init__(
+            run_id="test-run-001",
+            config={},
+        )
+        self.validation_errors: list[dict[str, object]] = []
 
-    def record_validation_error(self, **kwargs: object) -> None:
-        self.validation_errors.append(dict(kwargs))
+    def record_validation_error(
+        self,
+        row: object,
+        error: str,
+        schema_mode: str,
+        destination: str,
+    ) -> "ValidationErrorToken":
+        """Override to track validation errors for test assertions."""
+        from elspeth.plugins.context import ValidationErrorToken
+
+        self.validation_errors.append(
+            {
+                "row": row,
+                "error": error,
+                "schema_mode": schema_mode,
+                "destination": destination,
+            }
+        )
+        # Return a mock token - tests don't have landscape
+        return ValidationErrorToken(
+            row_id="test-row",
+            node_id=self.node_id or "test-node",
+            destination=destination,
+        )
+
+
+def make_test_context() -> _TestablePluginContext:
+    """Create a test context for integration tests."""
+    return _TestablePluginContext()
 
 
 class TestSourceToSinkContractFlow:
@@ -61,7 +91,7 @@ class TestSourceToSinkContractFlow:
         )
 
         # Load rows and get contract
-        ctx = MockContext()
+        ctx = make_test_context()
         rows = list(source.load(ctx))
         assert len(rows) == 1
 
@@ -126,7 +156,7 @@ class TestSourceToSinkContractFlow:
             }
         )
 
-        ctx = MockContext()
+        ctx = make_test_context()
         rows = list(source.load(ctx))
         source_row = rows[0]
         contract = source_row.contract
@@ -163,7 +193,7 @@ class TestSourceToSinkContractFlow:
             }
         )
 
-        ctx = MockContext()
+        ctx = make_test_context()
         rows = list(source.load(ctx))
         source_row = rows[0]
 
@@ -193,7 +223,7 @@ class TestContractPreservationThroughTransforms:
             }
         )
 
-        ctx = MockContext()
+        ctx = make_test_context()
         rows = list(source.load(ctx))
         source_row = rows[0]
         input_contract = source_row.contract
@@ -229,7 +259,7 @@ class TestContractPreservationThroughTransforms:
             }
         )
 
-        ctx = MockContext()
+        ctx = make_test_context()
         rows = list(source.load(ctx))
         source_row = rows[0]
         input_contract = source_row.contract
@@ -268,7 +298,7 @@ class TestContractPreservationThroughTransforms:
             }
         )
 
-        ctx = MockContext()
+        ctx = make_test_context()
         rows = list(source.load(ctx))
         source_row = rows[0]
         input_contract = source_row.contract
@@ -301,7 +331,7 @@ class TestContractWithSinkHeaderModes:
             }
         )
 
-        ctx = MockContext()
+        ctx = make_test_context()
         rows = list(source.load(ctx))
         source_row = rows[0]
         contract = source_row.contract
@@ -342,7 +372,7 @@ class TestContractWithSinkHeaderModes:
             }
         )
 
-        ctx = MockContext()
+        ctx = make_test_context()
         rows = list(source.load(ctx))
         source_row = rows[0]
         contract = source_row.contract

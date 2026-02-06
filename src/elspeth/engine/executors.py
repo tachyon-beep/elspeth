@@ -14,6 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from elspeth.contracts import (
     Artifact,
     BatchPendingError,
@@ -21,8 +23,10 @@ from elspeth.contracts import (
     ExecutionError,
     NodeStateOpen,
     PendingOutcome,
+    PipelineRow,
     RoutingAction,
     RoutingSpec,
+    SchemaContract,
     TokenInfo,
 )
 from elspeth.contracts.enums import (
@@ -44,6 +48,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import (
+    BatchTransformProtocol,
     GateProtocol,
     SinkProtocol,
     TransformProtocol,
@@ -70,6 +75,7 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
 
 
 class MissingEdgeError(Exception):
@@ -220,15 +226,19 @@ class TransformExecutor:
         """
         if transform.node_id is None:
             raise OrchestrationInvariantError(f"Transform '{transform.name}' executed without node_id - orchestrator bug")
-        input_hash = stable_hash(token.row_data)
 
-        # Begin node state
+        # Extract dict from PipelineRow for hashing and Landscape recording
+        # Landscape stores raw dicts, not PipelineRow objects
+        input_dict = token.row_data.to_dict()
+        input_hash = stable_hash(input_dict)
+
+        # Begin node state with dict (for Landscape recording)
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=transform.node_id,
             run_id=ctx.run_id,
             step_index=step_in_pipeline,
-            input_data=token.row_data,
+            input_data=input_dict,
             attempt=attempt,
         )
 
@@ -238,6 +248,10 @@ class TransformExecutor:
         ctx.node_id = transform.node_id
         # Note: call_index allocation is handled by LandscapeRecorder.allocate_call_index()
         # which automatically starts at 0 for each new state_id
+
+        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
+        # This allows transforms to access original header names via ctx.contract.resolve_name()
+        ctx.contract = token.row_data.contract
 
         # Detect batch transforms (those using BatchTransformMixin)
         # They have accept() method and process() raises NotImplementedError
@@ -363,12 +377,22 @@ class TransformExecutor:
 
             # For single-row: output_data is the row
             # For multi-row: output_data is the rows list (engine handles expansion)
-            output_data: dict[str, Any] | list[dict[str, Any]]
+            output_data_with_pipe: dict[str, Any] | PipelineRow | list[dict[str, Any] | PipelineRow]
             if result.row is not None:
-                output_data = result.row
+                output_data_with_pipe = result.row
             else:
-                # result.rows is guaranteed non-None by has_output_data check above
-                output_data = result.rows  # type: ignore[assignment]
+                # has_output_data check above guarantees rows is not None when row is None
+                assert result.rows is not None, "has_output_data guarantees rows when row is None"
+                output_data_with_pipe = result.rows
+
+            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
+            def _to_dict(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
+                return dict(r._data) if isinstance(r, PipelineRow) else r
+
+            if isinstance(output_data_with_pipe, list):
+                output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict(r) for r in output_data_with_pipe]
+            else:
+                output_data = _to_dict(output_data_with_pipe)
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -378,10 +402,62 @@ class TransformExecutor:
                 success_reason=result.success_reason,
                 context_after=result.context_after,
             )
-            # Update token with new row data, preserving all lineage metadata
+
+            # Record schema evolution if transform adds fields
+            # Transforms signal field addition via transforms_adds_fields attribute
+            # When True, compute evolved contract and record to audit trail
+            if result.row is not None and transform.transforms_adds_fields:
+                from elspeth.contracts.contract_propagation import propagate_contract
+
+                # Compute evolved contract: input contract + fields added by transform
+                input_contract = token.row_data.contract
+                row_dict = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
+                evolved_contract = propagate_contract(
+                    input_contract=input_contract,
+                    output_row=row_dict,
+                    transform_adds_fields=True,
+                )
+
+                # Record to landscape for audit completeness
+                self._recorder.update_node_output_contract(
+                    run_id=ctx.run_id,
+                    node_id=transform.node_id,
+                    contract=evolved_contract,
+                )
+
+            # Update token with new PipelineRow, preserving all lineage metadata
             # For multi-row results, keep original row_data (engine will expand tokens later)
-            new_data = result.row if result.row is not None else token.row_data
-            updated_token = token.with_updated_data(new_data)
+            if result.row is not None:
+                # Single-row result: create new PipelineRow from result dict + contract
+                # Contract fallback chain:
+                # 1. result.contract (if transform provides it)
+                # 2. transform.output_schema (create contract from schema)
+                #    All transforms have output_schema per protocol, so this always succeeds
+                if result.contract is not None:
+                    output_contract = result.contract
+                else:
+                    # Create contract from transform's output_schema
+                    # transform.output_schema is always non-None per TransformProtocol
+                    from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+                    output_contract = create_output_contract_from_schema(transform.output_schema)
+
+                # Extract dict if result.row is already a PipelineRow (boundary operation)
+                row_dict = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
+                new_row = PipelineRow(row_dict, output_contract)
+
+                # B2 fix: Log PipelineRow creation for observability
+                slog.debug(
+                    "pipeline_row_created",
+                    token_id=token.token_id,
+                    transform=transform.name,
+                    contract_mode=output_contract.mode,
+                )
+
+                updated_token = token.with_updated_data(new_row)
+            else:
+                # Multi-row result: keep original row_data (engine will expand tokens later)
+                updated_token = token.with_updated_data(token.row_data)
         else:
             # Transform returned error status (not exception)
             # This is a LEGITIMATE processing failure, not a bug
@@ -419,7 +495,7 @@ class TransformExecutor:
             ctx.record_transform_error(
                 token_id=token.token_id,
                 transform_id=transform.node_id,
-                row=token.row_data,
+                row=input_dict,  # Use extracted dict for Landscape recording
                 error_details=result.reason,
                 destination=on_error,
             )
@@ -428,7 +504,7 @@ class TransformExecutor:
             if on_error != "discard":
                 ctx.route_to_sink(
                     sink_name=on_error,
-                    row=token.row_data,
+                    row=input_dict,  # Use extracted dict for sink routing
                     metadata={"transform_error": result.reason},
                 )
 
@@ -510,15 +586,19 @@ class GateExecutor:
         """
         if gate.node_id is None:
             raise OrchestrationInvariantError(f"Gate '{gate.name}' executed without node_id - orchestrator bug")
-        input_hash = stable_hash(token.row_data)
 
-        # Begin node state
+        # Extract dict from PipelineRow for hashing and Landscape recording
+        # Landscape stores raw dicts, not PipelineRow objects
+        input_dict = token.row_data.to_dict()
+        input_hash = stable_hash(input_dict)
+
+        # Begin node state with dict (for Landscape recording)
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
             run_id=ctx.run_id,
             step_index=step_in_pipeline,
-            input_data=token.row_data,
+            input_data=input_dict,
         )
 
         # BUG-RECORDER-01 fix: Set state_id on context for external call recording
@@ -526,6 +606,10 @@ class GateExecutor:
         ctx.state_id = state.state_id
         ctx.node_id = gate.node_id
         # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
+
+        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
+        # This allows gates to access original header names via ctx.contract.resolve_name()
+        ctx.contract = token.row_data.contract
 
         # Execute with timing and span
         # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
@@ -614,16 +698,27 @@ class GateExecutor:
                     node_id=gate.node_id,
                     action=action,
                 )
+                # Create PipelineRow from result for fork
+                # Use result.contract if provided, otherwise fallback to input contract
+                fork_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
+                if fork_contract is None:
+                    raise ValueError(
+                        f"Cannot create PipelineRow for fork: no contract available. "
+                        f"GateResult.contract is None and input token has no contract. "
+                        f"This is a bug in gate '{gate.name}' or upstream pipeline."
+                    )
+                fork_row = PipelineRow(result.row, fork_contract)
+
                 # Create child tokens (ATOMIC: also records parent FORKED outcome)
                 child_tokens, _fork_group_id = token_manager.fork_token(
                     parent_token=token,
                     branches=list(action.destinations),
                     step_in_pipeline=step_in_pipeline,
                     run_id=ctx.run_id,
-                    row_data=result.row,
+                    row_data=fork_row,
                 )
 
-        except (MissingEdgeError, RuntimeError) as e:
+        except (MissingEdgeError, RuntimeError, ValueError) as e:
             # Record failure before re-raising - ensures node_state is never left OPEN
             routing_error: ExecutionError = {
                 "exception": str(e),
@@ -646,8 +741,26 @@ class GateExecutor:
             duration_ms=duration_ms,
         )
 
-        # Update token with new row data, preserving all lineage metadata
-        updated_token = token.with_updated_data(result.row)
+        # Update token with new PipelineRow, preserving all lineage metadata
+        # Use result.contract if provided, otherwise fallback to input contract
+        output_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
+        if output_contract is None:
+            raise ValueError(
+                f"Cannot create PipelineRow: no contract available. "
+                f"GateResult.contract is None and input token has no contract. "
+                f"This is a bug in gate '{gate.name}' or upstream pipeline."
+            )
+        new_row = PipelineRow(result.row, output_contract)
+
+        # B2 fix: Log PipelineRow creation for observability
+        slog.debug(
+            "pipeline_row_created",
+            token_id=token.token_id,
+            gate=gate.name,
+            contract_mode=output_contract.mode,
+        )
+
+        updated_token = token.with_updated_data(new_row)
 
         return GateOutcome(
             result=result,
@@ -693,16 +806,22 @@ class GateExecutor:
             ValueError: If condition result doesn't match any route label
             RuntimeError: If fork destination without token_manager
         """
-        input_hash = stable_hash(token.row_data)
+        # Extract dict from PipelineRow for hashing and Landscape recording
+        # Landscape stores raw dicts, not PipelineRow objects
+        input_dict = token.row_data.to_dict()
+        input_hash = stable_hash(input_dict)
 
-        # Begin node state
+        # Begin node state with dict (for Landscape recording)
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
             step_index=step_in_pipeline,
-            input_data=token.row_data,
+            input_data=input_dict,
         )
+
+        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
+        ctx.contract = token.row_data.contract
 
         # Create parser and evaluate condition
         # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
@@ -716,6 +835,8 @@ class GateExecutor:
             start = time.perf_counter()
             try:
                 parser = ExpressionParser(gate_config.condition)
+                # Pass PipelineRow directly - it implements __getitem__ and .get()
+                # This preserves dual-name access (normalized and original field names)
                 eval_result = parser.evaluate(token.row_data)
                 duration_ms = (time.perf_counter() - start) * 1000
             except Exception as e:
@@ -779,9 +900,9 @@ class GateExecutor:
 
             elif destination == "fork":
                 # Fork to multiple paths - fork_to guaranteed by GateSettings.validate_fork_consistency()
-                # (Pydantic validation ensures fork_to is not None when routes include "fork")
-                # Local binding for type narrowing (mypy can't see Pydantic validation)
-                fork_branches: list[str] = gate_config.fork_to  # type: ignore[assignment]
+                # Pydantic validation ensures fork_to is not None when routes include "fork"
+                assert gate_config.fork_to is not None, "Pydantic validation guarantees fork_to when routes include 'fork'"
+                fork_branches: list[str] = gate_config.fork_to
 
                 if token_manager is None:
                     raise RuntimeError(
@@ -834,12 +955,14 @@ class GateExecutor:
             raise
 
         # Create GateResult for audit fields
+        # Config gates don't modify data, so use input dict as output
         result = GateResult(
-            row=token.row_data,
+            row=input_dict,
             action=action,
+            contract=token.row_data.contract,  # Preserve contract reference
         )
         result.input_hash = input_hash
-        result.output_hash = stable_hash(token.row_data)
+        result.output_hash = stable_hash(input_dict)  # Same as input (no modification)
         result.duration_ms = duration_ms
 
         # Complete node state - always "completed" for successful execution
@@ -847,12 +970,12 @@ class GateExecutor:
         self._recorder.complete_node_state(
             state_id=state.state_id,
             status=NodeStateStatus.COMPLETED,
-            output_data=token.row_data,
+            output_data=input_dict,  # Landscape stores dict, not PipelineRow
             duration_ms=duration_ms,
         )
 
         # Token row_data is unchanged (config gates don't modify data)
-        # Use with_updated_data anyway to preserve all lineage metadata
+        # PipelineRow is already set on token, so just preserve it
         updated_token = token.with_updated_data(token.row_data)
 
         return GateOutcome(
@@ -1005,8 +1128,9 @@ class AggregationExecutor:
         batch_id = self._batch_ids[node_id]
         assert batch_id is not None  # We just created it if it was None
 
-        # Buffer the row
-        self._buffers[node_id].append(token.row_data)
+        # Buffer the row - store dict (JSON-serializable for checkpoints)
+        # TokenInfo.row_data is PipelineRow, extract dict for buffer
+        self._buffers[node_id].append(token.row_data.to_dict())
         self._buffer_tokens[node_id].append(token)
 
         # Record batch membership for audit trail
@@ -1093,7 +1217,7 @@ class AggregationExecutor:
     def execute_flush(
         self,
         node_id: NodeID,
-        transform: TransformProtocol,
+        transform: BatchTransformProtocol,
         ctx: PluginContext,
         step_in_pipeline: int,
         trigger_type: TriggerType,
@@ -1109,7 +1233,7 @@ class AggregationExecutor:
 
         Args:
             node_id: Aggregation node ID
-            transform: Batch-aware transform plugin
+            transform: Batch-aware transform plugin (must implement BatchTransformProtocol)
             ctx: Plugin context
             step_in_pipeline: Current position in DAG
             trigger_type: What triggered the flush (COUNT, TIMEOUT, END_OF_SOURCE, etc.)
@@ -1153,6 +1277,22 @@ class AggregationExecutor:
 
         # Use first token for node_state (represents the batch operation)
         representative_token = buffered_tokens[0]
+
+        # Reconstruct PipelineRow objects from buffered dicts for transform execution
+        # buffered_rows are plain dicts (for checkpoint serialization), but batch transforms
+        # expect list[PipelineRow]. Reconstruct using contracts from buffered_tokens.
+        # Fix for P1: AttributeError when transforms call .to_dict() on dict objects
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        pipeline_rows: list[PipelineRow] = []
+        for row_dict, token in zip(buffered_rows, buffered_tokens, strict=True):
+            contract = token.row_data.contract
+            if contract is None:
+                raise RuntimeError(
+                    f"Token {token.token_id} has no contract - cannot reconstruct PipelineRow. "
+                    f"This indicates a bug in buffer_row() or checkpoint restore."
+                )
+            pipeline_rows.append(PipelineRow(row_dict, contract))
 
         # Step 1: Transition batch to "executing"
         self._recorder.update_batch_status(
@@ -1198,7 +1338,8 @@ class AggregationExecutor:
         ):
             start = time.perf_counter()
             try:
-                result = transform.process(buffered_rows, ctx)  # type: ignore[arg-type]
+                # Pass reconstructed PipelineRow objects to batch-aware transform
+                result = transform.process(pipeline_rows, ctx)
                 duration_ms = (time.perf_counter() - start) * 1000
             except BatchPendingError:
                 # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
@@ -1274,11 +1415,11 @@ class AggregationExecutor:
 
         # Step 5: Complete node state
         if result.status == "success":
-            output_data: dict[str, Any] | list[dict[str, Any]]
+            output_data_with_pipe: dict[str, Any] | PipelineRow | list[dict[str, Any] | PipelineRow]
             if result.row is not None:
-                output_data = result.row
+                output_data_with_pipe = result.row
             elif result.rows is not None:
-                output_data = result.rows
+                output_data_with_pipe = result.rows
             else:
                 # Contract violation: success status requires output data
                 raise RuntimeError(
@@ -1287,6 +1428,15 @@ class AggregationExecutor:
                     f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
                     f"This is a plugin bug."
                 )
+
+            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
+            def _to_dict_agg(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
+                return dict(r._data) if isinstance(r, PipelineRow) else r
+
+            if isinstance(output_data_with_pipe, list):
+                output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict_agg(r) for r in output_data_with_pipe]
+            else:
+                output_data = _to_dict_agg(output_data_with_pipe)
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -1406,8 +1556,9 @@ class AggregationExecutor:
         Raises:
             RuntimeError: If checkpoint exceeds 10MB size limit
         """
-        import json
         import logging
+
+        from elspeth.core.checkpoint.serialization import checkpoint_dumps
 
         logger = logging.getLogger(__name__)
 
@@ -1436,6 +1587,15 @@ class AggregationExecutor:
 
             # Store full TokenInfo as dicts (not just IDs)
             # Include all lineage fields to preserve fork/join/expand metadata
+            #
+            # PipelineRow Migration (v2.0):
+            # - row_data is stored as dict via to_dict() for JSON serialization
+            # - contract is stored once per node (not per token) for efficiency
+            # - contract_version links tokens to their contract for restoration
+            #
+            # Get contract from first token (all tokens in buffer share same contract)
+            # Per CLAUDE.md Tier 1: tokens exist, so first token MUST exist
+            first_token_contract = tokens[0].row_data.contract
             state[node_id] = {
                 "tokens": [
                     {
@@ -1445,7 +1605,8 @@ class AggregationExecutor:
                         "fork_group_id": t.fork_group_id,
                         "join_group_id": t.join_group_id,
                         "expand_group_id": t.expand_group_id,
-                        "row_data": t.row_data,
+                        "row_data": t.row_data.to_dict(),  # Extract dict for JSON serialization
+                        "contract_version": t.row_data.contract.version_hash(),
                     }
                     for t in tokens
                 ],
@@ -1454,15 +1615,19 @@ class AggregationExecutor:
                 # P2-2026-02-01: Preserve trigger fire time offsets
                 "count_fire_offset": count_fire_offset,
                 "condition_fire_offset": condition_fire_offset,
+                # Store contract once per node (all buffered tokens share the same contract)
+                "contract": first_token_contract.to_checkpoint_format(),
             }
 
         # Checkpoint format version
         # v1.0: Initial format with elapsed_age_seconds
         # v1.1: Added count_fire_offset/condition_fire_offset for trigger ordering (P2-2026-02-01)
-        state["_version"] = "1.1"
+        # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
+        state["_version"] = "2.0"
 
         # Size validation (on serialized checkpoint)
-        serialized = json.dumps(state)
+        # Use checkpoint_dumps to handle datetime (P1-2026-02-05 fix)
+        serialized = checkpoint_dumps(state)
         size_mb = len(serialized) / 1_000_000
         total_rows = sum(len(b) for b in self._buffer_tokens.values())
 
@@ -1490,10 +1655,13 @@ class AggregationExecutor:
         Args:
             state: Checkpoint state with format:
                 {
-                    "_version": "1.0",
+                    "_version": "2.0",
                     "node_id": {
-                        "tokens": [{"token_id", "row_id", "branch_name", "row_data"}],
-                        "batch_id": str
+                        "tokens": [{"token_id", "row_id", "branch_name", "row_data", ...}],
+                        "batch_id": str,
+                        "elapsed_age_seconds": float,
+                        "count_fire_offset": float | None,
+                        "condition_fire_offset": float | None
                     }
                 }
 
@@ -1501,10 +1669,19 @@ class AggregationExecutor:
             ValueError: If checkpoint format is invalid (per CLAUDE.md - our data, full trust)
         """
         # Validate checkpoint version (Bug #12 fix)
-        CHECKPOINT_VERSION = "1.1"
+        # v1.1: Pre-PipelineRow migration format
+        # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
+        CHECKPOINT_VERSION = "2.0"
         version = state.get("_version")
 
         if version != CHECKPOINT_VERSION:
+            # Log checkpoint rejection for observability
+            slog.warning(
+                "checkpoint_version_rejected",
+                found_version=version,
+                expected_version=CHECKPOINT_VERSION,
+                reason="incompatible_checkpoint_version",
+            )
             raise ValueError(
                 f"Incompatible checkpoint version: {version!r}. "
                 f"Expected: {CHECKPOINT_VERSION!r}. "
@@ -1533,11 +1710,20 @@ class AggregationExecutor:
             if not isinstance(tokens_data, list):
                 raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
 
+            # Restore contract from checkpoint (v2.0: stored once per node)
+            # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
+            if "contract" not in node_state:
+                raise ValueError(
+                    f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
+                    f"v2.0 format requires contract for PipelineRow restoration."
+                )
+            restored_contract = SchemaContract.from_checkpoint(node_state["contract"])
+
             # Reconstruct TokenInfo objects directly from checkpoint
             reconstructed_tokens = []
             for t in tokens_data:
                 # Validate required fields (crash on missing - per CLAUDE.md)
-                # All these fields are required in checkpoint format v1.1 (values can be None)
+                # All these fields are required in checkpoint format v2.0 (values can be None)
                 required_fields = {
                     "token_id",
                     "row_id",
@@ -1546,24 +1732,37 @@ class AggregationExecutor:
                     "fork_group_id",
                     "join_group_id",
                     "expand_group_id",
+                    "contract_version",  # v2.0: required for contract reference
                 }
                 missing = required_fields - set(t.keys())
                 if missing:
                     raise ValueError(
                         f"Checkpoint token missing required fields: {missing}. "
-                        f"Required in v1.1 format: {required_fields}. Found: {set(t.keys())}"
+                        f"Required in v2.0 format: {required_fields}. Found: {set(t.keys())}"
                     )
+
+                # Validate contract_version matches restored contract
+                # Per CLAUDE.md Tier 1: integrity check on our data
+                if t["contract_version"] != restored_contract.version_hash():
+                    raise ValueError(
+                        f"Contract version mismatch for token {t['token_id']}: "
+                        f"expected {restored_contract.version_hash()}, got {t['contract_version']}. "
+                        f"Checkpoint may be corrupted."
+                    )
+
+                # Reconstruct PipelineRow from checkpoint data
+                row_data = PipelineRow(t["row_data"], restored_contract)
 
                 # Reconstruct TokenInfo from checkpoint data
                 # NOTE: These fields CAN be None (valid state for unforked tokens), but they
-                # are ALWAYS present in checkpoint format v1.1 - use direct access to detect
+                # are ALWAYS present in checkpoint format v2.0 - use direct access to detect
                 # corruption/missing fields. The difference between "field is None" and
                 # "field is missing" matters: the former is valid, the latter is corruption.
                 reconstructed_tokens.append(
                     TokenInfo(
                         row_id=t["row_id"],
                         token_id=t["token_id"],
-                        row_data=t["row_data"],
+                        row_data=row_data,  # PipelineRow, not dict
                         branch_name=t["branch_name"],
                         fork_group_id=t["fork_group_id"],
                         join_group_id=t["join_group_id"],
@@ -1572,8 +1771,10 @@ class AggregationExecutor:
                 )
 
             # Restore buffer state
+            # _buffer_tokens stores TokenInfo with PipelineRow
+            # _buffers stores dicts (JSON-serializable for future checkpoints)
             self._buffer_tokens[node_id] = reconstructed_tokens
-            self._buffers[node_id] = [t.row_data for t in reconstructed_tokens]
+            self._buffers[node_id] = [t.row_data.to_dict() for t in reconstructed_tokens]
 
             if "batch_id" not in node_state:
                 raise ValueError(
@@ -1598,7 +1799,7 @@ class AggregationExecutor:
             # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
             # The old approach called record_accept() which set fire times to current time,
             # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
-            # NOTE: All fields are required in checkpoint format v1.1 - no backwards compat
+            # NOTE: All fields are required in checkpoint format v2.0 - no backwards compat
             elapsed_seconds = node_state["elapsed_age_seconds"]
             count_fire_offset = node_state["count_fire_offset"]
             condition_fire_offset = node_state["condition_fire_offset"]
@@ -1608,6 +1809,14 @@ class AggregationExecutor:
                 elapsed_age_seconds=elapsed_seconds,
                 count_fire_offset=count_fire_offset,
                 condition_fire_offset=condition_fire_offset,
+            )
+
+            # Log successful checkpoint restoration for observability
+            slog.info(
+                "checkpoint_restored",
+                node_id=str(node_id),
+                token_count=len(reconstructed_tokens),
+                checkpoint_version=CHECKPOINT_VERSION,
             )
 
     def get_batch_id(self, node_id: NodeID) -> str | None:
@@ -1850,7 +2059,10 @@ class SinkExecutor:
         if not tokens:
             return None
 
-        rows = [t.row_data for t in tokens]
+        # Extract dicts from PipelineRow for sink write
+        # Sinks serialize data to external formats - they receive plain dicts
+        # Contract metadata is preserved in Landscape audit trail, not sink output
+        rows = [t.row_data.to_dict() for t in tokens]
 
         # Create node_state for EACH token - this is how we derive COMPLETED terminal state
         # Sink must have node_id assigned by orchestrator before execution
@@ -1860,12 +2072,15 @@ class SinkExecutor:
 
         states: list[tuple[TokenInfo, NodeStateOpen]] = []
         for token in tokens:
+            # Extract dict from PipelineRow for Landscape recording
+            # Landscape stores raw dicts, not PipelineRow objects
+            input_dict = token.row_data.to_dict()
             state = self._recorder.begin_node_state(
                 token_id=token.token_id,
                 node_id=sink_node_id,
                 run_id=ctx.run_id,
                 step_index=step_in_pipeline,
-                input_data=token.row_data,
+                input_data=input_dict,
             )
             states.append((token, state))
 
@@ -1948,8 +2163,10 @@ class SinkExecutor:
         # Complete all token states - status=NodeStateStatus.COMPLETED means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference
         for token, state in states:
+            # Extract dict from PipelineRow for Landscape output recording
+            output_dict = token.row_data.to_dict()
             sink_output = {
-                "row": token.row_data,
+                "row": output_dict,
                 "artifact_path": artifact_info.path_or_uri,
                 "content_hash": artifact_info.content_hash,
             }

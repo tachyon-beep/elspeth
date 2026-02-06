@@ -160,6 +160,7 @@ elspeth run --settings pipeline.yaml --execute
 ```
 
 Signed exports include:
+
 - Every record with HMAC-SHA256 signature
 - Manifest with total count and running hash
 - Timestamp for chain-of-custody verification
@@ -185,6 +186,7 @@ landscape:
 ChaosLLM is a fake LLM server for load and stress testing pipelines without real API calls.
 
 **Features:**
+
 - OpenAI + Azure OpenAI compatible chat completion endpoints
 - Error injection: rate limits (429), server errors (5xx), timeouts, disconnects, malformed JSON
 - Latency simulation and burst patterns for AIMD testing
@@ -439,7 +441,7 @@ See [Docker Guide](docs/guides/docker.md) for complete deployment documentation.
 ## Architecture
 
 ```
-elspeth-rapid/
+elspeth/
 ├── src/elspeth/
 │   ├── core/           # Config, canonical JSON, DAG, rate limiting, retention
 │   │   └── landscape/  # Audit trail (recorder, exporter, schema)

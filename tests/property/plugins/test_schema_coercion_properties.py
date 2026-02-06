@@ -48,7 +48,7 @@ str_bools = st.sampled_from(["true", "True", "false", "False", "1", "0", "yes", 
 native_ints = st.integers(min_value=-10000, max_value=10000)
 native_floats = st.floats(min_value=-10000.0, max_value=10000.0, allow_nan=False, allow_infinity=False)
 native_bools = st.booleans()
-native_strings = st.text(min_size=0, max_size=50, alphabet=st.characters(blacklist_categories=("Cs",)))
+native_strings = st.text(min_size=0, max_size=50, alphabet=st.characters(blacklist_categories=["Cs"]))
 
 
 # =============================================================================

@@ -3,24 +3,39 @@
 
 These tests verify that safety mechanisms (iteration limits, etc.)
 correctly prevent pathological scenarios from hanging the pipeline.
+
+Test Philosophy:
+----------------
+The MAX_WORK_QUEUE_ITERATIONS guard exists to catch bugs in the processor
+that could cause infinite loops (e.g., child work items with start_step=0
+that never progress). Normal production code should never trigger this guard.
+
+To test that the guard works, we use two approaches:
+1. Inject a buggy scenario via mocking to verify the guard fires
+2. Run realistic production scenarios to verify the guard doesn't interfere
+
+Per CLAUDE.md "Test Path Integrity": We call production code paths, but
+since the guard is defense-in-depth against bugs that shouldn't exist in
+correct code, we inject the bug scenario via mocking rather than building
+a broken pipeline.
 """
 
 from __future__ import annotations
 
-from collections import deque
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from elspeth.contracts import TokenInfo
+from elspeth.contracts import SourceRow, TokenInfo
 from elspeth.contracts.enums import NodeType, RowOutcome
 from elspeth.contracts.results import RowResult
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.engine.processor import MAX_WORK_QUEUE_ITERATIONS, RowProcessor, _WorkItem
+from elspeth.engine.processor import RowProcessor, _WorkItem
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -28,23 +43,42 @@ from elspeth.plugins.results import TransformResult as PluginTransformResult
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+
 class TestProcessorGuards:
     """Tests for processor safety guards."""
-
-    def test_max_work_queue_iterations_constant_value(self) -> None:
-        """Verify MAX_WORK_QUEUE_ITERATIONS is set to expected value.
-
-        This is a sanity check - if someone changes the constant,
-        they should be aware tests depend on it.
-        """
-        assert MAX_WORK_QUEUE_ITERATIONS == 10_000
 
     def test_work_queue_exceeding_limit_raises_runtime_error(self) -> None:
         """Exceeding MAX_WORK_QUEUE_ITERATIONS must raise RuntimeError.
 
-        This test verifies the infinite loop guard fires correctly.
-        We patch the constant to a lower value and create a mock scenario
-        where the work queue keeps growing indefinitely.
+        This test verifies the infinite loop guard fires correctly by using
+        the production process_row() path with a mocked _process_single_token
+        that simulates a bug creating infinite child work items.
+
+        Why mock _process_single_token?
+        --------------------------------
+        The guard protects against processor bugs that create infinite loops.
+        Correct production code NEVER triggers this guard. To test the guard,
+        we inject a bug scenario: _process_single_token always returns a child
+        work item with start_step=0, which would cause infinite processing.
+
+        What this test verifies:
+        - process_row() correctly tracks iterations
+        - process_row() raises RuntimeError when limit exceeded
+        - The error message includes useful debugging info
         """
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -59,10 +93,18 @@ class TestProcessorGuards:
             config={},
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
+        # Must register transform node for FK constraint
+        transform_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="buggy_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
 
         span_factory = SpanFactory()
 
-        # Create processor with minimal config
         processor = RowProcessor(
             recorder=recorder,
             span_factory=span_factory,
@@ -70,80 +112,153 @@ class TestProcessorGuards:
             source_node_id=NodeID(source.node_id),
         )
 
-        # Create a simple token to use in the work queue
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=source.node_id,
-            row_index=0,
-            data={"value": 1},
-        )
-        token = recorder.create_token(row_id=row.row_id)
-        token_info = TokenInfo(
-            token_id=token.token_id,
-            row_id=row.row_id,
-            row_data={"value": 1},
-            branch_name=None,
-        )
+        # Simple passthrough transform (the bug is injected via mock)
+        class SimpleTransform(BaseTransform):
+            name = "buggy_transform"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
 
-        # Create a mock result that will be returned by the patched method
-        mock_result = RowResult(
-            token=token_info,
-            final_data={"value": 1},
-            outcome=RowOutcome.COMPLETED,
-            sink_name="output",
-        )
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"mode": "observed"}})
+                self.node_id = node_id
 
-        # Patch the internal _process_single_token method to always return more work
+            def process(self, row: PipelineRow, ctx: PluginContext) -> PluginTransformResult:
+                return PluginTransformResult.success(row.to_dict(), success_reason={"action": "pass"})
+
+        transform = SimpleTransform(transform_node.node_id)
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Mock _process_single_token to simulate infinite loop bug
+        # BUG: Always returns the same token as a child with start_step=0
+        def buggy_process_single_token(
+            token: TokenInfo,
+            transforms: list[Any],
+            ctx: PluginContext,
+            start_step: int,
+            coalesce_at_step: int | None = None,
+            coalesce_name: CoalesceName | None = None,
+        ) -> tuple[RowResult | list[RowResult] | None, list[_WorkItem]]:
+            # Return a "completed" result BUT also queue the same token again at step 0
+            # This simulates a processor bug that creates infinite work
+            result = RowResult(
+                token=token,
+                final_data=token.row_data.to_dict(),
+                outcome=RowOutcome.COMPLETED,
+                sink_name="output",
+            )
+            # BUG: Infinite loop - always re-queue same token at start
+            child_items = [_WorkItem(token=token, start_step=0)]
+            return result, child_items
+
+        # Patch to lower iteration limit for fast test
+        # Call PRODUCTION process_row() - verify the guard fires
         with (
-            patch.object(
-                processor,
-                "_process_single_token",
-                side_effect=lambda **kwargs: (
-                    mock_result,
-                    [_WorkItem(token=token_info, start_step=0)],
-                ),
-            ),
+            patch.object(processor, "_process_single_token", side_effect=buggy_process_single_token),
             patch("elspeth.engine.processor.MAX_WORK_QUEUE_ITERATIONS", 5),
+            pytest.raises(RuntimeError, match=r"exceeded .* iterations"),
         ):
-            # Simulate the work queue loop that's inside process_row
-            # to test the guard logic more directly
-            work_queue: deque[_WorkItem] = deque([_WorkItem(token=token_info, start_step=0)])
-            iterations = 0
+            processor.process_row(
+                row_index=0,
+                source_row=SourceRow.valid({"value": 1}, contract=_make_observed_contract({"value": 1})),
+                transforms=[transform],
+                ctx=ctx,
+            )
 
-            # Use the patched value
-            limit = 5
+    def test_production_processing_with_multiple_transforms(self) -> None:
+        """Real production processing with multiple transforms completes normally.
 
-            with (
-                pytest.raises(RuntimeError, match=r"exceeded .* iterations"),
-                processor._spans.row_span(token_info.row_id, token_info.token_id),
-            ):
-                while work_queue:
-                    iterations += 1
-                    if iterations > limit:
-                        raise RuntimeError(f"Work queue exceeded {limit} iterations. Possible infinite loop in pipeline.")
-                    item = work_queue.popleft()
-                    _result, child_items = processor._process_single_token(
-                        token=item.token,
-                        transforms=[],
-                        ctx=PluginContext(run_id=run.run_id, config={}),
-                        start_step=item.start_step,
-                    )
-                    work_queue.extend(child_items)
+        This test exercises the ACTUAL production code path with multiple
+        transforms. It verifies:
+        1. Production process_row() works correctly
+        2. Multiple transforms process in sequence
+        3. The iteration guard doesn't interfere with normal processing
 
-    def test_normal_processing_completes_without_hitting_guard(self) -> None:
-        """Normal DAG processing should never approach the iteration limit.
-
-        This is a sanity check that the guard doesn't interfere with
-        legitimate pipelines.
+        This is NOT just checking constants - it runs real code.
         """
-        # A simple linear pipeline with 10 transforms should complete
-        # in exactly 10 iterations (one per transform)
-        assert MAX_WORK_QUEUE_ITERATIONS > 10
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
 
-        # The guard is set high enough that even complex DAGs with
-        # many forks/joins should complete well under the limit
-        # A DAG with 100 nodes and 10 parallel branches = ~1000 iterations max
-        assert MAX_WORK_QUEUE_ITERATIONS > 1000
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        span_factory = SpanFactory()
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=span_factory,
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+        )
+
+        # Create multiple transforms that each modify the row
+        class AddFieldTransform(BaseTransform):
+            name = "add_field"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def __init__(self, field_name: str, field_value: int, node_id: str) -> None:
+                super().__init__({"schema": {"mode": "observed"}})
+                self._field_name = field_name
+                self._field_value = field_value
+                self.node_id = node_id
+
+            def process(self, row: PipelineRow, ctx: PluginContext) -> PluginTransformResult:
+                output = row.to_dict()
+                output[self._field_name] = self._field_value
+                return PluginTransformResult.success(output, success_reason={"action": "add_field"})
+
+        # Register transforms and create instances
+        transforms = []
+        for i in range(10):  # 10 transforms in sequence
+            node = recorder.register_node(
+                run_id=run.run_id,
+                plugin_name=f"transform_{i}",
+                node_type=NodeType.TRANSFORM,
+                plugin_version="1.0",
+                config={},
+                schema_config=DYNAMIC_SCHEMA,
+            )
+            transform = AddFieldTransform(f"field_{i}", i, node.node_id)
+            transforms.append(transform)
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process row through all transforms - should complete without hitting guard
+        results = processor.process_row(
+            row_index=0,
+            source_row=SourceRow.valid({"initial": 42}, contract=_make_observed_contract({"initial": 42})),
+            transforms=transforms,
+            ctx=ctx,
+        )
+
+        # Verify we got results (didn't crash)
+        assert len(results) >= 1
+
+        # Verify the transforms actually ran (data was modified)
+        # At least one result should have the fields added by transforms
+        final_data_list = [r.final_data for r in results if r.final_data is not None]
+        assert len(final_data_list) > 0
+
+        # Check that transforms ran in order (each added its field)
+        final_data = final_data_list[0]
+        if isinstance(final_data, PipelineRow):
+            final_dict = final_data.to_dict()
+        else:
+            final_dict = final_data
+
+        assert "initial" in final_dict
+        assert final_dict["initial"] == 42
+        # All 10 transforms should have added their fields
+        for i in range(10):
+            assert f"field_{i}" in final_dict, f"Transform {i} didn't run - field_{i} missing"
+            assert final_dict[f"field_{i}"] == i
 
     def test_iteration_guard_exists_in_process_row(self) -> None:
         """Verify iteration guard is present in process_row method.
@@ -192,8 +307,9 @@ class TestProcessorGuards:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> PluginTransformResult:
-                return PluginTransformResult.success(row, success_reason={"action": "passthrough"})
+            def process(self, row: PipelineRow, ctx: PluginContext) -> PluginTransformResult:
+                # Passthrough - return dict copy of row data
+                return PluginTransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
 
         transform = PassthroughTransform(transform_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -201,7 +317,7 @@ class TestProcessorGuards:
         # This should complete successfully without hitting the guard
         results = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=SourceRow.valid({"value": 42}, contract=_make_observed_contract({"value": 42})),
             transforms=[transform],
             ctx=ctx,
         )
@@ -209,18 +325,3 @@ class TestProcessorGuards:
         # If we get here without RuntimeError, the guard didn't fire
         # (which is correct for normal processing)
         assert len(results) >= 1  # At least one result (terminal state)
-
-    def test_guard_constant_is_reasonable(self) -> None:
-        """Verify the MAX_WORK_QUEUE_ITERATIONS constant is reasonable.
-
-        The guard should be high enough to not trigger on legitimate pipelines
-        but low enough to catch runaway loops quickly.
-        """
-        # Should be at least 1000 for complex DAGs
-        assert MAX_WORK_QUEUE_ITERATIONS >= 1000
-
-        # Should not be astronomical (would defeat the purpose)
-        assert MAX_WORK_QUEUE_ITERATIONS <= 100_000
-
-        # Should be exactly 10,000 as documented
-        assert MAX_WORK_QUEUE_ITERATIONS == 10_000

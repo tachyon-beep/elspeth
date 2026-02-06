@@ -255,6 +255,7 @@ TransformErrorCategory = Literal[
     "content_filtered",
     "content_safety_violation",
     "prompt_injection_detected",
+    "unknown_category",  # Unknown category from external API (fail-closed)
     # Contract violations (schema validation)
     "contract_violation",
     "multiple_contract_violations",

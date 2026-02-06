@@ -82,6 +82,7 @@ from elspeth.contracts.contract_builder import ContractBuilder
 # Schema contracts (Phase 3: Pipeline Integration)
 from elspeth.contracts.contract_propagation import (
     merge_contract_with_output,
+    narrow_contract_to_output,
     propagate_contract,
 )
 
@@ -363,6 +364,7 @@ __all__ = [  # Grouped by category for readability
     "create_output_contract_from_schema",
     "HeaderMode",
     "merge_contract_with_output",
+    "narrow_contract_to_output",
     "parse_header_mode",
     "propagate_contract",
     "resolve_headers",

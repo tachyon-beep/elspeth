@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import jinja2
+import jinja2.sandbox
 
 from elspeth.testing.chaosllm.config import ResponseConfig
 
@@ -412,7 +413,7 @@ class ResponseGenerator:
 
     def _create_jinja_env(self) -> jinja2.Environment:
         """Create Jinja2 environment with custom helpers."""
-        env = jinja2.Environment(
+        env = jinja2.sandbox.SandboxedEnvironment(
             autoescape=False,  # We're generating text, not HTML
             undefined=jinja2.StrictUndefined,
         )

@@ -18,7 +18,7 @@ DEFAULT_MEMORY_DB = "file:chaosllm-metrics?mode=memory&cache=shared"
 class ServerConfig(BaseModel):
     """Server binding and worker configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     host: str = Field(
         default="127.0.0.1",
@@ -40,7 +40,7 @@ class ServerConfig(BaseModel):
 class MetricsConfig(BaseModel):
     """Metrics storage configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     database: str = Field(
         default=DEFAULT_MEMORY_DB,
@@ -56,7 +56,7 @@ class MetricsConfig(BaseModel):
 class RandomResponseConfig(BaseModel):
     """Random text response generation settings."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     min_words: int = Field(
         default=10,
@@ -84,7 +84,7 @@ class RandomResponseConfig(BaseModel):
 class TemplateResponseConfig(BaseModel):
     """Template-based response generation settings."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     body: str = Field(
         default='{"result": "ok"}',
@@ -95,7 +95,7 @@ class TemplateResponseConfig(BaseModel):
 class PresetResponseConfig(BaseModel):
     """Preset bank response generation settings."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     file: str = Field(
         default="./responses.jsonl",
@@ -110,7 +110,7 @@ class PresetResponseConfig(BaseModel):
 class ResponseConfig(BaseModel):
     """Response generation configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     mode: Literal["random", "template", "echo", "preset"] = Field(
         default="random",
@@ -133,7 +133,7 @@ class ResponseConfig(BaseModel):
 class LatencyConfig(BaseModel):
     """Latency simulation configuration."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     base_ms: int = Field(
         default=50,
@@ -150,7 +150,7 @@ class LatencyConfig(BaseModel):
 class BurstConfig(BaseModel):
     """Burst pattern configuration for simulating provider stress."""
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(
         default=False,
@@ -188,7 +188,7 @@ class ErrorInjectionConfig(BaseModel):
     one is selected based on defined priority order.
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     # === HTTP-Level Errors ===
 
@@ -398,7 +398,7 @@ class ChaosLLMConfig(BaseModel):
     4. Built-in defaults
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     server: ServerConfig = Field(
         default_factory=ServerConfig,

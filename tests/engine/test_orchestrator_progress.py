@@ -10,17 +10,33 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import SourceRow
+from elspeth.contracts import ArtifactDescriptor, FieldContract, SchemaContract, SourceRow
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
     as_sink,
     as_source,
 )
+from tests.engine.conftest import CollectSink
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     pass
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestOrchestratorProgress:
@@ -28,7 +44,7 @@ class TestOrchestratorProgress:
 
     def test_progress_callback_called_every_100_rows(self, payload_store) -> None:
         """Verify progress callback is called at 100, 200, and 250 row marks."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, ProgressEvent, SourceRow
+        from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -44,21 +60,13 @@ class TestOrchestratorProgress:
             output_schema = ValueSchema
 
             def __init__(self, count: int) -> None:
+                super().__init__()
                 self._count = count
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(self._count):
-                    yield SourceRow.valid({"value": i})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+                    row = {"value": i}
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         # Create 250-row source
         source = MultiRowSource(count=250)
@@ -117,7 +125,7 @@ class TestOrchestratorProgress:
 
     def test_progress_callback_not_called_when_none(self, payload_store) -> None:
         """Verify no crash when on_progress is None."""
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -132,17 +140,8 @@ class TestOrchestratorProgress:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(50):
-                    yield SourceRow.valid({"value": i})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+                    row = {"value": i}
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         source = SmallSource()
         sink = CollectSink()
@@ -166,7 +165,7 @@ class TestOrchestratorProgress:
         continue, so quarantined rows at 100-row boundaries never triggered
         progress updates.
         """
-        from elspeth.contracts import ArtifactDescriptor, PluginSchema, ProgressEvent, SourceRow
+        from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -183,24 +182,15 @@ class TestOrchestratorProgress:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(150):
+                    row = {"value": i}
                     if i == 99:  # Row 100 (0-indexed 99) is quarantined
                         yield SourceRow.quarantined(
-                            row={"value": i},
+                            row=row,
                             error="test_quarantine_at_boundary",
                             destination="quarantine",
                         )
                     else:
-                        yield SourceRow.valid({"value": i})
-
-        class CollectSink(_TestSinkBase):
-            name = "collect_sink"
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+                        yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         source = QuarantineAtBoundarySource()
         default_sink = CollectSink()
@@ -276,7 +266,8 @@ class TestOrchestratorProgress:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(150):
-                    yield SourceRow.valid({"value": i})
+                    row = {"value": i}
+                    yield SourceRow.valid(row, contract=_make_observed_contract(row))
 
         class TrackingSink(_TestSinkBase):
             """Sink that tracks whether it received writes."""

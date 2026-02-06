@@ -23,6 +23,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.config_base import TransformDataConfig
@@ -30,6 +31,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, is_capacity_error
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.azure.errors import MalformedResponseError
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -44,6 +46,8 @@ class ContentSafetyThresholds(BaseModel):
     A threshold of 0 means all content of that type is blocked.
     A threshold of 6 means only the most severe content is blocked.
     """
+
+    model_config = {"extra": "forbid"}
 
     hate: int = Field(..., ge=0, le=6, description="Hate content threshold (0-6)")
     violence: int = Field(..., ge=0, le=6, description="Violence content threshold (0-6)")
@@ -125,6 +129,17 @@ class AzureContentSafetyConfig(TransformDataConfig):
 
 # Rebuild model to resolve nested model references
 AzureContentSafetyConfig.model_rebuild()
+
+
+# Explicit mapping from Azure Content Safety API category names to internal names.
+# This is the ONLY place where Azure category names are translated.
+# Unknown categories are REJECTED (fail closed) — see _analyze_content().
+_AZURE_CATEGORY_MAP: dict[str, str] = {
+    "Hate": "hate",
+    "Violence": "violence",
+    "Sexual": "sexual",
+    "SelfHarm": "self_harm",
+}
 
 
 class AzureContentSafety(BaseTransform, BatchTransformMixin):
@@ -242,7 +257,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
 
         Submits the row to the batch processing pipeline. Returns quickly
@@ -268,7 +283,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Not supported - use accept() for row-level pipelining.
@@ -285,7 +300,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
 
     def _process_row(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row. Called by worker threads.
@@ -312,7 +327,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
 
     def _process_single_with_state(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         state_id: str,
     ) -> TransformResult:
         """Process a single row with explicit state_id.
@@ -322,13 +337,15 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         Raises:
             CapacityError: On rate limit errors (for pooled retry)
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        # Get dict representation for field scanning
+        row_dict = row.to_dict()
+        fields_to_scan = self._get_fields_to_scan(row_dict)
 
         for field_name in fields_to_scan:
-            if field_name not in row:
+            if field_name not in row_dict:
                 continue  # Skip fields not present in this row
 
-            value = row[field_name]
+            value = row_dict[field_name]
             if not isinstance(value, str):
                 continue
 
@@ -349,6 +366,18 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                     },
                     retryable=False,
                 )
+            except ValueError as e:
+                # Unknown category from Azure — fail CLOSED (security transform).
+                # Not retryable: the API response is structurally valid but contains
+                # categories we can't assess. Requires code update to handle.
+                return TransformResult.error(
+                    {
+                        "reason": "unknown_category",
+                        "field": field_name,
+                        "message": str(e),
+                    },
+                    retryable=False,
+                )
             except httpx.RequestError as e:
                 return TransformResult.error(
                     {
@@ -357,6 +386,17 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                         "message": str(e),
                     },
                     retryable=True,
+                )
+            except MalformedResponseError as e:
+                # Malformed API response — fail CLOSED, non-retryable
+                # (response structure won't improve on retry)
+                return TransformResult.error(
+                    {
+                        "reason": "api_error",
+                        "error_type": "malformed_response",
+                        "message": str(e),
+                    },
+                    retryable=False,
                 )
 
             # Check thresholds
@@ -372,8 +412,9 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                 )
 
         return TransformResult.success(
-            row,
+            row_dict,
             success_reason={"action": "validated"},
+            contract=row.contract,
         )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
@@ -445,27 +486,51 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         response.raise_for_status()
 
         # Parse response into category -> severity mapping
-        # Azure API responses are external data (Tier 3: Zero Trust) - wrap parsing
+        # Azure API responses are external data (Tier 3: Zero Trust) — validate immediately
         try:
             data = response.json()
-            # Initialize all categories to 0 (safe) - Azure only returns categories
-            # where content was detected, missing = no harmful content
-            result: dict[str, int] = {
-                "hate": 0,
-                "violence": 0,
-                "sexual": 0,
-                "self_harm": 0,
-            }
+        except Exception as e:
+            raise MalformedResponseError(f"Invalid JSON in Content Safety response: {e}") from e
+
+        try:
+            # Initialize all expected categories to 0 (safe)
+            _EXPECTED_CATEGORIES = {"hate", "violence", "sexual", "self_harm"}
+            result: dict[str, int] = dict.fromkeys(_EXPECTED_CATEGORIES, 0)
+
             for item in data["categoriesAnalysis"]:
-                category = item["category"].lower().replace("selfharm", "self_harm")
-                result[category] = item["severity"]
+                azure_category = item["category"]
+                internal_name = _AZURE_CATEGORY_MAP.get(azure_category)
+                if internal_name is None:
+                    # Fail CLOSED: unknown category means Azure updated their taxonomy.
+                    # We cannot assess content safety with unknown categories — reject.
+                    raise ValueError(
+                        f"Unknown Azure Content Safety category: {azure_category!r}. "
+                        f"Known categories: {sorted(_AZURE_CATEGORY_MAP.keys())}. "
+                        f"Update _AZURE_CATEGORY_MAP to handle this category."
+                    )
+                if not isinstance(item["severity"], int):
+                    raise MalformedResponseError(f"severity for {azure_category!r} must be int, got {type(item['severity']).__name__}")
+                result[internal_name] = item["severity"]
+
+            # Fail CLOSED: verify all expected categories were returned by Azure.
+            # If Azure changes to only returning flagged categories, absent ones
+            # would silently default to 0 (safe) — that's a fail-open path.
+            returned_categories = {
+                _AZURE_CATEGORY_MAP[item["category"]] for item in data["categoriesAnalysis"] if item["category"] in _AZURE_CATEGORY_MAP
+            }
+            missing = _EXPECTED_CATEGORIES - returned_categories
+            if missing:
+                raise MalformedResponseError(
+                    f"Azure Content Safety response missing expected categories: "
+                    f"{sorted(missing)}. Returned: {sorted(returned_categories)}. "
+                    f"Cannot assess content safety without all categories."
+                )
 
             return result
 
-        except (KeyError, TypeError, ValueError) as e:
-            # Malformed response - the HTTP call was recorded as SUCCESS by AuditedHTTPClient
-            # (because we got a 200), but the response is unusable at the application level
-            raise httpx.RequestError(f"Malformed API response: {e}") from e
+        except (KeyError, TypeError) as e:
+            # Malformed response structure — non-retryable
+            raise MalformedResponseError(f"Malformed Content Safety response: {e}") from e
 
     def _check_thresholds(
         self,

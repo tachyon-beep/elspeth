@@ -13,7 +13,7 @@ This consolidates duplicate tests from individual Runtime*Config test files.
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -35,21 +35,21 @@ RUNTIME_CONFIGS = [
 ]
 
 
-def get_config_class(name: str) -> type:
+def get_config_class(name: str) -> Any:
     """Import and return a RuntimeConfig class by name."""
     from elspeth.contracts.config import runtime
 
     return getattr(runtime, name)
 
 
-def get_protocol_class(name: str) -> type:
+def get_protocol_class(name: str) -> Any:
     """Import and return a Protocol class by name."""
     from elspeth.contracts import config
 
     return getattr(config, name)
 
 
-def get_settings_class(name: str) -> type:
+def get_settings_class(name: str) -> Any:
     """Import and return a Settings class by name.
 
     Settings classes are in core.config, NOT contracts.config (leaf boundary fix).
@@ -75,10 +75,10 @@ class TestRuntimeConfigImmutability:
     def test_frozen_dataclass(self, config_name: str) -> None:
         """Runtime configs are frozen (immutable) for thread safety."""
         config_cls = get_config_class(config_name)
-        config = config_cls.default()
+        config = config_cls.default()  # type: ignore[attr-defined]  # Runtime reflection: all Runtime*Config have .default() classmethod
 
         # Get first field name to attempt mutation
-        field_name = next(iter(config_cls.__dataclass_fields__.keys()))
+        field_name = next(iter(config_cls.__dataclass_fields__.keys()))  # type: ignore[attr-defined]  # Runtime reflection: testing dataclass attribute
 
         with pytest.raises(FrozenInstanceError):
             setattr(config, field_name, "mutated_value")
@@ -113,7 +113,7 @@ class TestRuntimeConfigProtocolCompliance:
         config_cls = get_config_class(config_name)
         protocol_cls = get_protocol_class(protocol_name)
 
-        config = config_cls.default()
+        config = config_cls.default()  # type: ignore[attr-defined]  # Runtime reflection: all Runtime*Config have .default() classmethod
 
         assert isinstance(config, protocol_cls), (
             f"{config_name} does not implement {protocol_name}. Check that all protocol properties are present with correct types."
@@ -141,10 +141,10 @@ class TestRuntimeConfigNoOrphanFields:
         settings_cls = get_settings_class(settings_name)
 
         # Get all runtime config fields
-        runtime_fields = set(config_cls.__dataclass_fields__.keys())
+        runtime_fields = set(config_cls.__dataclass_fields__.keys())  # type: ignore[attr-defined]  # Runtime reflection: testing dataclass attribute
 
         # Get Settings fields (with their runtime names via mapping)
-        settings_fields = set(settings_cls.model_fields.keys())
+        settings_fields = set(settings_cls.model_fields.keys())  # type: ignore[attr-defined]  # Runtime reflection: testing Pydantic model attribute
         field_mappings = FIELD_MAPPINGS.get(settings_name, {})
         runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
 
@@ -175,10 +175,10 @@ class TestRuntimeConfigNoOrphanFields:
         settings_cls = get_settings_class(settings_name)
 
         # Get all runtime config fields
-        runtime_fields = set(config_cls.__dataclass_fields__.keys())
+        runtime_fields = set(config_cls.__dataclass_fields__.keys())  # type: ignore[attr-defined]  # Runtime reflection: testing dataclass attribute
 
         # Get Settings fields (with their runtime names via mapping)
-        settings_fields = set(settings_cls.model_fields.keys())
+        settings_fields = set(settings_cls.model_fields.keys())  # type: ignore[attr-defined]  # Runtime reflection: testing Pydantic model attribute
         field_mappings = FIELD_MAPPINGS.get(settings_name, {})
         runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
 

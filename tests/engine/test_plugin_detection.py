@@ -10,7 +10,7 @@ Aggregation is now handled by batch-aware transforms (is_batch_aware=True).
 
 from typing import Any
 
-from elspeth.contracts import NodeID, NodeType
+from elspeth.contracts import FieldContract, NodeID, NodeType, SchemaContract, SourceRow
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -18,6 +18,21 @@ from elspeth.plugins.results import (
     RoutingAction,
     TransformResult,
 )
+
+
+def _make_observed_contract(row: dict[str, Any]) -> SchemaContract:
+    """Create an OBSERVED contract from row data for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=type(value),
+            required=False,
+            source="inferred",
+        )
+        for key, value in row.items()
+    )
+    return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
 class TestPluginTypeDetection:
@@ -55,12 +70,12 @@ class TestPluginTypeDetection:
             name = "duck"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})  # type: ignore[attr-defined]
 
         duck = DuckTypedTransform()
         # Has the method but NOT an instance of BaseTransform
         assert hasattr(duck, "process")
-        assert not isinstance(duck, BaseTransform)
+        assert not isinstance(duck, BaseTransform)  # type: ignore[unreachable]
 
     def test_duck_typed_gate_not_recognized(self) -> None:
         """Duck-typed gates without inheritance should NOT be recognized.
@@ -80,7 +95,7 @@ class TestPluginTypeDetection:
         duck = DuckTypedGate()
         # Has the method but NOT an instance of BaseGate
         assert hasattr(duck, "evaluate")
-        assert not isinstance(duck, BaseGate)
+        assert not isinstance(duck, BaseGate)  # type: ignore[unreachable]
 
 
 class TestPluginInheritanceHierarchy:
@@ -124,7 +139,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             node_id = "fake_node_id"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})  # type: ignore[attr-defined]
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -157,7 +172,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(
                 row_index=0,
-                row_data={"value": 1},
+                source_row=SourceRow.valid({"value": 1}, contract=_make_observed_contract({"value": 1})),
                 transforms=[duck],
                 ctx=ctx,
             )
@@ -215,7 +230,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(
                 row_index=0,
-                row_data={"value": 1},
+                source_row=SourceRow.valid({"value": 1}, contract=_make_observed_contract({"value": 1})),
                 transforms=[duck],
                 ctx=ctx,
             )

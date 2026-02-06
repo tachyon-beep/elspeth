@@ -527,8 +527,15 @@ class PipelineRow:
         Raises:
             KeyError: If field not found in contract or data
         """
-        normalized = self._contract.resolve_name(key)
-        return self._data[normalized]
+        try:
+            normalized = self._contract.resolve_name(key)
+            return self._data[normalized]
+        except KeyError:
+            # For FLEXIBLE mode: allow access to extra fields in data not in contract
+            # For FIXED mode: resolve_name raises KeyError which we re-raise
+            if self._contract.mode in ("FLEXIBLE", "OBSERVED") and key in self._data:
+                return self._data[key]
+            raise
 
     def __getattr__(self, key: str) -> Any:
         """Dot notation access: row.field_name.
@@ -561,24 +568,23 @@ class PipelineRow:
             key: Field name (original or normalized)
 
         Returns:
-            True if field is in the contract AND exists in actual row data.
-            Returns False if field is not in the contract, even if it exists
-            in the underlying data (use to_dict() for raw access).
+            True if field is accessible via __getitem__ AND exists in actual row data.
+            For FLEXIBLE/OBSERVED contracts, includes extra fields present in data.
+            For FIXED contracts, only includes fields in the contract.
 
         Note:
-            The contract defines which fields are accessible via PipelineRow.
-            In FLEXIBLE mode with declared fields, extras pass validation but
-            are NOT added to the contract, so they are NOT accessible via
-            PipelineRow (only via to_dict()). This enforces contract-based
-            access control.
+            This must align with __getitem__ semantics: if 'key in row' returns True,
+            then row[key] must NOT raise KeyError. This consistency is critical for
+            gate expressions that check membership before accessing fields.
         """
         try:
             resolved = self._contract.resolve_name(key)
             return resolved in self._data
         except KeyError:
-            # Field not in contract - not accessible via PipelineRow
-            # Even if it exists in _data, contract defines accessibility
-            return False
+            # For FLEXIBLE/OBSERVED mode: allow access to extra fields in data not in contract
+            # This mirrors __getitem__ fallback logic for extra-field access
+            # For FIXED mode: resolve_name raises KeyError which we caught, return False
+            return self._contract.mode in ("FLEXIBLE", "OBSERVED") and key in self._data
 
     def to_dict(self) -> dict[str, Any]:
         """Export raw data (normalized keys) for serialization.
@@ -629,6 +635,39 @@ class PipelineRow:
             The SchemaContract associated with this row
         """
         return self._contract
+
+    def __copy__(self) -> PipelineRow:
+        """Support shallow copy - creates new PipelineRow with same data dict.
+
+        SchemaContract is immutable (frozen=True), so sharing reference is safe.
+        MappingProxyType doesn't support direct copy/pickle, so we create new one.
+
+        Returns:
+            New PipelineRow with same contract and data copy
+        """
+        return PipelineRow(dict(self._data), self._contract)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> PipelineRow:
+        """Support deep copy - creates new PipelineRow with deep copied data.
+
+        This enables fork_token and expand_token to use deepcopy() on PipelineRow
+        without hitting MappingProxyType pickle issues.
+
+        SchemaContract is immutable (frozen=True), so sharing reference is safe.
+        Only the data dict needs deep copying.
+
+        Args:
+            memo: Memoization dict for deepcopy
+
+        Returns:
+            New PipelineRow with same contract and deep copied data
+        """
+        import copy
+
+        # Deep copy the data dict (contains nested structures)
+        copied_data = copy.deepcopy(dict(self._data), memo)
+        # Contract is immutable - share reference (safe for frozen dataclass)
+        return PipelineRow(copied_data, self._contract)
 
     def to_checkpoint_format(self) -> dict[str, Any]:
         """Serialize for checkpoint storage.

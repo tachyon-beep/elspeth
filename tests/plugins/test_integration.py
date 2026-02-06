@@ -4,6 +4,8 @@
 from collections.abc import Iterator
 from typing import Any, ClassVar
 
+from elspeth.contracts.schema_contract import PipelineRow
+
 
 class TestPluginSystemIntegration:
     """End-to-end plugin system tests."""
@@ -11,6 +13,7 @@ class TestPluginSystemIntegration:
     def test_full_plugin_workflow(self) -> None:
         """Test source -> transform -> sink workflow."""
         from elspeth.contracts import ArtifactDescriptor, SourceRow
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
         from elspeth.plugins import (
             BaseSink,
             BaseSource,
@@ -36,8 +39,22 @@ class TestPluginSystemIntegration:
             output_schema = InputSchema
 
             def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+                # Create schema contract for output
+                contract = SchemaContract(
+                    mode="FIXED",
+                    fields=(
+                        FieldContract(
+                            normalized_name="value",
+                            original_name="value",
+                            python_type=int,
+                            required=True,
+                            source="declared",
+                        ),
+                    ),
+                    locked=True,
+                )
                 for v in self.config["values"]:
-                    yield SourceRow.valid({"value": v})
+                    yield SourceRow.valid({"value": v}, contract=contract)
 
             def close(self) -> None:
                 pass
@@ -47,11 +64,12 @@ class TestPluginSystemIntegration:
             input_schema = InputSchema
             output_schema = EnrichedSchema
 
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                row_dict = row.to_dict()
                 return TransformResult.success(
                     {
-                        "value": row["value"],
-                        "doubled": row["value"] * 2,
+                        "value": row_dict["value"],
+                        "doubled": row_dict["value"] * 2,
                     },
                     success_reason={"action": "double"},
                 )
@@ -112,12 +130,14 @@ class TestPluginSystemIntegration:
         MemorySink.collected = []  # Reset
 
         for source_row in source.load(ctx):
-            # Extract row data from SourceRow for transform
+            # Convert SourceRow to PipelineRow for transform processing
             assert source_row.row is not None
-            result = transform.process(source_row.row, ctx)
+            pipeline_row = source_row.to_pipeline_row()
+            result = transform.process(pipeline_row, ctx)
             assert result.status == "success"
             assert result.row is not None  # Success always has row
-            sink.write([result.row], ctx)  # write() takes list of rows
+            row_data = result.row if isinstance(result.row, dict) else result.row.to_dict()
+            sink.write([row_data], ctx)  # write() takes list of rows
 
         # Verify results
         # Values: 10*2=20, 50*2=100, 100*2=200

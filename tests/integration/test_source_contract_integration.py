@@ -13,24 +13,57 @@ Per CLAUDE.md Test Path Integrity: These tests use production code paths
 
 from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.plugins.context import PluginContext
 from elspeth.plugins.sources.csv_source import CSVSource
 
+if TYPE_CHECKING:
+    from elspeth.plugins.context import ValidationErrorToken
 
-class MockContext:
-    """Minimal context for integration testing.
 
-    Implements the PluginContext interface methods used by sources.
-    """
+class _TestablePluginContext(PluginContext):
+    """PluginContext subclass with validation error tracking for tests."""
 
     def __init__(self) -> None:
-        self.validation_errors: list[dict] = []
+        super().__init__(
+            run_id="test-run-001",
+            config={},
+        )
+        self.validation_errors: list[dict[str, object]] = []
 
-    def record_validation_error(self, **kwargs: object) -> None:
-        self.validation_errors.append(dict(kwargs))
+    def record_validation_error(
+        self,
+        row: object,
+        error: str,
+        schema_mode: str,
+        destination: str,
+    ) -> "ValidationErrorToken":
+        """Override to track validation errors for test assertions."""
+        from elspeth.plugins.context import ValidationErrorToken
+
+        self.validation_errors.append(
+            {
+                "row": row,
+                "error": error,
+                "schema_mode": schema_mode,
+                "destination": destination,
+            }
+        )
+        # Return a mock token - tests don't have landscape
+        return ValidationErrorToken(
+            row_id="test-row",
+            node_id=self.node_id or "test-node",
+            destination=destination,
+        )
+
+
+def make_test_context() -> _TestablePluginContext:
+    """Create a test context for integration tests."""
+    return _TestablePluginContext()
 
 
 class TestSourceContractIntegration:
@@ -55,7 +88,7 @@ class TestSourceContractIntegration:
                 "on_validation_failure": "discard",
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         rows = list(source.load(ctx))
 
@@ -92,7 +125,7 @@ class TestSourceContractIntegration:
                 "normalize_fields": True,
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         rows = list(source.load(ctx))
         assert len(rows) == 1
@@ -135,7 +168,7 @@ class TestSourceContractIntegration:
                 "on_validation_failure": "quarantine",
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         rows = list(source.load(ctx))
 
@@ -174,7 +207,7 @@ class TestSourceContractIntegration:
                 "on_validation_failure": "discard",
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         # Consume the source to trigger contract creation
         list(source.load(ctx))
@@ -219,7 +252,7 @@ class TestSourceContractIntegration:
                 "on_validation_failure": "discard",
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         rows = list(source.load(ctx))
         assert len(rows) == 1
@@ -262,7 +295,7 @@ class TestSourceContractIntegration:
                 "on_validation_failure": "quarantine",
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         rows = list(source.load(ctx))
         assert len(rows) == 1
@@ -288,7 +321,7 @@ class TestSourceContractIntegration:
                 "on_validation_failure": "discard",
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         rows = list(source.load(ctx))
         pipeline_row = rows[0].to_pipeline_row()
@@ -321,7 +354,7 @@ class TestSourceContractIntegration:
                 "on_validation_failure": "discard",
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         rows = list(source.load(ctx))
         assert len(rows) == 1
@@ -342,12 +375,14 @@ class TestSourceContractIntegration:
         pipeline_row = rows[0].to_pipeline_row()
         assert pipeline_row["id"] == 1
 
-        # Extra fields passed validation but are not in the contract
-        # They exist in the underlying data but can't be accessed via PipelineRow
-        assert "name" not in pipeline_row
-        assert "extra_field" not in pipeline_row
+        # FLEXIBLE mode allows access to extra fields in data not in contract
+        # This is the key difference from FIXED mode: extras are accessible
+        assert "name" in pipeline_row
+        assert pipeline_row["name"] == "Alice"
+        assert "extra_field" in pipeline_row
+        assert pipeline_row["extra_field"] == "bonus_data"
 
-        # The underlying data still has the extras (can access via to_dict)
+        # The underlying data contains all fields (same as to_dict)
         raw_data = pipeline_row.to_dict()
         assert raw_data["name"] == "Alice"
         assert raw_data["extra_field"] == "bonus_data"
@@ -374,7 +409,7 @@ class TestSourceContractIntegration:
                 "on_validation_failure": "quarantine",
             }
         )
-        ctx = MockContext()
+        ctx = make_test_context()
 
         rows = list(source.load(ctx))
 
