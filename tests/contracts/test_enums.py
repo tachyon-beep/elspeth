@@ -110,11 +110,18 @@ class TestRoutingMode:
     """Tests for RoutingMode enum."""
 
     def test_routing_mode_values(self) -> None:
-        """RoutingMode has move and copy."""
+        """RoutingMode has move, copy, and divert."""
         from elspeth.contracts import RoutingMode
 
         assert RoutingMode.MOVE.value == "move"
         assert RoutingMode.COPY.value == "copy"
+        assert RoutingMode.DIVERT.value == "divert"
+
+    def test_routing_mode_divert_is_str(self) -> None:
+        """DIVERT mode serializes to string for database storage."""
+        from elspeth.contracts import RoutingMode
+
+        assert RoutingMode.DIVERT == "divert"
 
 
 class TestEnumCoercion:

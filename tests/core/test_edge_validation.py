@@ -199,6 +199,7 @@ def test_edge_validation_timing_from_plugin_instances() -> None:
         name: ClassVar[str] = "test_source"
         config: ClassVar[dict[str, Any]] = {}
         output_schema: ClassVar[type[PluginSchema]] = ProducerSchema  # Has: id, name
+        _on_validation_failure: ClassVar[str] = "discard"
 
     class MockSink:
         name: ClassVar[str] = "test_sink"

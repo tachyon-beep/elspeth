@@ -1103,6 +1103,33 @@ class TestGateSettings:
         assert "reserved" in str(exc_info.value).lower()
         assert "continue" in str(exc_info.value)
 
+    def test_gate_settings_dunder_route_label_rejected(self) -> None:
+        """Route labels starting with __ are reserved for system edges."""
+        from elspeth.core.config import GateSettings
+
+        with pytest.raises(ValidationError) as exc_info:
+            GateSettings(
+                name="bad_gate",
+                condition="row['x'] > 0",
+                routes={"__quarantine__": "some_sink", "true": "continue"},
+            )
+        assert "__" in str(exc_info.value)
+        assert "reserved" in str(exc_info.value).lower()
+
+    def test_gate_settings_dunder_fork_branch_rejected(self) -> None:
+        """Fork branches starting with __ are reserved for system edges."""
+        from elspeth.core.config import GateSettings
+
+        with pytest.raises(ValidationError) as exc_info:
+            GateSettings(
+                name="bad_gate",
+                condition="True",
+                routes={"all": "fork"},
+                fork_to=["path_a", "__error_0__"],
+            )
+        assert "__" in str(exc_info.value)
+        assert "reserved" in str(exc_info.value).lower()
+
     def test_gate_settings_continue_as_destination_allowed(self) -> None:
         """'continue' as a route DESTINATION (not label) is still valid.
 

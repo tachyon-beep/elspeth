@@ -129,12 +129,18 @@ class RoutingMode(str, Enum):
 
     MOVE: Token exits current path, goes to destination only
     COPY: Token clones to destination AND continues on current path
+    DIVERT: Token is diverted from normal flow to error/quarantine sink.
+            Like MOVE, but semantically distinct: represents failure handling,
+            not intentional routing. Used for source quarantine and transform
+            on_error edges. These are structural markers in the DAG — rows
+            reach these sinks via exception handling, not by traversing the edge.
 
     Uses (str, Enum) for database serialization.
     """
 
     MOVE = "move"
     COPY = "copy"
+    DIVERT = "divert"
 
 
 class RowOutcome(str, Enum):

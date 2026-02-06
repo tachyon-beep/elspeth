@@ -478,7 +478,7 @@ class TestRoutingModeEnumProperties:
         assert mode == mode.value
 
     def test_routing_mode_expected_members(self) -> None:
-        """Property: RoutingMode has exactly MOVE and COPY."""
-        expected = {"MOVE", "COPY"}
+        """Property: RoutingMode has exactly MOVE, COPY, and DIVERT."""
+        expected = {"MOVE", "COPY", "DIVERT"}
         actual = {m.name for m in RoutingMode}
         assert actual == expected

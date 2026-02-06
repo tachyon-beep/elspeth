@@ -1722,3 +1722,8 @@ allow_hits:
   reason: User YAML config boundary - http_config is parsed from pipeline settings
   safety: Defaults to 30s timeout - safe fallback for optional config field
   expires: '2026-05-02'
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=7a098a79b0ab4c1c
+  owner: architecture
+  reason: Framework-boundary type narrowing — transforms list contains both TransformProtocol and GateProtocol instances despite type annotation. GateProtocol does not define _on_error, so isinstance is required to skip gates when adding divert edges.
+  safety: Gates skipped cleanly — only TransformProtocol instances get _on_error checked. Existing isinstance pattern at dag.py line 456.
+  expires: '2026-05-06'

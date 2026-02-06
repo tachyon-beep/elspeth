@@ -359,6 +359,13 @@ class GateSettings(BaseModel):
             if label in _RESERVED_EDGE_LABELS:
                 raise ValueError(f"Route label '{label}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
 
+            # Labels starting with __ are reserved for system edges
+            # (__quarantine__, __error_N__) added by the DAG builder
+            if label.startswith("__"):
+                raise ValueError(
+                    f"Route label '{label}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
+                )
+
             # Destinations must be "continue", "fork", or a sink name.
             # Sink name validation is deferred to DAG compilation where we have
             # access to the actual sink definitions.
@@ -381,6 +388,10 @@ class GateSettings(BaseModel):
         for branch in v:
             if branch in _RESERVED_EDGE_LABELS:
                 raise ValueError(f"Fork branch '{branch}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
+            if branch.startswith("__"):
+                raise ValueError(
+                    f"Fork branch '{branch}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
+                )
         return v
 
     @model_validator(mode="after")
