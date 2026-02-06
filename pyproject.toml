@@ -75,7 +75,7 @@ dev = [
     "pytest-timeout>=2.3,<3",  # Test timeouts for stress tests
     "hypothesis>=6.98,<7",  # Property-based testing
     "mypy>=1.19,<2",  # Static type checking
-    "ruff>=0.14,<1",  # Linting and formatting
+    "ruff==0.15.0",  # Linting and formatting
     "pre-commit>=3.6,<4",  # Git hooks
     # Type stubs
     "pandas-stubs>=2.2,<3",  # Pandas type hints
@@ -148,7 +148,7 @@ all = [
     "pytest-timeout>=2.3,<3",
     "hypothesis>=6.98,<7",
     "mypy>=1.19,<2",
-    "ruff>=0.14,<1",
+    "ruff==0.15.0",
     "pre-commit>=3.6,<4",
     "pandas-stubs>=2.2,<3",
     "types-networkx>=3.2,<4",

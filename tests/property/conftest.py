@@ -67,7 +67,7 @@ json_primitives = (
 # Recursive strategy for nested JSON structures (arrays and objects)
 json_values = st.recursive(
     json_primitives,
-    lambda children: (st.lists(children, max_size=10) | st.dictionaries(st.text(max_size=20), children, max_size=10)),
+    lambda children: st.lists(children, max_size=10) | st.dictionaries(st.text(max_size=20), children, max_size=10),
     max_leaves=50,
 )
 
