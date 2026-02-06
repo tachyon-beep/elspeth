@@ -12,23 +12,41 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
-from elspeth.contracts import TransformResult
+from elspeth.contracts import TokenInfo, TransformResult
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import SharedBatchAdapter
 
 
-@dataclass
-class MockTokenInfo:
-    """Minimal TokenInfo for testing emit()."""
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
 
-    token_id: str
-    row_id: int = 0
-    row_data: dict[str, Any] = field(default_factory=dict)
-    branch_name: str | None = None
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
+
+
+def _make_token(token_id: str, row_id: str = "row-1") -> TokenInfo:
+    """Create a TokenInfo with proper PipelineRow for testing."""
+    return TokenInfo(
+        token_id=token_id,
+        row_id=row_id,
+        row_data=_make_pipeline_row({}),
+    )
 
 
 class TestSharedBatchAdapter:
@@ -48,9 +66,9 @@ class TestSharedBatchAdapter:
         def emit_when_signaled() -> None:
             registration_complete.wait()  # Wait for test setup to complete
             emit_allowed.wait()  # Wait for explicit signal
-            token = MockTokenInfo(token_id="token-1", row_id=1)
+            token = _make_token("token-1", "row-1")
             result = TransformResult.success({"output": "done"}, success_reason={"action": "test"})
-            adapter.emit(token, result, "state-1")  # type: ignore[arg-type]
+            adapter.emit(token, result, "state-1")
 
         thread = threading.Thread(target=emit_when_signaled)
         thread.start()
@@ -92,21 +110,21 @@ class TestSharedBatchAdapter:
             # Emit in controlled order: token-2, token-1, token-3
             emit_events["token-2"].wait()
             adapter.emit(
-                MockTokenInfo(token_id="token-2", row_id=2),  # type: ignore[arg-type]
+                _make_token("token-2", "row-2"),
                 TransformResult.success({"value": 2}, success_reason={"action": "test"}),
                 "state-2",
             )
 
             emit_events["token-1"].wait()
             adapter.emit(
-                MockTokenInfo(token_id="token-1", row_id=1),  # type: ignore[arg-type]
+                _make_token("token-1", "row-1"),
                 TransformResult.success({"value": 1}, success_reason={"action": "test"}),
                 "state-1",
             )
 
             emit_events["token-3"].wait()
             adapter.emit(
-                MockTokenInfo(token_id="token-3", row_id=3),  # type: ignore[arg-type]
+                _make_token("token-3", "row-3"),
                 TransformResult.success({"value": 3}, success_reason={"action": "test"}),
                 "state-3",
             )
@@ -144,9 +162,9 @@ class TestSharedBatchAdapter:
         waiter = adapter.register("token-fast", "state-fast")
 
         # Emit result IMMEDIATELY (before wait is called)
-        token = MockTokenInfo(token_id="token-fast", row_id=1)
+        token = _make_token("token-fast", "row-1")
         result = TransformResult.success({"fast": True}, success_reason={"action": "test"})
-        adapter.emit(token, result, "state-fast")  # type: ignore[arg-type]
+        adapter.emit(token, result, "state-fast")
 
         # Now wait - should return immediately since event is already set
         start = time.perf_counter()
@@ -206,7 +224,7 @@ class TestSharedBatchAdapter:
 
         # Late result arrives after timeout
         adapter.emit(
-            MockTokenInfo(token_id="token-late", row_id=1),  # type: ignore[arg-type]
+            _make_token("token-late", "row-1"),
             TransformResult.success({"late": "result"}, success_reason={"action": "test"}),
             "state-late",
         )
@@ -221,9 +239,9 @@ class TestSharedBatchAdapter:
         waiter = adapter.register("token-error", "state-error")
 
         # Emit error result
-        token = MockTokenInfo(token_id="token-error", row_id=1)
+        token = _make_token("token-error", "row-1")
         result = TransformResult.error({"reason": "llm_call_failed", "error": "API down"})
-        adapter.emit(token, result, "state-error")  # type: ignore[arg-type]
+        adapter.emit(token, result, "state-error")
 
         got_result = waiter.wait(timeout=1.0)
 
@@ -258,7 +276,7 @@ class TestSharedBatchAdapter:
             # Emit all results
             for i in range(5):
                 adapter.emit(
-                    MockTokenInfo(token_id=f"token-{i}", row_id=i),  # type: ignore[arg-type]
+                    _make_token(f"token-{i}", f"row-{i}"),
                     TransformResult.success({"index": i}, success_reason={"action": "test"}),
                     f"state-{i}",
                 )
@@ -287,7 +305,7 @@ class TestSharedBatchAdapter:
 
         # Emit a result that won't be consumed (orphaned due to no matching waiter key)
         adapter.emit(
-            MockTokenInfo(token_id="token-orphan", row_id=99),  # type: ignore[arg-type]
+            _make_token("token-orphan", "row-99"),
             TransformResult.success({"orphan": True}, success_reason={"action": "test"}),
             "state-orphan",
         )
@@ -322,14 +340,14 @@ class TestSharedBatchAdapter:
 
         # First worker finishes late (after timeout), emits with old state_id
         adapter.emit(
-            MockTokenInfo(token_id="token-42", row_id=42),  # type: ignore[arg-type]
+            _make_token("token-42", "row-42"),
             TransformResult.success({"result": "stale"}, success_reason={"action": "test"}),
             "attempt-1",
         )
 
         # Retry worker finishes, emits with retry state_id
         adapter.emit(
-            MockTokenInfo(token_id="token-42", row_id=42),  # type: ignore[arg-type]
+            _make_token("token-42", "row-42"),
             TransformResult.success({"result": "fresh"}, success_reason={"action": "test"}),
             "attempt-2",
         )

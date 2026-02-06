@@ -172,9 +172,6 @@ class TestDeaggregationAuditTrail:
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.plugins.sinks.json_sink import JSONSink
-        from elspeth.plugins.sources.json_source import JSONSource
-        from elspeth.plugins.transforms.json_explode import JSONExplode
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -224,8 +221,9 @@ class TestDeaggregationAuditTrail:
         # Create database
         db = LandscapeDB.from_url(settings.landscape.url)
 
-        # Build graph
+        # Build graph and get plugins via production code path
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import resolve_config
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
@@ -237,18 +235,12 @@ class TestDeaggregationAuditTrail:
             default_sink=settings.default_sink,
         )
 
-        # Instantiate plugins
-        source = JSONSource(dict(settings.source.options))
-        transform = JSONExplode(dict(settings.transforms[0].options))
-        sink = JSONSink(dict(settings.sinks["output"].options))
-
-        # Build pipeline config
-        from elspeth.core.config import resolve_config
-
+        # Build pipeline config using the SAME plugin instances as the graph
+        # This ensures the test exercises the production code path
         pipeline_config = PipelineConfig(
-            source=source,  # type: ignore[arg-type]
-            transforms=[transform],  # type: ignore[arg-type]
-            sinks={"output": sink},  # type: ignore[arg-type]
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
             config=resolve_config(settings),
         )
 
