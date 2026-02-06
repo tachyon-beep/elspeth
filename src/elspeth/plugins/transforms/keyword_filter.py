@@ -13,6 +13,37 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 
+# ReDoS detection: patterns with nested quantifiers cause catastrophic backtracking
+# on adversarial input. E.g., (a+)+ on "aaa...!" is O(2^n).
+_NESTED_QUANTIFIER_RE = re.compile(
+    r"[+*]\)["  # quantified group followed by
+    r"+*{]"  # another quantifier
+    r"|"
+    r"\([^)]*[+*][^)]*\)["  # group containing quantifier, followed by
+    r"+*{]"  # another quantifier
+)
+
+# Maximum pattern length — long patterns increase backtracking risk
+_MAX_PATTERN_LENGTH = 1000
+
+
+def _validate_regex_safety(pattern: str) -> None:
+    """Reject regex patterns with known ReDoS-prone constructs.
+
+    Checks for nested quantifiers (the primary cause of catastrophic
+    backtracking) and excessive pattern length.
+
+    Args:
+        pattern: Regex pattern string to validate
+
+    Raises:
+        ValueError: If pattern contains ReDoS-prone constructs
+    """
+    if len(pattern) > _MAX_PATTERN_LENGTH:
+        raise ValueError(f"Regex pattern exceeds maximum length ({_MAX_PATTERN_LENGTH} chars): {pattern[:50]}...")
+    if _NESTED_QUANTIFIER_RE.search(pattern):
+        raise ValueError(f"Regex pattern contains nested quantifiers (ReDoS risk): {pattern}")
+
 
 class KeywordFilterConfig(TransformDataConfig):
     """Configuration for keyword filter transform.
@@ -80,6 +111,9 @@ class KeywordFilter(BaseTransform):
         self._on_error = cfg.on_error
 
         # Compile patterns at init - fail fast on invalid regex
+        # Validate for ReDoS-prone constructs before compiling
+        for pattern in cfg.blocked_patterns:
+            _validate_regex_safety(pattern)
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
         # Create schema

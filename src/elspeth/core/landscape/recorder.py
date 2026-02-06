@@ -568,6 +568,9 @@ class LandscapeRecorder:
             # always includes these fields for keyvault source (our code, not user data)
             fp = secret_fingerprint(rec["secret_value"], key=fingerprint_key)
 
+            # Clear plaintext secret from memory immediately after fingerprinting
+            del rec["secret_value"]
+
             self._ops.execute_insert(
                 secret_resolutions_table.insert().values(
                     resolution_id=generate_id(),

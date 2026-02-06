@@ -847,67 +847,67 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R5:PresetBank:from_jsonl:fp=5bb9a6693c3dd667
+- key: testing/chaosllm/response_generator.py:R5:PresetBank:from_jsonl:fp=a86816a07f74c3f6
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=1ba25161c45aaf41
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=319727597ad71ac9
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=a89767e7c531ac4a
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=e27542ac4ab46102
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=13f703d73d706c75
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=0fa0eec2f5837ed3
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=e726cefd13ee4fcb
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=d04051587b9b4e1c
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=e59870599a1036db
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=216d32a283dd211a
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=e18fc0bb62fd2eda
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=ae7b944c3352fb61
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=965b13109ef850c3
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=7032350ebd1e2d01
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=dc5b661e7357054b
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=0edfa9b30664cb15
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=f22f515f96150330
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=fb007fb57e761ed1
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=e4ffa75f2ec50777
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=3e5f449fe83d3c46
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=2f8bb9dcd6d15dd2
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=b8f580c3d8818c70
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=c353cb2f283b3f9e
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=8bd668fa1c1402bd
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -1032,17 +1032,17 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=f4c43531382cffe9
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=9160e4e0b95ed5e8
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=ae79a04952a24af5
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=af2344f0f0f5938f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=a1f4ad0438813128
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=840bd57450114a00
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

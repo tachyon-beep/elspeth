@@ -22,7 +22,8 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from jinja2 import Environment, StrictUndefined
+from jinja2 import StrictUndefined
+from jinja2.sandbox import SandboxedEnvironment
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
@@ -347,7 +348,7 @@ class AzureBlobSink(BaseSink):
         """
         # Use StrictUndefined to fail fast on typos in blob_path template.
         # A typo like {{ runid }} should error, not silently become empty.
-        env = Environment(undefined=StrictUndefined)
+        env = SandboxedEnvironment(undefined=StrictUndefined)
         template = env.from_string(self._blob_path_template)
         return template.render(
             run_id=ctx.run_id,
