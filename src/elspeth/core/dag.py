@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 import networkx as nx
 from networkx import MultiDiGraph
 
-from elspeth.contracts import EdgeInfo, RoutingMode, check_compatibility
+from elspeth.contracts import EdgeInfo, RoutingMode, check_compatibility, error_edge_label
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import (
     AggregationName,
@@ -818,7 +818,7 @@ class ExecutionGraph:
                 graph.add_edge(
                     transform_ids[i],
                     sink_ids[SinkName(on_error)],
-                    label=f"__error_{i}__",
+                    label=error_edge_label(i),
                     mode=RoutingMode.DIVERT,
                 )
 

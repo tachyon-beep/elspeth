@@ -116,6 +116,7 @@ from elspeth.contracts.enums import (
     RunStatus,
     TelemetryGranularity,
     TriggerType,
+    error_edge_label,
 )
 from elspeth.contracts.errors import (
     BatchPendingError,
@@ -291,6 +292,7 @@ __all__ = [  # Grouped by category for readability
     "RunStatus",
     "TelemetryGranularity",
     "TriggerType",
+    "error_edge_label",
     # identity
     "TokenInfo",
     # checkpoint

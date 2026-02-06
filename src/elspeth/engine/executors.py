@@ -138,6 +138,7 @@ class TransformExecutor:
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
         max_workers: int | None = None,
+        error_edge_ids: dict[NodeID, str] | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -145,10 +146,14 @@ class TransformExecutor:
             recorder: Landscape recorder for audit trail
             span_factory: Span factory for tracing
             max_workers: Maximum concurrent workers (None = no limit)
+            error_edge_ids: Map of transform node_id -> DIVERT edge_id for error routing.
+                           Built by the processor from the edge_map using error_edge_label().
+                           Only populated for transforms with on_error pointing to a real sink.
         """
         self._recorder = recorder
         self._spans = span_factory
         self._max_workers = max_workers
+        self._error_edge_ids = error_edge_ids or {}
 
     def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
         """Get or create shared batch adapter for transform.
@@ -500,8 +505,25 @@ class TransformExecutor:
                 destination=on_error,
             )
 
-            # Route to sink if not discarding
+            # Record DIVERT routing_event for audit trail (AUD-002).
+            # This follows the same pattern as GateExecutor._record_routing():
+            # the routing_event is recorded inside the executor where state_id
+            # is in scope, co-located with the node_state lifecycle.
             if on_error != "discard":
+                error_edge_id = self._error_edge_ids.get(NodeID(transform.node_id))
+                if error_edge_id is None:
+                    raise OrchestrationInvariantError(
+                        f"Transform '{transform.node_id}' has on_error={on_error!r} but no "
+                        f"DIVERT edge registered. DAG construction should have created an "
+                        f"__error_N__ edge in from_plugin_instances()."
+                    )
+                self._recorder.record_routing_event(
+                    state_id=state.state_id,
+                    edge_id=error_edge_id,
+                    mode=RoutingMode.DIVERT,
+                    reason=result.reason,
+                )
+
                 ctx.route_to_sink(
                     sink_name=on_error,
                     row=input_dict,  # Use extracted dict for sink routing

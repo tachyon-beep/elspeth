@@ -429,7 +429,9 @@ class TestTransformExecutor:
 
     def test_execute_transform_returns_error_sink_name(self) -> None:
         """When transform errors with on_error=sink_name, returns that sink name."""
-        from elspeth.contracts import TokenInfo
+        from elspeth.contracts import TokenInfo, error_edge_label
+        from elspeth.contracts.enums import RoutingMode
+        from elspeth.contracts.types import NodeID
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
@@ -447,6 +449,21 @@ class TestTransformExecutor:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="error_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        error_edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=node.node_id,
+            to_node_id=sink_node.node_id,
+            label=error_edge_label(0),
+            mode=RoutingMode.DIVERT,
+        )
 
         class ErrorRoutingTransform:
             name = "routing_to_error"
@@ -459,7 +476,10 @@ class TestTransformExecutor:
 
         transform = ErrorRoutingTransform()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
-        executor = TransformExecutor(recorder, SpanFactory())
+        executor = TransformExecutor(
+            recorder, SpanFactory(),
+            error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
+        )
 
         token = TokenInfo(
             row_id="row-1",
@@ -763,9 +783,33 @@ class TestTransformErrorIdRegression:
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.error({"reason": "validation_failed", "error": "invalid phone format"})
 
+        # Register DIVERT edge for error routing
+        from elspeth.contracts import error_edge_label
+        from elspeth.contracts.enums import RoutingMode
+        from elspeth.contracts.types import NodeID
+
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="error_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        error_edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=node2.node_id,
+            to_node_id=sink_node.node_id,
+            label=error_edge_label(1),  # seq=1 since node2 is second transform
+            mode=RoutingMode.DIVERT,
+        )
+
         transform = FailingFieldMapper()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
-        executor = TransformExecutor(recorder, SpanFactory())
+        executor = TransformExecutor(
+            recorder, SpanFactory(),
+            error_edge_ids={NodeID(node2.node_id): error_edge.edge_id},
+        )
 
         token = TokenInfo(
             row_id="row-1",

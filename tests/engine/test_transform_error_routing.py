@@ -4,6 +4,7 @@ These tests verify that TransformResult.error() rows are routed correctly:
 - To configured sink (on_error = "sink_name")
 - Discarded silently (on_error = "discard")
 - RuntimeError if no on_error configured
+- DIVERT routing_events are recorded for audit trail
 
 Transform bugs (exceptions) still crash - only explicit errors are routed.
 """
@@ -12,10 +13,11 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import TokenInfo, TransformErrorReason
-from elspeth.contracts.enums import NodeType
+from elspeth.contracts import TokenInfo, TransformErrorReason, error_edge_label
+from elspeth.contracts.enums import NodeType, RoutingMode
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID
 from elspeth.plugins.context import PluginContext, TransformErrorToken
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestTransformBase, as_transform
@@ -129,6 +131,23 @@ class TestTransformErrorRouting:
             schema_config=DYNAMIC_SCHEMA,
         )
 
+        # Register error sink node and DIVERT edge
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="error_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        error_edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=node.node_id,
+            to_node_id=sink_node.node_id,
+            label=error_edge_label(0),
+            mode=RoutingMode.DIVERT,
+        )
+
         transform = MockTransform(
             TransformResult.error({"reason": "validation_failed", "error": "Cannot process"}),
             on_error="error_sink",
@@ -149,7 +168,10 @@ class TestTransformErrorRouting:
             {"sink": sink_name, "row": row, "metadata": metadata}
         )
 
-        executor = TransformExecutor(recorder, SpanFactory())
+        executor = TransformExecutor(
+            recorder, SpanFactory(),
+            error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
+        )
 
         token = TokenInfo(
             row_id="row-1",
@@ -304,6 +326,22 @@ class TestTransformErrorRouting:
             schema_config=DYNAMIC_SCHEMA,
         )
 
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="error_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        error_edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=node.node_id,
+            to_node_id=sink_node.node_id,
+            label=error_edge_label(0),
+            mode=RoutingMode.DIVERT,
+        )
+
         transform = MockTransform(
             TransformResult.error({"reason": "test_error"}),
             on_error="error_sink",
@@ -343,7 +381,10 @@ class TestTransformErrorRouting:
         ctx.record_transform_error = capture_record  # type: ignore[method-assign,assignment]
         ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
 
-        executor = TransformExecutor(recorder, SpanFactory())
+        executor = TransformExecutor(
+            recorder, SpanFactory(),
+            error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
+        )
 
         token = TokenInfo(
             row_id="row-1",
@@ -524,6 +565,22 @@ class TestTransformErrorRouting:
             schema_config=DYNAMIC_SCHEMA,
         )
 
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="quarantine_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        error_edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=node.node_id,
+            to_node_id=sink_node.node_id,
+            label=error_edge_label(0),
+            mode=RoutingMode.DIVERT,
+        )
+
         original_row = {"field1": "value1", "field2": 42, "nested": {"a": 1}}
 
         transform = MockTransform(
@@ -543,7 +600,10 @@ class TestTransformErrorRouting:
             row
         )
 
-        executor = TransformExecutor(recorder, SpanFactory())
+        executor = TransformExecutor(
+            recorder, SpanFactory(),
+            error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
+        )
 
         token = TokenInfo(
             row_id="row-1",
@@ -585,6 +645,22 @@ class TestTransformErrorRouting:
             schema_config=DYNAMIC_SCHEMA,
         )
 
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="error_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        error_edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=node.node_id,
+            to_node_id=sink_node.node_id,
+            label=error_edge_label(0),
+            mode=RoutingMode.DIVERT,
+        )
+
         error_reason: TransformErrorReason = {
             "reason": "validation_failed",
             "error": "Division by zero",
@@ -608,7 +684,10 @@ class TestTransformErrorRouting:
             lambda sink_name, row, metadata=None: routed_metadata.append(metadata)
         )
 
-        executor = TransformExecutor(recorder, SpanFactory())
+        executor = TransformExecutor(
+            recorder, SpanFactory(),
+            error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
+        )
 
         token = TokenInfo(
             row_id="row-1",
@@ -635,3 +714,217 @@ class TestTransformErrorRouting:
         assert routed_metadata[0] is not None
         assert "transform_error" in routed_metadata[0]
         assert routed_metadata[0]["transform_error"] == error_reason
+
+
+class TestTransformErrorDivertRoutingEvent:
+    """Tests for DIVERT routing_event recording when transforms error-route."""
+
+    @pytest.fixture
+    def setup_landscape(self) -> tuple[Any, Any, Any]:
+        """Set up LandscapeDB, recorder, and run for tests."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        return db, recorder, run
+
+    def test_error_routing_creates_divert_routing_event(self, setup_landscape: tuple[Any, Any, Any]) -> None:
+        """TransformResult.error() with on_error creates a DIVERT routing_event."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        _db, recorder, run = setup_landscape
+
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="mock_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="error_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        error_edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=node.node_id,
+            to_node_id=sink_node.node_id,
+            label=error_edge_label(0),
+            mode=RoutingMode.DIVERT,
+        )
+
+        transform = MockTransform(
+            TransformResult.error({"reason": "test_error", "detail": "something failed"}),
+            on_error="error_sink",
+        )
+        transform.node_id = node.node_id
+
+        ctx = PluginContext(
+            run_id=run.run_id,
+            config={},
+            node_id=node.node_id,
+            landscape=recorder,
+        )
+        ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
+
+        executor = TransformExecutor(
+            recorder, SpanFactory(),
+            error_edge_ids={NodeID(node.node_id): error_edge.edge_id},
+        )
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok_123",
+            row_data=PipelineRow({"input": 1}, _make_contract()),
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data=token.row_data.to_dict(),
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        result, _, error_sink = executor.execute_transform(
+            transform=as_transform(transform),
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=1,
+        )
+
+        assert result.status == "error"
+        assert error_sink == "error_sink"
+
+        # Verify routing_event was recorded with DIVERT mode
+        # The state_id is set by begin_node_state inside the executor
+        routing_events = recorder.get_routing_events(ctx.state_id)
+        assert len(routing_events) == 1
+        event = routing_events[0]
+        assert event.edge_id == error_edge.edge_id
+        assert event.mode == RoutingMode.DIVERT
+        assert event.reason_hash is not None  # reason was hashed
+
+    def test_discard_does_not_create_routing_event(self, setup_landscape: tuple[Any, Any, Any]) -> None:
+        """TransformResult.error() with discard creates NO routing_event."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        _db, recorder, run = setup_landscape
+
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="mock_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        transform = MockTransform(
+            TransformResult.error({"reason": "test_error"}),
+            on_error="discard",
+        )
+        transform.node_id = node.node_id
+
+        ctx = PluginContext(
+            run_id=run.run_id,
+            config={},
+            node_id=node.node_id,
+            landscape=recorder,
+        )
+
+        # No error_edge_ids needed — discard has no edge
+        executor = TransformExecutor(recorder, SpanFactory())
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok_123",
+            row_data=PipelineRow({"input": 1}, _make_contract()),
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data=token.row_data.to_dict(),
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        result, _, error_sink = executor.execute_transform(
+            transform=as_transform(transform),
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=1,
+        )
+
+        assert result.status == "error"
+        assert error_sink == "discard"
+
+        # No routing_event for discard
+        routing_events = recorder.get_routing_events(ctx.state_id)
+        assert len(routing_events) == 0
+
+    def test_missing_error_edge_raises_invariant_error(self, setup_landscape: tuple[Any, Any, Any]) -> None:
+        """Missing DIVERT edge raises OrchestrationInvariantError."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        _db, recorder, run = setup_landscape
+
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="mock_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        transform = MockTransform(
+            TransformResult.error({"reason": "test_error"}),
+            on_error="error_sink",
+        )
+        transform.node_id = node.node_id
+
+        ctx = PluginContext(
+            run_id=run.run_id,
+            config={},
+            node_id=node.node_id,
+            landscape=recorder,
+        )
+        ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
+
+        # Intentionally empty error_edge_ids
+        executor = TransformExecutor(recorder, SpanFactory(), error_edge_ids={})
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok_123",
+            row_data=PipelineRow({"input": 1}, _make_contract()),
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data=token.row_data.to_dict(),
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        with pytest.raises(OrchestrationInvariantError, match="no DIVERT edge registered"):
+            executor.execute_transform(
+                transform=as_transform(transform),
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+            )

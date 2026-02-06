@@ -21,7 +21,6 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
-    from elspeth.contracts.enums import RoutingMode
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.engine.clock import Clock
@@ -29,7 +28,7 @@ if TYPE_CHECKING:
     from elspeth.engine.executors import GateOutcome
     from elspeth.telemetry import TelemetryManager
 
-from elspeth.contracts.enums import OutputMode, RoutingKind, TriggerType
+from elspeth.contracts.enums import OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError, TransformErrorReason
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -167,8 +166,20 @@ class RowProcessor:
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
         self._clock = clock if clock is not None else DEFAULT_CLOCK
 
+        # Build error edge map: transform node_id -> DIVERT edge_id.
+        # Scans edge_map for __error_N__ labels (created by dag.py for transforms
+        # with on_error pointing to a real sink, not "discard").
+        _edge_map = edge_map or {}
+        error_edge_ids: dict[NodeID, str] = {}
+        for (node_id, label), edge_id in _edge_map.items():
+            if label.startswith("__error_") and label.endswith("__"):
+                error_edge_ids[node_id] = edge_id
+        self._error_edge_ids = error_edge_ids
+
         self._token_manager = TokenManager(recorder, payload_store=payload_store)
-        self._transform_executor = TransformExecutor(recorder, span_factory, max_workers=max_workers)
+        self._transform_executor = TransformExecutor(
+            recorder, span_factory, max_workers=max_workers, error_edge_ids=error_edge_ids,
+        )
         self._gate_executor = GateExecutor(recorder, span_factory, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(
             recorder, span_factory, run_id, aggregation_settings=aggregation_settings, clock=self._clock
@@ -1241,6 +1252,22 @@ class RowProcessor:
                         destination=on_error,
                     )
 
+                    # Record DIVERT routing_event using ctx.state_id (set by executor
+                    # at executors.py:247 before the exception propagated).
+                    if on_error != "discard":
+                        error_edge_id = self._error_edge_ids.get(NodeID(transform.node_id))
+                        if error_edge_id is None:
+                            raise OrchestrationInvariantError(
+                                f"Transform '{transform.node_id}' has on_error={on_error!r} "
+                                f"but no DIVERT edge registered."
+                            ) from e
+                        self._recorder.record_routing_event(
+                            state_id=ctx.state_id,
+                            edge_id=error_edge_id,
+                            mode=RoutingMode.DIVERT,
+                            reason=error_details,
+                        )
+
                     return (
                         TransformResult.error(error_details, retryable=True),
                         token,
@@ -1269,6 +1296,22 @@ class RowProcessor:
                     error_details=transient_error,
                     destination=on_error,
                 )
+
+                # Record DIVERT routing_event using ctx.state_id (set by executor
+                # at executors.py:247 before the exception propagated).
+                if on_error != "discard":
+                    error_edge_id = self._error_edge_ids.get(NodeID(transform.node_id))
+                    if error_edge_id is None:
+                        raise OrchestrationInvariantError(
+                            f"Transform '{transform.node_id}' has on_error={on_error!r} "
+                            f"but no DIVERT edge registered."
+                        ) from e
+                    self._recorder.record_routing_event(
+                        state_id=ctx.state_id,
+                        edge_id=error_edge_id,
+                        mode=RoutingMode.DIVERT,
+                        reason=transient_error,
+                    )
 
                 return (
                     TransformResult.error(transient_error, retryable=True),

@@ -271,3 +271,16 @@ class OutputMode(StrEnum):
 
     PASSTHROUGH = "passthrough"
     TRANSFORM = "transform"
+
+
+def error_edge_label(transform_seq: int) -> str:
+    """Canonical label for a transform error DIVERT edge.
+
+    Shared between DAG construction (dag.py) and error-routing audit recording
+    (executors.py, processor.py) to prevent label drift.
+
+    Args:
+        transform_seq: 0-based position of the transform in the pipeline's
+                       transform list (same index used in dag.py:813-823).
+    """
+    return f"__error_{transform_seq}__"
