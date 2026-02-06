@@ -151,7 +151,7 @@ def test_post_handles_binary_response(http_client, mock_recorder):
 @respx.mock
 def test_post_fingerprints_auth_headers(http_client, mock_recorder):
     """POST should fingerprint sensitive headers (not store raw secrets)."""
-    with patch.dict("os.environ", {"ELSPETH_FINGERPRINT_KEY": "test-key-12345"}):
+    with patch.dict("os.environ", {"ELSPETH_FINGERPRINT_KEY": "test-key-12345", "ELSPETH_ALLOW_RAW_SECRETS": ""}):
         respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
 
         http_client.post(

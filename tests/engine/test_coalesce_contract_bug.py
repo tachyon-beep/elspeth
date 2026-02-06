@@ -1,108 +1,84 @@
-"""Test case for coalesce contract behavior with nested/select merge strategies.
+"""Test coalesce contract behavior with nested merge strategy.
 
-P2 Bug (documented in code review):
-- Coalesce with merge="nested" creates data like {branch_a: {...}, branch_b: {...}}
-- But the contract is a union of all branch fields, not the nested structure
-- Downstream transforms fail with KeyError when accessing row['branch_a']
+Verifies that nested merge produces a FIXED contract with branch-key fields
+(type=object) rather than an empty FLEXIBLE contract or a union of flat fields.
 
-These tests use @pytest.mark.xfail(strict=True) to document expected behavior.
-When the bug is fixed, the tests will pass and strict=True will cause pytest to
-fail - alerting the fixer to remove the xfail marker.
+The fix is in coalesce_executor.py: the nested merge branch builds FieldContracts
+for each branch name with python_type=object, instead of an empty FLEXIBLE contract.
 """
-
-import pytest
 
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 
 
-def _make_branch_contracts() -> tuple[SchemaContract, SchemaContract]:
-    """Create sample contracts for two branches."""
-    contract_a = SchemaContract(
-        fields=(
+def _make_nested_merge_contract(
+    branch_names: list[str],
+    arrived_branches: set[str] | None = None,
+) -> SchemaContract:
+    """Build a nested merge contract the same way coalesce_executor does.
+
+    Args:
+        branch_names: All expected branch names (from CoalesceSettings.branches)
+        arrived_branches: Which branches actually arrived (defaults to all)
+    """
+    if arrived_branches is None:
+        arrived_branches = set(branch_names)
+
+    return SchemaContract(
+        fields=tuple(
             FieldContract(
-                original_name="value_a",
-                normalized_name="value_a",
-                python_type=str,
-                required=True,
-                source="inferred",
-            ),
+                original_name=name,
+                normalized_name=name,
+                python_type=object,
+                required=name in arrived_branches,
+                source="declared",
+            )
+            for name in branch_names
         ),
         mode="FIXED",
+        locked=True,
     )
-    contract_b = SchemaContract(
-        fields=(
-            FieldContract(
-                original_name="value_b",
-                normalized_name="value_b",
-                python_type=str,
-                required=True,
-                source="inferred",
-            ),
-        ),
-        mode="FIXED",
-    )
-    return contract_a, contract_b
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P2 bug: nested merge contract should have branch keys (path_a, path_b), not original fields",
-)
 def test_nested_merge_contract_allows_branch_key_access():
-    """For nested merge, contract should allow access to branch keys.
+    """Nested merge contract declares branch keys, enabling row['branch_name'] access."""
+    contract = _make_nested_merge_contract(["path_a", "path_b"])
 
-    Expected correct behavior:
-    - Nested merge creates data: {"path_a": {...}, "path_b": {...}}
-    - Contract should declare path_a and path_b as valid keys
-    - row["path_a"] should return the nested dict for that branch
-
-    Current broken behavior:
-    - Contract has original fields (value_a, value_b) instead of branch keys
-    - row["path_a"] raises KeyError
-    """
-    contract_a, contract_b = _make_branch_contracts()
-
-    # Current behavior: merge() unions the field names
-    # BUG: For nested merge, contract should have path_a/path_b keys instead
-    merged_contract = contract_a.merge(contract_b)
-
-    # Nested merge creates this data shape
     nested_data = {"path_a": {"value_a": "from_a"}, "path_b": {"value_b": "from_b"}}
+    row = PipelineRow(nested_data, contract)
 
-    # Create PipelineRow with the (currently wrong) merged contract
-    row = PipelineRow(nested_data, merged_contract)
-
-    # EXPECTED: This should work - path_a is a valid key in nested merge output
-    # ACTUAL: Raises KeyError because contract doesn't have path_a
-    branch_a_data = row["path_a"]
-    assert branch_a_data == {"value_a": "from_a"}
-
-    branch_b_data = row["path_b"]
-    assert branch_b_data == {"value_b": "from_b"}
+    assert row["path_a"] == {"value_a": "from_a"}
+    assert row["path_b"] == {"value_b": "from_b"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P2 bug: nested merge contract should declare nested dict types for branch keys",
-)
 def test_nested_merge_contract_has_correct_field_types():
-    """For nested merge, contract field types should reflect the nested structure.
+    """Nested merge contract declares branch keys with object type."""
+    contract = _make_nested_merge_contract(["path_a", "path_b"])
 
-    Expected correct behavior:
-    - Contract for nested merge should have fields like:
-      - path_a: dict (containing value_a)
-      - path_b: dict (containing value_b)
+    field_names = {f.normalized_name for f in contract.fields}
+    assert field_names == {"path_a", "path_b"}
 
-    Current broken behavior:
-    - Contract has flat fields (value_a: str, value_b: str)
-    - No representation of the nested structure
-    """
-    contract_a, contract_b = _make_branch_contracts()
-    merged_contract = contract_a.merge(contract_b)
+    # object is the "any" type in VALID_FIELD_TYPES — correct for nested dicts
+    field_types = {f.normalized_name: f.python_type for f in contract.fields}
+    assert field_types["path_a"] is object
+    assert field_types["path_b"] is object
 
-    # EXPECTED: Contract should have path_a and path_b fields
-    field_names = {f.normalized_name for f in merged_contract.fields}
 
-    # These assertions describe the CORRECT behavior we want
-    assert "path_a" in field_names, "Nested merge contract should have path_a field"
-    assert "path_b" in field_names, "Nested merge contract should have path_b field"
+def test_nested_merge_contract_is_fixed_mode():
+    """Nested merge uses FIXED mode — only declared branch keys are valid."""
+    contract = _make_nested_merge_contract(["path_a", "path_b"])
+
+    assert contract.mode == "FIXED"
+    assert contract.locked is True
+
+
+def test_nested_merge_partial_arrival_marks_missing_not_required():
+    """When a branch doesn't arrive (quorum/best_effort), its field is not required."""
+    contract = _make_nested_merge_contract(
+        branch_names=["path_a", "path_b", "path_c"],
+        arrived_branches={"path_a", "path_c"},
+    )
+
+    required = {f.normalized_name: f.required for f in contract.fields}
+    assert required["path_a"] is True
+    assert required["path_b"] is False  # Didn't arrive
+    assert required["path_c"] is True

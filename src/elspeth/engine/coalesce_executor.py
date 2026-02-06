@@ -14,7 +14,7 @@ import structlog
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.contracts.errors import OrchestrationInvariantError
-from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.clock import DEFAULT_CLOCK
@@ -416,12 +416,25 @@ class CoalesceExecutor:
             )
 
         elif settings.merge == "nested":
-            # Nested: Contract must match nested structure {branch_a: {...}, branch_b: {...}}
-            # Dict values are not tracked in contracts (non-primitive type)
-            # Use FLEXIBLE mode with no declared fields - allows access to any data field
+            # Nested: Contract declares branch keys with object type
+            # Data shape is {branch_a: {...}, branch_b: {...}} where each value
+            # is the full row data from that branch as a plain dict.
+            # We use object (the "any" type in VALID_FIELD_TYPES) because dict
+            # is not a valid FieldContract type and the contract only needs to
+            # declare that the field exists, not constrain its inner structure.
+            branch_fields = tuple(
+                FieldContract(
+                    original_name=branch_name,
+                    normalized_name=branch_name,
+                    python_type=object,
+                    required=branch_name in pending.arrived,
+                    source="declared",
+                )
+                for branch_name in settings.branches
+            )
             merged_contract = SchemaContract(
-                fields=(),  # No declared fields - all access goes through FLEXIBLE mode
-                mode="FLEXIBLE",
+                fields=branch_fields,
+                mode="FIXED",
                 locked=True,
             )
 

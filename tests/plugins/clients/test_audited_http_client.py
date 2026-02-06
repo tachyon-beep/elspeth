@@ -140,8 +140,9 @@ class TestAuditedHTTPClient:
         have different request_hash values to distinguish them in replay/verify mode.
         The raw secret values must NOT appear in the audit trail.
         """
-        # Set fingerprint key for deterministic testing
+        # Set fingerprint key for deterministic testing, ensure dev mode is off
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+        monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
         recorder = self._create_mock_recorder()
 
@@ -203,6 +204,7 @@ class TestAuditedHTTPClient:
         which produces a unique request_hash.
         """
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+        monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
         from elspeth.core.canonical import stable_hash
 
@@ -1402,6 +1404,7 @@ class TestAuditedHTTPClientGet:
     def test_get_auth_headers_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GET requests fingerprint auth headers in audit trail."""
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+        monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
         recorder = self._create_mock_recorder()
 

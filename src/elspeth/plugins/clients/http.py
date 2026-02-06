@@ -196,11 +196,14 @@ class AuditedHTTPClient(AuditedClientBase):
 
         for k, v in headers.items():
             if self._is_sensitive_header(k):
-                if have_key:
+                if allow_raw:
+                    # Dev mode: remove header (don't store secrets, don't require key)
+                    pass
+                elif have_key:
                     # Fingerprint the sensitive value
                     fp = secret_fingerprint(v)
                     result[k] = f"<fingerprint:{fp}>"
-                elif not allow_raw:
+                else:
                     # No key and not dev mode - this shouldn't happen in production
                     # Remove header to avoid leaking secrets (fail-safe)
                     logger.warning(
@@ -209,9 +212,6 @@ class AuditedHTTPClient(AuditedClientBase):
                         k,
                     )
                     # Don't include this header
-                else:
-                    # Dev mode: remove header (don't store secrets, don't require key)
-                    pass
             else:
                 # Non-sensitive header: include as-is
                 result[k] = v
