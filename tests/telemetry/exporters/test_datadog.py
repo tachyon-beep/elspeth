@@ -53,18 +53,18 @@ class TestDatadogExporterConfiguration:
         assert exporter.name == "datadog"
 
     def test_default_configuration(self) -> None:
-        """Default configuration uses sensible defaults."""
+        """Default configuration uses sensible defaults without global env mutation."""
         mock_module, _mock_tracer, _ = create_mock_ddtrace_module()
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}), patch.dict("os.environ", {}, clear=False):
             exporter = DatadogExporter()
             exporter.configure({})
 
-            # ddtrace 4.x uses environment variables instead of tracer.configure()
+            # Env vars are set transiently for ddtrace init, then restored
             import os
 
-            assert os.environ.get("DD_AGENT_HOST") == "localhost"
-            assert os.environ.get("DD_TRACE_AGENT_PORT") == "8126"
+            assert os.environ.get("DD_AGENT_HOST") is None
+            assert os.environ.get("DD_TRACE_AGENT_PORT") is None
 
     def test_custom_agent_host_and_port(self) -> None:
         """Custom agent host and port are set via environment variables."""
@@ -79,11 +79,11 @@ class TestDatadogExporterConfiguration:
                 }
             )
 
-            # ddtrace 4.x uses environment variables
+            # Env vars are restored after ddtrace init — no global mutation
             import os
 
-            assert os.environ.get("DD_AGENT_HOST") == "datadog-agent.internal"
-            assert os.environ.get("DD_TRACE_AGENT_PORT") == "9126"
+            assert os.environ.get("DD_AGENT_HOST") is None
+            assert os.environ.get("DD_TRACE_AGENT_PORT") is None
 
     def test_invalid_port_zero_raises(self) -> None:
         """Port 0 raises TelemetryExporterError."""

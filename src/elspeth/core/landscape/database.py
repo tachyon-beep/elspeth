@@ -128,6 +128,8 @@ class LandscapeDB:
             cursor.execute("PRAGMA journal_mode=WAL")
             # Enable foreign key enforcement
             cursor.execute("PRAGMA foreign_keys=ON")
+            # Set busy timeout to avoid immediate SQLITE_BUSY errors under contention
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
     def _create_tables(self) -> None:

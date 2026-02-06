@@ -32,7 +32,7 @@ class ProgressEvent:
 class ExecutionResult(TypedDict):
     """Result from pipeline execution.
 
-    Returned by _execute_pipeline() in cli.py.
+    Returned by _execute_pipeline_with_instances() in cli.py.
 
     Required fields:
         run_id: Unique identifier for this pipeline run.

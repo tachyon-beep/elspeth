@@ -1687,11 +1687,11 @@ class LandscapeRecorder:
         """
         updates: dict[str, Any] = {"status": status.value}
 
-        if trigger_type:
+        if trigger_type is not None:
             updates["trigger_type"] = trigger_type.value
-        if trigger_reason:
+        if trigger_reason is not None:
             updates["trigger_reason"] = trigger_reason
-        if state_id:
+        if state_id is not None:
             updates["aggregation_state_id"] = state_id
         if status in (BatchStatus.COMPLETED, BatchStatus.FAILED):
             updates["completed_at"] = now()
