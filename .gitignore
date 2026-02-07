@@ -153,3 +153,4 @@ landscape.db-wal
 
 # bv (beads viewer) local config and caches
 .bv/
+.perles/config.yaml
