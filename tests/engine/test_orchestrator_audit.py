@@ -1229,7 +1229,6 @@ class TestQuarantineRoutingEvents:
 
         from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -1265,9 +1264,7 @@ class TestQuarantineRoutingEvents:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(
-            config, graph=build_production_graph(config), payload_store=payload_store
-        )
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         recorder = LandscapeRecorder(db)
 
         # Find the quarantined token's source node_state (step_index=0, FAILED)
@@ -1281,16 +1278,12 @@ class TestQuarantineRoutingEvents:
                 if source_states and source_states[0].status == NodeStateStatus.FAILED:
                     quarantine_tokens.append((token, source_states[0]))
 
-        assert len(quarantine_tokens) == 1, (
-            f"Expected 1 quarantined token, found {len(quarantine_tokens)}"
-        )
+        assert len(quarantine_tokens) == 1, f"Expected 1 quarantined token, found {len(quarantine_tokens)}"
         _token, source_state = quarantine_tokens[0]
 
         # Verify routing_event exists for the source state
         routing_events = recorder.get_routing_events(source_state.state_id)
-        assert len(routing_events) == 1, (
-            f"Expected 1 routing_event for quarantine, got {len(routing_events)}"
-        )
+        assert len(routing_events) == 1, f"Expected 1 routing_event for quarantine, got {len(routing_events)}"
 
         event = routing_events[0]
         assert event.mode == RoutingMode.DIVERT
@@ -1335,9 +1328,7 @@ class TestQuarantineRoutingEvents:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(
-            config, graph=build_production_graph(config), payload_store=payload_store
-        )
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         recorder = LandscapeRecorder(db)
 
         # Find __quarantine__ DIVERT edge
@@ -1400,9 +1391,7 @@ class TestQuarantineRoutingEvents:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(
-            config, graph=build_production_graph(config), payload_store=payload_store
-        )
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         recorder = LandscapeRecorder(db)
 
         # Find the routing_event and verify reason_hash is non-null
@@ -1436,9 +1425,7 @@ class TestQuarantineRoutingEvents:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(
-            config, graph=build_production_graph(config), payload_store=payload_store
-        )
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         recorder = LandscapeRecorder(db)
 
         rows = recorder.get_rows(result.run_id)
@@ -1449,7 +1436,4 @@ class TestQuarantineRoutingEvents:
                 source_states = [s for s in states if s.step_index == 0]
                 for ss in source_states:
                     events = recorder.get_routing_events(ss.state_id)
-                    assert len(events) == 0, (
-                        f"Valid row should have no routing_events on source state, "
-                        f"found {len(events)}"
-                    )
+                    assert len(events) == 0, f"Valid row should have no routing_events on source state, found {len(events)}"
