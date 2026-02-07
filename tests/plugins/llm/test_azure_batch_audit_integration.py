@@ -118,18 +118,14 @@ def test_llm_calls_visible_in_explain(real_landscape_db) -> None:
     # Verify lineage has exactly the batch state
     assert lineage is not None
     assert len(lineage.node_states) == 1, (
-        f"Expected exactly 1 node_state (batch), got {len(lineage.node_states)}: "
-        f"{[s.node_id for s in lineage.node_states]}"
+        f"Expected exactly 1 node_state (batch), got {len(lineage.node_states)}: {[s.node_id for s in lineage.node_states]}"
     )
 
     batch_state = lineage.node_states[0]
     assert batch_state.node_id == batch_node.node_id
 
     # Verify exactly 1 LLM call recorded against the batch state
-    assert len(lineage.calls) == 1, (
-        f"Expected exactly 1 call, got {len(lineage.calls)}: "
-        f"{[c.call_type for c in lineage.calls]}"
-    )
+    assert len(lineage.calls) == 1, f"Expected exactly 1 call, got {len(lineage.calls)}: {[c.call_type for c in lineage.calls]}"
 
     llm_call = lineage.calls[0]
     assert llm_call.call_type == CallType.LLM

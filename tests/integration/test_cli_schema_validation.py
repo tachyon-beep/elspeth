@@ -48,9 +48,7 @@ default_sink: output
         assert result.exit_code != 0
         # Must fail specifically due to schema or field issue, not generic crash
         output_lower = result.output.lower()
-        assert "schema" in output_lower or "field" in output_lower, (
-            f"Expected schema-related error, got: {result.output!r}"
-        )
+        assert "schema" in output_lower or "field" in output_lower, f"Expected schema-related error, got: {result.output!r}"
 
     finally:
         config_file.unlink()
@@ -96,9 +94,7 @@ default_sink: output
         assert result.exit_code != 0
         # Must fail specifically due to schema or field issue, not generic crash
         output_lower = result.output.lower()
-        assert "schema" in output_lower or "field" in output_lower, (
-            f"Expected schema-related error, got: {result.output!r}"
-        )
+        assert "schema" in output_lower or "field" in output_lower, f"Expected schema-related error, got: {result.output!r}"
 
     finally:
         config_file.unlink()
