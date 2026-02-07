@@ -24,6 +24,7 @@ from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, PluginSch
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.expression_parser import ExpressionEvaluationError
+from elspeth.testing import make_pipeline_row
 from tests.conftest import as_sink, as_source, as_transform
 from tests.engine.conftest import CollectSink, ListSource
 from tests.engine.orchestrator_test_helpers import build_production_graph
@@ -31,28 +32,6 @@ from tests.engine.orchestrator_test_helpers import build_production_graph
 # =============================================================================
 # Test Helpers
 # =============================================================================
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> Any:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper for tests that manually create TokenInfo objects.
-    Creates a PipelineRow with a contract that accepts any fields.
-    """
-    from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 class _RawScoreSchema(PluginSchema):
@@ -1332,7 +1311,7 @@ class TestGateRuntimeErrors:
         token = TokenInfo(
             row_id="row_1",
             token_id="token_1",
-            row_data=_make_pipeline_row({"existing_field": 42}),  # Missing 'nonexistent' field
+            row_data=make_pipeline_row({"existing_field": 42}),  # Missing 'nonexistent' field
         )
 
         # Create row and token in landscape for audit trail
@@ -1456,7 +1435,7 @@ class TestGateRuntimeErrors:
         token_missing = TokenInfo(
             row_id="row_1",
             token_id="token_1",
-            row_data=_make_pipeline_row({"required": "value"}),  # Missing 'optional' field
+            row_data=make_pipeline_row({"required": "value"}),  # Missing 'optional' field
         )
 
         # Create row and token in landscape for audit trail
@@ -1489,7 +1468,7 @@ class TestGateRuntimeErrors:
         token_present = TokenInfo(
             row_id="row_2",
             token_id="token_2",
-            row_data=_make_pipeline_row({"required": "value", "optional": 10}),
+            row_data=make_pipeline_row({"required": "value", "optional": 10}),
         )
 
         row2 = recorder.create_row(
@@ -1517,7 +1496,7 @@ class TestGateRuntimeErrors:
         token_low = TokenInfo(
             row_id="row_3",
             token_id="token_3",
-            row_data=_make_pipeline_row({"required": "value", "optional": 3}),
+            row_data=make_pipeline_row({"required": "value", "optional": 3}),
         )
 
         row3 = recorder.create_row(

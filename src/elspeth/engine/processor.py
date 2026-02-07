@@ -1722,8 +1722,10 @@ class RowProcessor:
 
         if outcome.merged_token is not None:
             if coalesce_step >= total_steps:
-                # Terminal coalesce — no downstream transforms, emit COALESCED
-                self._emit_token_completed(outcome.merged_token, RowOutcome.COALESCED)
+                # Terminal coalesce — no downstream transforms.
+                # Do NOT emit TokenCompleted here: the merged token still
+                # needs to flow through the sink write for durable recording.
+                # Telemetry is emitted later by accumulate_row_outcomes.
                 return [
                     RowResult(
                         token=outcome.merged_token,

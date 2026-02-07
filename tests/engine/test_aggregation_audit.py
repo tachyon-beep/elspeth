@@ -16,7 +16,6 @@ from elspeth.contracts import BatchPendingError, TokenInfo
 from elspeth.contracts.audit import NodeStateCompleted, NodeStateFailed
 from elspeth.contracts.enums import BatchStatus, NodeStateStatus, NodeType, TriggerType
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -24,30 +23,11 @@ from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult
+from elspeth.testing import make_pipeline_row
 from tests.conftest import _TestTransformBase, as_batch_transform
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 # === Mock Transforms ===
@@ -227,7 +207,7 @@ def create_token(
     return TokenInfo(
         row_id=row_id,
         token_id=token_id,
-        row_data=_make_pipeline_row(row_data),
+        row_data=make_pipeline_row(row_data),
     )
 
 

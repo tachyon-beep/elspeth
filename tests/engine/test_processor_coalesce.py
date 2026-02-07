@@ -24,28 +24,9 @@ from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
 )
+from elspeth.testing import make_pipeline_row
 from tests.conftest import as_transform, create_observed_contract
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
@@ -602,7 +583,7 @@ class TestRowProcessorCoalesce:
         sentiment_token = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"text": "ACME earnings report", "sentiment": "positive"}),
+            row_data=make_pipeline_row({"text": "ACME earnings report", "sentiment": "positive"}),
             branch_name="sentiment",
         )
         outcome1 = coalesce_executor.accept(sentiment_token, "merger", step_in_pipeline=3)
@@ -612,7 +593,7 @@ class TestRowProcessorCoalesce:
         entities_token = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"text": "ACME earnings report", "entities": ["ACME"]}),
+            row_data=make_pipeline_row({"text": "ACME earnings report", "entities": ["ACME"]}),
             branch_name="entities",
         )
         outcome2 = coalesce_executor.accept(entities_token, "merger", step_in_pipeline=3)
@@ -729,7 +710,7 @@ class TestRowProcessorCoalesce:
         fast_token = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"text": "test input", "fast_result": "fast done"}),
+            row_data=make_pipeline_row({"text": "test input", "fast_result": "fast done"}),
             branch_name="fast",
         )
         outcome1 = coalesce_executor.accept(fast_token, "merger", step_in_pipeline=3)
@@ -742,7 +723,7 @@ class TestRowProcessorCoalesce:
         medium_token = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"text": "test input", "medium_result": "medium done"}),
+            row_data=make_pipeline_row({"text": "test input", "medium_result": "medium done"}),
             branch_name="medium",
         )
         outcome2 = coalesce_executor.accept(medium_token, "merger", step_in_pipeline=3)
@@ -791,7 +772,7 @@ class TestRowProcessorCoalesce:
         slow_token = TokenInfo(
             row_id=children[2].row_id,
             token_id=children[2].token_id,
-            row_data=_make_pipeline_row({"text": "test input", "slow_result": "slow done"}),
+            row_data=make_pipeline_row({"text": "test input", "slow_result": "slow done"}),
             branch_name="slow",
         )
         outcome3 = coalesce_executor.accept(slow_token, "merger", step_in_pipeline=3)
@@ -933,7 +914,7 @@ class TestRowProcessorCoalesce:
         enriched_a1 = TokenInfo(
             row_id=path_a1_token.row_id,
             token_id=path_a1_token.token_id,
-            row_data=_make_pipeline_row(
+            row_data=make_pipeline_row(
                 {
                     "text": "Document for nested processing",
                     "sentiment": "positive",
@@ -945,7 +926,7 @@ class TestRowProcessorCoalesce:
         enriched_a2 = TokenInfo(
             row_id=path_a2_token.row_id,
             token_id=path_a2_token.token_id,
-            row_data=_make_pipeline_row(
+            row_data=make_pipeline_row(
                 {
                     "text": "Document for nested processing",
                     "entities": ["ACME", "2024"],
@@ -982,7 +963,7 @@ class TestRowProcessorCoalesce:
         enriched_b = TokenInfo(
             row_id=path_b_token.row_id,
             token_id=path_b_token.token_id,
-            row_data=_make_pipeline_row(
+            row_data=make_pipeline_row(
                 {
                     "text": "Document for nested processing",
                     "category": "financial",
@@ -997,7 +978,7 @@ class TestRowProcessorCoalesce:
         inner_for_outer = TokenInfo(
             row_id=inner_merged_token.row_id,
             token_id=inner_merged_token.token_id,
-            row_data=_make_pipeline_row(inner_merged_token.row_data.to_dict()),
+            row_data=make_pipeline_row(inner_merged_token.row_data.to_dict()),
             branch_name="path_a_merged",  # Assign branch for outer coalesce
         )
 
@@ -1199,13 +1180,13 @@ class TestRowProcessorCoalesce:
         fast_token = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"text": "test", "fast_result": "done"}),
+            row_data=make_pipeline_row({"text": "test", "fast_result": "done"}),
             branch_name="fast",
         )
         slow_token = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"text": "test", "slow_result": "done"}),
+            row_data=make_pipeline_row({"text": "test", "slow_result": "done"}),
             branch_name="slow",
         )
 

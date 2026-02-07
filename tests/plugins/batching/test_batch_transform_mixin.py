@@ -17,27 +17,12 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.context import PluginContext
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED contract for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
+from elspeth.testing import make_pipeline_row
 
 
 def make_token(row_id: str, token_id: str | None = None, row_data: dict[str, Any] | None = None) -> TokenInfo:
@@ -45,7 +30,7 @@ def make_token(row_id: str, token_id: str | None = None, row_data: dict[str, Any
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data=_make_pipeline_row(row_data or {}),
+        row_data=make_pipeline_row(row_data or {}),
     )
 
 
@@ -72,7 +57,7 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
-        self.accept_row(_make_pipeline_row(row), ctx, self._process_row)
+        self.accept_row(make_pipeline_row(row), ctx, self._process_row)
 
     def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         # Simple passthrough - just add a marker
@@ -338,7 +323,7 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         if not self._batch_initialized:
             raise RuntimeError("connect_output() must be called before accept()")
-        self.accept_row(_make_pipeline_row(row), ctx, self._process_row)
+        self.accept_row(make_pipeline_row(row), ctx, self._process_row)
 
     def _process_row(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         # Signal that processing has started

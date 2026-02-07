@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import SourceRow
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import CoalesceName
 from elspeth.plugins.base import BaseTransform
+from elspeth.testing import make_pipeline_row
 from tests.conftest import (
     _TestSchema,
     _TestSourceBase,
@@ -27,26 +28,6 @@ from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 # =============================================================================
@@ -312,7 +293,7 @@ class TestCoalesceWiring:
         merged_token = TokenInfo(
             row_id="row_1",
             token_id="merged_token_1",  # Fake - not in DB
-            row_data=_make_pipeline_row({"merged": True}),
+            row_data=make_pipeline_row({"merged": True}),
             branch_name=None,
         )
         coalesced_result = RowResult(
@@ -329,7 +310,7 @@ class TestCoalesceWiring:
             mock_processor = MagicMock()
             mock_processor.process_row.return_value = [coalesced_result]
             mock_processor.token_manager.create_initial_token.return_value = MagicMock(
-                row_id="row_1", token_id="t1", row_data=_make_pipeline_row({"value": 1})
+                row_id="row_1", token_id="t1", row_data=make_pipeline_row({"value": 1})
             )
             mock_processor_cls.return_value = mock_processor
 
@@ -513,7 +494,7 @@ class TestCoalesceWiring:
         merged_token = TokenInfo(
             row_id="row_1",
             token_id="flushed_merged_token",  # Fake - not in DB
-            row_data=_make_pipeline_row({"merged_at_flush": True}),
+            row_data=make_pipeline_row({"merged_at_flush": True}),
             branch_name=None,
         )
 

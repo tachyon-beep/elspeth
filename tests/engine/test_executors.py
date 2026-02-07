@@ -48,6 +48,7 @@ from elspeth.engine.executors import (
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import GateResult, TransformResult
+from elspeth.testing import make_pipeline_row
 from tests.conftest import (
     _TestSchema,
     _TestSinkBase,
@@ -61,26 +62,6 @@ if TYPE_CHECKING:
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 # =============================================================================
@@ -163,7 +144,7 @@ class TestGateOutcome:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
         result = GateResult(
             row={"x": 1},
@@ -185,18 +166,18 @@ class TestGateOutcome:
         parent_token = TokenInfo(
             row_id="row-1",
             token_id="parent",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
         child_a = TokenInfo(
             row_id="row-1",
             token_id="child-a",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
             branch_name="path_a",
         )
         child_b = TokenInfo(
             row_id="row-1",
             token_id="child-b",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
             branch_name="path_b",
         )
 
@@ -220,7 +201,7 @@ class TestGateOutcome:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
         result = GateResult(
             row={"x": 1},
@@ -295,7 +276,7 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"input": 1}),
+            row_data=make_pipeline_row({"input": 1}),
         )
 
         # Create row/token in landscape
@@ -350,7 +331,7 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"input": 1}),
+            row_data=make_pipeline_row({"input": 1}),
         )
 
         row = recorder.create_row(
@@ -408,7 +389,7 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"input": 1}),
+            row_data=make_pipeline_row({"input": 1}),
         )
 
         row = recorder.create_row(
@@ -451,7 +432,7 @@ class TestTransformExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"input": 1}),
+            row_data=make_pipeline_row({"input": 1}),
         )
 
         executor = TransformExecutor(recorder, span_factory)
@@ -557,7 +538,7 @@ class TestGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
@@ -634,7 +615,7 @@ class TestGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
@@ -695,7 +676,7 @@ class TestGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
@@ -741,7 +722,7 @@ class TestGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
 
         executor = GateExecutor(recorder, span_factory)
@@ -1186,8 +1167,8 @@ class TestSinkExecutor:
         )
 
         tokens = [
-            TokenInfo(row_id="row-1", token_id="tok-1", row_data=_make_pipeline_row({"x": 1})),
-            TokenInfo(row_id="row-2", token_id="tok-2", row_data=_make_pipeline_row({"x": 2})),
+            TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_pipeline_row({"x": 1})),
+            TokenInfo(row_id="row-2", token_id="tok-2", row_data=make_pipeline_row({"x": 2})),
         ]
 
         # Create rows and tokens in landscape
@@ -1243,8 +1224,8 @@ class TestSinkExecutor:
         )
 
         tokens = [
-            TokenInfo(row_id="row-1", token_id="tok-1", row_data=_make_pipeline_row({"x": 1})),
-            TokenInfo(row_id="row-2", token_id="tok-2", row_data=_make_pipeline_row({"x": 2})),
+            TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_pipeline_row({"x": 1})),
+            TokenInfo(row_id="row-2", token_id="tok-2", row_data=make_pipeline_row({"x": 2})),
         ]
 
         for i, token in enumerate(tokens):
@@ -1288,7 +1269,7 @@ class TestSinkExecutor:
         )
 
         tokens = [
-            TokenInfo(row_id="row-1", token_id="tok-1", row_data=_make_pipeline_row({"x": 1})),
+            TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_pipeline_row({"x": 1})),
         ]
 
         executor = SinkExecutor(recorder, span_factory, run.run_id)
@@ -1331,8 +1312,8 @@ class TestSinkExecutor:
         )
 
         tokens = [
-            TokenInfo(row_id="row-1", token_id="tok-1", row_data=_make_pipeline_row({"x": 1})),
-            TokenInfo(row_id="row-2", token_id="tok-2", row_data=_make_pipeline_row({"x": 2})),
+            TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_pipeline_row({"x": 1})),
+            TokenInfo(row_id="row-2", token_id="tok-2", row_data=make_pipeline_row({"x": 2})),
         ]
 
         for i, token in enumerate(tokens):
@@ -1425,7 +1406,7 @@ class TestTransformCanonicalValidation:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
@@ -1492,7 +1473,7 @@ class TestTransformCanonicalValidation:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(
@@ -1563,7 +1544,7 @@ class TestTransformCanonicalValidation:
         token = TokenInfo(
             row_id="row-1",
             token_id="tok-1",
-            row_data=_make_pipeline_row({"x": 1}),
+            row_data=make_pipeline_row({"x": 1}),
         )
 
         row = recorder.create_row(

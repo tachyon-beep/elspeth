@@ -74,11 +74,6 @@ def _make_contract(data: dict[str, Any]) -> SchemaContract:
     return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow for testing."""
-    return PipelineRow(data, _make_contract(data))
-
-
 class DynamicSchema(PluginSchema):
     """Dynamic schema for testing - allows any fields."""
 

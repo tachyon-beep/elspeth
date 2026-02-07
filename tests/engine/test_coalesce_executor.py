@@ -6,10 +6,10 @@ import pytest
 
 from elspeth.contracts import Run, SourceRow
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.spans import SpanFactory
+from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager
@@ -18,32 +18,12 @@ if TYPE_CHECKING:
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
-
-
 def _make_source_row(data: dict[str, Any]) -> SourceRow:
     """Create a SourceRow with OBSERVED schema for testing.
 
     Helper to create valid SourceRow that can be passed to create_initial_token.
     """
-    pipeline_row = _make_pipeline_row(data)
+    pipeline_row = make_pipeline_row(data)
     return SourceRow.valid(data, contract=pipeline_row.contract)
 
 
@@ -265,13 +245,13 @@ class TestCoalesceExecutorRequireAll:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"sentiment": "positive"}),
+            row_data=make_pipeline_row({"sentiment": "positive"}),
             branch_name="path_a",
         )
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"entities": ["ACME"]}),
+            row_data=make_pipeline_row({"entities": ["ACME"]}),
             branch_name="path_b",
         )
 
@@ -325,7 +305,7 @@ class TestCoalesceExecutorFirst:
         token_slow = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"result": "from_slow"}),
+            row_data=make_pipeline_row({"result": "from_slow"}),
             branch_name="slow",
         )
 
@@ -388,7 +368,7 @@ class TestCoalesceExecutorFirst:
         token_fast = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"value": 100, "fast_result": 1}),
+            row_data=make_pipeline_row({"value": 100, "fast_result": 1}),
             branch_name="fast",
         )
         outcome_fast = executor.accept(token_fast, "first_wins", step_in_pipeline=2)
@@ -399,7 +379,7 @@ class TestCoalesceExecutorFirst:
         token_slow = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"value": 100, "slow_result": 2}),
+            row_data=make_pipeline_row({"value": 100, "slow_result": 2}),
             branch_name="slow",
         )
         outcome_slow = executor.accept(token_slow, "first_wins", step_in_pipeline=2)
@@ -453,13 +433,13 @@ class TestCoalesceExecutorQuorum:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"score": 0.9}),
+            row_data=make_pipeline_row({"score": 0.9}),
             branch_name="model_a",
         )
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"score": 0.85}),
+            row_data=make_pipeline_row({"score": 0.85}),
             branch_name="model_b",
         )
 
@@ -522,7 +502,7 @@ class TestCoalesceExecutorQuorum:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"score": 0.9}),
+            row_data=make_pipeline_row({"score": 0.9}),
             branch_name="model_a",
         )
 
@@ -587,13 +567,13 @@ class TestCoalesceExecutorQuorum:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"value": 100, "a_result": 1}),
+            row_data=make_pipeline_row({"value": 100, "a_result": 1}),
             branch_name="path_a",
         )
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"value": 100, "b_result": 2}),
+            row_data=make_pipeline_row({"value": 100, "b_result": 2}),
             branch_name="path_b",
         )
 
@@ -712,7 +692,7 @@ class TestCoalesceExecutorQuorum:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"value": 100, "a_result": 1}),
+            row_data=make_pipeline_row({"value": 100, "a_result": 1}),
             branch_name="path_a",
         )
         outcome_a = executor.accept(token_a, "require_all_merge", step_in_pipeline=2)
@@ -740,7 +720,7 @@ class TestCoalesceExecutorQuorum:
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"value": 100, "b_result": 2}),
+            row_data=make_pipeline_row({"value": 100, "b_result": 2}),
             branch_name="path_b",
         )
         outcome_b = executor.accept(token_b, "require_all_merge", step_in_pipeline=2)
@@ -798,7 +778,7 @@ class TestCoalesceExecutorBestEffort:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"a_result": 1}),
+            row_data=make_pipeline_row({"a_result": 1}),
             branch_name="path_a",
         )
 
@@ -902,13 +882,13 @@ class TestCoalesceAuditMetadata:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"sentiment": "positive"}),
+            row_data=make_pipeline_row({"sentiment": "positive"}),
             branch_name="path_a",
         )
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"entities": ["ACME"]}),
+            row_data=make_pipeline_row({"entities": ["ACME"]}),
             branch_name="path_b",
         )
 
@@ -1055,13 +1035,13 @@ class TestCoalesceIntegration:
         sentiment_token = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"sentiment": "positive", "confidence": 0.92}),
+            row_data=make_pipeline_row({"sentiment": "positive", "confidence": 0.92}),
             branch_name="sentiment",
         )
         entities_token = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"entities": [{"name": "ACME Corp", "type": "ORG"}]}),
+            row_data=make_pipeline_row({"entities": [{"name": "ACME Corp", "type": "ORG"}]}),
             branch_name="entities",
         )
 
@@ -1245,7 +1225,7 @@ class TestFlushPending:
             token = TokenInfo(
                 row_id=child.row_id,
                 token_id=child.token_id,
-                row_data=_make_pipeline_row(token_spec["row_data"]),
+                row_data=make_pipeline_row(token_spec["row_data"]),
                 branch_name=branch,
             )
             last_outcome = executor.accept(token, coalesce_name, step_in_pipeline=2)
@@ -1392,7 +1372,7 @@ class TestDuplicateBranchDetection:
         token_a_first = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"value": 100, "result": "first"}),
+            row_data=make_pipeline_row({"value": 100, "result": "first"}),
             branch_name="path_a",
         )
         outcome = executor.accept(token_a_first, "merge_all", step_in_pipeline=2)
@@ -1403,7 +1383,7 @@ class TestDuplicateBranchDetection:
         token_a_duplicate = TokenInfo(
             row_id=children[0].row_id,  # Same row_id
             token_id=children[0].token_id,  # Same token - replayed
-            row_data=_make_pipeline_row({"value": 100, "result": "duplicate_data"}),
+            row_data=make_pipeline_row({"value": 100, "result": "duplicate_data"}),
             branch_name="path_a",  # Same branch - THIS IS THE BUG
         )
 
@@ -1500,7 +1480,7 @@ class TestTimeoutFailureRecording:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"score": 0.9}),
+            row_data=make_pipeline_row({"score": 0.9}),
             branch_name="model_a",
         )
         outcome = executor.accept(token_a, "quorum_merge", step_in_pipeline=2)
@@ -1619,13 +1599,13 @@ class TestTimeoutFailureRecording:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"score": 0.9}),
+            row_data=make_pipeline_row({"score": 0.9}),
             branch_name="model_a",
         )
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"score": 0.8}),
+            row_data=make_pipeline_row({"score": 0.8}),
             branch_name="model_b",
         )
 
@@ -1765,7 +1745,7 @@ class TestSelectBranchValidation:
         fast_token = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"query": "test", "result": "fast_result"}),
+            row_data=make_pipeline_row({"query": "test", "result": "fast_result"}),
             branch_name="fast_model",
         )
 
@@ -1870,13 +1850,13 @@ class TestCoalesceMetadataRecording:
         token_a = TokenInfo(
             row_id=children[0].row_id,
             token_id=children[0].token_id,
-            row_data=_make_pipeline_row({"value": 100, "a_result": 1}),
+            row_data=make_pipeline_row({"value": 100, "a_result": 1}),
             branch_name="path_a",
         )
         token_b = TokenInfo(
             row_id=children[1].row_id,
             token_id=children[1].token_id,
-            row_data=_make_pipeline_row({"value": 100, "b_result": 2}),
+            row_data=make_pipeline_row({"value": 100, "b_result": 2}),
             branch_name="path_b",
         )
 

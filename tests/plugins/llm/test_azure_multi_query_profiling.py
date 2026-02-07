@@ -18,9 +18,9 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import TransformResult
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
+from elspeth.testing import make_pipeline_row
 
 from .conftest import (
     chaosllm_azure_openai_sequence,
@@ -30,26 +30,6 @@ from .conftest import (
 from .conftest import (
     make_azure_multi_query_config as make_config,
 )
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 def make_mock_llm_response(score: int, rationale: str, delay_ms: float = 0) -> tuple[dict[str, Any], float] | dict[str, Any]:
@@ -109,7 +89,7 @@ class TestLoadScenarios:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-load-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=60.0)
                 elapsed = time.time() - start_time
@@ -194,7 +174,7 @@ class TestLoadScenarios:
                         }
                         token = make_token(f"row-{i}")
                         ctx = make_plugin_context(state_id=f"state-{i}", token=token)
-                        transform.accept(_make_pipeline_row(row), ctx)
+                        transform.accept(make_pipeline_row(row), ctx)
 
                     transform.flush_batch_processing(timeout=30.0)
                     elapsed = time.time() - start_time
@@ -275,7 +255,7 @@ class TestLoadScenarios:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-mem-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=60.0)
 
@@ -346,7 +326,7 @@ class TestLoadScenarios:
                 }
                 token = make_token("row-rate-limit")
                 ctx = make_plugin_context(state_id="rate-limit-test", token=token)
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
                 # Process will fail because one of the 4 queries hits rate limit
@@ -401,7 +381,7 @@ class TestLoadScenarios:
                     token = make_token(f"row-{i}")
                     # Use same state_id to test client caching per state
                     ctx = make_plugin_context(state_id="shared-state", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -480,7 +460,7 @@ class TestRowAtomicity:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"atomicity-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
 
@@ -573,7 +553,7 @@ class TestRowAtomicity:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"high-failure-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
 
@@ -662,7 +642,7 @@ class TestRowAtomicity:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"concurrent-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
 
@@ -738,7 +718,7 @@ class TestProfilingInstrumentation:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"timing-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
 
@@ -803,7 +783,7 @@ class TestProfilingInstrumentation:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"overhead-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
                 elapsed = time.time() - start_time

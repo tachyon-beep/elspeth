@@ -14,26 +14,9 @@ import httpx
 import pytest
 import respx
 
-from elspeth.contracts import PipelineRow
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED contract for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
+from elspeth.testing import make_pipeline_row
 
 
 def _mock_getaddrinfo(ip: str) -> Any:
@@ -92,7 +75,7 @@ def mock_ctx(payload_store):
 
 def test_ssrf_blocks_file_scheme(transform, mock_ctx):
     """file:// URLs should be blocked."""
-    result = transform.process(_make_pipeline_row({"url": "file:///etc/passwd"}), mock_ctx)
+    result = transform.process(make_pipeline_row({"url": "file:///etc/passwd"}), mock_ctx)
 
     assert result.status == "error"
     assert result.reason["error_type"] == "SSRFBlockedError"
@@ -102,7 +85,7 @@ def test_ssrf_blocks_file_scheme(transform, mock_ctx):
 def test_ssrf_blocks_private_ip(transform, mock_ctx):
     """Private IPs should be blocked."""
     with patch("socket.getaddrinfo", _mock_getaddrinfo("192.168.1.1")):
-        result = transform.process(_make_pipeline_row({"url": "https://internal.example.com"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://internal.example.com"}), mock_ctx)
 
         assert result.status == "error"
         assert result.reason["error_type"] == "SSRFBlockedError"
@@ -111,7 +94,7 @@ def test_ssrf_blocks_private_ip(transform, mock_ctx):
 def test_ssrf_blocks_loopback(transform, mock_ctx):
     """Loopback IPs should be blocked."""
     with patch("socket.getaddrinfo", _mock_getaddrinfo("127.0.0.1")):
-        result = transform.process(_make_pipeline_row({"url": "http://localhost/admin"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "http://localhost/admin"}), mock_ctx)
 
         assert result.status == "error"
         assert result.reason["error_type"] == "SSRFBlockedError"
@@ -121,7 +104,7 @@ def test_ssrf_blocks_cloud_metadata(transform, mock_ctx):
     """Cloud metadata endpoints should be blocked."""
     with patch("socket.getaddrinfo", _mock_getaddrinfo("169.254.169.254")):
         result = transform.process(
-            _make_pipeline_row({"url": "http://metadata.google.internal/computeMetadata/v1/"}),
+            make_pipeline_row({"url": "http://metadata.google.internal/computeMetadata/v1/"}),
             mock_ctx,
         )
 
@@ -136,7 +119,7 @@ def test_ssrf_allows_public_ip(transform, mock_ctx):
     respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
         assert result.status == "success"
 
@@ -160,7 +143,7 @@ def test_connection_uses_validated_ip(transform, mock_ctx):
     hostname_route = respx.get("https://example.com/page").mock(return_value=httpx.Response(200, text="<html>Unsafe</html>"))
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     assert ip_route.called, "Request should go to pinned IP, not hostname"
@@ -178,7 +161,7 @@ def test_resolved_ip_recorded_in_audit(transform, mock_ctx):
     respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
-        transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     # Check that record_call was invoked with resolved_ip in request_data
     record_call_args = mock_ctx.landscape.record_call.call_args
@@ -203,7 +186,7 @@ def test_contract_includes_output_fields(transform, mock_ctx):
     respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
         assert result.status == "success"
         # Contract MUST be provided so executor can use it
@@ -231,7 +214,7 @@ def test_contract_field_types_are_correct(transform, mock_ctx):
     respx.get("https://93.184.216.34:443/page").mock(return_value=httpx.Response(200, text="<html>Content</html>"))
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
         assert result.contract is not None
 

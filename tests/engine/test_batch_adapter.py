@@ -12,32 +12,12 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
 
 import pytest
 
 from elspeth.contracts import TokenInfo, TransformResult
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import SharedBatchAdapter
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
+from elspeth.testing import make_pipeline_row
 
 
 def _make_token(token_id: str, row_id: str = "row-1") -> TokenInfo:
@@ -45,7 +25,7 @@ def _make_token(token_id: str, row_id: str = "row-1") -> TokenInfo:
     return TokenInfo(
         token_id=token_id,
         row_id=row_id,
-        row_data=_make_pipeline_row({}),
+        row_data=make_pipeline_row({}),
     )
 
 

@@ -4,27 +4,11 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
+from elspeth.testing import make_pipeline_row
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 class TestPassThrough:
@@ -56,7 +40,7 @@ class TestPassThrough:
         transform = PassThrough({"schema": DYNAMIC_SCHEMA})
         row = {"id": 1, "name": "alice", "value": 100}
 
-        result = transform.process(_make_pipeline_row(row), ctx)
+        result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == row
@@ -69,7 +53,7 @@ class TestPassThrough:
         transform = PassThrough({"schema": DYNAMIC_SCHEMA})
         row: dict[str, Any] = {"id": 1, "meta": {"source": "test", "tags": ["a", "b"]}}
 
-        result = transform.process(_make_pipeline_row(row), ctx)
+        result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -85,7 +69,7 @@ class TestPassThrough:
         transform = PassThrough({"schema": DYNAMIC_SCHEMA})
         row: dict[str, Any] = {}
 
-        result = transform.process(_make_pipeline_row(row), ctx)
+        result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {}
@@ -124,7 +108,7 @@ class TestPassThrough:
         )
 
         with pytest.raises(ValidationError):
-            transform.process(_make_pipeline_row({"count": "not_an_int"}), ctx)
+            transform.process(make_pipeline_row({"count": "not_an_int"}), ctx)
 
     def test_validate_input_disabled_passes_wrong_type(self, ctx: PluginContext) -> None:
         """validate_input=False (default) passes wrong types through.
@@ -142,7 +126,7 @@ class TestPassThrough:
         )
 
         # String passes through without validation
-        result = transform.process(_make_pipeline_row({"count": "not_an_int"}), ctx)
+        result = transform.process(make_pipeline_row({"count": "not_an_int"}), ctx)
         assert result.status == "success"
         assert result.row is not None
         assert result.row["count"] == "not_an_int"
@@ -162,7 +146,7 @@ class TestPassThrough:
         )
 
         # Any data passes with dynamic schema
-        result = transform.process(_make_pipeline_row({"anything": "goes", "count": "string"}), ctx)
+        result = transform.process(make_pipeline_row({"anything": "goes", "count": "string"}), ctx)
         assert result.status == "success"
 
     def test_passthrough_validates_schema_compatibility(self) -> None:

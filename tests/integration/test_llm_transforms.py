@@ -26,7 +26,6 @@ import pytest
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, NodeType
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
@@ -39,32 +38,10 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
 from elspeth.plugins.llm.base import BaseLLMTransform
 from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform
+from elspeth.testing import make_pipeline_row
 
 # Dynamic schema for tests
 DYNAMIC_SCHEMA = {"mode": "observed"}
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with observed schema contract for testing.
-
-    Args:
-        data: Row data as plain dict
-
-    Returns:
-        PipelineRow with contract
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data=data, contract=contract)
 
 
 # Concrete subclass of BaseLLMTransform for testing
@@ -169,7 +146,7 @@ class TestLLMTransformIntegration:
             }
         )
 
-        result = transform.process(_make_pipeline_row({"name": "Alice"}), ctx)
+        result = transform.process(make_pipeline_row({"name": "Alice"}), ctx)
 
         # Verify result
         assert result.status == "success"
@@ -229,7 +206,7 @@ class TestLLMTransformIntegration:
             }
         )
 
-        result = transform.process(_make_pipeline_row({"text": "Hello world"}), ctx)
+        result = transform.process(make_pipeline_row({"text": "Hello world"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -272,7 +249,7 @@ class TestLLMTransformIntegration:
             }
         )
 
-        result = transform.process(_make_pipeline_row({"text": "test"}), ctx)
+        result = transform.process(make_pipeline_row({"text": "test"}), ctx)
 
         # Transform should return error result
         assert result.status == "error"
@@ -318,7 +295,7 @@ class TestLLMTransformIntegration:
         from elspeth.plugins.clients.llm import RateLimitError
 
         with pytest.raises(RateLimitError):
-            transform.process(_make_pipeline_row({"text": "test"}), ctx)
+            transform.process(make_pipeline_row({"text": "test"}), ctx)
 
         # Audit trail should record as error
         calls = recorder.get_calls(state_id)
@@ -363,7 +340,7 @@ class TestLLMTransformIntegration:
             }
         )
 
-        transform.process(_make_pipeline_row({"text": "Hello"}), ctx)
+        transform.process(make_pipeline_row({"text": "Hello"}), ctx)
 
         # Verify messages include system prompt
         call_args = mock_client.chat.completions.create.call_args
@@ -439,7 +416,7 @@ class TestOpenRouterLLMTransformIntegration:
         )
         recorder.create_token(row_id=row.row_id, token_id=token_id)
         # Wrap row_data in PipelineRow with contract
-        pipeline_row = _make_pipeline_row(row_data)
+        pipeline_row = make_pipeline_row(row_data)
         return TokenInfo(row_id=row_id, token_id=token_id, row_data=pipeline_row)
 
     def _patch_httpx_for_chaosllm(self, chaosllm_server) -> Any:
@@ -670,9 +647,9 @@ class TestAzureBatchLLMTransformIntegration:
         transform._client = mock_client
 
         rows = [
-            _make_pipeline_row({"text": "Item 1"}),
-            _make_pipeline_row({"text": "Item 2"}),
-            _make_pipeline_row({"text": "Item 3"}),
+            make_pipeline_row({"text": "Item 1"}),
+            make_pipeline_row({"text": "Item 2"}),
+            make_pipeline_row({"text": "Item 3"}),
         ]
 
         # Should raise BatchPendingError after submission
@@ -770,9 +747,9 @@ class TestAzureBatchLLMTransformIntegration:
         transform._client = mock_client
 
         rows = [
-            _make_pipeline_row({"text": "Item A"}),
-            _make_pipeline_row({"text": "Item B"}),
-            _make_pipeline_row({"text": "Item C"}),
+            make_pipeline_row({"text": "Item A"}),
+            make_pipeline_row({"text": "Item B"}),
+            make_pipeline_row({"text": "Item C"}),
         ]
 
         result = transform.process(rows, ctx)
@@ -810,9 +787,9 @@ class TestAzureBatchLLMTransformIntegration:
 
         # Mix of valid and invalid rows (missing required template field)
         rows = [
-            _make_pipeline_row({"text": "valid1"}),
-            _make_pipeline_row({"other_field": "missing_text"}),  # Will fail template
-            _make_pipeline_row({"text": "valid2"}),
+            make_pipeline_row({"text": "valid1"}),
+            make_pipeline_row({"other_field": "missing_text"}),  # Will fail template
+            make_pipeline_row({"text": "valid2"}),
         ]
 
         with pytest.raises(BatchPendingError):
@@ -885,7 +862,7 @@ class TestAzureBatchLLMTransformIntegration:
 
         transform._client = mock_client
 
-        rows = [_make_pipeline_row({"text": "good"}), _make_pipeline_row({"text": "blocked"})]
+        rows = [make_pipeline_row({"text": "good"}), make_pipeline_row({"text": "blocked"})]
 
         result = transform.process(rows, ctx)
 

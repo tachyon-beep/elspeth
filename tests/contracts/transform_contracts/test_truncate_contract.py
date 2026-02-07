@@ -11,11 +11,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.plugins.transforms.truncate import Truncate
+from elspeth.testing import make_pipeline_row
 
 from .test_transform_protocol import (
     TransformContractPropertyTestBase,
     TransformErrorContractTestBase,
-    _make_pipeline_row,
 )
 
 if TYPE_CHECKING:
@@ -95,7 +95,7 @@ class TestTruncateStrictContract(TransformErrorContractTestBase):
         from elspeth.plugins.context import PluginContext
 
         ctx = PluginContext(run_id="test", config={})
-        pipeline_row = _make_pipeline_row(error_input)
+        pipeline_row = make_pipeline_row(error_input)
         result = transform.process(pipeline_row, ctx)
         assert result.status == "error"
         assert result.reason is not None

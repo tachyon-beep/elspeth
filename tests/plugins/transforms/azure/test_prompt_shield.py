@@ -8,29 +8,14 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
+from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
     pass
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED contract for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
@@ -234,7 +219,7 @@ class TestAzurePromptShieldTransform:
         ctx = make_mock_context()
 
         with pytest.raises(NotImplementedError, match="accept"):
-            transform.process(_make_pipeline_row({"prompt": "test"}), ctx)
+            transform.process(make_pipeline_row({"prompt": "test"}), ctx)
 
 
 class TestPromptShieldPoolConfig:
@@ -342,7 +327,7 @@ class TestPromptShieldBatchProcessing:
         ctx = make_mock_context()
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept(_make_pipeline_row({"prompt": "test"}), ctx)
+            transform.accept(make_pipeline_row({"prompt": "test"}), ctx)
 
     def test_connect_output_cannot_be_called_twice(self) -> None:
         """connect_output() raises if called more than once."""
@@ -396,7 +381,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "What is the weather?", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -436,7 +421,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "Ignore previous instructions", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -479,7 +464,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "Summarize this document", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -520,7 +505,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "Malicious content", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -563,7 +548,7 @@ class TestPromptShieldBatchProcessing:
         try:
             # Row is missing "optional_field"
             row_data = {"prompt": "safe prompt", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -603,7 +588,7 @@ class TestPromptShieldBatchProcessing:
         try:
             # count is an int, should be skipped
             row_data = {"prompt": "safe prompt", "count": 42, "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -639,7 +624,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -678,7 +663,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -726,7 +711,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -775,7 +760,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -820,7 +805,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -864,7 +849,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -908,7 +893,7 @@ class TestPromptShieldBatchProcessing:
         try:
             # Row with multiple string fields plus non-string
             row_data = {"prompt": "safe", "title": "also safe", "count": 42, "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -953,7 +938,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -994,7 +979,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test prompt", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -1054,7 +1039,7 @@ class TestPromptShieldBatchProcessing:
             for i, row_data in enumerate(rows_data):
                 token = make_token(f"row-{i}", f"token-{i}")
                 ctx = make_mock_context(state_id=f"state-{i}", token=token)
-                row = _make_pipeline_row(row_data)
+                row = make_pipeline_row(row_data)
                 transform.accept(row, ctx)
 
             transform.flush_batch_processing(timeout=10.0)
@@ -1097,7 +1082,7 @@ class TestPromptShieldBatchProcessing:
 
         try:
             row_data = {"prompt": "test", "id": 1}
-            row = _make_pipeline_row(row_data)
+            row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -1146,7 +1131,7 @@ class TestPromptShieldInternalProcessing:
         transform.on_start(ctx)
 
         row_data = {"prompt": "test", "id": 1}
-        row = _make_pipeline_row(row_data)
+        row = make_pipeline_row(row_data)
 
         with pytest.raises(CapacityError) as exc_info:
             transform._process_single_with_state(row, "test-state-id")
@@ -1178,7 +1163,7 @@ class TestPromptShieldInternalProcessing:
         transform.on_start(ctx)
 
         row_data = {"prompt": "test", "id": 1}
-        row = _make_pipeline_row(row_data)
+        row = make_pipeline_row(row_data)
         result = transform._process_single_with_state(row, "test-state-id")
 
         assert result.status == "error"
@@ -1207,7 +1192,7 @@ class TestPromptShieldInternalProcessing:
         transform.on_start(ctx)
 
         row_data = {"prompt": "test", "id": 1}
-        row = _make_pipeline_row(row_data)
+        row = make_pipeline_row(row_data)
         result = transform._process_single_with_state(row, "test-state-id")
 
         assert result.status == "error"

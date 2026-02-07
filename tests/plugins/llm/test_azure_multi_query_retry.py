@@ -15,11 +15,11 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import TransformResult
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
+from elspeth.testing import make_pipeline_row
 
 from .conftest import (
     chaosllm_azure_openai_responses,
@@ -28,26 +28,6 @@ from .conftest import (
     make_plugin_context,
     make_token,
 )
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 def make_config(**overrides: Any) -> dict[str, Any]:
@@ -145,7 +125,7 @@ class TestRetryBehavior:
                 token = make_token("row-retry-1")
                 ctx = make_plugin_context(state_id="state-retry-1", token=token)
 
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()
@@ -203,7 +183,7 @@ class TestRetryBehavior:
                 token = make_token("row-timeout-1")
                 ctx = make_plugin_context(state_id="state-timeout-1", token=token)
 
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()
@@ -259,7 +239,7 @@ class TestRetryBehavior:
                 token = make_token("row-mixed-1")
                 ctx = make_plugin_context(state_id="state-mixed-1", token=token)
 
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()
@@ -331,7 +311,7 @@ class TestConcurrentRowProcessing:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-100-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
             finally:
@@ -402,7 +382,7 @@ class TestConcurrentRowProcessing:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"concurrent-atomicity-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
             finally:
@@ -483,7 +463,7 @@ class TestConcurrentRowProcessing:
                 }
                 token = make_token("row-0")
                 ctx = make_plugin_context(state_id="pool-util-0", token=token)
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=30.0)
             finally:
@@ -568,7 +548,7 @@ class TestSequentialFallback:
                 token = make_token("row-seq-1")
                 ctx = make_plugin_context(state_id="state-seq-1", token=token)
 
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()
@@ -651,7 +631,7 @@ class TestMemoryLeakPrevention:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-memory-leak-test-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 # BEFORE FIX: _llm_clients would contain 40 cached clients
                 # AFTER FIX: _llm_clients should be cleaned up to only batch client
@@ -717,7 +697,7 @@ class TestMemoryLeakPrevention:
                     }
                     token = make_token(f"row-{i}")
                     ctx = make_plugin_context(state_id=f"batch-failure-cleanup-{i}", token=token)
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 # Process batch - all rows will fail with retry timeout
                 transform.flush_batch_processing(timeout=30.0)
@@ -800,7 +780,7 @@ class TestLLMErrorRetry:
                 }
                 token = make_token("row-network-error-1")
                 ctx = make_plugin_context(state_id="network-error-retry", token=token)
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=30.0)
             finally:
                 transform.close()
@@ -859,7 +839,7 @@ class TestLLMErrorRetry:
                 }
                 token = make_token("row-content-policy-1")
                 ctx = make_plugin_context(state_id="content-policy-no-retry", token=token)
-                transform.accept(_make_pipeline_row(row), ctx)
+                transform.accept(make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
             finally:
                 transform.close()

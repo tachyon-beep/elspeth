@@ -6,23 +6,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import PipelineRow
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with observed schema contract for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data=data, contract=contract)
+from elspeth.testing import make_pipeline_row
 
 
 class TestBaseTransform:
@@ -82,7 +66,7 @@ class TestBaseTransform:
 
         transform = IncompleteTransform({})
         ctx = PluginContext(run_id="test", config={})
-        row = _make_pipeline_row({"x": 1})
+        row = make_pipeline_row({"x": 1})
 
         # Calling process() should raise NotImplementedError
         with pytest.raises(NotImplementedError) as exc_info:
@@ -120,7 +104,7 @@ class TestBaseTransform:
         transform = DoubleTransform({"some": "config"})
         ctx = PluginContext(run_id="test", config={})
 
-        result = transform.process(_make_pipeline_row({"x": 21}), ctx)
+        result = transform.process(make_pipeline_row({"x": 21}), ctx)
         assert result.row == {"x": 21, "doubled": 42}
 
     def test_lifecycle_hooks_exist(self) -> None:

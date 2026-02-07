@@ -5,31 +5,14 @@ gate execution and routing decisions. Contract tests for RoutingKind itself
 are in tests/contracts/test_routing.py and tests/contracts/test_enums.py.
 """
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from elspeth.contracts import NodeID, RoutingAction, RoutingKind, TokenInfo
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.engine.executors import GateExecutor, GateOutcome, MissingEdgeError
 from elspeth.plugins.context import PluginContext
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
+from elspeth.testing import make_pipeline_row
 
 
 class TestGateExecutorRoutingBehavior:
@@ -73,7 +56,7 @@ class TestGateExecutorRoutingBehavior:
         return TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data=_make_pipeline_row({"status": "active", "value": 100}),
+            row_data=make_pipeline_row({"status": "active", "value": 100}),
             branch_name=None,
         )
 

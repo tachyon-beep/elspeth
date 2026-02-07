@@ -9,29 +9,14 @@ from typing import Any
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import RateLimitSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.rate_limit import RateLimitRegistry
 from elspeth.engine import Orchestrator
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with observed schema contract for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data=data, contract=contract)
+from elspeth.testing import make_pipeline_row
 
 
 class RateLimitAwareTransform(BaseTransform):
@@ -147,7 +132,7 @@ class TestRateLimitThrottling:
             # Make 11 calls - first 10 should be instant (bucket holds 10)
             # The 11th should block waiting for a leak
             for i in range(11):
-                transform.process(_make_pipeline_row({"id": i}), ctx)
+                transform.process(make_pipeline_row({"id": i}), ctx)
 
             call_times = transform.call_times
             assert len(call_times) == 11
@@ -182,7 +167,7 @@ class TestRateLimitThrottling:
 
             # Make 5 calls rapidly
             for i in range(5):
-                transform.process(_make_pipeline_row({"id": i}), ctx)
+                transform.process(make_pipeline_row({"id": i}), ctx)
 
             call_times = transform.call_times
             assert len(call_times) == 5

@@ -17,8 +17,9 @@ from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.openrouter_multi_query import OpenRouterMultiQueryLLMTransform
+from elspeth.testing import make_pipeline_row
 
-from .conftest import _make_pipeline_row, chaosllm_openrouter_http_responses
+from .conftest import chaosllm_openrouter_http_responses
 
 # Common schema config
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -74,7 +75,7 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data=_make_pipeline_row({}),
+        row_data=make_pipeline_row({}),
     )
 
 
@@ -149,7 +150,7 @@ class TestOpenRouterMultiQueryLLMTransformInit:
         ctx = make_plugin_context()
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
-            transform.process(_make_pipeline_row({"text": "hello"}), ctx)
+            transform.process(make_pipeline_row({"text": "hello"}), ctx)
 
 
 class TestSingleQueryProcessing:
@@ -443,7 +444,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "case2 hist",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -479,7 +480,7 @@ class TestRowProcessingWithPipelining:
                 "original_field": "preserved",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -547,7 +548,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "hist",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             # Entire row fails
@@ -583,7 +584,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "hist",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -682,7 +683,7 @@ class TestMultiRowPipelining:
                         state_id=f"state-{i}",
                         token=token,
                     )
-                    transform.accept(_make_pipeline_row(row), ctx)
+                    transform.accept(make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -709,7 +710,7 @@ class TestMultiRowPipelining:
         )
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
+            transform.accept(make_pipeline_row({"text": "hello"}), ctx)
 
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
@@ -794,7 +795,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             # Should return error result, not raise exception
@@ -841,7 +842,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -892,7 +893,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -932,7 +933,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1
@@ -965,7 +966,7 @@ class TestHTTPSpecificBehavior:
                 "cs2_hist": "data",
             }
 
-            transform.accept(_make_pipeline_row(row), ctx)
+            transform.accept(make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             assert len(collector.results) == 1

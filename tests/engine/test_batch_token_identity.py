@@ -27,31 +27,12 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult
+from elspeth.testing import make_pipeline_row
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 from tests.helpers.audit_assertions import (
     assert_all_batch_members_consumed,
     assert_output_token_distinct_from_inputs,
 )
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 class SumTransform(BaseTransform):
@@ -144,7 +125,7 @@ class TestBatchTokenIdentity:
         all_results = []
         input_token_ids = []
         for i in range(3):
-            pipeline_row = _make_pipeline_row({"value": (i + 1) * 10})  # 10, 20, 30
+            pipeline_row = make_pipeline_row({"value": (i + 1) * 10})  # 10, 20, 30
             source_row = SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
             results = processor.process_row(
                 row_index=i,
@@ -232,7 +213,7 @@ class TestBatchTokenIdentity:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process row 0 - buffered, returns CONSUMED_IN_BATCH
-        pipeline_row_0 = _make_pipeline_row({"value": 10})
+        pipeline_row_0 = make_pipeline_row({"value": 10})
         source_row_0 = SourceRow.valid(pipeline_row_0.to_dict(), contract=pipeline_row_0.contract)
         results_0 = processor.process_row(
             row_index=0,
@@ -245,7 +226,7 @@ class TestBatchTokenIdentity:
         first_token_id = results_0[0].token.token_id
 
         # Process row 1 - triggers flush
-        pipeline_row_1 = _make_pipeline_row({"value": 20})
+        pipeline_row_1 = make_pipeline_row({"value": 20})
         source_row_1 = SourceRow.valid(pipeline_row_1.to_dict(), contract=pipeline_row_1.contract)
         results_1 = processor.process_row(
             row_index=1,
@@ -328,7 +309,7 @@ class TestBatchTokenIdentity:
         all_results = []
         input_token_ids = []
         for i in range(3):
-            pipeline_row = _make_pipeline_row({"value": (i + 1) * 10})
+            pipeline_row = make_pipeline_row({"value": (i + 1) * 10})
             source_row = SourceRow.valid(pipeline_row.to_dict(), contract=pipeline_row.contract)
             results = processor.process_row(
                 row_index=i,

@@ -13,11 +13,11 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from elspeth.plugins.transforms.passthrough import PassThrough
+from elspeth.testing import make_pipeline_row
 
 from .test_transform_protocol import (
     TransformContractPropertyTestBase,
     TransformContractTestBase,
-    _make_pipeline_row,
 )
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
         ctx = PluginContext(run_id="test", config={})
         input_row = {"a": 1, "b": "two", "c": [1, 2, 3], "d": {"nested": True}}
-        pipeline_row = _make_pipeline_row(input_row)
+        pipeline_row = make_pipeline_row(input_row)
 
         result = transform.process(pipeline_row, ctx)
 
@@ -66,7 +66,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
         ctx = PluginContext(run_id="test", config={})
         input_row = {"id": 1, "nested": {"value": [1, 2, 3]}}
         input_copy = deepcopy(input_row)
-        pipeline_row = _make_pipeline_row(input_row)
+        pipeline_row = make_pipeline_row(input_row)
 
         transform.process(pipeline_row, ctx)
 
@@ -78,7 +78,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
         ctx = PluginContext(run_id="test", config={})
         input_row = {"id": 1, "nested": {"value": [1, 2, 3]}}
-        pipeline_row = _make_pipeline_row(input_row)
+        pipeline_row = make_pipeline_row(input_row)
 
         result = transform.process(pipeline_row, ctx)
         assert result.row is not None
@@ -125,7 +125,7 @@ class TestPassThroughStrictSchemaContract(TransformContractTestBase):
 
         ctx = PluginContext(run_id="test", config={})
         wrong_type_input = {"id": "not_an_int", "name": "test"}
-        pipeline_row = _make_pipeline_row(wrong_type_input)
+        pipeline_row = make_pipeline_row(wrong_type_input)
 
         # Per Three-Tier Trust Model: wrong types in pipeline data = crash
         with pytest.raises(ValidationError):
@@ -172,7 +172,7 @@ class TestPassThroughPropertyBased:
     @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_passthrough_preserves_arbitrary_dicts(self, transform: PassThrough, ctx: Any, data: dict[str, Any]) -> None:
         """Property: PassThrough preserves any valid JSON-like dict."""
-        pipeline_row = _make_pipeline_row(data)
+        pipeline_row = make_pipeline_row(data)
         result = transform.process(pipeline_row, ctx)
 
         assert result.status == "success"
@@ -190,7 +190,7 @@ class TestPassThroughPropertyBased:
     @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_passthrough_is_deterministic(self, transform: PassThrough, ctx: Any, data: dict[str, Any]) -> None:
         """Property: PassThrough produces same output for same input."""
-        pipeline_row = _make_pipeline_row(data)
+        pipeline_row = make_pipeline_row(data)
         result1 = transform.process(pipeline_row, ctx)
         result2 = transform.process(pipeline_row, ctx)
 

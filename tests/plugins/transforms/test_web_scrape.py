@@ -21,25 +21,10 @@ from elspeth.plugins.transforms.web_scrape_errors import (
     RateLimitError,
     ServerError,
 )
+from elspeth.testing import make_pipeline_row
 
 # Stable test IP used for all DNS resolution mocks
 _TEST_IP = "104.18.27.120"
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 def _mock_getaddrinfo(ip: str = _TEST_IP) -> Any:
@@ -105,7 +90,7 @@ def test_web_scrape_success_markdown(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     assert "# Title" in result.row["page_content"]
@@ -134,7 +119,7 @@ def test_web_scrape_404_returns_error(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/missing"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/missing"}), mock_ctx)
 
     assert result.status == "error"
     assert "NotFoundError" in result.reason["error_type"]
@@ -160,7 +145,7 @@ def test_web_scrape_500_raises_for_retry(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(ServerError) as exc_info:
-        transform.process(_make_pipeline_row({"url": "https://example.com/error"}), mock_ctx)
+        transform.process(make_pipeline_row({"url": "https://example.com/error"}), mock_ctx)
 
     assert exc_info.value.retryable is True
     assert "500" in str(exc_info.value)
@@ -185,7 +170,7 @@ def test_web_scrape_429_raises_for_retry(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(RateLimitError) as exc_info:
-        transform.process(_make_pipeline_row({"url": "https://example.com/throttled"}), mock_ctx)
+        transform.process(make_pipeline_row({"url": "https://example.com/throttled"}), mock_ctx)
 
     assert exc_info.value.retryable is True
     assert "429" in str(exc_info.value)
@@ -206,7 +191,7 @@ def test_web_scrape_invalid_scheme_returns_error(mock_ctx):
         }
     )
 
-    result = transform.process(_make_pipeline_row({"url": "ftp://example.com/file"}), mock_ctx)
+    result = transform.process(make_pipeline_row({"url": "ftp://example.com/file"}), mock_ctx)
 
     assert result.status == "error"
     assert "SSRFBlockedError" in result.reason["error_type"]
@@ -229,7 +214,7 @@ def test_web_scrape_private_ip_returns_error(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo("169.254.169.254")):
-        result = transform.process(_make_pipeline_row({"url": "http://169.254.169.254/metadata"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "http://169.254.169.254/metadata"}), mock_ctx)
 
     assert result.status == "error"
     assert "SSRFBlockedError" in result.reason["error_type"]
@@ -257,7 +242,7 @@ def test_web_scrape_text_format(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     # Text format should not include markdown
@@ -296,7 +281,7 @@ def test_web_scrape_strips_script_tags(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     assert "alert" not in result.row["page_content"]
@@ -325,7 +310,7 @@ def test_web_scrape_payload_storage(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
     assert result.status == "success"
     # Check payload hashes were stored and are valid SHA-256 hashes
@@ -362,7 +347,7 @@ def test_web_scrape_timeout_raises_network_error(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError) as exc_info:
-        transform.process(_make_pipeline_row({"url": "https://example.com/slow"}), mock_ctx)
+        transform.process(make_pipeline_row({"url": "https://example.com/slow"}), mock_ctx)
 
     assert exc_info.value.retryable is True
     assert "timeout" in str(exc_info.value).lower()
@@ -387,7 +372,7 @@ def test_web_scrape_connection_error_raises_network_error(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError) as exc_info:
-        transform.process(_make_pipeline_row({"url": "https://example.com/unreachable"}), mock_ctx)
+        transform.process(make_pipeline_row({"url": "https://example.com/unreachable"}), mock_ctx)
 
     assert exc_info.value.retryable is True
     assert "connection" in str(exc_info.value).lower()
@@ -412,7 +397,7 @@ def test_web_scrape_403_returns_error(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/forbidden"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/forbidden"}), mock_ctx)
 
     assert result.status == "error"
     assert "ForbiddenError" in result.reason["error_type"]
@@ -438,7 +423,7 @@ def test_web_scrape_401_returns_error(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/unauthorized"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/unauthorized"}), mock_ctx)
 
     assert result.status == "error"
     assert "UnauthorizedError" in result.reason["error_type"]
@@ -519,7 +504,7 @@ def test_web_scrape_follows_redirects_301(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/old"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/old"}), mock_ctx)
 
     assert result.status == "success"
     assert "# New Location" in result.row["page_content"]
@@ -553,7 +538,7 @@ def test_web_scrape_follows_redirect_chain(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/start"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/start"}), mock_ctx)
 
     assert result.status == "success"
     assert "# Final Destination" in result.row["page_content"]
@@ -584,7 +569,7 @@ def test_web_scrape_redirect_limit_exceeded(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()), pytest.raises(NetworkError, match=r"redirect|too many redirects"):
-        transform.process(_make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
+        transform.process(make_pipeline_row({"url": "https://example.com/a"}), mock_ctx)
 
 
 @respx.mock
@@ -619,7 +604,7 @@ def test_web_scrape_malformed_html_graceful_degradation(mock_ctx):
     )
 
     with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-        result = transform.process(_make_pipeline_row({"url": "https://example.com/malformed"}), mock_ctx)
+        result = transform.process(make_pipeline_row({"url": "https://example.com/malformed"}), mock_ctx)
 
     # Should succeed despite malformed HTML
     assert result.status == "success"

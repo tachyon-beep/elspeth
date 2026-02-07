@@ -16,27 +16,11 @@ if TYPE_CHECKING:
     import httpx
 
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
+from elspeth.testing import make_pipeline_row
 
 # Common schema config used across LLM tests
 DYNAMIC_SCHEMA = {"mode": "observed"}
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED contract for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for key in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 def make_azure_multi_query_config(**overrides: Any) -> dict[str, Any]:
@@ -77,7 +61,7 @@ def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data=_make_pipeline_row({}),
+        row_data=make_pipeline_row({}),
     )
 
 

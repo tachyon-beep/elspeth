@@ -43,37 +43,16 @@ import pytest
 
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching import OutputPort
 from elspeth.plugins.batching.mixin import BatchTransformMixin
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import TransformProtocol
+from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
     pass
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with OBSERVED schema for testing.
-
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
-    """
-    # Create OBSERVED schema that accepts any fields
-    # Use object type for all fields (OBSERVED mode is permissive)
-    fields = tuple(
-        FieldContract(
-            normalized_name=key,
-            original_name=key,
-            python_type=object,  # OBSERVED mode - accept any type
-            required=False,
-            source="inferred",
-        )
-        for key, value in data.items()
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data, contract)
 
 
 class CollectingOutputPort(OutputPort):
@@ -252,7 +231,7 @@ class BatchTransformContractTestBase(ABC):
 
         try:
             with pytest.raises((RuntimeError, AttributeError, ValueError)):
-                pipeline_row = _make_pipeline_row(valid_input)
+                pipeline_row = make_pipeline_row(valid_input)
                 batch_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
         finally:
             # Cleanup attempt (may fail, that's ok)
@@ -285,7 +264,7 @@ class BatchTransformContractTestBase(ABC):
     ) -> None:
         """Contract: accept() MUST return None (results via OutputPort)."""
         ctx = mock_ctx_factory()
-        pipeline_row = _make_pipeline_row(valid_input)
+        pipeline_row = make_pipeline_row(valid_input)
         result = started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
         assert result is None, f"accept() should return None, got {type(result)}"
 
@@ -301,7 +280,7 @@ class BatchTransformContractTestBase(ABC):
         ctx.token = None  # No token!
 
         with pytest.raises(ValueError, match="token"):
-            pipeline_row = _make_pipeline_row(valid_input)
+            pipeline_row = make_pipeline_row(valid_input)
             started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
     # =========================================================================
@@ -317,7 +296,7 @@ class BatchTransformContractTestBase(ABC):
     ) -> None:
         """Contract: Results MUST eventually arrive through OutputPort."""
         ctx = mock_ctx_factory()
-        pipeline_row = _make_pipeline_row(valid_input)
+        pipeline_row = make_pipeline_row(valid_input)
         started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         # Wait for result
@@ -336,7 +315,7 @@ class BatchTransformContractTestBase(ABC):
     ) -> None:
         """Contract: Emitted result MUST be a TransformResult."""
         ctx = mock_ctx_factory()
-        pipeline_row = _make_pipeline_row(valid_input)
+        pipeline_row = make_pipeline_row(valid_input)
         started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         output_port.wait_for_results(1, timeout=10.0)
@@ -355,7 +334,7 @@ class BatchTransformContractTestBase(ABC):
         """Contract: Emitted result MUST include the submitted token."""
         ctx = mock_ctx_factory()
         submitted_token = ctx.token
-        pipeline_row = _make_pipeline_row(valid_input)
+        pipeline_row = make_pipeline_row(valid_input)
         started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         output_port.wait_for_results(1, timeout=10.0)
@@ -376,7 +355,7 @@ class BatchTransformContractTestBase(ABC):
         """Contract: Emitted result MUST include the correct state_id."""
         ctx = mock_ctx_factory()
         submitted_state_id = ctx.state_id
-        pipeline_row = _make_pipeline_row(valid_input)
+        pipeline_row = make_pipeline_row(valid_input)
         started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         output_port.wait_for_results(1, timeout=10.0)
@@ -402,7 +381,7 @@ class BatchTransformContractTestBase(ABC):
         for _ in range(5):
             ctx = mock_ctx_factory()
             submitted_tokens.append(ctx.token.token_id)
-            pipeline_row = _make_pipeline_row(valid_input.copy())
+            pipeline_row = make_pipeline_row(valid_input.copy())
             started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         # Wait for all results
@@ -461,7 +440,7 @@ class BatchTransformContractTestBase(ABC):
         """Contract: on_complete() lifecycle hook MUST not raise."""
         # Process something first
         ctx = mock_ctx_factory()
-        pipeline_row = _make_pipeline_row(valid_input)
+        pipeline_row = make_pipeline_row(valid_input)
         started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
         output_port.wait_for_results(1, timeout=10.0)
 
@@ -489,7 +468,7 @@ class BatchTransformFIFOStressTestBase(BatchTransformContractTestBase):
         for _ in range(20):
             ctx = mock_ctx_factory()
             submitted_tokens.append(ctx.token.token_id)
-            pipeline_row = _make_pipeline_row(valid_input.copy())
+            pipeline_row = make_pipeline_row(valid_input.copy())
             started_transform.accept(pipeline_row, ctx)  # type: ignore[attr-defined]
 
         # Wait for all results

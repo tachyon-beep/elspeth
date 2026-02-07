@@ -5,23 +5,7 @@ from collections.abc import Iterator
 from typing import Any, ClassVar
 
 from elspeth.contracts import PipelineRow, SourceRow
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
-
-def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
-    """Create a PipelineRow with observed schema contract for testing."""
-    fields = tuple(
-        FieldContract(
-            normalized_name=k,
-            original_name=k,
-            python_type=object,
-            required=False,
-            source="inferred",
-        )
-        for k in data
-    )
-    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-    return PipelineRow(data=data, contract=contract)
+from elspeth.testing import make_pipeline_row
 
 
 class TestSourceProtocol:
@@ -212,7 +196,7 @@ class TestTransformProtocol:
 
         ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
 
-        result = transform.process(_make_pipeline_row({"value": 21}), ctx)
+        result = transform.process(make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
         assert result.row == {"value": 21, "doubled": 42}
 
@@ -242,7 +226,7 @@ class TestTransformBatchSupport:
 
         transform = SingleTransform({})
         ctx = PluginContext(run_id="test", config={})
-        result = transform.process(_make_pipeline_row({"value": 1}), ctx)
+        result = transform.process(make_pipeline_row({"value": 1}), ctx)
         assert result.row == {"processed": 1}
 
     def test_transform_process_batch_rows(self) -> None:
@@ -276,7 +260,7 @@ class TestTransformBatchSupport:
 
         # Batch mode
         result = transform.process(
-            [_make_pipeline_row({"value": 1}), _make_pipeline_row({"value": 2}), _make_pipeline_row({"value": 3})], ctx
+            [make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx
         )
         assert result.row == {"total": 6, "count": 3}
 
