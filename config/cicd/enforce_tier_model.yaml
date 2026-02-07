@@ -1627,12 +1627,12 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to request processing
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=148d0beb064bb396
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=c3b2ccc3cd57da7c
   owner: architecture
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Breaks redirect loop if missing - no silent failure
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=bdd153a7c08724d2
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=2c79da3d02ca6e65
   owner: architecture
   reason: httpx Client.get() method call - redirect hop with SSRF-validated IP
   safety: Each redirect hop independently validated against SSRF blocklist

@@ -29,9 +29,7 @@ def http_client():
     )
 
 
-def _make_redirect_response(
-    location: str, status_code: int = 301, url: str = "https://93.184.216.34:443/old-path"
-) -> httpx.Response:
+def _make_redirect_response(location: str, status_code: int = 301, url: str = "https://93.184.216.34:443/old-path") -> httpx.Response:
     """Create a redirect response with an IP-based URL (as httpx would see it)."""
     request = httpx.Request("GET", url)
     return httpx.Response(
@@ -67,9 +65,7 @@ class TestRelativeRedirectResolution:
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     @patch("elspeth.plugins.clients.http.httpx.Client")
-    def test_relative_redirect_resolves_against_hostname(
-        self, mock_client_cls, mock_validate, http_client
-    ):
+    def test_relative_redirect_resolves_against_hostname(self, mock_client_cls, mock_validate, http_client):
         """Location: /new-path should produce https://example.com/new-path, not https://93.184.216.34/new-path."""
         redirect_response = _make_redirect_response("/new-path")
         final_response = _make_final_response()
@@ -95,9 +91,7 @@ class TestRelativeRedirectResolution:
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     @patch("elspeth.plugins.clients.http.httpx.Client")
-    def test_relative_redirect_preserves_scheme_and_host(
-        self, mock_client_cls, mock_validate, http_client
-    ):
+    def test_relative_redirect_preserves_scheme_and_host(self, mock_client_cls, mock_validate, http_client):
         """Relative redirect should preserve scheme and host from original URL."""
         redirect_response = _make_redirect_response("/api/v2/resource")
         final_response = _make_final_response()
@@ -125,9 +119,7 @@ class TestAbsoluteRedirectResolution:
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     @patch("elspeth.plugins.clients.http.httpx.Client")
-    def test_absolute_redirect_to_different_host(
-        self, mock_client_cls, mock_validate, http_client
-    ):
+    def test_absolute_redirect_to_different_host(self, mock_client_cls, mock_validate, http_client):
         """Location: https://other.com/page should use other.com, not original host."""
         redirect_response = _make_redirect_response("https://other.com/page")
         final_response = _make_final_response()
@@ -155,9 +147,7 @@ class TestChainedRedirects:
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     @patch("elspeth.plugins.clients.http.httpx.Client")
-    def test_chained_relative_redirects_track_hostname(
-        self, mock_client_cls, mock_validate, http_client
-    ):
+    def test_chained_relative_redirects_track_hostname(self, mock_client_cls, mock_validate, http_client):
         """Relative -> relative should keep resolving against the logical hostname."""
         redirect1 = _make_redirect_response("/step2")
         redirect2 = _make_redirect_response("/step3", url="https://93.184.216.34:443/step2")
@@ -188,9 +178,7 @@ class TestChainedRedirects:
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     @patch("elspeth.plugins.clients.http.httpx.Client")
-    def test_absolute_redirect_updates_hostname_for_subsequent_relative(
-        self, mock_client_cls, mock_validate, http_client
-    ):
+    def test_absolute_redirect_updates_hostname_for_subsequent_relative(self, mock_client_cls, mock_validate, http_client):
         """Absolute redirect to new.com, then relative /page, should resolve as https://new.com/page."""
         redirect1 = _make_redirect_response("https://new.com/")
         redirect2 = _make_redirect_response("/page", url="https://203.0.113.1:443/")
@@ -225,9 +213,7 @@ class TestHostHeaderAndSNI:
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     @patch("elspeth.plugins.clients.http.httpx.Client")
-    def test_host_header_uses_hostname_not_ip(
-        self, mock_client_cls, mock_validate, http_client
-    ):
+    def test_host_header_uses_hostname_not_ip(self, mock_client_cls, mock_validate, http_client):
         """Host header on redirect hop should be the hostname, not the resolved IP."""
         redirect_response = _make_redirect_response("/new-path")
         final_response = _make_final_response()
@@ -255,9 +241,7 @@ class TestHostHeaderAndSNI:
 
     @patch("elspeth.plugins.clients.http.validate_url_for_ssrf")
     @patch("elspeth.plugins.clients.http.httpx.Client")
-    def test_sni_hostname_set_for_https_redirect(
-        self, mock_client_cls, mock_validate, http_client
-    ):
+    def test_sni_hostname_set_for_https_redirect(self, mock_client_cls, mock_validate, http_client):
         """TLS SNI should use the hostname from the redirect target, not IP."""
         redirect_response = _make_redirect_response("/secure-path")
         final_response = _make_final_response()

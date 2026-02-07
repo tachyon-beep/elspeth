@@ -759,7 +759,10 @@ class AuditedHTTPClient(AuditedClientBase):
             # Handle redirects with SSRF validation at each hop
             if follow_redirects:
                 response = self._follow_redirects_safe(
-                    response, max_redirects, effective_timeout, merged_headers,
+                    response,
+                    max_redirects,
+                    effective_timeout,
+                    merged_headers,
                     original_url=request.original_url,
                 )
 
