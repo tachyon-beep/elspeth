@@ -2787,6 +2787,91 @@ class TestExpandTemplateFiles:
         assert "system_prompt_file" not in expanded
 
 
+class TestTemplateFilePathTraversal:
+    """Tests that template file loading blocks path traversal."""
+
+    def test_template_file_traversal_blocked(self, tmp_path: Path) -> None:
+        """template_file with .. escaping config directory is rejected."""
+        from elspeth.core.config import TemplateFileError, _expand_template_files
+
+        settings_path = tmp_path / "project" / "settings.yaml"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.touch()
+
+        # Create a file outside the config directory
+        outside_file = tmp_path / "secret.txt"
+        outside_file.write_text("secret data")
+
+        config = {"template_file": "../secret.txt"}
+
+        with pytest.raises(TemplateFileError, match="path traversal blocked"):
+            _expand_template_files(config, settings_path)
+
+    def test_lookup_file_traversal_blocked(self, tmp_path: Path) -> None:
+        """lookup_file with .. escaping config directory is rejected."""
+        from elspeth.core.config import TemplateFileError, _expand_template_files
+
+        settings_path = tmp_path / "project" / "settings.yaml"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.touch()
+
+        outside_file = tmp_path / "secret.yaml"
+        outside_file.write_text("key: value")
+
+        config = {"lookup_file": "../secret.yaml"}
+
+        with pytest.raises(TemplateFileError, match="path traversal blocked"):
+            _expand_template_files(config, settings_path)
+
+    def test_system_prompt_file_traversal_blocked(self, tmp_path: Path) -> None:
+        """system_prompt_file with .. escaping config directory is rejected."""
+        from elspeth.core.config import TemplateFileError, _expand_template_files
+
+        settings_path = tmp_path / "project" / "settings.yaml"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.touch()
+
+        outside_file = tmp_path / "secret.txt"
+        outside_file.write_text("stolen prompt")
+
+        config = {"system_prompt_file": "../secret.txt"}
+
+        with pytest.raises(TemplateFileError, match="path traversal blocked"):
+            _expand_template_files(config, settings_path)
+
+    def test_absolute_path_outside_config_dir_blocked(self, tmp_path: Path) -> None:
+        """Absolute path pointing outside config directory is rejected."""
+        from elspeth.core.config import TemplateFileError, _expand_template_files
+
+        settings_path = tmp_path / "project" / "settings.yaml"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.touch()
+
+        outside_file = tmp_path / "secret.txt"
+        outside_file.write_text("secret data")
+
+        config = {"template_file": str(outside_file)}
+
+        with pytest.raises(TemplateFileError, match="path traversal blocked"):
+            _expand_template_files(config, settings_path)
+
+    def test_subdirectory_paths_allowed(self, tmp_path: Path) -> None:
+        """Paths within config directory (including subdirs) are allowed."""
+        from elspeth.core.config import _expand_template_files
+
+        settings_path = tmp_path / "settings.yaml"
+        settings_path.touch()
+
+        template_file = tmp_path / "prompts" / "deep" / "nested" / "test.j2"
+        template_file.parent.mkdir(parents=True)
+        template_file.write_text("Hello {{ row.name }}")
+
+        config = {"template_file": "prompts/deep/nested/test.j2"}
+
+        expanded = _expand_template_files(config, settings_path)
+        assert expanded["template"] == "Hello {{ row.name }}"
+
+
 class TestLoadSettingsWithRunMode:
     """Tests for loading YAML with run_mode configuration."""
 

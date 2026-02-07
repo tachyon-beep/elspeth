@@ -846,3 +846,126 @@ class TestPooledExecutorOrderingMetadata:
         assert entries[1].buffer_wait_ms >= 50, f"Item 1 should have waited for item 0, only waited {entries[1].buffer_wait_ms}ms"
 
         executor.shutdown()
+
+
+class TestPooledExecutorBugFixes:
+    """Regression tests for xy77: thread pool executor bugs."""
+
+    def test_throttle_stats_reset_between_batches(self) -> None:
+        """Throttle capacity_retries must not accumulate across batches.
+
+        Bug: _reset_batch_stats only reset executor stats, not AIMDThrottle stats.
+        Batch 2's get_stats() reported batch 1's capacity_retries + batch 2's.
+        """
+        config = PoolConfig(pool_size=1, recovery_step_ms=10)
+        executor = PooledExecutor(config)
+
+        call_count = 0
+        lock = Lock()
+
+        def fail_then_succeed(row: dict[str, Any], state_id: str) -> TransformResult:
+            nonlocal call_count
+            with lock:
+                call_count += 1
+                current = call_count
+
+            if current == 1:
+                raise CapacityError(429, "Rate limited")
+            return TransformResult.success(row, success_reason={"action": "ok"})
+
+        # Batch 1: triggers 1 capacity retry
+        ctx1 = [RowContext(row={"v": 1}, state_id="s1", row_index=0)]
+        executor.execute_batch(ctx1, fail_then_succeed)
+        stats1 = executor.get_stats()
+        assert stats1["pool_stats"]["capacity_retries"] == 1
+
+        # Batch 2: no errors
+        call_count = 0
+
+        def always_succeed(row: dict[str, Any], state_id: str) -> TransformResult:
+            return TransformResult.success(row, success_reason={"action": "ok"})
+
+        ctx2 = [RowContext(row={"v": 2}, state_id="s2", row_index=0)]
+        executor.execute_batch(ctx2, always_succeed)
+        stats2 = executor.get_stats()
+
+        # Must be 0 for batch 2, not 1 carried over from batch 1
+        assert stats2["pool_stats"]["capacity_retries"] == 0
+
+        executor.shutdown()
+
+    def test_shutdown_event_stops_retries(self) -> None:
+        """Workers should stop retrying after shutdown is requested.
+
+        Bug: _shutdown was a bare bool never checked in retry loop.
+        """
+        config = PoolConfig(pool_size=1, max_capacity_retry_seconds=30)
+        executor = PooledExecutor(config)
+
+        call_count = 0
+        lock = Lock()
+
+        def always_fail(row: dict[str, Any], state_id: str) -> TransformResult:
+            nonlocal call_count
+            with lock:
+                call_count += 1
+                if call_count >= 2:
+                    # Trigger shutdown after first retry
+                    executor.shutdown(wait=False)
+            raise CapacityError(429, "Rate limited")
+
+        ctx = [RowContext(row={"v": 1}, state_id="s1", row_index=0)]
+        entries = executor.execute_batch(ctx, always_fail)
+
+        # Should have stopped with a shutdown_requested error, not run for 30s
+        assert len(entries) == 1
+        assert entries[0].result.status == "error"
+        assert entries[0].result.reason["reason"] == "shutdown_requested"
+
+    def test_dispatch_gate_respects_aimd_congestion(self) -> None:
+        """Dispatch gate should use AIMD delay when higher than min_dispatch_delay.
+
+        Bug: gate always used min_dispatch_delay_ms, ignoring AIMD congestion.
+
+        Uses pool_size=1 for serial execution so each dispatch reads the
+        current AIMD delay without race conditions from concurrent on_success.
+        Pumps 5 capacity errors to build up enough delay that on_success
+        recovery steps don't bring it below min_dispatch_delay_ms.
+        """
+        config = PoolConfig(
+            pool_size=1,
+            min_dispatch_delay_ms=10,
+            recovery_step_ms=10,
+            max_dispatch_delay_ms=500,
+        )
+        executor = PooledExecutor(config)
+
+        # Pump 5 capacity errors to build significant AIMD delay
+        # Error chain: 0→10→20→40→80→160ms
+        for _ in range(5):
+            executor._throttle.on_capacity_error()
+        aimd_delay = executor._throttle.current_delay_ms
+        assert aimd_delay >= 100, f"AIMD delay should be >= 100ms, got {aimd_delay}"
+
+        dispatch_times: list[float] = []
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            dispatch_times.append(time.monotonic())
+            return TransformResult.success(row, success_reason={"action": "ok"})
+
+        ctx = [RowContext(row={"v": i}, state_id=f"s{i}", row_index=i) for i in range(3)]
+        executor.execute_batch(ctx, mock_process)
+
+        # With serial execution, each dispatch reads the (slightly decreasing)
+        # AIMD delay. Even after on_success steps, delay stays well above 10ms.
+        assert len(dispatch_times) == 3
+        for i in range(1, len(dispatch_times)):
+            interval_ms = (dispatch_times[i] - dispatch_times[i - 1]) * 1000
+            # AIMD delay decreases by recovery_step_ms per success, but should
+            # still be much higher than min_dispatch_delay_ms of 10ms
+            assert interval_ms >= 50, (
+                f"Dispatch {i} was {interval_ms:.1f}ms after {i - 1}, "
+                f"expected >= 50ms (AIMD congestion should slow dispatches)"
+            )
+
+        executor.shutdown()

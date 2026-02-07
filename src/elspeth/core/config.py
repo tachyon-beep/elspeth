@@ -1390,6 +1390,46 @@ class TemplateFileError(Exception):
     """Error loading template or lookup file."""
 
 
+def _resolve_template_path(file_ref: str, settings_path: Path, label: str) -> Path:
+    """Resolve a template/lookup/prompt file path with containment check.
+
+    Relative paths are resolved against the settings file's parent directory.
+    Absolute paths are used as-is. In both cases, the resolved path must remain
+    within the settings directory tree to prevent path traversal attacks.
+
+    Args:
+        file_ref: File reference from config (relative or absolute)
+        settings_path: Path to the settings file
+        label: Human-readable label for error messages (e.g. "Template file")
+
+    Returns:
+        Resolved, validated Path
+
+    Raises:
+        TemplateFileError: If path escapes settings directory or file not found
+    """
+    config_root = settings_path.parent.resolve()
+    file_path = Path(file_ref)
+    if not file_path.is_absolute():
+        file_path = (config_root / file_path).resolve()
+    else:
+        file_path = file_path.resolve()
+
+    # Containment check: resolved path must be under the config directory
+    try:
+        file_path.relative_to(config_root)
+    except ValueError:
+        raise TemplateFileError(
+            f"{label} path traversal blocked: {file_ref!r} resolves to "
+            f"{file_path} which is outside config directory {config_root}"
+        ) from None
+
+    if not file_path.exists():
+        raise TemplateFileError(f"{label} not found: {file_path}")
+
+    return file_path
+
+
 def _expand_template_files(
     options: dict[str, Any],
     settings_path: Path,
@@ -1407,7 +1447,7 @@ def _expand_template_files(
         - system_prompt_file → system_prompt (content) + system_prompt_source (path)
 
     Raises:
-        TemplateFileError: If files not found or invalid
+        TemplateFileError: If files not found, invalid, or path traversal detected
     """
     result = dict(options)
 
@@ -1416,12 +1456,7 @@ def _expand_template_files(
         if "template" in result:
             raise TemplateFileError("Cannot specify both 'template' and 'template_file'")
         template_file = result.pop("template_file")
-        template_path = Path(template_file)
-        if not template_path.is_absolute():
-            template_path = (settings_path.parent / template_path).resolve()
-
-        if not template_path.exists():
-            raise TemplateFileError(f"Template file not found: {template_path}")
+        template_path = _resolve_template_path(template_file, settings_path, "Template file")
 
         result["template"] = template_path.read_text(encoding="utf-8")
         result["template_source"] = template_file
@@ -1431,12 +1466,7 @@ def _expand_template_files(
         if "lookup" in result:
             raise TemplateFileError("Cannot specify both 'lookup' and 'lookup_file'")
         lookup_file = result.pop("lookup_file")
-        lookup_path = Path(lookup_file)
-        if not lookup_path.is_absolute():
-            lookup_path = (settings_path.parent / lookup_path).resolve()
-
-        if not lookup_path.exists():
-            raise TemplateFileError(f"Lookup file not found: {lookup_path}")
+        lookup_path = _resolve_template_path(lookup_file, settings_path, "Lookup file")
 
         try:
             loaded = yaml.safe_load(lookup_path.read_text(encoding="utf-8"))
@@ -1453,12 +1483,7 @@ def _expand_template_files(
         if "system_prompt" in result:
             raise TemplateFileError("Cannot specify both 'system_prompt' and 'system_prompt_file'")
         system_prompt_file = result.pop("system_prompt_file")
-        system_prompt_path = Path(system_prompt_file)
-        if not system_prompt_path.is_absolute():
-            system_prompt_path = (settings_path.parent / system_prompt_path).resolve()
-
-        if not system_prompt_path.exists():
-            raise TemplateFileError(f"System prompt file not found: {system_prompt_path}")
+        system_prompt_path = _resolve_template_path(system_prompt_file, settings_path, "System prompt file")
 
         result["system_prompt"] = system_prompt_path.read_text(encoding="utf-8")
         result["system_prompt_source"] = system_prompt_file
