@@ -932,7 +932,6 @@ The following commands can destroy uncommitted work or rewrite history. **ALWAYS
 - `git reset --hard` - Discards uncommitted changes
 - `git clean -f` - Deletes untracked files permanently
 - `git checkout -- <file>` - Discards uncommitted changes to file
-- `git stash drop` - Permanently deletes stashed changes
 - `git push --force` - Rewrites remote history
 - `git rebase` (on pushed branches) - Rewrites shared history
 
@@ -951,6 +950,35 @@ Worktrees add complexity without benefit for our workflow:
 - Regular branches are simpler and sufficient
 
 **If you think you need a worktree:** You don't. Use a regular branch instead.
+
+## No Stashing, No Temporary File Movement
+
+**STRICT REQUIREMENT:** `git stash`, `git stash pop`, `git stash drop`, and ALL forms of temporary file displacement are **absolutely forbidden**.
+
+### What Is Forbidden
+
+- `git stash` / `git stash push` - Moves uncommitted work to a hidden stack
+- `git stash pop` / `git stash apply` - Restores stashed changes (often lossy)
+- `git stash drop` / `git stash clear` - Destroys stashed changes
+- Moving, copying, or renaming files as a "temporary" measure
+- Any operation that displaces the user's working tree state without explicit permission
+
+### Why This Is Forbidden
+
+Pre-commit hooks and agent workflows that stash/unstash silently cause **data loss**. The stash/pop cycle is inherently unsafe:
+
+1. `git stash --keep-index` before hooks separates staged from unstaged changes
+2. After the commit, `git stash pop` attempts to reapply unstaged changes
+3. If the pop encounters any conflict or corruption, **unstaged work is silently destroyed**
+4. The user sees a clean working tree and has no indication that changes were lost
+
+This has caused repeated data loss in this project. There is no safe use of stash in an automated context.
+
+### What To Do Instead
+
+- **Commit everything you want to keep.** Stage all changes before committing. If you need to commit a subset, commit the subset, then make the remaining changes in a follow-up commit.
+- **Never run operations that implicitly stash.** If a tool or hook wants to stash, that tool is broken for our workflow.
+- **If you think you need stash:** You don't. Commit your work to a branch instead.
 
 ## PROHIBITION ON "DEFENSIVE PROGRAMMING" PATTERNS
 
