@@ -996,9 +996,7 @@ class CoalesceExecutor:
                 )
             return None  # Still waiting for remaining branches
 
-        elif settings.policy == "first":
-            # first: should already have merged on first arrival
-            # If no arrivals yet, nothing to merge
-            return None
-
+        # settings.policy == "first":
+        # first: should already have merged on first arrival
+        # If no arrivals yet, nothing to merge
         return None
