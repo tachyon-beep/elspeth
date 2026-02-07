@@ -3754,7 +3754,6 @@ class TestDivertCoalesceWarnings:
             SourceSettings,
             TransformSettings,
         )
-        from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
             source=SourceSettings(
@@ -3789,9 +3788,7 @@ class TestDivertCoalesceWarnings:
         )
 
         graph = self._build_graph_with_coalesce(settings)
-        warnings = graph.warn_divert_coalesce_interactions(
-            {cs.name: cs for cs in settings.coalesce}
-        )
+        warnings = graph.warn_divert_coalesce_interactions({cs.name: cs for cs in settings.coalesce})
         assert len(warnings) == 0
 
     def test_no_warning_for_on_error_discard(self, plugin_manager) -> None:
@@ -3836,9 +3833,7 @@ class TestDivertCoalesceWarnings:
         )
 
         graph = self._build_graph_with_coalesce(settings)
-        warnings = graph.warn_divert_coalesce_interactions(
-            {cs.name: cs for cs in settings.coalesce}
-        )
+        warnings = graph.warn_divert_coalesce_interactions({cs.name: cs for cs in settings.coalesce})
         assert len(warnings) == 0
 
     def test_no_warning_for_divert_after_coalesce(self, plugin_manager) -> None:
@@ -3885,9 +3880,7 @@ class TestDivertCoalesceWarnings:
         )
 
         graph = self._build_graph_with_coalesce(settings)
-        warnings = graph.warn_divert_coalesce_interactions(
-            {cs.name: cs for cs in settings.coalesce}
-        )
+        warnings = graph.warn_divert_coalesce_interactions({cs.name: cs for cs in settings.coalesce})
         # Transform is after coalesce (in the continue-edge spine after merge),
         # not between fork gate and coalesce, so no warning
         assert len(warnings) == 0
@@ -3935,9 +3928,7 @@ class TestDivertCoalesceWarnings:
         )
 
         graph = self._build_graph_with_coalesce(settings)
-        warnings = graph.warn_divert_coalesce_interactions(
-            {cs.name: cs for cs in settings.coalesce}
-        )
+        warnings = graph.warn_divert_coalesce_interactions({cs.name: cs for cs in settings.coalesce})
         # Source quarantine is on the source node (not a transform), so no warning
         assert len(warnings) == 0
 

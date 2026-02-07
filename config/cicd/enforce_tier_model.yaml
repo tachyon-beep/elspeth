@@ -672,37 +672,62 @@ allow_hits:
   reason: List/tuple type detection for canonical JSON serialization after mypy typecheck
   safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
   expires: null
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=a77de18447c39dcc
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=6d388e3fcd965f6e
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=9b050e479c87531a
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=d2118151a6b5f1ac
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=158bf417c4c20d08
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=ca79520b4ff39c0a
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=b52c68ef4953caf0
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=05c1490e2d921cbc
+  owner: architecture
+  reason: Framework-boundary type narrowing — transforms list contains both TransformProtocol and GateProtocol instances despite type annotation. GateProtocol does not define _on_error, so isinstance is required to skip gates when adding divert edges.
+  safety: Gates skipped cleanly — only TransformProtocol instances get _on_error checked
+  expires: '2026-05-06'
+- key: core/dag.py:R1:ExecutionGraph:warn_divert_coalesce_interactions:fp=c81c02216396a4c0
+  owner: architecture
+  reason: NetworkX edge data dict access — framework boundary, not our Pydantic model
+  safety: All edges have label attribute (set by add_edge); non-fatal warning method
+  expires: '2026-05-06'
+- key: core/dag.py:R1:ExecutionGraph:warn_divert_coalesce_interactions:fp=90bcaf3308b04c54
+  owner: architecture
+  reason: Coalesce name may not exist in graph if config references invalid name
+  safety: Returns None and skips gracefully; non-fatal warning method
+  expires: '2026-05-06'
+- key: core/dag.py:R1:ExecutionGraph:warn_divert_coalesce_interactions:fp=e954b8a1e024cb9c
+  owner: architecture
+  reason: NetworkX edge data dict access — framework boundary, not our Pydantic model
+  safety: All edges have label attribute; non-fatal warning method
+  expires: '2026-05-06'
+- key: core/dag.py:R6:ExecutionGraph:warn_divert_coalesce_interactions:fp=346633e1a338aa9e
+  owner: architecture
+  reason: Expected control flow — gate may not be reachable from coalesce on spine subgraph
+  safety: NetworkXNoPath is expected outcome of shortest_path; skips gracefully
+  expires: '2026-05-06'
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=a18d11bcb212bdda
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=37264ee6291aad91
+- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=cba6088fa71ace2d
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=6912052c5d86f9ea
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=d244c5a98fc1ec95
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=23fcb143873b4a0f
+- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=7f047273b9464f6c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1627,11 +1652,6 @@ allow_hits:
   reason: User YAML config boundary - http_config is parsed from pipeline settings
   safety: Defaults to 30s timeout - safe fallback for optional config field
   expires: '2026-05-02'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=1b3fc36e4105e10d
-  owner: architecture
-  reason: Framework-boundary type narrowing — transforms list contains both TransformProtocol and GateProtocol instances despite type annotation. GateProtocol does not define _on_error, so isinstance is required to skip gates when adding divert edges.
-  safety: Gates skipped cleanly — only TransformProtocol instances get _on_error checked. Existing isinstance pattern at dag.py line 456.
-  expires: '2026-05-06'
 
 - key: engine/processor.py:R5:_extract_dict:fp=f5a5a4fa3692668f
   owner: architecture

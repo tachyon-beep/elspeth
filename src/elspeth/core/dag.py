@@ -870,9 +870,7 @@ class ExecutionGraph:
 
         # PHASE 3 WARNINGS: Check for dangerous divert+coalesce interactions
         if coalesce_settings:
-            graph.warn_divert_coalesce_interactions(
-                {cs.name: cs for cs in coalesce_settings}
-            )
+            graph.warn_divert_coalesce_interactions({cs.name: cs for cs in coalesce_settings})
 
         return graph
 
@@ -998,11 +996,7 @@ class ExecutionGraph:
             return warnings
 
         # 2. Build subgraph of only "continue" edges (the main pipeline spine)
-        continue_edges = [
-            (u, v)
-            for u, v, d in self._graph.edges(data=True)
-            if d.get("label") == "continue"
-        ]
+        continue_edges = [(u, v) for u, v, d in self._graph.edges(data=True) if d.get("label") == "continue"]
         spine: nx.DiGraph[str] = nx.DiGraph(continue_edges)
 
         # 3. For each require_all coalesce, find fork gates feeding it
