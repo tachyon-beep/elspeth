@@ -1134,3 +1134,101 @@ class TestForkAggregationCoalesce:
         for row in sink.results:
             # With 'nested' merge strategy, each path's data is under its branch name
             assert "agg_path" in row or "direct_path" in row, f"Merged row should have branch data, got: {row}"
+
+
+class TestTerminalCoalesceBranchLoss:
+    """Tests for branch-loss triggered merges at terminal coalesce points.
+
+    Regression test for: loss-triggered merge at a terminal coalesce step
+    must produce COALESCED outcome, not COMPLETED.
+    """
+
+    def test_terminal_coalesce_branch_loss_produces_coalesced_outcome(
+        self,
+        landscape_db: LandscapeDB,
+        payload_store,
+    ) -> None:
+        """When branch-loss triggers a merge at a terminal coalesce, outcome is COALESCED.
+
+        Pipeline: source → fork(path_a, path_b) → fail_transform → coalesce(best_effort) → sink
+        The transform fails on the second fork child (path_b), which is quarantined.
+        Coalesce re-evaluates with best_effort: 1 arrived + 1 lost = 2 expected → merge.
+        Since coalesce is terminal (no transforms after it), the merged token must
+        get COALESCED outcome, not be re-enqueued as a work item.
+        """
+
+        from elspeth.contracts import TransformResult
+
+        class FailSecondCallTransform(BaseTransform):
+            """Transform that fails on the second call, quarantining one fork child."""
+
+            name = "fail_second"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            _on_error = "discard"  # Quarantine errors
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"mode": "observed"}})
+                self._call_count = 0
+
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                self._call_count += 1
+                if self._call_count == 2:
+                    return TransformResult.error(
+                        {"reason": "branch_loss_test", "error": "intentional_failure"},
+                        retryable=False,
+                    )
+                return TransformResult.success(dict(row), success_reason={"action": "pass"})
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="list_source", options={}),
+            sinks={
+                "output": SinkSettings(plugin="collect_sink", options={}),
+            },
+            default_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches=["path_a", "path_b"],
+                    policy="best_effort",
+                    merge="union",
+                    timeout_seconds=60.0,
+                ),
+            ],
+        )
+
+        source = ListSource([{"id": 1, "value": 100}])
+        sink = CollectSink()
+        fail_transform = FailSecondCallTransform()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(fail_transform)],
+            sinks={"output": as_sink(sink)},
+            gates=settings.gates,
+            coalesce_settings=settings.coalesce,
+            aggregation_settings={},
+            config={},
+        )
+
+        graph = build_production_graph(config, default_sink=settings.default_sink)
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+
+        # The row was forked (parent gets FORKED outcome)
+        assert result.rows_forked == 1
+
+        # The merged token should have COALESCED outcome, not COMPLETED
+        assert result.rows_coalesced >= 1, (
+            f"Expected at least 1 coalesced row, got {result.rows_coalesced}. "
+            f"Branch-loss triggered merge at terminal coalesce must produce COALESCED outcome."
+        )

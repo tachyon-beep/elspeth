@@ -1681,6 +1681,7 @@ class RowProcessor:
         current_token: TokenInfo,
         reason: str,
         child_items: list[_WorkItem],
+        total_steps: int,
     ) -> list[RowResult]:
         """Notify the coalesce executor that a forked branch was diverted.
 
@@ -1693,10 +1694,12 @@ class RowProcessor:
             current_token: The forked token being diverted
             reason: Machine-readable reason for the diversion
             child_items: Mutable work queue — merged tokens are appended here
+            total_steps: Total number of transform steps in pipeline
 
         Returns:
             List of RowResults for sibling tokens that failed as a consequence
-            of the branch loss. Empty if no consequences yet (still waiting).
+            of the branch loss, or a COALESCED RowResult if the merge triggered
+            at a terminal coalesce step. Empty if no consequences yet.
         """
         if self._coalesce_executor is None or current_token.branch_name is None:
             return []
@@ -1718,7 +1721,17 @@ class RowProcessor:
             return []
 
         if outcome.merged_token is not None:
-            # Merge triggered — resume merged token at coalesce step
+            if coalesce_step >= total_steps:
+                # Terminal coalesce — no downstream transforms, emit COALESCED
+                self._emit_token_completed(outcome.merged_token, RowOutcome.COALESCED)
+                return [
+                    RowResult(
+                        token=outcome.merged_token,
+                        final_data=outcome.merged_token.row_data,
+                        outcome=RowOutcome.COALESCED,
+                    ),
+                ]
+            # Non-terminal — resume merged token at coalesce step
             child_items.append(
                 _WorkItem(
                     token=outcome.merged_token,
@@ -1929,6 +1942,7 @@ class RowProcessor:
                         current_token,
                         f"max_retries_exceeded:{e}",
                         child_items,
+                        total_steps,
                     )
                     current_result = RowResult(
                         token=current_token,
@@ -1959,6 +1973,7 @@ class RowProcessor:
                             current_token,
                             f"quarantined:{error_detail}",
                             child_items,
+                            total_steps,
                         )
                         current_result = RowResult(
                             token=current_token,
@@ -1978,6 +1993,7 @@ class RowProcessor:
                             current_token,
                             f"error_routed:{error_detail}",
                             child_items,
+                            total_steps,
                         )
                         current_result = RowResult(
                             token=current_token,
