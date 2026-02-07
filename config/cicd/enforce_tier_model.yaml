@@ -106,27 +106,27 @@ per_file_rules:
   reason: Security utilities access optional environment variables (Tier 3) - defensive access for missing keys
   expires: null
 allow_hits:
-- key: core/landscape/recorder.py:R5:LandscapeRecorder:complete_node_state:fp=412d2cbf5638b662
+- key: core/landscape/recorder.py:R5:LandscapeRecorder:complete_node_state:fp=199b1fdc934bf6de
   owner: architecture
   reason: Type narrowing after DB update - discriminated union requires isinstance to verify terminal state
   safety: Raises AuditIntegrityError if wrong state - explicit failure, not masking
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=c5d342387befe620
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=51920e8f840e9a2b
   owner: architecture
   reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
   safety: Returns lineage with payload_available=False - caller sees data was purged
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=ff11b3a3d3c0e71d
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=b43f543ab87f6a35
   owner: architecture
   reason: OSError for infrastructure issues (NFS timeout, disk full) — payload unavailable but not corruption
   safety: Logs warning with row_id/ref/error details, returns lineage with payload_available=False
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=67f486733db58fcf
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=610c1192ec4907a1
   owner: architecture
   reason: Tier-3 boundary - row_data may contain NaN/Infinity which are not canonically serializable
   safety: Falls back to repr() with logging - audit trail preserved with metadata
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:get_call_response_data:fp=ab25e51af0acede6
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:get_call_response_data:fp=9bcf7255674cb51f
   owner: architecture
   reason: Graceful handling of purged payloads - retention policy may have deleted response data
   safety: Returns None indicating purged - caller handles missing data explicitly
