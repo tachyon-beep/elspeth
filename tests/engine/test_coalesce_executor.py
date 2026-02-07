@@ -151,6 +151,109 @@ def coalesce_setup(recorder: LandscapeRecorder, run: Run):
     return _create_coalesce
 
 
+class TestCoalesceUnionMergeCollisions:
+    """Regression tests for union merge field collision detection (vzrr)."""
+
+    def test_union_merge_records_field_collisions(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """Union merge with overlapping fields should record collisions in audit metadata."""
+        from elspeth.contracts import TokenInfo
+
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+            merge="union",
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"original": True}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # Both branches have "score" field - collision
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data=make_pipeline_row({"score": 0.8, "sentiment": "positive"}),
+            branch_name="path_a",
+        )
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data=make_pipeline_row({"score": 0.3, "entities": ["ACME"]}),
+            branch_name="path_b",
+        )
+
+        executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        outcome = executor.accept(token_b, "merge_results", step_in_pipeline=2)
+
+        assert outcome.merged_token is not None
+        # path_b wins because it's later in settings.branches
+        assert outcome.merged_token.row_data["score"] == 0.3
+        # Non-colliding fields preserved
+        assert outcome.merged_token.row_data["sentiment"] == "positive"
+        assert outcome.merged_token.row_data["entities"] == ["ACME"]
+
+    def test_union_merge_no_collision_no_metadata(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """Union merge with no overlapping fields should not add collision metadata."""
+        from elspeth.contracts import TokenInfo
+
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+            merge="union",
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"original": True}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # No overlap — disjoint fields
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data=make_pipeline_row({"sentiment": "positive"}),
+            branch_name="path_a",
+        )
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data=make_pipeline_row({"entities": ["ACME"]}),
+            branch_name="path_b",
+        )
+
+        executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        outcome = executor.accept(token_b, "merge_results", step_in_pipeline=2)
+
+        assert outcome.merged_token is not None
+        # No collisions — _last_union_collisions should have been reset to empty
+        assert executor._last_union_collisions == {}
+
+
 class TestCoalesceExecutorInit:
     """Test CoalesceExecutor initialization."""
 

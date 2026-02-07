@@ -349,6 +349,10 @@ class PooledExecutor:
                 remaining_s = delay_s - time_since_last
                 remaining_ms = remaining_s * 1000
 
+            # Bail out if shutdown was requested (don't block at gate indefinitely)
+            if self._shutdown_event.is_set():
+                break
+
             # Sleep OUTSIDE the lock to allow other workers to check
             time.sleep(remaining_s)
             total_wait_ms += remaining_ms

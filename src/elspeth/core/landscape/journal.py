@@ -45,6 +45,8 @@ class LandscapeJournal:
             self._payload_store = FilesystemPayloadStore(Path(payload_base_path))
         self._lock = Lock()
         self._disabled = False
+        self._consecutive_failures = 0
+        self._total_dropped = 0
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -102,17 +104,55 @@ class LandscapeJournal:
         if _BUFFER_KEY in conn.info:
             conn.info[_BUFFER_KEY].clear()
 
+    # After this many consecutive failures, disable until next success
+    _MAX_CONSECUTIVE_FAILURES = 5
+
     def _append_records(self, records: list[dict[str, Any]]) -> None:
         payload = "\n".join(self._serialize_record(record) for record in records) + "\n"
         with self._lock:
+            if self._disabled:
+                # Periodically attempt recovery instead of staying silent forever
+                self._total_dropped += len(records)
+                if self._total_dropped % 100 == 0:
+                    logger.warning(
+                        "Landscape journal still disabled after %d consecutive failures, %d records dropped",
+                        self._consecutive_failures,
+                        self._total_dropped,
+                    )
+                    # Attempt recovery
+                    self._disabled = False
+                else:
+                    return
+
             try:
                 with self._path.open("a", encoding="utf-8") as handle:
                     handle.write(payload)
+                if self._consecutive_failures > 0:
+                    logger.info(
+                        "Landscape journal recovered after %d consecutive failures (%d records were dropped)",
+                        self._consecutive_failures,
+                        self._total_dropped,
+                    )
+                self._consecutive_failures = 0
             except Exception as exc:
-                logger.error("Landscape journal write failed: %s", exc)
+                self._consecutive_failures += 1
+                self._total_dropped += len(records)
+                logger.error(
+                    "Landscape journal write failed (attempt %d/%d): %s",
+                    self._consecutive_failures,
+                    self._MAX_CONSECUTIVE_FAILURES,
+                    exc,
+                )
                 if self._fail_on_error:
                     raise
-                self._disabled = True
+                if self._consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        "Landscape journal disabled after %d consecutive failures. "
+                        "Will retry every 100 dropped records. %d records dropped so far.",
+                        self._consecutive_failures,
+                        self._total_dropped,
+                    )
+                    self._disabled = True
 
     @staticmethod
     def _serialize_record(record: dict[str, Any]) -> str:

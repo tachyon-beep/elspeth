@@ -700,7 +700,9 @@ class TestMemoryLeakPrevention:
                     transform.accept(make_pipeline_row(row), ctx)
 
                 # Process batch - all rows will fail with retry timeout
-                transform.flush_batch_processing(timeout=30.0)
+                # Timeout is generous because AIMD congestion control serializes
+                # retries through the dispatch gate under 100% failure rate
+                transform.flush_batch_processing(timeout=120.0)
 
                 assert len(collector.results) == 5
                 # All rows should have failed (either as error result or exception)

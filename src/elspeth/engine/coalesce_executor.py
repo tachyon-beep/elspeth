@@ -123,6 +123,8 @@ class CoalesceExecutor:
         # Maximum completed keys to retain (prevents OOM in long-running pipelines)
         # Late arrivals after eviction create new pending entries (timeout/flush correctly)
         self._max_completed_keys: int = 10000
+        # Temporary storage for union merge collision info (consumed by _execute_merge)
+        self._last_union_collisions: dict[str, list[str]] = {}
 
     def register_coalesce(
         self,
@@ -573,6 +575,11 @@ class CoalesceExecutor:
             "wait_duration_ms": (now - pending.first_arrival) * 1000,
         }
 
+        # Include union merge collision info in audit trail if present
+        if self._last_union_collisions:
+            coalesce_metadata["union_field_collisions"] = self._last_union_collisions
+            self._last_union_collisions = {}
+
         # Complete pending node states for consumed tokens
         # (These states were created as "pending" when tokens were held in accept())
         for branch_name, token in pending.arrived.items():
@@ -626,12 +633,31 @@ class CoalesceExecutor:
         Note: row_data is PipelineRow, so we use to_dict() to get raw dict.
         """
         if settings.merge == "union":
-            # Combine all fields (later branches override earlier)
+            # Combine all fields from all branches.
+            # On name collision, the last branch in settings.branches wins.
+            # Collisions are recorded in the audit trail (coalesce_metadata)
+            # so that overwritten values are never silently lost.
             merged: dict[str, Any] = {}
+            field_origins: dict[str, str] = {}  # field -> branch that set it
+            collisions: dict[str, list[str]] = {}  # field -> [branch1, branch2, ...]
             for branch_name in settings.branches:
                 if branch_name in arrived:
-                    # PipelineRow requires to_dict() for dict operations
-                    merged.update(arrived[branch_name].row_data.to_dict())
+                    branch_data = arrived[branch_name].row_data.to_dict()
+                    for field in branch_data:
+                        if field in field_origins:
+                            if field not in collisions:
+                                collisions[field] = [field_origins[field]]
+                            collisions[field].append(branch_name)
+                        field_origins[field] = branch_name
+                    merged.update(branch_data)
+            if collisions:
+                slog.warning(
+                    "union_merge_field_collisions",
+                    collisions=dict(collisions),
+                    winner_branch={f: branches[-1] for f, branches in collisions.items()},
+                )
+            # Stash collisions for audit metadata (read by _execute_merge)
+            self._last_union_collisions = collisions
             return merged
 
         elif settings.merge == "nested":

@@ -16,6 +16,7 @@ Usage:
 import argparse
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -643,10 +644,11 @@ class LandscapeAnalyzer:
         if not sql_normalized.startswith("SELECT"):
             raise ValueError("Only SELECT queries are allowed")
 
-        # Reject dangerous keywords even in SELECT
+        # Reject dangerous keywords even in SELECT (word-boundary match to avoid
+        # false positives like created_at matching CREATE, updated_at matching UPDATE)
         dangerous = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "GRANT", "REVOKE"]
         for keyword in dangerous:
-            if keyword in sql_normalized:
+            if re.search(rf"\b{keyword}\b", sql_normalized):
                 raise ValueError(f"Query contains forbidden keyword: {keyword}")
 
         from sqlalchemy import text
