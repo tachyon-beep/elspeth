@@ -235,8 +235,10 @@ class TestSchemaCompatibility:
         result = check_compatibility(Producer, Consumer)
         assert result.compatible is False
         assert result.error_message is not None
-        # Error should contain "int | None", not just "Union" or "Optional"
-        assert "int | None" in result.error_message or "Optional" not in result.error_message
+        # Error should use modern union syntax "int | None", not "Union" or "Optional"
+        assert "int | None" in result.error_message, (
+            f"Error message should contain 'int | None', got: {result.error_message!r}"
+        )
 
     def test_extra_fields_detected_with_strict_consumer(self) -> None:
         """Extra fields should be detected when consumer has extra='forbid'.
