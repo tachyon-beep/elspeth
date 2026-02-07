@@ -29,6 +29,10 @@ from elspeth.core.landscape.schema import (
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
 
+# SQLite's SQLITE_MAX_VARIABLE_NUMBER defaults to 999. We chunk IN clauses
+# at 500 to leave headroom for other query parameters in the same statement.
+_METADATA_CHUNK_SIZE = 500
+
 __all__ = [
     "RecoveryManager",
     "ResumeCheck",  # Re-exported from contracts for convenience
@@ -204,16 +208,20 @@ class RecoveryManager:
 
         result: list[tuple[str, int, dict[str, Any]]] = []
 
-        # Batch query: Fetch all row metadata in one query (N+1 fix)
-        with self._db.engine.connect() as conn:
-            rows_result = conn.execute(
-                select(rows_table.c.row_id, rows_table.c.row_index, rows_table.c.source_data_ref).where(rows_table.c.row_id.in_(row_ids))
-            ).fetchall()
-
-        # Build lookup dict for row metadata
+        # Batch query: Fetch row metadata in chunks to respect SQLite bind limit.
         row_metadata: dict[str, tuple[int, str | None]] = {}
-        for r in rows_result:
-            row_metadata[r.row_id] = (r.row_index, r.source_data_ref)
+        with self._db.engine.connect() as conn:
+            for i in range(0, len(row_ids), _METADATA_CHUNK_SIZE):
+                chunk = row_ids[i : i + _METADATA_CHUNK_SIZE]
+                rows_result = conn.execute(
+                    select(
+                        rows_table.c.row_id,
+                        rows_table.c.row_index,
+                        rows_table.c.source_data_ref,
+                    ).where(rows_table.c.row_id.in_(chunk))
+                ).fetchall()
+                for r in rows_result:
+                    row_metadata[r.row_id] = (r.row_index, r.source_data_ref)
 
         for row_id in row_ids:
             if row_id not in row_metadata:

@@ -295,3 +295,140 @@ class TestRecoveryManagerRowData:
 
         with pytest.raises(ValueError, match="payload has been purged"):
             recovery_manager.get_unprocessed_row_data(run_id, payload_store, source_schema_class=mock_schema)
+
+
+class TestMetadataQueryChunking:
+    """Tests for P1: SQLite bind limit protection in get_unprocessed_row_data.
+
+    The metadata query uses an IN clause that would exceed SQLite's
+    SQLITE_MAX_VARIABLE_NUMBER (default 999) for large resume sets.
+    The fix chunks the query at _METADATA_CHUNK_SIZE rows.
+    """
+
+    def test_chunked_metadata_query_returns_all_rows(
+        self,
+        db: LandscapeDB,
+        payload_store: FilesystemPayloadStore,
+        checkpoint_manager: CheckpointManager,
+        recovery_manager: RecoveryManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify all rows are returned when IN clause is chunked.
+
+        Monkeypatches _METADATA_CHUNK_SIZE to 3, then creates 7 unprocessed
+        rows — forcing 3 chunked queries (3 + 3 + 1). Verifies all 7 rows
+        are returned with correct data.
+        """
+        import elspeth.core.checkpoint.recovery as recovery_mod
+
+        monkeypatch.setattr(recovery_mod, "_METADATA_CHUNK_SIZE", 3)
+
+        run_id = "test-chunk-run"
+        now = datetime.now(UTC)
+        total_rows = 10  # 3 processed + 7 unprocessed
+        processed_count = 3
+
+        with db.engine.connect() as conn:
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=run_id,
+                    started_at=now,
+                    config_hash="x",
+                    settings_json="{}",
+                    canonical_version="v1",
+                    status=RunStatus.FAILED,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="source-node",
+                    run_id=run_id,
+                    plugin_name="csv",
+                    node_type=NodeType.SOURCE,
+                    plugin_version="1.0",
+                    determinism=Determinism.IO_READ,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="sink-node",
+                    run_id=run_id,
+                    plugin_name="csv_sink",
+                    node_type=NodeType.SINK,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+
+            for i in range(total_rows):
+                row_id = f"row-{i:03d}"
+                row_data = {"id": i, "value": f"data-{i}"}
+                payload_ref = payload_store.store(json.dumps(row_data).encode())
+                conn.execute(
+                    rows_table.insert().values(
+                        row_id=row_id,
+                        run_id=run_id,
+                        source_node_id="source-node",
+                        row_index=i,
+                        source_data_hash=f"hash{i}",
+                        source_data_ref=payload_ref,
+                        created_at=now,
+                    )
+                )
+                conn.execute(
+                    tokens_table.insert().values(
+                        token_id=f"tok-{i:03d}",
+                        row_id=row_id,
+                        created_at=now,
+                    )
+                )
+
+            # Mark first 3 rows as completed
+            for i in range(processed_count):
+                conn.execute(
+                    token_outcomes_table.insert().values(
+                        outcome_id=f"outcome-{i:03d}",
+                        run_id=run_id,
+                        token_id=f"tok-{i:03d}",
+                        outcome=RowOutcome.COMPLETED.value,
+                        is_terminal=1,
+                        recorded_at=now,
+                        sink_name="sink-node",
+                    )
+                )
+            conn.commit()
+
+        # Checkpoint at row 2 (rows 3-9 unprocessed = 7 rows, needing 3 chunks of 3)
+        from tests.core.checkpoint.conftest import _create_test_graph
+
+        graph = _create_test_graph()
+        checkpoint_manager.create_checkpoint(
+            run_id=run_id,
+            token_id="tok-002",
+            node_id="source-node",
+            sequence_number=2,
+            graph=graph,
+        )
+
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("ChunkTestSchema")
+
+        result = recovery_manager.get_unprocessed_row_data(run_id, payload_store, source_schema_class=mock_schema)
+
+        # All 7 unprocessed rows must be returned
+        assert len(result) == 7
+        returned_indices = [row_index for _, row_index, _ in result]
+        assert returned_indices == list(range(3, 10))
+
+        # Verify data integrity across chunk boundaries
+        for row_id, row_index, row_data in result:
+            assert row_id == f"row-{row_index:03d}"
+            assert row_data["id"] == row_index
+            assert row_data["value"] == f"data-{row_index}"
