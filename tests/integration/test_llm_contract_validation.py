@@ -3,6 +3,10 @@
 
 These tests verify that the contract validation system catches missing
 template fields at configuration time, before any data processing occurs.
+
+Note: Tests in TestDAGContractValidationWithLLMConfig and TestMultiTransformChain
+manually construct graphs to test validate_edge_compatibility(), which is a graph
+algorithm. Per CLAUDE.md, manual graph construction is acceptable for graph algorithm tests.
 """
 
 import pytest
