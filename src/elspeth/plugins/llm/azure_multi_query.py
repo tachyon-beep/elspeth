@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, TransformErrorCategory, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_multi_query_guaranteed_fields
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfig,

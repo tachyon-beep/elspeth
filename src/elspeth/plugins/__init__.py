@@ -31,6 +31,9 @@ from elspeth.contracts import (
     check_compatibility,
     validate_row,
 )
+
+# Context
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.base import (
     BaseGate,
     BaseSink,
@@ -47,9 +50,6 @@ from elspeth.plugins.config_base import (
     SourceDataConfig,
     TransformDataConfig,
 )
-
-# Context
-from elspeth.contracts.plugin_context import PluginContext
 
 # Hookspecs
 from elspeth.plugins.hookspecs import hookimpl, hookspec

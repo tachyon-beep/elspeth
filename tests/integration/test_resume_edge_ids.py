@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import select
 
 from elspeth.contracts import Determinism, NodeType
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow
@@ -23,7 +24,6 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import edges_table
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.plugins.base import BaseGate
-from elspeth.contracts.plugin_context import PluginContext
 
 
 class SimpleGate(BaseGate):

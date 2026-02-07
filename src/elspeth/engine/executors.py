@@ -37,6 +37,7 @@ from elspeth.contracts.enums import (
     TriggerType,
 )
 from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -46,7 +47,6 @@ from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.protocols import (
     BatchTransformProtocol,
     GateProtocol,
@@ -523,12 +523,6 @@ class TransformExecutor:
                     edge_id=error_edge_id,
                     mode=RoutingMode.DIVERT,
                     reason=result.reason,
-                )
-
-                ctx.route_to_sink(
-                    sink_name=on_error,
-                    row=input_dict,  # Use extracted dict for sink routing
-                    metadata={"transform_error": result.reason},
                 )
 
             updated_token = token
@@ -1611,7 +1605,7 @@ class AggregationExecutor:
             # Store full TokenInfo as dicts (not just IDs)
             # Include all lineage fields to preserve fork/join/expand metadata
             #
-            # PipelineRow Migration (v2.0):
+            # PipelineRow Migration (v2.0), hash-width bump (v2.1):
             # - row_data is stored as dict via to_dict() for JSON serialization
             # - contract is stored once per node (not per token) for efficiency
             # - contract_version links tokens to their contract for restoration
@@ -1646,7 +1640,8 @@ class AggregationExecutor:
         # v1.0: Initial format with elapsed_age_seconds
         # v1.1: Added count_fire_offset/condition_fire_offset for trigger ordering (P2-2026-02-01)
         # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
-        state["_version"] = "2.0"
+        # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
+        state["_version"] = "2.1"
 
         # Size validation (on serialized checkpoint)
         # Use checkpoint_dumps to handle datetime (P1-2026-02-05 fix)
@@ -1678,7 +1673,7 @@ class AggregationExecutor:
         Args:
             state: Checkpoint state with format:
                 {
-                    "_version": "2.0",
+                    "_version": "2.1",
                     "node_id": {
                         "tokens": [{"token_id", "row_id", "branch_name", "row_data", ...}],
                         "batch_id": str,
@@ -1694,7 +1689,8 @@ class AggregationExecutor:
         # Validate checkpoint version (Bug #12 fix)
         # v1.1: Pre-PipelineRow migration format
         # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
-        CHECKPOINT_VERSION = "2.0"
+        # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
+        CHECKPOINT_VERSION = "2.1"
         version = state.get("_version")
 
         if version != CHECKPOINT_VERSION:
@@ -1733,12 +1729,12 @@ class AggregationExecutor:
             if not isinstance(tokens_data, list):
                 raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
 
-            # Restore contract from checkpoint (v2.0: stored once per node)
+            # Restore contract from checkpoint (v2.1: stored once per node)
             # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
             if "contract" not in node_state:
                 raise ValueError(
                     f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
-                    f"v2.0 format requires contract for PipelineRow restoration."
+                    f"v2.1 format requires contract for PipelineRow restoration."
                 )
             restored_contract = SchemaContract.from_checkpoint(node_state["contract"])
 
@@ -1746,7 +1742,7 @@ class AggregationExecutor:
             reconstructed_tokens = []
             for t in tokens_data:
                 # Validate required fields (crash on missing - per CLAUDE.md)
-                # All these fields are required in checkpoint format v2.0 (values can be None)
+                # All these fields are required in checkpoint format v2.1 (values can be None)
                 required_fields = {
                     "token_id",
                     "row_id",
@@ -1761,7 +1757,7 @@ class AggregationExecutor:
                 if missing:
                     raise ValueError(
                         f"Checkpoint token missing required fields: {missing}. "
-                        f"Required in v2.0 format: {required_fields}. Found: {set(t.keys())}"
+                        f"Required in v2.1 format: {required_fields}. Found: {set(t.keys())}"
                     )
 
                 # Validate contract_version matches restored contract
@@ -1778,7 +1774,7 @@ class AggregationExecutor:
 
                 # Reconstruct TokenInfo from checkpoint data
                 # NOTE: These fields CAN be None (valid state for unforked tokens), but they
-                # are ALWAYS present in checkpoint format v2.0 - use direct access to detect
+                # are ALWAYS present in checkpoint format v2.1 - use direct access to detect
                 # corruption/missing fields. The difference between "field is None" and
                 # "field is missing" matters: the former is valid, the latter is corruption.
                 reconstructed_tokens.append(
@@ -1822,7 +1818,7 @@ class AggregationExecutor:
             # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
             # The old approach called record_accept() which set fire times to current time,
             # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
-            # NOTE: All fields are required in checkpoint format v2.0 - no backwards compat
+            # NOTE: All fields are required in checkpoint format v2.1 - no backwards compat
             elapsed_seconds = node_state["elapsed_age_seconds"]
             count_fire_offset = node_state["count_fire_offset"]
             condition_fire_offset = node_state["condition_fire_offset"]

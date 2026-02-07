@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts import ArtifactDescriptor
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.azure.blob_sink import AzureBlobSink
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.contracts.plugin_context import PluginContext
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}

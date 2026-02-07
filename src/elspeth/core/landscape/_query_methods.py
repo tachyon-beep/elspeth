@@ -245,11 +245,7 @@ class QueryMethodsMixin:
         """
         if not state_ids:
             return []
-        query = (
-            select(calls_table)
-            .where(calls_table.c.state_id.in_(state_ids))
-            .order_by(calls_table.c.state_id, calls_table.c.call_index)
-        )
+        query = select(calls_table).where(calls_table.c.state_id.in_(state_ids)).order_by(calls_table.c.state_id, calls_table.c.call_index)
         db_rows = self._ops.execute_fetchall(query)
         return [self._call_repo.load(r) for r in db_rows]
 

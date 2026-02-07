@@ -14,12 +14,12 @@ Gates are config-driven using GateSettings.
 from typing import Any
 
 from elspeth.contracts import NodeStateStatus, NodeType, SourceRow
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB
 from elspeth.plugins.base import BaseTransform
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
@@ -1346,6 +1346,7 @@ class TestAggregationCoalesceMetadataPropagation:
         causing the token to skip the coalesce point.
         """
         from elspeth.contracts import NodeType
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.types import BranchName, CoalesceName, NodeID
         from elspeth.core.config import CoalesceSettings
         from elspeth.core.landscape import LandscapeRecorder
@@ -1353,7 +1354,6 @@ class TestAggregationCoalesceMetadataPropagation:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.contracts.plugin_context import PluginContext
 
         recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")

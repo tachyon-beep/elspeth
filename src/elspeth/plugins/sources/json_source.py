@@ -17,9 +17,9 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import SourceDataConfig
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 

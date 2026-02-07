@@ -1273,11 +1273,11 @@ class TestGateRuntimeErrors:
         available fields), and this should be recorded as a failed node state.
         """
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -1375,11 +1375,11 @@ class TestGateRuntimeErrors:
         3. The gate evaluates correctly and routes based on the result
         """
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

@@ -17,11 +17,11 @@ import pytest
 
 from elspeth.contracts import TokenCompleted
 from elspeth.contracts.enums import RowOutcome, RunStatus
-from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.contracts.events import (
     RunFinished,
     RunStarted,
 )
+from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters.otlp import (
     OTLPExporter,
     _derive_span_id,

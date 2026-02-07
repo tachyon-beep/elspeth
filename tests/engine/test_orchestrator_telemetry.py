@@ -19,13 +19,12 @@ from pydantic import ConfigDict
 
 from elspeth.contracts import ArtifactDescriptor, PipelineRow, PluginSchema, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
-from elspeth.contracts.events import TelemetryEvent
+from elspeth.contracts.events import PhaseChanged, RunFinished, RunStarted, TelemetryEvent
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.contracts.events import PhaseChanged, RunFinished, RunStarted
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
@@ -477,8 +476,8 @@ class TestRowCreatedTelemetry:
         2. Emits RowCreated telemetry AFTER Landscape recording succeeds
         3. Records QUARANTINED outcome
         """
-        from elspeth.core.canonical import stable_hash
         from elspeth.contracts.events import RowCreated
+        from elspeth.core.canonical import stable_hash
 
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])

@@ -22,8 +22,8 @@ import httpx
 import pytest
 
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
-from elspeth.plugins.config_base import PluginConfigError
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.llm.openrouter_batch import (
     OpenRouterBatchConfig,
     OpenRouterBatchLLMTransform,

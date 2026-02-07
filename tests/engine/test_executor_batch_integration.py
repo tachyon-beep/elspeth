@@ -22,13 +22,13 @@ import pytest
 from elspeth.contracts import NodeStateCompleted, TransformResult
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.spans import SpanFactory
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.azure import AzureLLMTransform
 
 DYNAMIC_SCHEMA = {"mode": "observed"}

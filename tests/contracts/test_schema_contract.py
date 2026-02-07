@@ -598,7 +598,7 @@ class TestSchemaContractCheckpoint:
         hash1 = sample_contract.version_hash()
         hash2 = sample_contract.version_hash()
         assert hash1 == hash2
-        assert len(hash1) == 16  # Truncated SHA-256
+        assert len(hash1) == 32  # Truncated SHA-256 (128 bits)
 
     def test_version_hash_changes_on_field_change(self) -> None:
         """Different fields produce different hashes."""

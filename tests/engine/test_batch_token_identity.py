@@ -18,6 +18,7 @@ from typing import Any
 
 from elspeth.contracts import Determinism, NodeType, SourceRow
 from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -25,7 +26,6 @@ from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema

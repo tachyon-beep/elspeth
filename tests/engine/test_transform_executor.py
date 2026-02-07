@@ -27,10 +27,10 @@ class TestTransformExecutor:
 
     def test_execute_transform_success(self) -> None:
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -92,10 +92,10 @@ class TestTransformExecutor:
 
     def test_execute_transform_error(self) -> None:
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -164,10 +164,10 @@ class TestTransformExecutor:
     def test_execute_transform_exception_records_failure(self) -> None:
         """Transform raising exception still records audit state."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -228,10 +228,10 @@ class TestTransformExecutor:
     def test_execute_transform_updates_token_row_data(self) -> None:
         """Updated token should have new row_data."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -290,10 +290,10 @@ class TestTransformExecutor:
     def test_node_state_records_input_and_output(self) -> None:
         """Node state should record both input and output hashes."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -358,10 +358,10 @@ class TestTransformExecutor:
     def test_execute_transform_returns_error_sink_on_discard(self) -> None:
         """When transform errors with on_error='discard', returns error_sink='discard'."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -431,11 +431,11 @@ class TestTransformExecutor:
         """When transform errors with on_error=sink_name, returns that sink name."""
         from elspeth.contracts import TokenInfo, error_edge_label
         from elspeth.contracts.enums import RoutingMode
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.types import NodeID
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -509,10 +509,10 @@ class TestTransformExecutor:
     def test_execute_transform_returns_none_error_sink_on_success(self) -> None:
         """On success, error_sink is None."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -570,10 +570,10 @@ class TestTransformExecutor:
         from unittest.mock import patch
 
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -640,10 +640,10 @@ class TestTransformExecutor:
         import json
 
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()
@@ -741,10 +741,10 @@ class TestTransformErrorIdRegression:
         Fix: Use transform.node_id which is unique per DAG node.
         """
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         db = LandscapeDB.in_memory()

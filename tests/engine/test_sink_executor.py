@@ -66,10 +66,10 @@ class TestSinkExecutor:
     def test_write_records_artifact(self) -> None:
         """Write tokens to sink records artifact in Landscape."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -151,10 +151,10 @@ class TestSinkExecutor:
     def test_write_empty_tokens_returns_none(self) -> None:
         """Write with empty tokens returns None without side effects."""
         from elspeth.contracts import ArtifactDescriptor
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -198,10 +198,10 @@ class TestSinkExecutor:
     def test_write_exception_records_failure(self) -> None:
         """Sink raising exception still records audit state for all tokens."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -272,10 +272,10 @@ class TestSinkExecutor:
     def test_write_multiple_batches_creates_multiple_artifacts(self) -> None:
         """Multiple sink writes create separate artifacts."""
         from elspeth.contracts import ArtifactDescriptor, TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -356,10 +356,10 @@ class TestSinkExecutor:
     def test_artifact_linked_to_first_state(self) -> None:
         """Artifact is linked to first token's state_id for audit lineage."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -423,10 +423,10 @@ class TestSinkExecutor:
     def test_sink_external_calls_attributed_to_operation(self) -> None:
         """BUG-RECORDER-01: Sink execution sets state_id on context for external call recording."""
         from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -542,10 +542,10 @@ class TestSinkExecutor:
         """
         from elspeth.contracts import ArtifactDescriptor, TokenInfo
         from elspeth.contracts.audit import NodeStateFailed
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -643,10 +643,10 @@ class TestSinkExecutor:
         the exception after completing audit states.
         """
         from elspeth.contracts import ArtifactDescriptor, TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

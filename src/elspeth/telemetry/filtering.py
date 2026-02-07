@@ -12,17 +12,15 @@ used by TelemetryManager to decide which events to emit.
 
 from elspeth.contracts.enums import TelemetryGranularity
 from elspeth.contracts.events import (
-    GateEvaluated,
-    TelemetryEvent,
-    TokenCompleted,
-    TransformCompleted,
-)
-from elspeth.contracts.events import (
     ExternalCallCompleted,
+    GateEvaluated,
     PhaseChanged,
     RowCreated,
     RunFinished,
     RunStarted,
+    TelemetryEvent,
+    TokenCompleted,
+    TransformCompleted,
 )
 
 

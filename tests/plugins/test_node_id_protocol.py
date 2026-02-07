@@ -24,8 +24,8 @@ class TestNodeIdProtocol:
         from typing import Any
 
         from elspeth.contracts import PluginSchema
-        from elspeth.plugins.base import BaseSource
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.base import BaseSource
 
         class TestSchema(PluginSchema):
             pass
@@ -58,8 +58,8 @@ class TestNodeIdProtocol:
         """BaseTransform has node_id attribute with default None."""
 
         from elspeth.contracts import PipelineRow, PluginSchema
-        from elspeth.plugins.base import BaseTransform
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
 
         class TestSchema(PluginSchema):
@@ -91,8 +91,8 @@ class TestNodeIdProtocol:
         """BaseGate has node_id attribute with default None."""
 
         from elspeth.contracts import PipelineRow, PluginSchema, RoutingAction
-        from elspeth.plugins.base import BaseGate
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.base import BaseGate
         from elspeth.plugins.results import GateResult
 
         class TestSchema(PluginSchema):
@@ -145,8 +145,8 @@ class TestNodeIdProtocol:
         from typing import Any
 
         from elspeth.contracts import PluginSchema
-        from elspeth.plugins.base import BaseSink
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.base import BaseSink
 
         class TestSchema(PluginSchema):
             pass

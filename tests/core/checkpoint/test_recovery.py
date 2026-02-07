@@ -936,7 +936,7 @@ class TestGetUnprocessedRowsBufferedInAggregation:
         # Create checkpoint with aggregation state containing rows 2 and 3
         # This simulates a passthrough aggregation that has buffered these rows
         aggregation_state = {
-            "_version": "2.0",
+            "_version": "2.1",
             "agg-node": {
                 "tokens": [
                     {

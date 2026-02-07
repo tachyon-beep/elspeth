@@ -249,8 +249,6 @@ class TestSingleQueryProcessing:
             )
             mock_client.post.return_value = mock_response
 
-
-
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             transform.on_start(ctx)
@@ -281,8 +279,6 @@ class TestSingleQueryProcessing:
                 response=mock_response,
             )
             mock_client.post.return_value = mock_response
-
-
 
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
@@ -537,8 +533,6 @@ class TestRowProcessingWithPipelining:
             mock_client = mock_client_class.return_value
             mock_client.post.side_effect = make_response
 
-
-
             row = {
                 "cs1_bg": "bg",
                 "cs1_sym": "sym",
@@ -784,8 +778,6 @@ class TestHTTPSpecificBehavior:
             )
             mock_client.post.return_value = mock_response
 
-
-
             row = {
                 "cs1_bg": "data",
                 "cs1_sym": "data",
@@ -830,8 +822,6 @@ class TestHTTPSpecificBehavior:
             mock_response.content = b""
             mock_response.raise_for_status = Mock()
             mock_client.post.return_value = mock_response
-
-
 
             row = {
                 "cs1_bg": "data",
@@ -881,8 +871,6 @@ class TestHTTPSpecificBehavior:
             mock_response.content = b""
             mock_response.raise_for_status = Mock()
             mock_client.post.return_value = mock_response
-
-
 
             row = {
                 "cs1_bg": "data",
@@ -954,8 +942,6 @@ class TestHTTPSpecificBehavior:
         with patch("httpx.Client") as mock_client_class:
             mock_client = mock_client_class.return_value
             mock_client.post.side_effect = httpx.ConnectError("Connection refused")
-
-
 
             row = {
                 "cs1_bg": "data",

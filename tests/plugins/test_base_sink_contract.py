@@ -4,9 +4,9 @@
 from typing import Any
 
 from elspeth.contracts import ArtifactDescriptor
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.plugins.base import BaseSink
-from elspeth.contracts.plugin_context import PluginContext
 
 
 class StubSink(BaseSink):

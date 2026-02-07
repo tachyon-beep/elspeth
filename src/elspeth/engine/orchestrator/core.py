@@ -60,6 +60,7 @@ from elspeth.contracts.events import (
     RunCompletionStatus,
     RunSummary,
 )
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -104,7 +105,6 @@ from elspeth.engine.orchestrator.validation import (
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 if TYPE_CHECKING:

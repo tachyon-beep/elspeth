@@ -426,12 +426,12 @@ class TestEngineIntegrationOutcomes:
         from pydantic import ConfigDict
 
         from elspeth.contracts import PluginSchema, RowOutcome
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class _TestSchema(PluginSchema):
@@ -510,12 +510,12 @@ class TestEngineIntegrationOutcomes:
         from pydantic import ConfigDict
 
         from elspeth.contracts import NodeType, PluginSchema, RowOutcome
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class _TestSchema(PluginSchema):
@@ -587,12 +587,12 @@ class TestEngineIntegrationOutcomes:
     def test_processor_records_forked_outcome_with_fork_group_id(self) -> None:
         """RowProcessor should record FORKED outcome with fork_group_id and parent lineage."""
         from elspeth.contracts import NodeType, RowOutcome
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

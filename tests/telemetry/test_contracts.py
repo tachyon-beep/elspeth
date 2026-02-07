@@ -34,19 +34,17 @@ from elspeth.contracts.enums import (
     RunStatus,
 )
 from elspeth.contracts.events import (
+    ExternalCallCompleted,
     GateEvaluated,
     PhaseAction,
-    PipelinePhase,
-    TelemetryEvent,
-    TokenCompleted,
-    TransformCompleted,
-)
-from elspeth.contracts.events import (
-    ExternalCallCompleted,
     PhaseChanged,
+    PipelinePhase,
     RowCreated,
     RunFinished,
     RunStarted,
+    TelemetryEvent,
+    TokenCompleted,
+    TransformCompleted,
 )
 from elspeth.telemetry.exporters.azure_monitor import AzureMonitorExporter
 from elspeth.telemetry.exporters.console import ConsoleExporter

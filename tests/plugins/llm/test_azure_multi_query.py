@@ -9,9 +9,9 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 from elspeth.testing import make_pipeline_row
 

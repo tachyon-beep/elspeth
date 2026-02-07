@@ -21,9 +21,9 @@ from elspeth.contracts import Determinism
 
 if TYPE_CHECKING:
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
-    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.plugins.results import GateResult, TransformResult
 
 

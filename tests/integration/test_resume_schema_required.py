@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, RunStatus
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
@@ -19,7 +20,6 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.plugins.base import BaseSource
-from elspeth.contracts.plugin_context import PluginContext
 
 
 class SourceWithoutSchema(BaseSource):

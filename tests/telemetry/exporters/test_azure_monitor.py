@@ -19,11 +19,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts.enums import RowOutcome, RunStatus
-from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.contracts.events import (
     RunFinished,
     RunStarted,
 )
+from elspeth.telemetry.errors import TelemetryExporterError
 
 # Import the exporter class - it doesn't import Azure SDK at module level
 from elspeth.telemetry.exporters.azure_monitor import AzureMonitorExporter

@@ -17,18 +17,23 @@ from typing import Any
 # level pulls in 400+ modules just for type normalization.
 # FIX: P2-2026-01-30-6fp (regression from type_normalization.py addition)
 
+# Canonical type registry: string name → Python type.
+# Single source of truth for all contract type maps in the codebase.
+# Used for checkpoint serialization/deserialization, type validation,
+# and annotation resolution across contracts/ modules.
+CONTRACT_TYPE_MAP: dict[str, type] = {
+    "int": int,
+    "str": str,
+    "float": float,
+    "bool": bool,
+    "NoneType": type(None),
+    "datetime": datetime,
+    "object": object,  # 'any' type for fields that accept any value
+}
+
 # Types that can be serialized in checkpoint and restored in from_checkpoint()
-# Must match type_map in SchemaContract.from_checkpoint()
-ALLOWED_CONTRACT_TYPES: frozenset[type] = frozenset(
-    {
-        int,
-        str,
-        float,
-        bool,
-        type(None),
-        datetime,
-    }
-)
+# Derived from CONTRACT_TYPE_MAP to stay in sync.
+ALLOWED_CONTRACT_TYPES: frozenset[type] = frozenset(CONTRACT_TYPE_MAP.values())
 
 
 def normalize_type_for_contract(value: Any) -> type:

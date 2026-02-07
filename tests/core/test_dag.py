@@ -1505,9 +1505,9 @@ class TestCoalesceNodes:
         from typing import Any
 
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
         from elspeth.plugins.base import BaseGate
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult, RoutingAction
 
         class DummySchema(PluginSchema):

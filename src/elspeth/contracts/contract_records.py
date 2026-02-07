@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts.errors import (
@@ -22,22 +21,10 @@ from elspeth.contracts.errors import (
     MissingFieldViolation,
     TypeMismatchViolation,
 )
+from elspeth.contracts.type_normalization import CONTRACT_TYPE_MAP
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
-
-# Type map for restoration: string name -> Python type
-# Per CLAUDE.md Tier 1: No fallback - crash on unknown types (audit integrity)
-TYPE_MAP: dict[str, type] = {
-    "int": int,
-    "str": str,
-    "float": float,
-    "bool": bool,
-    "NoneType": type(None),
-    "datetime": datetime,
-    "object": object,
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +184,7 @@ class ContractAuditRecord:
             FieldContract(
                 normalized_name=f.normalized_name,
                 original_name=f.original_name,
-                python_type=TYPE_MAP[f.python_type],  # KeyError on unknown = correct!
+                python_type=CONTRACT_TYPE_MAP[f.python_type],  # KeyError on unknown = correct!
                 required=f.required,
                 source=f.source,
             )

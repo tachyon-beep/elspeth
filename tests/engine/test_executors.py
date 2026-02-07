@@ -32,6 +32,7 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.enums import Determinism, NodeType, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
@@ -46,7 +47,6 @@ from elspeth.engine.executors import (
     TransformExecutor,
 )
 from elspeth.engine.spans import SpanFactory
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import GateResult, TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.conftest import (

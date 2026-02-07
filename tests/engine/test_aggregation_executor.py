@@ -770,7 +770,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format (can be None)
                         "join_group_id": None,  # Required in v2.0 format (can be None)
                         "expand_group_id": None,  # Required in v2.0 format (can be None)
-                        "contract_version": "93577787f8ffd7ee",  # v2.0: contract hash (name+score fields)
+                        "contract_version": "93577787f8ffd7ee162b5a153fcf970c",  # v2.0: contract hash (name+score fields)
                     },
                     {
                         "token_id": "token-102",
@@ -780,14 +780,14 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
-                        "contract_version": "93577787f8ffd7ee",  # v2.0: contract hash (name+score fields)
+                        "contract_version": "93577787f8ffd7ee162b5a153fcf970c",  # v2.0: contract hash (name+score fields)
                     },
                 ],
                 "batch_id": "batch-123",
                 "contract": {
                     "mode": "OBSERVED",
                     "locked": True,
-                    "version_hash": "93577787f8ffd7ee",
+                    "version_hash": "93577787f8ffd7ee162b5a153fcf970c",
                     "fields": [
                         {
                             "normalized_name": "name",
@@ -884,7 +884,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format
                         "join_group_id": None,  # Required in v2.0 format
                         "expand_group_id": None,  # Required in v2.0 format
-                        "contract_version": "acaff3625e64c8a6",  # v2.0: contract hash (value field)
+                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # v2.0: contract hash (value field)
                     }
                     for i in range(4)
                 ],
@@ -892,7 +892,7 @@ class TestAggregationExecutorCheckpoint:
                 "contract": {
                     "mode": "OBSERVED",
                     "locked": True,
-                    "version_hash": "acaff3625e64c8a6",
+                    "version_hash": "acaff3625e64c8a6c9c281c7e6c1589c",
                     "fields": [
                         {
                             "normalized_name": "value",
@@ -1004,11 +1004,11 @@ class TestAggregationExecutorCheckpoint:
         _buffer_tokens was empty while _buffers had rows.
         """
 
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TriggerType
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         # Setup
@@ -1056,7 +1056,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format
                         "join_group_id": None,  # Required in v2.0 format
                         "expand_group_id": None,  # Required in v2.0 format
-                        "contract_version": "acaff3625e64c8a6",  # v2.0: contract hash (value field)
+                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # v2.0: contract hash (value field)
                     },
                     {
                         "token_id": f"{test_prefix}token-102",
@@ -1066,14 +1066,14 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
-                        "contract_version": "acaff3625e64c8a6",  # v2.0: contract hash (value field)
+                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # v2.0: contract hash (value field)
                     },
                 ],
                 "batch_id": batch.batch_id,
                 "contract": {
                     "mode": "OBSERVED",
                     "locked": True,
-                    "version_hash": "acaff3625e64c8a6",
+                    "version_hash": "acaff3625e64c8a6c9c281c7e6c1589c",
                     "fields": [
                         {
                             "normalized_name": "value",
@@ -1143,11 +1143,11 @@ class TestAggregationExecutorCheckpoint:
     def test_execute_flush_detects_incomplete_restoration(self, real_landscape_db) -> None:
         """Defensive guard catches buffer/token length mismatch with clear error."""
 
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TriggerType
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup
         recorder = LandscapeRecorder(real_landscape_db)
@@ -1611,11 +1611,11 @@ class TestAggregationExecutorCheckpoint:
                             "row_id": 1,
                             # "row_data" is MISSING
                             "branch_name": None,
-                            "contract_version": "807f89f2eb82f40b",  # v2.0: contract hash (empty fields)
+                            "contract_version": "807f89f2eb82f40bcbb5442bde74466a",  # v2.0: contract hash (empty fields)
                         }
                     ],
                     "batch_id": None,
-                    "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "807f89f2eb82f40b", "fields": []},
+                    "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "807f89f2eb82f40bcbb5442bde74466a", "fields": []},
                 },
                 r"missing required fields.*row_data",
                 id="missing_token_fields",

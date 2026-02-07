@@ -15,13 +15,13 @@ import pytest
 from elspeth.contracts import BatchPendingError, TokenInfo
 from elspeth.contracts.audit import NodeStateCompleted, NodeStateFailed
 from elspeth.contracts.enums import BatchStatus, NodeStateStatus, NodeType, TriggerType
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.conftest import _TestTransformBase, as_batch_transform

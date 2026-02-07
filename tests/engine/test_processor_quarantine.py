@@ -9,9 +9,9 @@ Tests the full quarantine flow including:
 from typing import Any
 
 from elspeth.contracts import FieldContract, NodeType, PipelineRow, SchemaContract, SourceRow
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,

@@ -831,11 +831,11 @@ class TestForkIntegration:
         edges to work around DiGraph's single-edge limitation between node pairs.
         """
         from elspeth.contracts import RowOutcome
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         recorder = LandscapeRecorder(db)
 
@@ -1047,6 +1047,7 @@ class TestForkCoalescePipelineIntegration:
         - Sink artifact has correct content hash
         """
         from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import CoalesceSettings
         from elspeth.core.landscape import LandscapeRecorder
@@ -1054,7 +1055,6 @@ class TestForkCoalescePipelineIntegration:
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         recorder = LandscapeRecorder(db)
@@ -1383,6 +1383,7 @@ class TestForkCoalescePipelineIntegration:
         - Sink receives correct number of merged rows
         """
         from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import CoalesceSettings
         from elspeth.core.landscape import LandscapeRecorder
@@ -1393,7 +1394,6 @@ class TestForkCoalescePipelineIntegration:
         )
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.contracts.plugin_context import PluginContext
 
         recorder = LandscapeRecorder(db)
 
@@ -1604,6 +1604,7 @@ class TestComplexDAGIntegration:
         - Audit trail captures all node traversals
         """
         from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import CoalesceSettings
         from elspeth.core.landscape import LandscapeRecorder
@@ -1615,7 +1616,6 @@ class TestComplexDAGIntegration:
         )
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         recorder = LandscapeRecorder(db)

@@ -35,9 +35,7 @@ class TestRequiredStringFields:
         assert args["run_id"] == "abc-123"
 
     def test_multiple_required_strings(self) -> None:
-        args = _validate_tool_args(
-            "explain_field", {"run_id": "r1", "field_name": "amount"}
-        )
+        args = _validate_tool_args("explain_field", {"run_id": "r1", "field_name": "amount"})
         assert args["run_id"] == "r1"
         assert args["field_name"] == "amount"
 
@@ -70,16 +68,12 @@ class TestOptionalStringDefaults:
         assert args["error_type"] == "all"
 
     def test_explicit_value_overrides_default(self) -> None:
-        args = _validate_tool_args(
-            "get_errors", {"run_id": "r1", "error_type": "validation"}
-        )
+        args = _validate_tool_args("get_errors", {"run_id": "r1", "error_type": "validation"})
         assert args["error_type"] == "validation"
 
     def test_rejects_non_string(self) -> None:
         with pytest.raises(TypeError, match="must be string"):
-            _validate_tool_args(
-                "get_errors", {"run_id": "r1", "error_type": 123}
-            )
+            _validate_tool_args("get_errors", {"run_id": "r1", "error_type": 123})
 
 
 class TestOptionalIntFields:
@@ -127,22 +121,16 @@ class TestOptionalDictFields:
         assert args["params"] is None
 
     def test_accepts_dict(self) -> None:
-        args = _validate_tool_args(
-            "query", {"sql": "SELECT 1", "params": {"x": 1}}
-        )
+        args = _validate_tool_args("query", {"sql": "SELECT 1", "params": {"x": 1}})
         assert args["params"] == {"x": 1}
 
     def test_accepts_null(self) -> None:
-        args = _validate_tool_args(
-            "query", {"sql": "SELECT 1", "params": None}
-        )
+        args = _validate_tool_args("query", {"sql": "SELECT 1", "params": None})
         assert args["params"] is None
 
     def test_rejects_non_dict(self) -> None:
         with pytest.raises(TypeError, match="must be object or null"):
-            _validate_tool_args(
-                "query", {"sql": "SELECT 1", "params": "not a dict"}
-            )
+            _validate_tool_args("query", {"sql": "SELECT 1", "params": "not a dict"})
 
 
 class TestUnknownTool:
@@ -157,9 +145,7 @@ class TestExtraFieldsIgnored:
     """Extra fields in arguments are silently dropped (not passed through)."""
 
     def test_extra_fields_not_in_output(self) -> None:
-        args = _validate_tool_args(
-            "get_run", {"run_id": "r1", "extra_field": "surprise"}
-        )
+        args = _validate_tool_args("get_run", {"run_id": "r1", "extra_field": "surprise"})
         assert "extra_field" not in args
         assert args["run_id"] == "r1"
 
@@ -202,8 +188,7 @@ class TestAllToolsHaveSpecs:
         from elspeth.mcp.server import _TOOL_ARGS
 
         assert tool_name in _TOOL_ARGS, (
-            f"Tool '{tool_name}' has no _TOOL_ARGS entry -- "
-            f"arguments will not be validated at the Tier 3 boundary"
+            f"Tool '{tool_name}' has no _TOOL_ARGS entry -- arguments will not be validated at the Tier 3 boundary"
         )
 
 

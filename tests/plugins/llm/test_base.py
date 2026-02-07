@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
@@ -16,7 +17,6 @@ from elspeth.plugins.clients.llm import (
     RateLimitError,
 )
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.base import BaseLLMTransform, LLMConfig
 
 # Common schema config for dynamic field handling (accepts any fields)

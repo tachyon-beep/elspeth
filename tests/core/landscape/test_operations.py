@@ -26,11 +26,11 @@ from elspeth.contracts import (
     FrameworkBugError,
     NodeType,
 )
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.operations import track_operation
-from elspeth.contracts.plugin_context import PluginContext
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})

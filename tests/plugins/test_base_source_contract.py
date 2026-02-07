@@ -5,9 +5,9 @@ from collections.abc import Iterator
 from typing import Any
 
 from elspeth.contracts import SourceRow
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.plugins.base import BaseSource
-from elspeth.contracts.plugin_context import PluginContext
 
 
 class StubSource(BaseSource):

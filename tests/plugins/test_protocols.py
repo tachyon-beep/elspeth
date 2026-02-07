@@ -207,8 +207,8 @@ class TestTransformBatchSupport:
     def test_transform_process_single_row(self) -> None:
         """Transform.process() accepts single row dict."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.base import BaseTransform
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
 
         class AnySchema(PluginSchema):
@@ -232,8 +232,8 @@ class TestTransformBatchSupport:
     def test_transform_process_batch_rows(self) -> None:
         """Transform.process() accepts list of row dicts when is_batch_aware=True."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.base import BaseTransform
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
 
         class AnySchema(PluginSchema):
@@ -265,8 +265,8 @@ class TestTransformBatchSupport:
     def test_transform_is_batch_aware_default_false(self) -> None:
         """Transforms have is_batch_aware=False by default."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.base import BaseTransform
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
 
         class AnySchema(PluginSchema):
@@ -288,8 +288,8 @@ class TestTransformBatchSupport:
     def test_transform_is_batch_aware_can_be_set_true(self) -> None:
         """Transforms can declare is_batch_aware=True for batch support."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.base import BaseTransform
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
 
         class AnySchema(PluginSchema):
@@ -472,8 +472,8 @@ class TestSinkProtocol:
     def test_batch_sink_implementation(self) -> None:
         """Test sink with batch write returning ArtifactDescriptor."""
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
-        from elspeth.contracts.sink import OutputValidationResult
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.sink import OutputValidationResult
         from elspeth.plugins.protocols import SinkProtocol
 
         class InputSchema(PluginSchema):
@@ -536,8 +536,8 @@ class TestSinkProtocol:
         """Test sink conforming to updated batch protocol."""
 
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
-        from elspeth.contracts.sink import OutputValidationResult
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.contracts.sink import OutputValidationResult
         from elspeth.plugins.protocols import SinkProtocol
 
         class InputSchema(PluginSchema):

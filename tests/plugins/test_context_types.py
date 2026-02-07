@@ -7,9 +7,9 @@ class TestPluginContextTypes:
 
     def test_landscape_type_matches_recorder(self) -> None:
         """PluginContext.landscape type should accept LandscapeRecorder."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Create a real LandscapeRecorder
         db = LandscapeDB.in_memory()
@@ -67,7 +67,9 @@ class TestPluginContextTypes:
         for name in local_items:
             obj = getattr(context_module, name)
             # Check if it's a class named LandscapeRecorder defined in this module
-            is_local_recorder = isinstance(obj, type) and name == "LandscapeRecorder" and obj.__module__ == "elspeth.contracts.plugin_context"
+            is_local_recorder = (
+                isinstance(obj, type) and name == "LandscapeRecorder" and obj.__module__ == "elspeth.contracts.plugin_context"
+            )
             if is_local_recorder:
                 raise AssertionError(
                     "context.py should not define its own LandscapeRecorder stub. It should import from elspeth.core.landscape.recorder"

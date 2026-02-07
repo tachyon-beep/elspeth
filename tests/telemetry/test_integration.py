@@ -24,6 +24,10 @@ from pydantic import ConfigDict
 from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
 from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
 from elspeth.contracts.events import (
+    PhaseChanged,
+    RowCreated,
+    RunFinished,
+    RunStarted,
     TelemetryEvent,
     TokenCompleted,
     TransformCompleted,
@@ -34,12 +38,6 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.contracts.events import (
-    PhaseChanged,
-    RowCreated,
-    RunFinished,
-    RunStarted,
-)
 from tests.conftest import _TestSinkBase, _TestSourceBase, _TestTransformBase, as_sink, as_source, as_transform
 
 if TYPE_CHECKING:

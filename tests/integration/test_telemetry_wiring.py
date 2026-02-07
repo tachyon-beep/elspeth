@@ -20,12 +20,12 @@ from pydantic import ConfigDict
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
+from elspeth.contracts.events import RunStarted
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.contracts.events import RunStarted
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 from tests.telemetry.fixtures import MockTelemetryConfig, TelemetryTestExporter

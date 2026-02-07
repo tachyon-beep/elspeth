@@ -50,12 +50,12 @@ class TestProcessorPassthroughMode:
     def test_aggregation_passthrough_mode(self) -> None:
         """Passthrough mode: BUFFERED while waiting, COMPLETED on flush with same tokens."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class PassthroughEnricher(BaseTransform):
@@ -196,12 +196,12 @@ class TestProcessorPassthroughMode:
         import pytest
 
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class BadPassthrough(BaseTransform):
@@ -279,12 +279,12 @@ class TestProcessorPassthroughMode:
     def test_aggregation_passthrough_continues_to_next_transform(self) -> None:
         """Passthrough mode rows continue through remaining transforms after flush."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class PassthroughEnricher(BaseTransform):
@@ -433,12 +433,12 @@ class TestProcessorTransformMode:
     def test_aggregation_transform_mode(self) -> None:
         """Transform mode returns M rows from N input rows with new tokens."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class GroupSplitter(BaseTransform):
@@ -586,12 +586,12 @@ class TestProcessorTransformMode:
     def test_aggregation_transform_mode_single_row_output(self) -> None:
         """Transform mode with single row output still creates new token."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class BatchAggregator(BaseTransform):
@@ -705,12 +705,12 @@ class TestProcessorTransformMode:
     def test_aggregation_transform_mode_continues_to_next_transform(self) -> None:
         """Transform mode output rows continue through remaining transforms."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class GroupSplitter(BaseTransform):
@@ -887,12 +887,12 @@ class TestProcessorSingleMode:
         Bug (now fixed): Aggregated row only had 'total', skipping AddMarker entirely.
         """
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class SumTransform(BaseTransform):
@@ -1035,12 +1035,12 @@ class TestProcessorSingleMode:
     def test_aggregation_transform_mode_no_downstream_completes_immediately(self) -> None:
         """Transform mode with no downstream transforms returns COMPLETED correctly."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class SumTransform(BaseTransform):

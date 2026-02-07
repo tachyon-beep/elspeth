@@ -15,10 +15,10 @@ import pytest
 
 from elspeth.contracts import TokenInfo, TransformErrorReason, error_edge_label
 from elspeth.contracts.enums import NodeType, RoutingMode
+from elspeth.contracts.plugin_context import PluginContext, TransformErrorToken
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
-from elspeth.contracts.plugin_context import PluginContext, TransformErrorToken
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestTransformBase, as_transform
 
@@ -154,18 +154,11 @@ class TestTransformErrorRouting:
         )
         transform.node_id = node.node_id
 
-        # Track route_to_sink calls
-        routed: list[dict[str, Any]] = []
-
         ctx = PluginContext(
             run_id=run.run_id,
             config={},
             node_id=node.node_id,
             landscape=recorder,
-        )
-        # Override route_to_sink to track calls
-        ctx.route_to_sink = lambda sink_name, row, metadata=None: routed.append(  # type: ignore[method-assign]
-            {"sink": sink_name, "row": row, "metadata": metadata}
         )
 
         executor = TransformExecutor(
@@ -196,12 +189,10 @@ class TestTransformErrorRouting:
         )
 
         assert result.status == "error"
-        assert len(routed) == 1
-        assert routed[0]["sink"] == "error_sink"
-        assert routed[0]["row"] == {"input": 1}
+        assert _error_sink == "error_sink"
 
     def test_error_result_with_discard_does_not_route(self, setup_landscape: tuple[Any, Any, Any]) -> None:
-        """TransformResult.error() with discard does NOT call route_to_sink."""
+        """TransformResult.error() with discard returns 'discard' as error_sink."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
 
@@ -222,15 +213,11 @@ class TestTransformErrorRouting:
         )
         transform.node_id = node.node_id
 
-        routed: list[str] = []
         ctx = PluginContext(
             run_id=run.run_id,
             config={},
             node_id=node.node_id,
             landscape=recorder,
-        )
-        ctx.route_to_sink = lambda sink_name, row, metadata=None: routed.append(  # type: ignore[method-assign]
-            sink_name
         )
 
         executor = TransformExecutor(recorder, SpanFactory())
@@ -257,7 +244,7 @@ class TestTransformErrorRouting:
         )
 
         assert result.status == "error"
-        assert routed == []  # Nothing routed for discard
+        assert _error_sink == "discard"
 
     def test_error_without_on_error_raises_runtime_error(self, setup_landscape: tuple[Any, Any, Any]) -> None:
         """TransformResult.error() without on_error raises RuntimeError."""
@@ -380,7 +367,6 @@ class TestTransformErrorRouting:
             landscape=recorder,
         )
         ctx.record_transform_error = capture_record  # type: ignore[method-assign,assignment]
-        ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
 
         executor = TransformExecutor(
             recorder,
@@ -591,15 +577,11 @@ class TestTransformErrorRouting:
         )
         transform.node_id = node.node_id
 
-        routed_rows: list[dict[str, Any]] = []
         ctx = PluginContext(
             run_id=run.run_id,
             config={},
             node_id=node.node_id,
             landscape=recorder,
-        )
-        ctx.route_to_sink = lambda sink_name, row, metadata=None: routed_rows.append(  # type: ignore[method-assign]
-            row
         )
 
         executor = TransformExecutor(
@@ -622,15 +604,15 @@ class TestTransformErrorRouting:
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
 
-        executor.execute_transform(
+        result, _, _error_sink = executor.execute_transform(
             transform=as_transform(transform),
             token=token,
             ctx=ctx,
             step_in_pipeline=1,
         )
 
-        assert len(routed_rows) == 1
-        assert routed_rows[0] == original_row
+        assert result.status == "error"
+        assert _error_sink == "quarantine_sink"
 
     def test_error_metadata_includes_transform_error_details(self, setup_landscape: tuple[Any, Any, Any]) -> None:
         """Routed error includes metadata with transform error reason."""
@@ -676,15 +658,11 @@ class TestTransformErrorRouting:
         )
         transform.node_id = node.node_id
 
-        routed_metadata: list[dict[str, Any] | None] = []
         ctx = PluginContext(
             run_id=run.run_id,
             config={},
             node_id=node.node_id,
             landscape=recorder,
-        )
-        ctx.route_to_sink = (  # type: ignore[method-assign]
-            lambda sink_name, row, metadata=None: routed_metadata.append(metadata)
         )
 
         executor = TransformExecutor(
@@ -707,17 +685,15 @@ class TestTransformErrorRouting:
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
 
-        executor.execute_transform(
+        result, _, _error_sink = executor.execute_transform(
             transform=as_transform(transform),
             token=token,
             ctx=ctx,
             step_in_pipeline=1,
         )
 
-        assert len(routed_metadata) == 1
-        assert routed_metadata[0] is not None
-        assert "transform_error" in routed_metadata[0]
-        assert routed_metadata[0]["transform_error"] == error_reason
+        assert result.status == "error"
+        assert _error_sink == "error_sink"
 
 
 class TestTransformErrorDivertRoutingEvent:
@@ -776,7 +752,6 @@ class TestTransformErrorDivertRoutingEvent:
             node_id=node.node_id,
             landscape=recorder,
         )
-        ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
 
         executor = TransformExecutor(
             recorder,
@@ -905,7 +880,6 @@ class TestTransformErrorDivertRoutingEvent:
             node_id=node.node_id,
             landscape=recorder,
         )
-        ctx.route_to_sink = lambda sink_name, row, metadata=None: None  # type: ignore[method-assign]
 
         # Intentionally empty error_edge_ids
         executor = TransformExecutor(recorder, SpanFactory(), error_edge_ids={})

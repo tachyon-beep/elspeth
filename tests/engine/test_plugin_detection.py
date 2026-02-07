@@ -11,8 +11,8 @@ Aggregation is now handled by batch-aware transforms (is_batch_aware=True).
 from typing import Any
 
 from elspeth.contracts import FieldContract, NodeID, NodeType, SchemaContract, SourceRow
-from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.results import (
     GateResult,
     RoutingAction,

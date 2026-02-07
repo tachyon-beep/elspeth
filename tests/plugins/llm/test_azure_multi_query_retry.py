@@ -15,9 +15,9 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import TransformResult
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 from elspeth.testing import make_pipeline_row
 

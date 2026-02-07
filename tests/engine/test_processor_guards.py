@@ -29,6 +29,7 @@ import pytest
 
 from elspeth.contracts import SourceRow, TokenInfo
 from elspeth.contracts.enums import NodeType, RowOutcome
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import RowResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -38,7 +39,6 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.processor import RowProcessor, _WorkItem
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult as PluginTransformResult
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 

@@ -1894,25 +1894,19 @@ def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"'{name}' requires '{fname}'")
         val = arguments[fname]
         if not isinstance(val, str):
-            raise TypeError(
-                f"'{name}': '{fname}' must be string, got {type(val).__name__}"
-            )
+            raise TypeError(f"'{name}': '{fname}' must be string, got {type(val).__name__}")
         validated[fname] = val
 
     for fname in spec.optional_str:
         val = arguments.get(fname)
         if val is not None and not isinstance(val, str):
-            raise TypeError(
-                f"'{name}': '{fname}' must be string or null, got {type(val).__name__}"
-            )
+            raise TypeError(f"'{name}': '{fname}' must be string or null, got {type(val).__name__}")
         validated[fname] = val
 
     for fname, str_default in spec.optional_str_defaults:
         val = arguments.get(fname, str_default)
         if not isinstance(val, str):
-            raise TypeError(
-                f"'{name}': '{fname}' must be string, got {type(val).__name__}"
-            )
+            raise TypeError(f"'{name}': '{fname}' must be string, got {type(val).__name__}")
         validated[fname] = val
 
     for fname, int_default in spec.optional_int:
@@ -1921,17 +1915,13 @@ def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if isinstance(val, float) and val == int(val):
             val = int(val)
         if not isinstance(val, int) or isinstance(val, bool):
-            raise TypeError(
-                f"'{name}': '{fname}' must be integer, got {type(val).__name__}"
-            )
+            raise TypeError(f"'{name}': '{fname}' must be integer, got {type(val).__name__}")
         validated[fname] = val
 
     for fname in spec.optional_dict:
         val = arguments.get(fname)
         if val is not None and not isinstance(val, dict):
-            raise TypeError(
-                f"'{name}': '{fname}' must be object or null, got {type(val).__name__}"
-            )
+            raise TypeError(f"'{name}': '{fname}' must be object or null, got {type(val).__name__}")
         validated[fname] = val
 
     return validated

@@ -8,10 +8,10 @@ Verifies all integration audit fixes (Tasks 1-7) work together end-to-end.
 import pytest
 
 from elspeth.contracts import EdgeInfo, ExecutionError, NodeType, RoutingMode, RunStatus
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.manager import PluginManager
 
 # Dynamic schema config for tests - PathConfig now requires schema
@@ -34,7 +34,6 @@ class TestIntegrationAuditFixes:
         # All built-in plugins discoverable
         assert len(manager.get_sources()) >= 2
         assert len(manager.get_transforms()) >= 2
-        assert len(manager.get_gates()) >= 0  # Gate plugins removed in WP-02
         assert len(manager.get_sinks()) >= 3
 
         # Instantiate a plugin and verify node_id

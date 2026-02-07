@@ -72,30 +72,20 @@ class TestTokenInfo:
         with pytest.raises(TypeError, match="immutable"):
             token.row_data["field"] = "modified"
 
-    def test_token_info_fields_mutable(self) -> None:
-        """TokenInfo fields can be reassigned (dataclass is not frozen)."""
+    def test_token_info_is_frozen(self) -> None:
+        """TokenInfo is immutable — field assignment raises FrozenInstanceError."""
+        from dataclasses import FrozenInstanceError
+
         from elspeth.contracts import TokenInfo
 
         contract = _make_contract()
         pipeline_row = PipelineRow({}, contract)
 
         token = TokenInfo(row_id="r", token_id="t", row_data=pipeline_row)
-        token.branch_name = "sentiment"
-
-        assert token.branch_name == "sentiment"
-
-    def test_token_info_not_frozen(self) -> None:
-        """TokenInfo dataclass params confirm it is not frozen."""
-        from elspeth.contracts import TokenInfo
-
-        assert TokenInfo.__dataclass_fields__["branch_name"].default is None
-
-        contract = _make_contract()
-        pipeline_row = PipelineRow({}, contract)
-
-        token = TokenInfo(row_id="r", token_id="t", row_data=pipeline_row)
-        token.row_id = "new_row_id"
-        assert token.row_id == "new_row_id"
+        with pytest.raises(FrozenInstanceError):
+            token.branch_name = "sentiment"
+        with pytest.raises(FrozenInstanceError):
+            token.row_id = "new_row_id"
 
     def test_with_updated_data_preserves_lineage(self) -> None:
         """with_updated_data() preserves all lineage fields."""

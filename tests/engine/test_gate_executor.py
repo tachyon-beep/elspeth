@@ -35,10 +35,10 @@ class TestPluginGateExecutorBasicRouting:
         """Plugin gate returns continue action - routing event recorded for audit (AUD-002)."""
         from elspeth.contracts import TokenInfo
         from elspeth.contracts.enums import RoutingMode
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult, RoutingAction
 
         db = LandscapeDB.in_memory()
@@ -132,10 +132,10 @@ class TestPluginGateExecutorBasicRouting:
     def test_execute_gate_route(self) -> None:
         """Plugin gate routes to sink via route label - routing event recorded."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult, RoutingAction
 
         db = LandscapeDB.in_memory()
@@ -234,11 +234,11 @@ class TestPluginGateExecutorBasicRouting:
     def test_execute_gate_fork(self) -> None:
         """Plugin gate forks to multiple paths - routing events and child tokens created."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult, RoutingAction
 
         db = LandscapeDB.in_memory()
@@ -359,10 +359,10 @@ class TestPluginGateExecutorBasicRouting:
     def test_fork_without_token_manager_raises_error(self) -> None:
         """Plugin gate fork without token_manager raises RuntimeError for audit integrity."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult, RoutingAction
 
         db = LandscapeDB.in_memory()
@@ -467,10 +467,10 @@ class TestPluginGateExecutorBasicRouting:
     def test_missing_edge_raises_error(self) -> None:
         """Plugin gate routing to unregistered route label raises MissingEdgeError."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor, MissingEdgeError
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult, RoutingAction
 
         db = LandscapeDB.in_memory()
@@ -546,11 +546,11 @@ class TestConfigGateExecutorBasicRouting:
         """Config gate returns continue action - routing event recorded for audit (AUD-002)."""
         from elspeth.contracts import TokenInfo
         from elspeth.contracts.enums import RoutingMode
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -638,11 +638,11 @@ class TestConfigGateExecutorBasicRouting:
     def test_execute_gate_route(self) -> None:
         """Config gate routes to sink via route label - routing event recorded."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -729,12 +729,12 @@ class TestConfigGateExecutorBasicRouting:
     def test_execute_gate_fork(self) -> None:
         """Config gate forks to multiple paths - routing events and child tokens created."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -846,11 +846,11 @@ class TestConfigGateExecutorBasicRouting:
     def test_fork_without_token_manager_raises_error(self) -> None:
         """Config gate fork without token_manager raises RuntimeError for audit integrity."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -949,11 +949,11 @@ class TestConfigGateExecutorBasicRouting:
     def test_missing_edge_raises_error(self) -> None:
         """Config gate routing to unregistered route label raises MissingEdgeError."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor, MissingEdgeError
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -1024,10 +1024,10 @@ class TestPluginGateExecutor:
     def test_execute_gate_exception_records_failure(self) -> None:
         """Gate raising exception still records audit state."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult
 
         db = LandscapeDB.in_memory()
@@ -1087,10 +1087,10 @@ class TestPluginGateExecutor:
     def test_gate_context_has_state_id_for_call_recording(self) -> None:
         """BUG-RECORDER-01: Gate execution sets state_id on context for external call recording."""
         from elspeth.contracts import CallStatus, CallType, RoutingMode, TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult, RoutingAction
 
         db = LandscapeDB.in_memory()
@@ -1184,11 +1184,11 @@ class TestConfigGateExecutor:
     def test_execute_config_gate_string_result(self) -> None:
         """Config gate using ternary expression that returns string route labels."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -1258,11 +1258,11 @@ class TestConfigGateExecutor:
     def test_execute_config_gate_missing_route_label_raises_error(self) -> None:
         """Config gate condition returning unlisted label raises ValueError."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -1318,11 +1318,11 @@ class TestConfigGateExecutor:
     def test_execute_config_gate_expression_error_records_failure(self) -> None:
         """Config gate expression failure records audit state."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -1378,11 +1378,11 @@ class TestConfigGateExecutor:
     def test_execute_config_gate_reason_includes_condition(self) -> None:
         """Config gate routing action reason includes condition and result."""
         from elspeth.contracts import TokenInfo
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

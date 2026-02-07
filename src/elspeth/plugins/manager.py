@@ -15,7 +15,6 @@ from elspeth.plugins.hookspecs import (
     ElspethTransformSpec,
 )
 from elspeth.plugins.protocols import (
-    GateProtocol,
     SinkProtocol,
     SourceProtocol,
     TransformProtocol,
@@ -45,7 +44,6 @@ class PluginManager:
         # Caches - map name to plugin class for duplicate detection
         self._sources: dict[str, type[SourceProtocol]] = {}
         self._transforms: dict[str, type[TransformProtocol]] = {}
-        self._gates: dict[str, type[GateProtocol]] = {}
         self._sinks: dict[str, type[SinkProtocol]] = {}
 
         # Config validator
@@ -90,7 +88,6 @@ class PluginManager:
         # Collect all plugins first, then check for duplicates
         new_sources: dict[str, type[SourceProtocol]] = {}
         new_transforms: dict[str, type[TransformProtocol]] = {}
-        new_gates: dict[str, type[GateProtocol]] = {}
         new_sinks: dict[str, type[SinkProtocol]] = {}
 
         # Collect from all registered plugins with duplicate detection
@@ -108,13 +105,6 @@ class PluginManager:
                     raise ValueError(f"Duplicate transform plugin name: '{name}'. Already registered by {new_transforms[name].__name__}")
                 new_transforms[name] = cls
 
-        for gates in self._pm.hook.elspeth_get_gates():
-            for cls in gates:
-                name = cls.name
-                if name in new_gates:
-                    raise ValueError(f"Duplicate gate plugin name: '{name}'. Already registered by {new_gates[name].__name__}")
-                new_gates[name] = cls
-
         for sinks in self._pm.hook.elspeth_get_sinks():
             for cls in sinks:
                 name = cls.name
@@ -125,7 +115,6 @@ class PluginManager:
         # All validated, update caches
         self._sources = new_sources
         self._transforms = new_transforms
-        self._gates = new_gates
         self._sinks = new_sinks
 
     # === Getters ===
@@ -137,10 +126,6 @@ class PluginManager:
     def get_transforms(self) -> list[type[TransformProtocol]]:
         """Get all registered transform plugins."""
         return list(self._transforms.values())
-
-    def get_gates(self) -> list[type[GateProtocol]]:
-        """Get all registered gate plugins."""
-        return list(self._gates.values())
 
     def get_sinks(self) -> list[type[SinkProtocol]]:
         """Get all registered sink plugins."""
@@ -183,24 +168,6 @@ class PluginManager:
 
         available = sorted(self._transforms.keys())
         raise ValueError(f"Unknown transform plugin: {name}. Available transform plugins: {available}")
-
-    def get_gate_by_name(self, name: str) -> type[GateProtocol]:
-        """Get gate plugin class by name.
-
-        Args:
-            name: Plugin name to look up
-
-        Returns:
-            Gate plugin class
-
-        Raises:
-            ValueError: If plugin not found (configuration bug, should crash)
-        """
-        if name in self._gates:
-            return self._gates[name]
-
-        available = sorted(self._gates.keys())
-        raise ValueError(f"Unknown gate plugin: {name}. Available gate plugins: {available}")
 
     def get_sink_by_name(self, name: str) -> type[SinkProtocol]:
         """Get sink plugin class by name.
@@ -272,33 +239,6 @@ class PluginManager:
 
         # Get plugin class
         plugin_cls = self.get_transform_by_name(transform_type)
-
-        # Instantiate with validated config
-        return plugin_cls(config)
-
-    def create_gate(self, gate_type: str, config: dict[str, Any]) -> GateProtocol:
-        """Create gate plugin instance with validated config.
-
-        Args:
-            gate_type: Plugin type name
-            config: Plugin configuration dict
-
-        Returns:
-            Instantiated gate plugin
-
-        Raises:
-            ValueError: If config is invalid or plugin type not found
-        """
-        # Validate config first
-        errors = self._validator.validate_gate_config(gate_type, config)
-        if errors:
-            # Format errors into readable message with field names
-            error_lines = [f"  - {err.field}: {err.message}" for err in errors]
-            error_msg = f"Invalid configuration for gate '{gate_type}':\n" + "\n".join(error_lines)
-            raise ValueError(error_msg)
-
-        # Get plugin class
-        plugin_cls = self.get_gate_by_name(gate_type)
 
         # Instantiate with validated config
         return plugin_cls(config)

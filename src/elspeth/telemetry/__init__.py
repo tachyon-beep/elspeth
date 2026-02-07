@@ -43,7 +43,6 @@ Usage:
     )
 """
 
-from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.contracts.events import (
     ExternalCallCompleted,
     FieldResolutionApplied,
@@ -52,6 +51,7 @@ from elspeth.contracts.events import (
     RunFinished,
     RunStarted,
 )
+from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters import ConsoleExporter
 from elspeth.telemetry.factory import create_telemetry_manager
 from elspeth.telemetry.filtering import should_emit

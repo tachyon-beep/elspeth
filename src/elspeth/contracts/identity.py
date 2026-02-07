@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import PipelineRow
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TokenInfo:
     """Identity and data for a token flowing through the DAG.
 
@@ -24,8 +24,7 @@ class TokenInfo:
     - join_group_id: Groups all tokens merged in a coalesce operation
     - expand_group_id: Groups all children from an expand operation
 
-    Note: NOT frozen because row_data may need to be updated as tokens
-    flow through the pipeline. Use with_updated_data() for updates.
+    Frozen for immutability - use with_updated_data() to create new instances.
     """
 
     row_id: str

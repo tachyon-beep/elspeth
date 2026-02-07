@@ -214,7 +214,14 @@ class LandscapeJournal:
             record["payloads"] = enrichments
         else:
             payload_dict = self._payloads_for_params(columns, parameters)
-            record.update(payload_dict)
+            record["request_ref"] = payload_dict["request_ref"]
+            record["request_payload"] = payload_dict["request_payload"]
+            record["response_ref"] = payload_dict["response_ref"]
+            record["response_payload"] = payload_dict["response_payload"]
+            if "request_payload_error" in payload_dict:
+                record["request_payload_error"] = payload_dict["request_payload_error"]
+            if "response_payload_error" in payload_dict:
+                record["response_payload_error"] = payload_dict["response_payload_error"]
 
     def _payloads_for_params(self, columns: list[str], params: Any) -> PayloadInfo:
         values = self._columns_to_values(columns, params)

@@ -12,11 +12,11 @@ import pytest
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
 from elspeth.testing import make_pipeline_row
 

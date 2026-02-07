@@ -64,9 +64,9 @@ class TestTransformExecutorPipelineRow:
 
     def test_execute_transform_passes_pipeline_row_to_plugin(self) -> None:
         """TransformExecutor should pass PipelineRow to transform.process()."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -119,9 +119,9 @@ class TestTransformExecutorPipelineRow:
 
     def test_execute_transform_extracts_dict_for_landscape(self) -> None:
         """TransformExecutor should extract dict for Landscape recording."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -174,9 +174,9 @@ class TestTransformExecutorPipelineRow:
 
     def test_execute_transform_sets_ctx_contract(self) -> None:
         """TransformExecutor should set ctx.contract from token.row_data.contract."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -234,9 +234,9 @@ class TestTransformExecutorPipelineRow:
 
     def test_execute_transform_creates_pipeline_row_from_result(self) -> None:
         """TransformExecutor should create PipelineRow from result dict + contract."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         input_contract = _make_contract()
@@ -289,9 +289,9 @@ class TestTransformExecutorPipelineRow:
 
     def test_execute_transform_error_preserves_token(self) -> None:
         """When transform returns error, token should be unchanged."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -339,9 +339,9 @@ class TestTransformExecutorPipelineRow:
 
     def test_execute_transform_hashes_dict_not_pipeline_row(self) -> None:
         """stable_hash should be called with dict, not PipelineRow."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -398,12 +398,12 @@ class TestGateExecutorPipelineRow:
 
     def test_execute_gate_passes_pipeline_row_to_plugin(self) -> None:
         """GateExecutor should pass PipelineRow to gate.evaluate()."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -454,12 +454,12 @@ class TestGateExecutorPipelineRow:
 
     def test_execute_gate_sets_ctx_contract(self) -> None:
         """GateExecutor should set ctx.contract from token.row_data.contract."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -515,12 +515,12 @@ class TestGateExecutorPipelineRow:
 
     def test_execute_gate_extracts_dict_for_landscape(self) -> None:
         """GateExecutor should extract dict for Landscape recording."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -571,12 +571,12 @@ class TestGateExecutorPipelineRow:
 
     def test_execute_gate_creates_pipeline_row_from_result(self) -> None:
         """GateExecutor should create PipelineRow from result using correct contract."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         input_contract = _make_contract()
@@ -627,12 +627,12 @@ class TestGateExecutorPipelineRow:
 
     def test_execute_gate_uses_input_contract_as_fallback(self) -> None:
         """When GateResult has no contract, should use input token's contract."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -680,12 +680,12 @@ class TestGateExecutorPipelineRow:
 
     def test_execute_gate_hashes_dict_not_pipeline_row(self) -> None:
         """stable_hash should be called with dict, not PipelineRow."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -736,12 +736,12 @@ class TestGateExecutorPipelineRow:
 
     def test_execute_gate_crashes_if_no_contract_available(self) -> None:
         """Should crash if neither result nor input has contract (B6 fix)."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow - we'll mock the contract property to return None
         contract = _make_contract()
@@ -806,9 +806,9 @@ class TestSinkExecutorPipelineRow:
     def test_execute_sink_extracts_dicts_from_pipeline_rows(self) -> None:
         """SinkExecutor should extract dicts before calling sink.write()."""
         from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup tokens with PipelineRow
         contract = _make_contract()
@@ -868,9 +868,9 @@ class TestSinkExecutorPipelineRow:
     def test_execute_sink_extracts_dict_for_landscape_input(self) -> None:
         """SinkExecutor should extract dict for Landscape input_data recording."""
         from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -927,9 +927,9 @@ class TestSinkExecutorPipelineRow:
     def test_execute_sink_extracts_dict_for_landscape_output(self) -> None:
         """SinkExecutor should extract dict for Landscape output_data recording."""
         from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -988,9 +988,9 @@ class TestSinkExecutorPipelineRow:
     def test_execute_sink_preserves_all_fields_in_dict(self) -> None:
         """Sink should receive all fields, including extras not in contract."""
         from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow that has extra fields not in contract
         contract = _make_contract()  # Only declares 'value' field

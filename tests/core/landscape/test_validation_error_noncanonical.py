@@ -11,10 +11,10 @@ must be quarantined and recorded even when malformed.
 import pytest
 
 from elspeth.contracts import NodeType
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.contracts.plugin_context import PluginContext
 
 
 @pytest.fixture

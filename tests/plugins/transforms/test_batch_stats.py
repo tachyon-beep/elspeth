@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}

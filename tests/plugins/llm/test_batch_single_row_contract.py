@@ -10,8 +10,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
 from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchLLMTransform
 from elspeth.plugins.results import TransformResult

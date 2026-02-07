@@ -111,36 +111,15 @@ allow_hits:
   reason: Type narrowing after DB update - discriminated union requires isinstance to verify terminal state
   safety: Raises AuditIntegrityError if wrong state - explicit failure, not masking
   expires: null
-- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=70777de874656b5d
-  owner: architecture
-  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
-  safety: Returns lineage with payload_available=False - caller sees data was purged
-  expires: null
-- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=b6839eb989f4d77a
-  owner: architecture
-  reason: OSError for infrastructure issues (NFS timeout, disk full) — payload unavailable but not corruption
-  safety: Logs warning with row_id/ref/error details, returns lineage with payload_available=False
-  expires: null
 - key: core/landscape/_error_recording.py:R6:ErrorRecordingMixin:record_validation_error:fp=4f08618bc36aa9af
   owner: architecture
   reason: Tier-3 boundary - row_data may contain NaN/Infinity which are not canonically serializable
   safety: Falls back to repr() with logging - audit trail preserved with metadata
   expires: null
-- key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=f86944db9e535371
-  owner: architecture
-  reason: Graceful handling of purged payloads - retention policy may have deleted response data
-  safety: Returns None indicating purged - caller handles missing data explicitly
-  expires: null
 - key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=0fe7a31adc9f24b3
   owner: feature
   reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
   safety: Fallback to same value is correct behavior, not silent coercion
-  expires: null
-- key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=29ec70025ab11d9a
-  owner: architecture
-  reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for
-    strict lookup'
-  safety: Code reviewed - legitimate API pattern; resolve_name() raises KeyError for strict lookups
   expires: null
 - key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=a183521ba11a8ee6
   owner: bugfix
@@ -168,16 +147,6 @@ allow_hits:
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: core/canonical.py:R6:_normalize_value:fp=8ef8fcd777ae4ddf
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R6:_find_audit_databases:fp=d1b9da6750fcbc5b
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=4bf1b74c95450844
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -274,32 +243,27 @@ allow_hits:
   expires: '2026-05-02'
 - key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=00745130c0fe339a
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=1888089faaecfe0a
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
-    yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=0c505357d01d10fb
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=57f6b998f618a29b
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
-    yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=d428978c93102fa2
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=e51db81b7a4d271e
@@ -517,36 +481,6 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:get:fp=76de86ac35dafae4
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R1:PluginContext:record_call:fp=5ec999dfff114a20
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:record_call:fp=94971df001b1532e
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R4:PluginContext:record_call:fp=4e105a1207a19d87
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:record_validation_error:fp=27fe368832b3e2a9
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/context.py:R6:PluginContext:record_validation_error:fp=d20c868c67b376ce
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/validation.py:R5:PluginConfigValidator:validate_source_config:fp=3bd8f6558f2b54b2
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -555,21 +489,6 @@ allow_hits:
 - key: plugins/validation.py:R5:PluginConfigValidator:validate_transform_config:fp=b60f09b21ed871b6
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/validation.py:R5:PluginConfigValidator:validate_gate_config:fp=39024a41cd690457
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/validation.py:R5:PluginConfigValidator:validate_sink_config:fp=a600d1e3ff542109
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/validation.py:R1:PluginConfigValidator:_extract_errors:fp=35eba6846f56fdbf
-  owner: architecture
-  reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: core/events.py:R1:EventBus:emit:fp=9291c1b6dd51107b
@@ -679,7 +598,8 @@ allow_hits:
   expires: '2026-05-02'
 - key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=05c1490e2d921cbc
   owner: architecture
-  reason: Framework-boundary type narrowing — transforms list contains both TransformProtocol and GateProtocol instances despite type annotation. GateProtocol does not define _on_error, so isinstance is required to skip gates when adding divert edges.
+  reason: Framework-boundary type narrowing — transforms list contains both TransformProtocol and GateProtocol instances despite type annotation. GateProtocol does not define _on_error, so isinstance is
+    required to skip gates when adding divert edges.
   safety: Gates skipped cleanly — only TransformProtocol instances get _on_error checked
   expires: '2026-05-06'
 - key: core/dag.py:R1:ExecutionGraph:warn_divert_coalesce_interactions:fp=c81c02216396a4c0
@@ -720,21 +640,6 @@ allow_hits:
 - key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=7f047273b9464f6c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R4:create_server:call_tool:fp=91fde7b3a1219e76
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=db88995ea304163f
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=ca7cd80408f8d4f3
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=799383f3318c92d0
@@ -873,26 +778,6 @@ allow_hits:
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: core/landscape/_helpers.py:R5:coerce_enum:fp=7aabb8ce0df1d1fd
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=012ed1c9e0f416e2
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=a3a02bbe7e7d9ab5
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=0637b11f30905a31
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=2c17f57ba9b8f0bb
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1067,7 +952,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-# === content_safety.py (Azure API response is Tier 3 — zero trust) ===
 - key: plugins/transforms/azure/content_safety.py:R9:AzureContentSafety:_process_row:fp=b18b4272385d82ff
   owner: architecture
   reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
@@ -1098,7 +982,6 @@ allow_hits:
   reason: Tier 3 boundary — validates severity type from Azure API response is int
   safety: MalformedResponseError raised if type wrong, caught as non-retryable error
   expires: '2026-05-02'
-# === prompt_shield.py (Azure API response is Tier 3 — zero trust) ===
 - key: plugins/transforms/azure/prompt_shield.py:R9:AzurePromptShield:_process_row:fp=5555041200ea3e5a
   owner: architecture
   reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
@@ -1291,14 +1174,12 @@ allow_hits:
   expires: '2026-05-02'
 - key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=58a69ae36bfd1f89
   owner: bugfix
-  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl to prevent credentials
-    leaking to audit trail
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl to prevent credentials leaking to audit trail
   safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
   expires: null
 - key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=2598c89700a4b6b1
   owner: bugfix
-  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl to prevent tokens leaking
-    to audit trail
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl to prevent tokens leaking to audit trail
   safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
   expires: null
 - key: core/security/secret_loader.py:R6:CompositeSecretLoader:get_secret:fp=8846ddf2a85396bb
@@ -1381,21 +1262,6 @@ allow_hits:
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
   expires: null
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:post:fp=dfeb7f95505a03ae
-  owner: architecture
-  reason: HTTP response headers - external system boundary, content-type may be missing
-  safety: Defaults to empty string - safe fallback for content type detection
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:fp=30dbdb83e5329184
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to request processing
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:fp=4da5a482fdc539b9
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to request processing
-  expires: '2026-05-02'
 - key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=cb8f391ad82b21df
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
@@ -1456,46 +1322,6 @@ allow_hits:
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
   safety: ValueError raised for invalid config - explicit validation failure
   expires: null
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=628f2441375dbaa5
-  owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-  safety: Empty list returned for missing key; legitimate data model (rows may have no tokens)
-  expires: null
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=d99c75b480c3e5d1
-  owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all tokens have parent relationships (root tokens)
-  safety: Empty list returned for missing key; legitimate data model (root tokens have no parents)
-  expires: null
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=f931770c0a3724e6
-  owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all tokens have node states (routing decisions)
-  safety: Empty list returned for missing key; legitimate data model
-  expires: null
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9ffec7abbcd9ca21
-  owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all node states have events
-  safety: Empty list returned for missing key; legitimate data model
-  expires: null
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=19b155ad0f51f0e7
-  owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all node states have external calls (local-only transforms)
-  safety: Empty list returned for missing key; legitimate data model
-  expires: null
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=0756ec728f03201f
-  owner: P2-2026-02-02-76r
-  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
-  safety: Exhaustive isinstance() chain with else branch; required for polymorphic serialization
-  expires: null
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=d448fcf905d6e17c
-  owner: P2-2026-02-02-76r
-  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
-  safety: Exhaustive isinstance() chain with else branch; required for polymorphic serialization
-  expires: null
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=2223d3956605c0bd
-  owner: P2-2026-02-02-76r
-  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
-  safety: Exhaustive isinstance() chain with else branch; required for polymorphic serialization
-  expires: null
 - key: contracts/contract_propagation.py:R6:propagate_contract:fp=fbcdf96127213894
   owner: architecture
   reason: Type narrowing failure is silently skipped - non-primitive types aren't included in contract
@@ -1534,64 +1360,43 @@ allow_hits:
 - key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=9d7a59ec5d3f6186
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
-  safety: 'isinstance() check converts PipelineRow to dict for audit trail consistency'
+  safety: isinstance() check converts PipelineRow to dict for audit trail consistency
   expires: null
 - key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=32173d2b108569cc
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
-  safety: 'isinstance() check required to handle union type from batch processing'
+  safety: isinstance() check required to handle union type from batch processing
   expires: null
 - key: engine/executors.py:R5:TransformExecutor:execute_transform:_to_dict:fp=6ef2582894e98372
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
-  safety: 'isinstance() check converts PipelineRow to dict for transform output'
+  safety: isinstance() check converts PipelineRow to dict for transform output
   expires: null
 - key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=3e656c030c37dc73
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
-  safety: 'isinstance() check handles union type from transform output'
+  safety: isinstance() check handles union type from transform output
   expires: null
 - key: engine/executors.py:R5:AggregationExecutor:execute_flush:_to_dict_agg:fp=6843639153ff7b09
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
-  safety: 'isinstance() check converts PipelineRow to dict for aggregation output'
+  safety: isinstance() check converts PipelineRow to dict for aggregation output
   expires: null
 - key: engine/executors.py:R5:AggregationExecutor:execute_flush:fp=a4dfab975966217a
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
-  safety: 'isinstance() check handles union type from aggregation output'
+  safety: isinstance() check handles union type from aggregation output
   expires: null
 - key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=80f4b2eb31815f95
   owner: P1-2026-02-05-schema-evolution
   reason: Internal boundary - PipelineRow vs dict discrimination for contract propagation
-  safety: 'isinstance() converts PipelineRow to dict for propagate_contract() call'
+  safety: isinstance() converts PipelineRow to dict for propagate_contract() call
   expires: null
 - key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=c38a7ce82fed6778
   owner: P1-2026-02-05-schema-evolution
   reason: Internal boundary - PipelineRow vs dict discrimination for token update
-  safety: 'isinstance() converts PipelineRow to dict when creating new token'
+  safety: isinstance() converts PipelineRow to dict when creating new token
   expires: null
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=3c0be6939b9ad68c
-  owner: architecture
-  reason: HTTP response headers - external system boundary, content-type may be missing
-  safety: Defaults to empty string - safe fallback for content type detection
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=57f98d9a680c4fe0
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to request processing
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=8d0a8a1eebc183ff
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to request processing
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=e62a337336f30f2f
-  owner: architecture
-  reason: httpx Client.get() method call - this is the external HTTP call itself
-  safety: Response is fully recorded to audit trail with error handling
-  expires: '2026-05-02'
-# --- P0-01: SSRF IP pinning additions (get_ssrf_safe, _follow_redirects_safe, _contains_non_finite) ---
 - key: plugins/clients/http.py:R5:_contains_non_finite:fp=9370a8f4d789c2c1
   owner: architecture
   reason: isinstance() on float to detect NaN/Infinity in JSON - type discrimination for serialization
@@ -1607,42 +1412,11 @@ allow_hits:
   reason: isinstance() on list for recursive NaN/Infinity scan - type discrimination for serialization
   safety: Traverses JSON structure to find non-finite floats before audit recording
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=71c07320711cad7a
-  owner: architecture
-  reason: httpx Client.get() method call - this is the external HTTP call with IP pinning
-  safety: Response is fully recorded to audit trail with error handling
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=62c4590acd68b276
-  owner: architecture
-  reason: HTTP response headers - external system boundary, content-type may be missing
-  safety: Defaults to empty string - safe fallback for content type detection
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=824d86b96f0dd024
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to request processing
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=3cba223a5ad13b10
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to request processing
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=c3b2ccc3cd57da7c
-  owner: architecture
-  reason: HTTP redirect Location header - external system boundary, header may be absent
-  safety: Breaks redirect loop if missing - no silent failure
-  expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=56f2da70598cb68d
-  owner: architecture
-  reason: httpx Client.get() method call - redirect hop with SSRF-validated IP
-  safety: Each redirect hop independently validated against SSRF blocklist
-  expires: '2026-05-02'
 - key: plugins/transforms/web_scrape.py:R1:WebScrapeTransform:__init__:fp=6b27daeff28c2216
   owner: architecture
   reason: User YAML config boundary - http_config is parsed from pipeline settings
   safety: Defaults to 30s timeout - safe fallback for optional config field
   expires: '2026-05-02'
-
 - key: engine/processor.py:R5:_extract_dict:fp=f5a5a4fa3692668f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -1698,3 +1472,170 @@ allow_hits:
   reason: JSON Schema field access - external data at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=7df7fefcb2213125
+  owner: architecture
+  reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for strict lookup'
+- key: contracts/plugin_context.py:R5:PluginContext:get:fp=76de86ac35dafae4
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=5ec999dfff114a20
+  owner: architecture
+  reason: Optional field access at trust boundary
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=94971df001b1532e
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=4e105a1207a19d87
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=27fe368832b3e2a9
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=d20c868c67b376ce
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+- key: plugins/validation.py:R5:PluginConfigValidator:validate_sink_config:fp=39024a41cd690457
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: plugins/validation.py:R1:PluginConfigValidator:_extract_errors:fp=76f7694624d8cfcc
+  owner: architecture
+  reason: Optional field access at trust boundary
+- key: mcp/server.py:R5:_validate_tool_args:fp=69c3d598495199e8
+  owner: architecture
+  reason: MCP tool argument validation - Tier 3 external protocol boundary
+  safety: Invalid arguments raise ValueError with descriptive message
+  expires: '2026-05-02'
+- key: mcp/server.py:R5:_validate_tool_args:fp=1d4be1fd73596be4
+  owner: architecture
+  reason: MCP tool argument validation - Tier 3 external protocol boundary
+  safety: Invalid arguments raise ValueError with descriptive message
+  expires: '2026-05-02'
+- key: mcp/server.py:R5:_validate_tool_args:fp=b3a076df12512a98
+  owner: architecture
+  reason: MCP tool argument validation - Tier 3 external protocol boundary
+  safety: Invalid arguments raise ValueError with descriptive message
+  expires: '2026-05-02'
+- key: mcp/server.py:R5:_validate_tool_args:fp=0110a14d5673741b
+  owner: architecture
+  reason: MCP tool argument validation - Tier 3 external protocol boundary
+  safety: Invalid arguments raise ValueError with descriptive message
+  expires: '2026-05-02'
+- key: mcp/server.py:R5:_validate_tool_args:fp=7877fba47c3e1861
+  owner: architecture
+  reason: MCP tool argument validation - Tier 3 external protocol boundary
+  safety: Invalid arguments raise ValueError with descriptive message
+  expires: '2026-05-02'
+- key: mcp/server.py:R5:_validate_tool_args:fp=7c7262d14d75a68d
+  owner: architecture
+  reason: MCP tool argument validation - Tier 3 external protocol boundary
+  safety: Invalid arguments raise ValueError with descriptive message
+  expires: '2026-05-02'
+- key: mcp/server.py:R5:_validate_tool_args:fp=6a4c72ce1cfff6a7
+  owner: architecture
+  reason: MCP tool argument validation - Tier 3 external protocol boundary
+  safety: Invalid arguments raise ValueError with descriptive message
+  expires: '2026-05-02'
+- key: mcp/server.py:R4:create_server:call_tool:fp=f2fc0f3de0c0a642
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+- key: mcp/server.py:R6:_find_audit_databases:fp=6e1b6fb8610a9c80
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+- key: mcp/server.py:R6:_prompt_for_database:fp=fb3e25ee3e686cfa
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+- key: mcp/server.py:R6:_prompt_for_database:fp=58a72039b4c8c3f8
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+- key: mcp/server.py:R6:_prompt_for_database:fp=89f95e856b85e04f
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=3f32c48564ee23ba
+  owner: architecture
+  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
+- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=0ccb1c8df3875bcb
+  owner: architecture
+  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9ca89eaa0e651dcf
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=36c3f58b638f1aff
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=443894e5bdda8a78
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=36096d44e6d8c088
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=e7368fdf9fa869f8
+  owner: P2-2026-02-02-76r
+  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=c3e2f9d2af522c9d
+  owner: P2-2026-02-02-76r
+  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=47946a8ab829df41
+  owner: P2-2026-02-02-76r
+  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=dfa86502fc245865
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=a49774aca3191658
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=e6d0c8334783f7db
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=cd7ae9f783e16f59
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=25eb43eaa792a88a
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=13a240c282634e6a
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=8a63a6b78ec0851c
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=0bc9a6b3b94f93c9
+  owner: architecture
+  reason: Graceful handling of purged payloads - retention policy may have deleted response data
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:post:fp=3c0be6939b9ad68c
+  owner: architecture
+  reason: HTTP response headers - external system boundary, content-type may be missing
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:fp=57f98d9a680c4fe0
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:fp=8d0a8a1eebc183ff
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=de1053d26df88b2e
+  owner: architecture
+  reason: HTTP response headers - external system boundary, content-type may be missing
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=8e3c6282a014e674
+  owner: architecture
+  reason: HTTP response headers - external system boundary, content-type may be missing
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=828d933917d5becb
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=fd83274374bde4f7
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=1e64e43b98341872
+  owner: architecture
+  reason: httpx Client.get() method call - this is the external HTTP call with IP pinning
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=218c21461d517b71
+  owner: architecture
+  reason: httpx Client.get() method call - this is the external HTTP call with IP pinning
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=51570a45a72c0c87
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=5592b5008ca0c900
+  owner: architecture
+  reason: Telemetry emission failure - must not crash main request flow
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=23c341af1cdd3b1e
+  owner: architecture
+  reason: HTTP redirect Location header - external system boundary, header may be absent
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=4850854b4b37d852
+  owner: architecture
+  reason: HTTP redirect Location header - external system boundary, header may be absent

@@ -34,12 +34,12 @@ class TestRowProcessorGates:
 
     def test_gate_continue_proceeds(self) -> None:
         """Gate returning continue proceeds to completion."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         db = LandscapeDB.in_memory()
@@ -129,11 +129,11 @@ class TestRowProcessorGates:
 
     def test_gate_route_to_sink(self) -> None:
         """Gate routing via route label returns routed outcome with sink name."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome
 
         db = LandscapeDB.in_memory()
@@ -215,11 +215,11 @@ class TestRowProcessorGates:
 
     def test_gate_fork_returns_forked(self) -> None:
         """Gate forking returns forked outcome (linear pipeline mode)."""
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome
 
         db = LandscapeDB.in_memory()
@@ -359,12 +359,12 @@ class TestRowProcessorNestedForks:
         - 4 grandchildren COMPLETED (inherit count=1)
         Total: 7 results
         """
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         db = LandscapeDB.in_memory()

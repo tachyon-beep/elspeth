@@ -36,17 +36,45 @@ app = typer.Typer(
 # ── Vocabularies ────────────────────────────────────────────────────────
 
 _OCCUPATIONS_M = [
-    "office worker", "construction worker", "teacher", "engineer",
-    "truck driver", "chef", "musician", "farmer", "accountant",
-    "plumber", "electrician", "mechanic", "dentist", "pharmacist",
-    "warehouse worker", "security guard", "paramedic", "firefighter",
+    "office worker",
+    "construction worker",
+    "teacher",
+    "engineer",
+    "truck driver",
+    "chef",
+    "musician",
+    "farmer",
+    "accountant",
+    "plumber",
+    "electrician",
+    "mechanic",
+    "dentist",
+    "pharmacist",
+    "warehouse worker",
+    "security guard",
+    "paramedic",
+    "firefighter",
 ]
 
 _OCCUPATIONS_F = [
-    "nurse", "lawyer", "artist", "retail worker", "scientist",
-    "pilot", "athlete", "accountant", "surgeon", "therapist",
-    "journalist", "architect", "librarian", "social worker",
-    "veterinarian", "professor", "dietitian", "physiotherapist",
+    "nurse",
+    "lawyer",
+    "artist",
+    "retail worker",
+    "scientist",
+    "pilot",
+    "athlete",
+    "accountant",
+    "surgeon",
+    "therapist",
+    "journalist",
+    "architect",
+    "librarian",
+    "social worker",
+    "veterinarian",
+    "professor",
+    "dietitian",
+    "physiotherapist",
 ]
 
 _SYMPTOMS = [
@@ -154,8 +182,8 @@ def _generate_history(rng: random.Random) -> str:
 
 _FIELD_GENERATORS = {
     0: _generate_background,  # field 1: background
-    1: _generate_symptoms,     # field 2: symptoms
-    2: _generate_history,      # field 3: history
+    1: _generate_symptoms,  # field 2: symptoms
+    2: _generate_history,  # field 3: history
 }
 
 
@@ -165,11 +193,13 @@ def _generate_field(rng: random.Random, field_index: int) -> str:
     if generator is not None:
         return generator(rng)
     # For fields beyond 3, generate mixed content
-    return rng.choice([
-        _generate_background(rng),
-        _generate_symptoms(rng),
-        _generate_history(rng),
-    ])
+    return rng.choice(
+        [
+            _generate_background(rng),
+            _generate_symptoms(rng),
+            _generate_history(rng),
+        ]
+    )
 
 
 def _generate_multi_row(

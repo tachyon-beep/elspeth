@@ -47,8 +47,8 @@ class TestRowProcessorPipelineRow:
 
     def test_process_row_accepts_source_row(self) -> None:
         """process_row should accept SourceRow and pass it to create_initial_token."""
-        from elspeth.engine.processor import RowProcessor
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
         recorder = _make_mock_recorder()
@@ -78,8 +78,8 @@ class TestRowProcessorPipelineRow:
 
     def test_process_row_creates_pipeline_row(self) -> None:
         """process_row should create token with PipelineRow containing contract."""
-        from elspeth.engine.processor import RowProcessor
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
         recorder = _make_mock_recorder()
@@ -115,8 +115,8 @@ class TestRowProcessorPipelineRow:
         The error propagates from TokenManager.create_initial_token(),
         which enforces this requirement.
         """
-        from elspeth.engine.processor import RowProcessor
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.engine.processor import RowProcessor
 
         recorder = _make_mock_recorder()
         span_factory = _make_mock_span_factory()
@@ -146,8 +146,8 @@ class TestRowProcessorExistingRow:
 
     def test_process_existing_row_accepts_pipeline_row(self) -> None:
         """process_existing_row should accept PipelineRow for resume scenarios."""
-        from elspeth.engine.processor import RowProcessor
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.engine.processor import RowProcessor
 
         contract = _make_contract()
         recorder = _make_mock_recorder()

@@ -11,6 +11,7 @@ from datetime import UTC
 from sqlalchemy import select
 
 from elspeth.contracts.enums import NodeType
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.lineage import explain
@@ -19,7 +20,6 @@ from elspeth.core.landscape.schema import (
     transform_errors_table,
     validation_errors_table,
 )
-from elspeth.contracts.plugin_context import PluginContext
 
 # Shared schema config for tests
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})

@@ -99,23 +99,6 @@ def test_validator_accepts_valid_sink_config():
     assert errors == []
 
 
-def test_validator_rejects_unknown_gate_type():
-    """Gate validation raises error since no gate plugins exist yet."""
-    validator = PluginConfigValidator()
-
-    config = {
-        "field": "score",
-        "threshold": 0.5,
-        "schema": {"mode": "observed"},
-    }
-
-    # No gate plugins exist in codebase yet, so this should raise
-    with pytest.raises(ValueError) as exc_info:
-        validator.validate_gate_config("threshold", config)
-
-    assert "Unknown gate type" in str(exc_info.value)
-
-
 def test_validator_rejects_invalid_transform_config():
     """Invalid transform config with missing required field returns error."""
     validator = PluginConfigValidator()

@@ -12,11 +12,11 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.sentinels import MISSING

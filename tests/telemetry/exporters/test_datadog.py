@@ -19,11 +19,11 @@ import pytest
 
 from elspeth.contracts import GateEvaluated, TokenCompleted
 from elspeth.contracts.enums import RoutingMode, RowOutcome, RunStatus
-from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.contracts.events import (
     RunFinished,
     RunStarted,
 )
+from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters.datadog import DatadogExporter
 
 

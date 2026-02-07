@@ -13,8 +13,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.plugins.batching.mixin import BatchTransformMixin
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.plugins.batching.mixin import BatchTransformMixin
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
 from .test_batch_transform_protocol import BatchTransformContractTestBase

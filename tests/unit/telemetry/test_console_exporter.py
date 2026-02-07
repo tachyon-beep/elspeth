@@ -20,17 +20,15 @@ import pytest
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome, RunStatus
 from elspeth.contracts.events import (
     PhaseAction,
+    PhaseChanged,
     PipelinePhase,
+    RunFinished,
+    RunStarted,
     TelemetryEvent,
     TokenCompleted,
     TransformCompleted,
 )
 from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.contracts.events import (
-    PhaseChanged,
-    RunFinished,
-    RunStarted,
-)
 from elspeth.telemetry.exporters.console import ConsoleExporter
 from elspeth.telemetry.protocols import ExporterProtocol
 

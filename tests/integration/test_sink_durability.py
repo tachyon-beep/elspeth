@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import Determinism, NodeType, PendingOutcome, RowOutcome, TokenInfo
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
@@ -22,7 +23,6 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.executors import SinkExecutor
 from elspeth.engine.spans import SpanFactory
-from elspeth.contracts.plugin_context import PluginContext
 
 
 def _make_contract(data: dict[str, Any]) -> SchemaContract:

@@ -12,8 +12,8 @@ from typing import Any
 from pydantic import ConfigDict
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
-from elspeth.plugins.base import BaseSource
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.plugins.base import BaseSource
 
 
 class NullSourceSchema(PluginSchema):

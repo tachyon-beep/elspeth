@@ -22,7 +22,6 @@ import pluggy
 
 if TYPE_CHECKING:
     from elspeth.plugins.protocols import (
-        GateProtocol,
         SinkProtocol,
         SourceProtocol,
         TransformProtocol,
@@ -59,14 +58,6 @@ class ElspethTransformSpec:
 
         Returns:
             List of Transform plugin classes
-        """
-
-    @hookspec
-    def elspeth_get_gates(self) -> list[type["GateProtocol"]]:  # type: ignore[empty-body]  # pluggy hookspec: body provided by implementations
-        """Return gate plugin classes.
-
-        Returns:
-            List of Gate plugin classes
         """
 
 

@@ -27,8 +27,8 @@ from elspeth.contracts import BatchPendingError
 
 if TYPE_CHECKING:
     from elspeth.contracts import Operation
-    from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.core.landscape.recorder import LandscapeRecorder
 
 logger = logging.getLogger(__name__)
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.azure.blob_sink import AzureBlobSink
 from elspeth.plugins.azure.blob_source import AzureBlobSource
-from elspeth.contracts.plugin_context import PluginContext
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 

@@ -16,9 +16,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from elspeth.contracts.enums import BackpressureMode, TelemetryGranularity
-from elspeth.contracts.events import TelemetryEvent
+from elspeth.contracts.events import RunStarted, TelemetryEvent
 from elspeth.core.events import EventBus
-from elspeth.contracts.events import RunStarted
 from elspeth.telemetry.manager import TelemetryManager
 
 

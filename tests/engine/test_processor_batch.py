@@ -14,10 +14,10 @@ because the processor uses isinstance() for type-safe plugin detection.
 from typing import Any, cast
 
 from elspeth.contracts import NodeType, PipelineRow, SourceRow
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
@@ -53,12 +53,12 @@ class TestProcessorBatchTransforms:
     def test_processor_buffers_rows_for_aggregation_node(self) -> None:
         """Processor buffers rows at aggregation nodes and flushes on trigger."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class SumTransform(BaseTransform):
@@ -164,11 +164,11 @@ class TestProcessorBatchTransforms:
     def test_processor_batch_transform_without_aggregation_config(self) -> None:
         """Batch-aware transform without aggregation config uses single-row mode."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class DoubleTransform(BaseTransform):
@@ -242,12 +242,12 @@ class TestProcessorBatchTransforms:
     def test_processor_buffers_restored_on_recovery(self) -> None:
         """Processor restores buffer state from checkpoint."""
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class SumTransform(BaseTransform):
@@ -733,12 +733,12 @@ class TestProcessorDeaggregation:
         import pytest
 
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class NoneReturningTransform(BaseTransform):
@@ -837,12 +837,12 @@ class TestProcessorDeaggregation:
         import pytest
 
         from elspeth.contracts import Determinism
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class NoneReturningTransform(BaseTransform):

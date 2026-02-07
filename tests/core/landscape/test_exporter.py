@@ -1089,8 +1089,8 @@ class TestLandscapeExporterCompleteness:
         Without these refs, exported audit trails can't access the full operation data.
         """
         from elspeth.contracts import Determinism
-        from elspeth.core.operations import track_operation
         from elspeth.contracts.plugin_context import PluginContext
+        from elspeth.core.operations import track_operation
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

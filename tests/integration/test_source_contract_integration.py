@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.sources.csv_source import CSVSource
 
 if TYPE_CHECKING:

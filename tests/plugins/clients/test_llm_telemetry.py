@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
 )
-from elspeth.contracts.events import ExternalCallCompleted
 
 
 class TestLLMClientTelemetry:

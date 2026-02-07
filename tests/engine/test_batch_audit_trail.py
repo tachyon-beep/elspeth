@@ -30,12 +30,12 @@ import pytest
 from elspeth.contracts.audit import NodeStateCompleted, NodeStateFailed
 from elspeth.contracts.enums import CallStatus, CallType, NodeStateStatus, NodeType
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.spans import SpanFactory
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.azure import AzureLLMTransform
 from elspeth.testing import make_pipeline_row
 

@@ -24,9 +24,9 @@ from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.types import AggregationFlushResult, PipelineConfig
 
 if TYPE_CHECKING:
+    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.core.landscape import LandscapeRecorder
     from elspeth.engine.processor import RowProcessor
-    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.plugins.protocols import TransformProtocol
 
 

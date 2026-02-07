@@ -207,8 +207,7 @@ class RecoveryManager:
         # Batch query: Fetch all row metadata in one query (N+1 fix)
         with self._db.engine.connect() as conn:
             rows_result = conn.execute(
-                select(rows_table.c.row_id, rows_table.c.row_index, rows_table.c.source_data_ref)
-                .where(rows_table.c.row_id.in_(row_ids))
+                select(rows_table.c.row_id, rows_table.c.row_index, rows_table.c.source_data_ref).where(rows_table.c.row_id.in_(row_ids))
             ).fetchall()
 
         # Build lookup dict for row metadata

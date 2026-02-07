@@ -201,7 +201,7 @@ class TestOrchestratorResume:
                 "count_fire_offset": None,
                 "condition_fire_offset": None,
             },
-            "_version": "2.0",
+            "_version": "2.1",
         }
         checkpoint_manager.create_checkpoint(
             run_id=run.run_id,

@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import Field, model_validator
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError

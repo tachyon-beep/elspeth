@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError, TransformErrorReason
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
@@ -43,7 +44,6 @@ from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, TransformProtocol
 
 
