@@ -1382,66 +1382,48 @@ def _execute_resume_with_instances(
             telemetry_manager.close()
 
 
-def _build_validation_graph(settings_config: ElspethSettings) -> ExecutionGraph:
-    """Build execution graph for resume topology validation.
-
-    CRITICAL: Uses the ORIGINAL source plugin configuration (not NullSource)
-    to match the topology hash computed during the original run.
-
-    The checkpoint's upstream_topology_hash was computed with the real source,
-    so validation must use the same source to avoid false topology mismatches.
+def _build_resume_graphs(
+    settings_config: ElspethSettings,
+    plugins: dict[str, Any],
+) -> tuple[ExecutionGraph, ExecutionGraph]:
+    """Build both validation and execution graphs for resume from pre-instantiated plugins.
 
     Returns:
-        ExecutionGraph with original source for topology validation
+        Tuple of (validation_graph, execution_graph):
+        - validation_graph: Uses original source for topology hash matching
+        - execution_graph: Uses NullSource since resume data comes from stored payloads
     """
-    from elspeth.cli_helpers import instantiate_plugins_from_config
+    from elspeth.plugins.sources.null_source import NullSource
 
-    plugins = instantiate_plugins_from_config(settings_config)
+    gate_settings = list(settings_config.gates)
+    coalesce_settings = list(settings_config.coalesce) if settings_config.coalesce else None
 
-    graph = ExecutionGraph.from_plugin_instances(
-        source=plugins["source"],  # Use ORIGINAL source, not NullSource
+    # Validation graph uses the ORIGINAL source to match the topology hash
+    # computed during the original run
+    validation_graph = ExecutionGraph.from_plugin_instances(
+        source=plugins["source"],
         transforms=plugins["transforms"],
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
-        gates=list(settings_config.gates),
+        gates=gate_settings,
         default_sink=settings_config.default_sink,
-        coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
+        coalesce_settings=coalesce_settings,
     )
+    validation_graph.validate()
 
-    graph.validate()
-    return graph
-
-
-def _build_execution_graph(settings_config: ElspethSettings) -> ExecutionGraph:
-    """Build execution graph for resume execution.
-
-    Uses NullSource because resume data comes from stored payloads,
-    not from re-reading the original source.
-
-    Returns:
-        ExecutionGraph with NullSource for execution
-    """
-    from elspeth.cli_helpers import instantiate_plugins_from_config
-    from elspeth.plugins.sources.null_source import NullSource
-
-    plugins = instantiate_plugins_from_config(settings_config)
-
-    # Override source with NullSource for resume execution
-    null_source = NullSource({})
-    resume_plugins = {**plugins, "source": null_source}
-
-    graph = ExecutionGraph.from_plugin_instances(
-        source=resume_plugins["source"],
-        transforms=resume_plugins["transforms"],
-        sinks=resume_plugins["sinks"],
-        aggregations=resume_plugins["aggregations"],
-        gates=list(settings_config.gates),
+    # Execution graph uses NullSource — resume data comes from stored payloads
+    execution_graph = ExecutionGraph.from_plugin_instances(
+        source=NullSource({}),
+        transforms=plugins["transforms"],
+        sinks=plugins["sinks"],
+        aggregations=plugins["aggregations"],
+        gates=gate_settings,
         default_sink=settings_config.default_sink,
-        coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
+        coalesce_settings=coalesce_settings,
     )
+    execution_graph.validate()
 
-    graph.validate()
-    return graph
+    return validation_graph, execution_graph
 
 
 @app.command()
@@ -1540,9 +1522,18 @@ def resume(
         checkpoint_manager = CheckpointManager(db)
         recovery_manager = RecoveryManager(db, checkpoint_manager)
 
-        # Build graph for topology validation (uses original source)
+        # Instantiate plugins once — reused for validation graph, execution graph, and sink checks
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+
         try:
-            validation_graph = _build_validation_graph(settings_config)
+            plugins = instantiate_plugins_from_config(settings_config)
+        except Exception as e:
+            typer.echo(f"Error instantiating plugins: {e}", err=True)
+            raise typer.Exit(1) from None
+
+        # Build both graphs from the same plugin instances
+        try:
+            validation_graph, execution_graph = _build_resume_graphs(settings_config, plugins)
         except Exception as e:
             typer.echo(f"Error building validation graph: {e}", err=True)
             raise typer.Exit(1) from None
@@ -1601,43 +1592,17 @@ def resume(
 
         payload_store = FilesystemPayloadStore(payload_path)
 
-        # Build execution graph (uses NullSource for resume)
-        try:
-            execution_graph = _build_execution_graph(settings_config)
-        except Exception as e:
-            typer.echo(f"Error building execution graph: {e}", err=True)
-            raise typer.Exit(1) from None
-
-        # Instantiate plugins for execution
-        from elspeth.cli_helpers import instantiate_plugins_from_config
+        # CRITICAL: Validate and configure sinks for resume mode
+        # Uses the already-instantiated sinks from plugins dict
         from elspeth.plugins.sources.null_source import NullSource
 
-        try:
-            plugins = instantiate_plugins_from_config(settings_config)
-        except Exception as e:
-            typer.echo(f"Error instantiating plugins: {e}", err=True)
-            raise typer.Exit(1) from None
-
-        # CRITICAL: Validate and configure sinks for resume mode
-        # Each sink declares whether it supports resume and self-configures
-        manager = _get_plugin_manager()
         resume_sinks = {}
 
-        for sink_name, sink_config in settings_config.sinks.items():
-            sink_cls = manager.get_sink_by_name(sink_config.plugin)
-            sink_options = dict(sink_config.options)
-
-            # Instantiate sink to check resume capability
-            try:
-                sink = sink_cls(sink_options)
-            except Exception as e:
-                typer.echo(f"Error creating sink '{sink_name}': {e}", err=True)
-                raise typer.Exit(1) from None
-
+        for sink_name, sink in plugins["sinks"].items():
             # Check if sink supports resume
             if not sink.supports_resume:
                 typer.echo(
-                    f"Error: Cannot resume with sink '{sink_name}' (plugin: {sink_config.plugin}). "
+                    f"Error: Cannot resume with sink '{sink_name}' (plugin: {sink.name}). "
                     f"This sink does not support resume/append mode.\n"
                     f"Hint: Use a different sink type or start a new run.",
                     err=True,
@@ -1653,7 +1618,8 @@ def resume(
 
             # For sinks with restore_source_headers=True, provide field resolution
             # mapping BEFORE validation so they can correctly compare display names
-            restore_source_headers = "restore_source_headers" in sink_options and sink_options["restore_source_headers"]
+            sink_opts = dict(settings_config.sinks[sink_name].options)
+            restore_source_headers = sink_opts.get("restore_source_headers", False)
             if restore_source_headers:
                 from elspeth.core.landscape import LandscapeRecorder
 

@@ -55,8 +55,7 @@ def _extract_dict(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
     converting between representations at a known boundary.
     """
     if isinstance(row, PipelineRow):
-        # Extract immutable dict from PipelineRow
-        return dict(row._data)
+        return row.to_dict()
     return row
 
 
@@ -2034,7 +2033,7 @@ class RowProcessor:
                     # is_multi_row check above guarantees rows is not None
                     assert transform_result.rows is not None, "is_multi_row guarantees rows is not None"
                     # Convert any PipelineRow instances to dicts for TokenManager
-                    expanded_rows = [dict(r._data) if isinstance(r, PipelineRow) else r for r in transform_result.rows]
+                    expanded_rows = [r.to_dict() if isinstance(r, PipelineRow) else r for r in transform_result.rows]
                     child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,
                         expanded_rows=expanded_rows,

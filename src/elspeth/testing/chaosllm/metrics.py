@@ -219,6 +219,8 @@ class MetricsRecorder:
         # Thread-local storage for connections
         self._local = threading.local()
         self._lock = threading.Lock()
+        # Registry of all thread connections for cleanup in close()
+        self._connections: list[sqlite3.Connection] = []
 
         # Detect in-memory databases and URI usage
         self._use_uri = config.database.startswith("file:")
@@ -265,6 +267,8 @@ class MetricsRecorder:
                 conn.execute("PRAGMA synchronous=NORMAL")
             conn.row_factory = sqlite3.Row
             self._local.connection = conn
+            with self._lock:
+                self._connections.append(conn)
             return conn
 
     def _init_schema(self) -> None:
@@ -835,14 +839,11 @@ class MetricsRecorder:
         return [dict(row) for row in cursor.fetchall()]
 
     def close(self) -> None:
-        """Close all database connections.
-
-        Call this when shutting down to ensure clean disconnection.
-        """
-        try:
-            connection: sqlite3.Connection = self._local.connection
-            connection.close()
-            del self._local.connection
-        except AttributeError:
-            # No connection was created for this thread - nothing to close
-            pass
+        """Close all database connections across all threads."""
+        with self._lock:
+            for conn in self._connections:
+                try:
+                    conn.close()
+                except sqlite3.ProgrammingError:
+                    pass  # Already closed
+            self._connections.clear()

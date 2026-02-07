@@ -7,6 +7,11 @@ Tests all critical aspects of resume:
 3. Resume with schema type restoration (Bug #4)
 4. Resume with real edge IDs (Bug #3)
 5. Checkpoint cleanup on completion
+
+Note: Manual graph construction (add_node/add_edge) is intentional here.
+Resume tests must create graphs with specific node IDs that match pre-existing
+database checkpoint records. Using from_plugin_instances() would generate new
+UUIDs that wouldn't match stored checkpoints, breaking the resume flow.
 """
 
 from datetime import UTC, datetime

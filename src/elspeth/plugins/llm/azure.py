@@ -588,7 +588,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         # Clear cached LLM clients
         with self._llm_clients_lock:
             self._llm_clients.clear()
-        self._underlying_client = None
+            self._underlying_client = None
         self._langfuse_client = None
 
     def _flush_tracing(self) -> None:

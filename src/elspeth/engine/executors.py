@@ -392,7 +392,7 @@ class TransformExecutor:
 
             # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
             def _to_dict(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-                return dict(r._data) if isinstance(r, PipelineRow) else r
+                return r.to_dict() if isinstance(r, PipelineRow) else r
 
             if isinstance(output_data_with_pipe, list):
                 output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict(r) for r in output_data_with_pipe]
@@ -1454,7 +1454,7 @@ class AggregationExecutor:
 
             # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
             def _to_dict_agg(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-                return dict(r._data) if isinstance(r, PipelineRow) else r
+                return r.to_dict() if isinstance(r, PipelineRow) else r
 
             if isinstance(output_data_with_pipe, list):
                 output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict_agg(r) for r in output_data_with_pipe]

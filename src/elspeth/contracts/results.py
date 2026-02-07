@@ -38,7 +38,7 @@ def _extract_dict_from_row(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
         from elspeth.contracts.schema_contract import PipelineRow as PR
 
     if isinstance(row, PR):
-        return dict(row._data)
+        return row.to_dict()
     return row
 
 
