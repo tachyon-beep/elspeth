@@ -307,21 +307,21 @@ class PooledExecutor:
     def _wait_for_dispatch_gate(self) -> None:
         """Wait until we're allowed to dispatch, ensuring global pacing.
 
-        Enforces a delay between consecutive dispatches across ALL workers.
-        The delay is the greater of:
-        - min_dispatch_delay_ms: baseline pacing for even dispatch spacing
-        - AIMD current_delay_ms: congestion-aware backoff
+        Enforces min_dispatch_delay_ms between consecutive dispatches across
+        ALL workers. This prevents burst-hammering the API when many workers
+        are ready simultaneously.
 
-        When the API is healthy, dispatches are paced at min_dispatch_delay_ms.
-        When AIMD detects congestion (capacity errors), the gate slows ALL
-        dispatches — not just retrying workers — because API-level congestion
-        (429s) affects the entire endpoint, not individual request paths.
+        NOTE: This gate intentionally uses only the static min_dispatch_delay_ms,
+        NOT the AIMD delay. Congestion backoff is enforced per-worker in the
+        retry sleep (_execute_single). Feeding AIMD into the gate would
+        double-penalize workers (once in retry sleep, again at the gate) and
+        serialize all retries behind a single bottleneck, violating
+        max_capacity_retry_seconds guarantees.
 
         The lock is only held during check-and-update, not during sleep,
         allowing other workers to make progress.
         """
-        aimd_delay_ms = self._throttle.current_delay_ms
-        delay_ms = max(self._config.min_dispatch_delay_ms, aimd_delay_ms)
+        delay_ms = self._config.min_dispatch_delay_ms
         if delay_ms <= 0:
             return  # No pacing needed
 

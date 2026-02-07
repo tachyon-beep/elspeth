@@ -922,26 +922,23 @@ class TestPooledExecutorBugFixes:
         assert entries[0].result.status == "error"
         assert entries[0].result.reason["reason"] == "shutdown_requested"
 
-    def test_dispatch_gate_respects_aimd_congestion(self) -> None:
-        """Dispatch gate should use AIMD delay when higher than min_dispatch_delay.
+    def test_dispatch_gate_uses_only_static_delay(self) -> None:
+        """Dispatch gate should use only min_dispatch_delay_ms, NOT AIMD delay.
 
-        Bug: gate always used min_dispatch_delay_ms, ignoring AIMD congestion.
-
-        Uses pool_size=1 for serial execution so each dispatch reads the
-        current AIMD delay without race conditions from concurrent on_success.
-        Pumps 5 capacity errors to build up enough delay that on_success
-        recovery steps don't bring it below min_dispatch_delay_ms.
+        AIMD congestion backoff is enforced per-worker in the retry sleep,
+        not at the global gate. Feeding AIMD into the gate would double-penalize
+        workers and serialize all retries behind a single bottleneck, violating
+        max_capacity_retry_seconds guarantees.
         """
         config = PoolConfig(
             pool_size=1,
             min_dispatch_delay_ms=10,
             recovery_step_ms=10,
-            max_dispatch_delay_ms=500,
+            max_dispatch_delay_ms=5000,
         )
         executor = PooledExecutor(config)
 
-        # Pump 5 capacity errors to build significant AIMD delay
-        # Error chain: 0→10→20→40→80→160ms
+        # Pump capacity errors to build large AIMD delay
         for _ in range(5):
             executor._throttle.on_capacity_error()
         aimd_delay = executor._throttle.current_delay_ms
@@ -956,15 +953,14 @@ class TestPooledExecutorBugFixes:
         ctx = [RowContext(row={"v": i}, state_id=f"s{i}", row_index=i) for i in range(3)]
         executor.execute_batch(ctx, mock_process)
 
-        # With serial execution, each dispatch reads the (slightly decreasing)
-        # AIMD delay. Even after on_success steps, delay stays well above 10ms.
+        # Gate should pace at min_dispatch_delay_ms (10ms), NOT at AIMD delay
+        # (which is >= 100ms). Verify dispatches are faster than AIMD delay.
         assert len(dispatch_times) == 3
         for i in range(1, len(dispatch_times)):
             interval_ms = (dispatch_times[i] - dispatch_times[i - 1]) * 1000
-            # AIMD delay decreases by recovery_step_ms per success, but should
-            # still be much higher than min_dispatch_delay_ms of 10ms
-            assert interval_ms >= 50, (
-                f"Dispatch {i} was {interval_ms:.1f}ms after {i - 1}, expected >= 50ms (AIMD congestion should slow dispatches)"
+            assert interval_ms < aimd_delay, (
+                f"Dispatch {i} took {interval_ms:.1f}ms (AIMD={aimd_delay:.0f}ms). "
+                f"Gate should use min_dispatch_delay_ms (10ms), not AIMD delay."
             )
 
         executor.shutdown()
