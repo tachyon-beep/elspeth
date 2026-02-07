@@ -1635,10 +1635,7 @@ class RowProcessor:
             while work_queue:
                 iterations += 1
                 if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(
-                        f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. "
-                        f"Possible infinite loop in pipeline."
-                    )
+                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
 
                 item = work_queue.popleft()
                 result, child_items = self._process_single_token(

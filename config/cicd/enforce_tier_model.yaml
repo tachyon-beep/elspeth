@@ -382,30 +382,20 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=bd2be8e57cbe05de
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=e45664affb8b9f5c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=43ed76be1967a768
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=7817e2533f29b3b3
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_row:fp=d9f06c1971928bb3
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=8d67892f8bcf88cd
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_existing_row:fp=6cd9024f450a586b
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_token:fp=171d6f0a8b69c69c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
+  reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
+  safety: isinstance() discriminates documented union return type; no bug hiding
   expires: '2026-05-02'
 - key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=302e2e66d8f5696b
   owner: architecture
@@ -417,7 +407,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=dccf8f1387fd8ff5
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=fc6941785707f946
   owner: architecture
   reason: dict.get() is correct - not all branch names have a coalesce point mapping; returns None for non-coalescing branches
   safety: None return triggers early exit, no silent fallback
