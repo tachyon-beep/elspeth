@@ -405,11 +405,26 @@ class TransformErrorReason(TypedDict):
     errors: NotRequired[list[str | ErrorDetail]]  # Error messages or structured errors
 
 
+class SourceQuarantineReason(TypedDict):
+    """Reason for source quarantine routing.
+
+    Used when source validation fails and the row is routed to a quarantine sink
+    via a DIVERT edge. The quarantine_error field distinguishes this variant from
+    gate and transform reasons.
+
+    Required field:
+        quarantine_error: Description of the validation failure that caused quarantine
+    """
+
+    quarantine_error: str
+
+
 # Discriminated union - field presence distinguishes variants:
 # - ConfigGateReason has "condition" and "result"
 # - PluginGateReason has "rule" and "matched_value"
 # - TransformErrorReason has "reason" (error category string)
-RoutingReason = ConfigGateReason | PluginGateReason | TransformErrorReason
+# - SourceQuarantineReason has "quarantine_error"
+RoutingReason = ConfigGateReason | PluginGateReason | TransformErrorReason | SourceQuarantineReason
 
 
 # =============================================================================

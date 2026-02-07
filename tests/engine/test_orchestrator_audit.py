@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeID, NodeStateStatus, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName
+from elspeth.contracts import Determinism, NodeID, NodeStateStatus, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName, SourceRow
 from elspeth.contracts.audit import NodeStateCompleted
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
@@ -1218,3 +1218,238 @@ class TestSourceNodeStates:
         states = recorder.get_node_states_for_token(tokens[0].token_id)
         source_states = [s for s in states if s.step_index == 0]
         assert source_states[0].node_id == source_node_id
+
+
+class TestQuarantineRoutingEvents:
+    """Verify DIVERT routing_events are recorded for source quarantine."""
+
+    def test_quarantine_creates_divert_routing_event(self, payload_store) -> None:
+        """Quarantined rows must create a routing_event with mode=DIVERT."""
+        from collections.abc import Iterator
+
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class RowSchema(PluginSchema):
+            id: int
+            name: str
+
+        class QuarantiningSource(_TestSourceBase):
+            name = "quarantining_source"
+            output_schema = RowSchema
+            _on_validation_failure = "quarantine"
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield from self.wrap_rows([{"id": 1, "name": "alice"}])
+                yield SourceRow.quarantined(
+                    row={"id": 2, "name": "bob"},
+                    error="Schema validation failed: field 'name' has wrong type",
+                    destination="quarantine",
+                )
+
+        source = QuarantiningSource()
+        default_sink = CollectSink(name="collect_sink")
+        quarantine_sink = CollectSink(name="quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(
+            config, graph=build_production_graph(config), payload_store=payload_store
+        )
+        recorder = LandscapeRecorder(db)
+
+        # Find the quarantined token's source node_state (step_index=0, FAILED)
+        rows = recorder.get_rows(result.run_id)
+        quarantine_tokens = []
+        for row in rows:
+            tokens = recorder.get_tokens(row.row_id)
+            for token in tokens:
+                states = recorder.get_node_states_for_token(token.token_id)
+                source_states = [s for s in states if s.step_index == 0]
+                if source_states and source_states[0].status == NodeStateStatus.FAILED:
+                    quarantine_tokens.append((token, source_states[0]))
+
+        assert len(quarantine_tokens) == 1, (
+            f"Expected 1 quarantined token, found {len(quarantine_tokens)}"
+        )
+        _token, source_state = quarantine_tokens[0]
+
+        # Verify routing_event exists for the source state
+        routing_events = recorder.get_routing_events(source_state.state_id)
+        assert len(routing_events) == 1, (
+            f"Expected 1 routing_event for quarantine, got {len(routing_events)}"
+        )
+
+        event = routing_events[0]
+        assert event.mode == RoutingMode.DIVERT
+        assert event.reason_hash is not None
+
+    def test_quarantine_routing_event_references_quarantine_edge(self, payload_store) -> None:
+        """Routing_event edge_id must point to the __quarantine__ DIVERT edge."""
+        from collections.abc import Iterator
+
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class RowSchema(PluginSchema):
+            id: int
+
+        class QuarantiningSource(_TestSourceBase):
+            name = "q_source"
+            output_schema = RowSchema
+            _on_validation_failure = "quarantine"
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.quarantined(
+                    row={"id": 1},
+                    error="type error",
+                    destination="quarantine",
+                )
+
+        source = QuarantiningSource()
+        default_sink = CollectSink(name="default")
+        quarantine_sink = CollectSink(name="quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(
+            config, graph=build_production_graph(config), payload_store=payload_store
+        )
+        recorder = LandscapeRecorder(db)
+
+        # Find __quarantine__ DIVERT edge
+        edges = recorder.get_edges(result.run_id)
+        quarantine_edges = [e for e in edges if e.label == "__quarantine__"]
+        assert len(quarantine_edges) == 1
+        quarantine_edge = quarantine_edges[0]
+        assert quarantine_edge.default_mode == RoutingMode.DIVERT
+
+        # Find the routing_event
+        rows = recorder.get_rows(result.run_id)
+        for row in rows:
+            tokens = recorder.get_tokens(row.row_id)
+            for token in tokens:
+                states = recorder.get_node_states_for_token(token.token_id)
+                source_states = [s for s in states if s.step_index == 0]
+                if source_states and source_states[0].status == NodeStateStatus.FAILED:
+                    events = recorder.get_routing_events(source_states[0].state_id)
+                    assert len(events) == 1
+                    assert events[0].edge_id == quarantine_edge.edge_id
+
+    def test_quarantine_routing_event_captures_error_detail(self, payload_store) -> None:
+        """Routing_event reason_hash captures the quarantine error message."""
+        from collections.abc import Iterator
+
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class RowSchema(PluginSchema):
+            value: int
+
+        error_msg = "Field 'value' expected int, got str"
+
+        class QuarantiningSource(_TestSourceBase):
+            name = "q_source"
+            output_schema = RowSchema
+            _on_validation_failure = "quarantine"
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.quarantined(
+                    row={"value": "not_an_int"},
+                    error=error_msg,
+                    destination="quarantine",
+                )
+
+        source = QuarantiningSource()
+        default_sink = CollectSink(name="default")
+        quarantine_sink = CollectSink(name="quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(
+            config, graph=build_production_graph(config), payload_store=payload_store
+        )
+        recorder = LandscapeRecorder(db)
+
+        # Find the routing_event and verify reason_hash is non-null
+        rows = recorder.get_rows(result.run_id)
+        found_event = False
+        for row in rows:
+            tokens = recorder.get_tokens(row.row_id)
+            for token in tokens:
+                states = recorder.get_node_states_for_token(token.token_id)
+                source_states = [s for s in states if s.step_index == 0]
+                if source_states and source_states[0].status == NodeStateStatus.FAILED:
+                    events = recorder.get_routing_events(source_states[0].state_id)
+                    assert len(events) == 1
+                    assert events[0].reason_hash is not None
+                    found_event = True
+        assert found_event, "No quarantine routing_event found"
+
+    def test_valid_rows_have_no_routing_events_on_source_state(self, payload_store) -> None:
+        """Valid rows should NOT have routing_events on their source node_state."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+        source = ListSource([{"value": 1}, {"value": 2}], name="test_source")
+        sink = CollectSink(name="test_sink")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(
+            config, graph=build_production_graph(config), payload_store=payload_store
+        )
+        recorder = LandscapeRecorder(db)
+
+        rows = recorder.get_rows(result.run_id)
+        for row in rows:
+            tokens = recorder.get_tokens(row.row_id)
+            for token in tokens:
+                states = recorder.get_node_states_for_token(token.token_id)
+                source_states = [s for s in states if s.step_index == 0]
+                for ss in source_states:
+                    events = recorder.get_routing_events(ss.state_id)
+                    assert len(events) == 0, (
+                        f"Valid row should have no routing_events on source state, "
+                        f"found {len(events)}"
+                    )

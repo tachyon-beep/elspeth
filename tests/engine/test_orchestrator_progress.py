@@ -179,6 +179,7 @@ class TestOrchestratorProgress:
 
             name = "quarantine_boundary_source"
             output_schema = ValueSchema
+            _on_validation_failure = "quarantine"
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 for i in range(150):

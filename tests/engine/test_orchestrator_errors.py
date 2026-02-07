@@ -275,6 +275,7 @@ class TestSourceQuarantineTokenOutcome:
 
             name = "quarantining_source"
             output_schema = RowSchema
+            _on_validation_failure = "quarantine"
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Valid row
@@ -375,6 +376,7 @@ class TestSourceQuarantineTokenOutcome:
 
             name = "quarantining_source"
             output_schema = RowSchema
+            _on_validation_failure = "quarantine"
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 yield SourceRow.quarantined(

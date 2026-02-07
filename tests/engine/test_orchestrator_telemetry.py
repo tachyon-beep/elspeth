@@ -492,6 +492,7 @@ class TestRowCreatedTelemetry:
 
             name = "quarantining_source"
             output_schema = RowSchema
+            _on_validation_failure = "quarantine"
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Quarantined row - simulates validation failure
@@ -548,6 +549,7 @@ class TestRowCreatedTelemetry:
         class QuarantiningSource(_TestSourceBase):
             name = "quarantining_source"
             output_schema = RowSchema
+            _on_validation_failure = "quarantine"
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 yield SourceRow.quarantined(

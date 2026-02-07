@@ -45,8 +45,12 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
-from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import ExecutionError, OrchestrationInvariantError
+from elspeth.contracts.enums import NodeStateStatus, RoutingMode
+from elspeth.contracts.errors import (
+    ExecutionError,
+    OrchestrationInvariantError,
+    SourceQuarantineReason,
+)
 from elspeth.contracts.events import (
     PhaseAction,
     PhaseCompleted,
@@ -1241,6 +1245,29 @@ class Orchestrator:
                                 error=ExecutionError(
                                     exception=quarantine_error_msg,
                                     type="ValidationError",
+                                ),
+                            )
+
+                            # Record DIVERT routing_event for the quarantine edge.
+                            # The __quarantine__ edge MUST exist — DAG creates it when
+                            # on_validation_failure != "discard" (dag.py:798-806).
+                            quarantine_edge_key = (source_id, "__quarantine__")
+                            try:
+                                quarantine_edge_id = edge_map[quarantine_edge_key]
+                            except KeyError:
+                                raise OrchestrationInvariantError(
+                                    f"Quarantine row reached orchestrator but no __quarantine__ "
+                                    f"DIVERT edge exists in DAG for source '{source_id}'. "
+                                    f"This is a DAG construction bug — "
+                                    f"on_validation_failure should have created a DIVERT edge "
+                                    f"in from_plugin_instances()."
+                                ) from None
+                            recorder.record_routing_event(
+                                state_id=source_state.state_id,
+                                edge_id=quarantine_edge_id,
+                                mode=RoutingMode.DIVERT,
+                                reason=SourceQuarantineReason(
+                                    quarantine_error=quarantine_error_msg,
                                 ),
                             )
 
