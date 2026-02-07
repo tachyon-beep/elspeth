@@ -203,6 +203,7 @@ From this point forward, `parsed` is treated as Tier 2 pipeline data. No more va
 | `self._config.field` | ❌ No | Our code, our config - crash on bug |
 | `self._internal_state` | ❌ No | Our code - crash on bug |
 | `landscape.get_row_state(token_id)` | ❌ No | Our data - crash on corruption |
+| `checkpoint_data["tokens"]` | ❌ No | Our data - we wrote this JSON (see below) |
 | `row["field"]` arithmetic/parsing | ✅ Yes | Their data values can fail operations |
 | `external_api.call(row["id"])` | ✅ Yes | External system, anything can happen |
 | `json.loads(external_response)` | ✅ Yes | External data - validate immediately |
@@ -211,10 +212,13 @@ From this point forward, `parsed` is treated as Tier 2 pipeline data. No more va
 **Rule of thumb:**
 
 - **Reading from Landscape tables?** Crash on any anomaly - it's our data.
+- **Reading checkpoints or deserialized audit JSON?** Crash on any anomaly - it's our data (see below).
 - **Operating on row field values?** Wrap operations, return error result, quarantine row.
 - **Calling external systems?** Wrap call AND validate response immediately at boundary.
 - **Using already-validated external data?** Trust it - no defensive `.get()` needed.
 - **Accessing internal state?** Let it crash - that's a bug to fix.
+
+**Serialization does not change trust tier.** Data we wrote to our own database or checkpoint file is still Tier 1 when we read it back, even though it passes through `json.loads()` or SQLAlchemy deserialization. The trust boundary is about *who authored the data*, not the transport format. Checkpoints, audit records, and Landscape tables are all our data — we defined the schema, we wrote the values, we own the invariants. If a deserialized checkpoint is missing a `"tokens"` key or a `"row_id"` field, that is corruption in our system, not a data quality issue to handle gracefully. Crash immediately.
 
 ## Plugin Ownership: System Code, Not User Code
 
