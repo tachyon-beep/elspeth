@@ -187,8 +187,11 @@ class KeyVaultSecretLoader:
         try:
             from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
         except ImportError:
-            # If azure.core isn't available, we'll raise ImportError from _get_client() anyway
-            AzureResourceNotFoundError = Exception  # type: ignore[misc, assignment]  # fallback for missing azure.core; _get_client() would raise ImportError first
+            # When azure.core is unavailable, _get_client() raises ImportError before any
+            # Azure API call. This sentinel class ensures the except clause below can never
+            # accidentally catch unrelated exceptions.
+            class AzureResourceNotFoundError(Exception):  # type: ignore[no-redef]
+                pass
 
         # Fetch from Key Vault
         try:

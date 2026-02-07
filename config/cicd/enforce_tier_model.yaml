@@ -1321,10 +1321,10 @@ allow_hits:
   reason: Intentional fallback pattern - CompositeSecretLoader tries loaders in priority order
   safety: SecretNotFoundError from one loader triggers fallback to next; raises if all fail
   expires: null
-- key: core/security/secret_loader.py:R6:KeyVaultSecretLoader:get_secret:fp=81a43ae834824aad
+- key: core/security/secret_loader.py:R6:KeyVaultSecretLoader:get_secret:fp=0c397e0294f3db17
   owner: bugfix
-  reason: Compile-time type fallback - provides Exception type when azure.core not installed
-  safety: Not a runtime error handler; _get_client() will raise ImportError before this path executes
+  reason: Sentinel class definition in except ImportError — not a runtime error handler
+  safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
   expires: null
 - key: engine/executors.py:R1:GateExecutor:execute_gate:fp=4107d16f9b5cfad7
   owner: bugfix
@@ -1706,16 +1706,6 @@ allow_hits:
 - key: core/checkpoint/serialization.py:R5:_restore_types:fp=4d05c5da68423665
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/checkpoint/recovery.py:R1:RecoveryManager:get_unprocessed_rows:fp=65210095de7dbbac
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/checkpoint/recovery.py:R1:RecoveryManager:get_unprocessed_rows:fp=df131016147e1edf
-  owner: architecture
-  reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: engine/orchestrator/export.py:R1:reconstruct_schema_from_json:fp=64bce9b651db0fad

@@ -289,11 +289,9 @@ class RecoveryManager:
                     continue
                 # Extract row_id from each buffered token
                 # Format: {"node_id": {"tokens": [{"row_id": "...", ...}, ...]}}
-                tokens = node_state.get("tokens", [])
-                for token in tokens:
-                    row_id = token.get("row_id")
-                    if row_id:
-                        buffered_row_ids.add(row_id)
+                # Tier 1: checkpoint data is ours — crash on corruption, don't mask with defaults
+                for token in node_state["tokens"]:
+                    buffered_row_ids.add(token["row_id"])
 
         with self._db.engine.connect() as conn:
             # CORRECT SEMANTICS FOR FORK/AGGREGATION/COALESCE RECOVERY:
