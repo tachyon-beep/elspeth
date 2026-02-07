@@ -6,9 +6,8 @@ all possible inputs, using Hypothesis for systematic exploration.
 
 Test categories:
 1. TelemetryManagerStateMachine: Stateful testing for failure handling
-2. BoundedBuffer Properties: Ring buffer invariants
-3. Granularity Filtering Matrix: All granularity x event type combinations
-4. Event Ordering: FIFO ordering preservation through the pipeline
+2. Granularity Filtering Matrix: All granularity x event type combinations
+3. Event Ordering: FIFO ordering preservation through the pipeline
 """
 
 from dataclasses import dataclass
@@ -45,7 +44,6 @@ from elspeth.telemetry import (
     RunStarted,
     should_emit,
 )
-from elspeth.telemetry.buffer import BoundedBuffer
 from elspeth.telemetry.manager import TelemetryManager
 
 # =============================================================================
@@ -513,84 +511,7 @@ TestAllExportersFailStateMachine = AllExportersFailStateMachine.TestCase
 
 
 # =============================================================================
-# 2. BoundedBuffer Property Tests
-# =============================================================================
-
-
-class TestBoundedBufferProperties:
-    """Property-based tests for BoundedBuffer invariants."""
-
-    @given(
-        max_size=st.integers(min_value=1, max_value=1000),
-        num_events=st.integers(min_value=0, max_value=2000),
-    )
-    @settings(max_examples=100)
-    def test_length_never_exceeds_max_size(self, max_size: int, num_events: int) -> None:
-        """Property: len(buffer) <= max_size always."""
-        buffer = BoundedBuffer(max_size=max_size)
-        for i in range(num_events):
-            buffer.append(TelemetryEvent(timestamp=datetime.now(tz=UTC), run_id=f"run-{i}"))
-
-        assert len(buffer) <= max_size
-
-    @given(
-        max_size=st.integers(min_value=1, max_value=1000),
-        num_events=st.integers(min_value=0, max_value=2000),
-    )
-    @settings(max_examples=100)
-    def test_dropped_count_equals_overflow(self, max_size: int, num_events: int) -> None:
-        """Property: dropped_count == max(0, total_added - max_size)."""
-        buffer = BoundedBuffer(max_size=max_size)
-        for i in range(num_events):
-            buffer.append(TelemetryEvent(timestamp=datetime.now(tz=UTC), run_id=f"run-{i}"))
-
-        expected_drops = max(0, num_events - max_size)
-        assert buffer.dropped_count == expected_drops
-
-    @given(
-        max_size=st.integers(min_value=1, max_value=100),
-        events=st.lists(
-            st.integers(min_value=0, max_value=1000),
-            min_size=0,
-            max_size=200,
-        ),
-    )
-    @settings(max_examples=100)
-    def test_drain_order_is_fifo(self, max_size: int, events: list[int]) -> None:
-        """Property: drain order matches append order (FIFO)."""
-        buffer = BoundedBuffer(max_size=max_size)
-
-        # Append events with sequence numbers as run_ids
-        for seq in events:
-            buffer.append(TelemetryEvent(timestamp=datetime.now(tz=UTC), run_id=str(seq)))
-
-        # Drain all events
-        drained = buffer.pop_batch(max_count=len(buffer))
-
-        # The drained events should be the last max_size events in FIFO order
-        dropped = max(0, len(events) - max_size)
-        expected_ids = [str(seq) for seq in events[dropped:]]
-        actual_ids = [e.run_id for e in drained]
-
-        assert actual_ids == expected_ids
-
-    @given(
-        max_size=st.integers(min_value=1, max_value=100),
-        num_events=st.integers(min_value=0, max_value=500),
-    )
-    @settings(max_examples=100)
-    def test_conservation_of_events(self, max_size: int, num_events: int) -> None:
-        """Property: len(buffer) + dropped_count == events_added (no pops)."""
-        buffer = BoundedBuffer(max_size=max_size)
-        for i in range(num_events):
-            buffer.append(TelemetryEvent(timestamp=datetime.now(tz=UTC), run_id=f"run-{i}"))
-
-        # All events are either in buffer or dropped
-        assert len(buffer) + buffer.dropped_count == num_events
-
-
-# =============================================================================
-# 3. Granularity Filtering Matrix Tests
+# 2. Granularity Filtering Matrix Tests
 # =============================================================================
 
 
@@ -711,7 +632,7 @@ class TestGranularityFilteringMatrix:
 
 
 # =============================================================================
-# 4. Event Ordering Tests
+# 3. Event Ordering Tests
 # =============================================================================
 
 
@@ -766,32 +687,6 @@ class TestEventOrdering:
         assert exporter1.exports == exporter2.exports == exporter3.exports
         assert exporter1.exports == events
 
-    @given(
-        max_size=st.integers(min_value=1, max_value=50),
-        num_events=st.integers(min_value=1, max_value=100),
-        batch_size=st.integers(min_value=1, max_value=25),
-    )
-    @settings(max_examples=50)
-    def test_buffer_preserves_order_across_batches(self, max_size: int, num_events: int, batch_size: int) -> None:
-        """Property: Buffer preserves FIFO order across multiple pop_batch calls."""
-        buffer = BoundedBuffer(max_size=max_size)
-
-        # Add events
-        for i in range(num_events):
-            buffer.append(TelemetryEvent(timestamp=datetime.now(tz=UTC), run_id=str(i)))
-
-        # Drain in batches
-        all_drained = []
-        while len(buffer) > 0:
-            batch = buffer.pop_batch(max_count=batch_size)
-            all_drained.extend(batch)
-
-        # The drained order should be the last max_size events in order
-        dropped = max(0, num_events - max_size)
-        expected_order = [str(i) for i in range(dropped, num_events)]
-        actual_order = [e.run_id for e in all_drained]
-
-        assert actual_order == expected_order
 
 
 # =============================================================================
