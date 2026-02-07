@@ -919,6 +919,31 @@ class LandscapeRecorder:
         rows = self._ops.execute_fetchall(query)
         return [self._edge_repo.load(row) for row in rows]
 
+    def get_edge(self, edge_id: str) -> Edge:
+        """Get a single edge by ID.
+
+        Tier 1: crash on missing — an edge_id from our own routing_events
+        table MUST resolve. Missing means audit DB corruption.
+
+        Args:
+            edge_id: Edge ID to look up
+
+        Returns:
+            Edge model
+
+        Raises:
+            ValueError: If edge not found (audit integrity violation)
+        """
+        query = select(edges_table).where(edges_table.c.edge_id == edge_id)
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            raise ValueError(
+                f"Audit integrity violation: edge '{edge_id}' not found. "
+                f"A routing_event references a non-existent edge. "
+                f"This indicates database corruption."
+            )
+        return self._edge_repo.load(row)
+
     # === Row and Token Management ===
 
     def create_row(

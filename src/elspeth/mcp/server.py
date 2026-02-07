@@ -466,7 +466,30 @@ class LandscapeAnalyzer:
         result = explain(self._recorder, run_id, token_id=token_id, row_id=row_id, sink=sink)
         if result is None:
             return {"error": "Token or row not found, or no terminal tokens exist yet"}
-        return cast(dict[str, Any], _dataclass_to_dict(result))
+        result_dict = cast(dict[str, Any], _dataclass_to_dict(result))
+
+        # Annotate routing_events with flow_type convenience field
+        for event in result_dict.get("routing_events", []):
+            event["flow_type"] = "divert" if event.get("mode") == "divert" else "normal"
+
+        # Build divert_summary from routing events
+        divert_events = [e for e in result_dict.get("routing_events", []) if e.get("mode") == "divert"]
+
+        if divert_events:
+            divert_event = divert_events[-1]  # Last divert event is the terminal one
+            edge = self._recorder.get_edge(divert_event["edge_id"])
+            result_dict["divert_summary"] = {
+                "diverted": True,
+                "divert_type": "quarantine" if "__quarantine__" in edge.label else "error",
+                "from_node": edge.from_node_id,
+                "to_sink": edge.to_node_id,
+                "edge_label": edge.label,
+                "reason_hash": divert_event.get("reason_hash"),
+            }
+        else:
+            result_dict["divert_summary"] = None
+
+        return result_dict
 
     def get_errors(
         self,
