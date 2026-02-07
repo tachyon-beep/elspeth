@@ -110,7 +110,7 @@ def test_token_completed_in_contracts():
 def test_telemetry_events_inherit_from_contracts_base():
     """Telemetry-specific events should inherit from contracts TelemetryEvent."""
     from elspeth.contracts.events import TelemetryEvent
-    from elspeth.telemetry.events import (
+    from elspeth.contracts.events import (
         ExternalCallCompleted,
         PhaseChanged,
         RowCreated,

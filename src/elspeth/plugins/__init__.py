@@ -49,7 +49,7 @@ from elspeth.plugins.config_base import (
 )
 
 # Context
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 # Hookspecs
 from elspeth.plugins.hookspecs import hookimpl, hookspec

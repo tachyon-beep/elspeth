@@ -25,7 +25,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.telemetry.events import PhaseChanged, RunFinished, RunStarted
+from elspeth.contracts.events import PhaseChanged, RunFinished, RunStarted
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
@@ -478,7 +478,7 @@ class TestRowCreatedTelemetry:
         3. Records QUARANTINED outcome
         """
         from elspeth.core.canonical import stable_hash
-        from elspeth.telemetry.events import RowCreated
+        from elspeth.contracts.events import RowCreated
 
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])

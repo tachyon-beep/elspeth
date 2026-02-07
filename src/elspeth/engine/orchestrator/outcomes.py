@@ -28,7 +28,7 @@ from elspeth.engine.orchestrator.types import ExecutionCounters, RowPlugin
 if TYPE_CHECKING:
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.processor import RowProcessor
-    from elspeth.plugins.context import PluginContext
+    from elspeth.contracts.plugin_context import PluginContext
 
 
 def accumulate_row_outcomes(

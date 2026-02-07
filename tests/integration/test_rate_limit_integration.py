@@ -15,7 +15,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.core.rate_limit import RateLimitRegistry
 from elspeth.engine import Orchestrator
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 

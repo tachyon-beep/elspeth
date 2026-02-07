@@ -14,7 +14,7 @@ import httpx
 import pytest
 import respx
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.testing import make_pipeline_row
 

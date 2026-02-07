@@ -28,7 +28,7 @@ from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 
 def _make_contract(data: dict[str, Any]) -> SchemaContract:

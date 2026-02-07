@@ -15,7 +15,7 @@ class TestBaseTransform:
     def test_base_transform_creates_tokens_default_false(self) -> None:
         """BaseTransform.creates_tokens defaults to False."""
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class SimpleTransform(BaseTransform):
@@ -32,7 +32,7 @@ class TestBaseTransform:
     def test_base_transform_creates_tokens_settable(self) -> None:
         """BaseTransform.creates_tokens can be overridden to True."""
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class ExpandingTransform(BaseTransform):
@@ -56,7 +56,7 @@ class TestBaseTransform:
         must still implement process() - the base implementation raises NotImplementedError.
         """
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Create a minimal concrete subclass that doesn't override process()
         class IncompleteTransform(BaseTransform):
@@ -77,7 +77,7 @@ class TestBaseTransform:
     def test_subclass_implementation(self) -> None:
         from elspeth.contracts import PluginSchema
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class InputSchema(PluginSchema):
@@ -131,7 +131,7 @@ class TestBaseSink:
     def test_base_sink_implementation(self) -> None:
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.plugins.base import BaseSink
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         class InputSchema(PluginSchema):
             value: int
@@ -184,7 +184,7 @@ class TestBaseSink:
         """Test BaseSink subclass with batch write."""
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.plugins.base import BaseSink
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         class InputSchema(PluginSchema):
             value: int
@@ -237,7 +237,7 @@ class TestBaseSource:
 
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.plugins.base import BaseSource
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         class OutputSchema(PluginSchema):
             value: int
@@ -279,7 +279,7 @@ class TestBaseSource:
 
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.plugins.base import BaseSource
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         class OutputSchema(PluginSchema):
             value: int
@@ -312,7 +312,7 @@ class TestNoValidationEnforcement:
         """
         from elspeth.contracts import PluginSchema
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class TestSchema(PluginSchema):

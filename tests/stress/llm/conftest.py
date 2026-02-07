@@ -38,7 +38,7 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 # Re-export the HTTP server fixture for convenience
 from tests.stress.conftest import ChaosLLMHTTPFixture

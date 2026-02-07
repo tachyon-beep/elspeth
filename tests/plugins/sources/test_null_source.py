@@ -2,7 +2,7 @@
 
 import pytest
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 
 class TestNullSource:

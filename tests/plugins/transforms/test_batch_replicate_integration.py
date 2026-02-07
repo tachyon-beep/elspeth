@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from elspeth.contracts import PipelineRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
 

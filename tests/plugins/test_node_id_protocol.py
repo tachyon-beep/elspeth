@@ -25,7 +25,7 @@ class TestNodeIdProtocol:
 
         from elspeth.contracts import PluginSchema
         from elspeth.plugins.base import BaseSource
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         class TestSchema(PluginSchema):
             pass
@@ -59,7 +59,7 @@ class TestNodeIdProtocol:
 
         from elspeth.contracts import PipelineRow, PluginSchema
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class TestSchema(PluginSchema):
@@ -92,7 +92,7 @@ class TestNodeIdProtocol:
 
         from elspeth.contracts import PipelineRow, PluginSchema, RoutingAction
         from elspeth.plugins.base import BaseGate
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import GateResult
 
         class TestSchema(PluginSchema):
@@ -146,7 +146,7 @@ class TestNodeIdProtocol:
 
         from elspeth.contracts import PluginSchema
         from elspeth.plugins.base import BaseSink
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         class TestSchema(PluginSchema):
             pass

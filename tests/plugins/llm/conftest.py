@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     import httpx
 
 from elspeth.contracts.identity import TokenInfo
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 # Common schema config used across LLM tests

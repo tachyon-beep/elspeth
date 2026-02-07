@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 # Dynamic schema config for tests - SourceDataConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}

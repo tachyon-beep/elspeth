@@ -21,7 +21,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin
 from elspeth.plugins.batching.ports import CollectorOutputPort
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 

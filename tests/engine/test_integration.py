@@ -835,7 +835,7 @@ class TestForkIntegration:
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         recorder = LandscapeRecorder(db)
 
@@ -1054,7 +1054,7 @@ class TestForkCoalescePipelineIntegration:
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         recorder = LandscapeRecorder(db)
@@ -1393,7 +1393,7 @@ class TestForkCoalescePipelineIntegration:
         )
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         recorder = LandscapeRecorder(db)
 
@@ -1615,7 +1615,7 @@ class TestComplexDAGIntegration:
         )
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         recorder = LandscapeRecorder(db)

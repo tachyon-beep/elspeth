@@ -22,11 +22,11 @@ from elspeth.contracts import (
     propagate_contract,
 )
 from elspeth.contracts.errors import ContractMergeError
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
 
 if TYPE_CHECKING:
-    from elspeth.plugins.context import ValidationErrorToken
+    from elspeth.contracts.plugin_context import ValidationErrorToken
 from elspeth.plugins.sources.csv_source import CSVSource
 
 
@@ -48,7 +48,7 @@ class _TestablePluginContext(PluginContext):
         destination: str,
     ) -> "ValidationErrorToken":
         """Override to track validation errors for test assertions."""
-        from elspeth.plugins.context import ValidationErrorToken
+        from elspeth.contracts.plugin_context import ValidationErrorToken
 
         self.validation_errors.append(
             {

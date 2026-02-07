@@ -1,4 +1,4 @@
-# src/elspeth/plugins/context.py
+# src/elspeth/contracts/plugin_context.py
 """Plugin execution context.
 
 The PluginContext carries everything a plugin might need during execution.
@@ -319,7 +319,7 @@ class PluginContext:
         try:
             from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.core.canonical import stable_hash
-            from elspeth.telemetry.events import ExternalCallCompleted
+            from elspeth.contracts.events import ExternalCallCompleted
 
             # Extract token usage for LLM calls if available
             token_usage = None

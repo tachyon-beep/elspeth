@@ -18,7 +18,7 @@ from opentelemetry.sdk.trace.export import SpanExportResult
 
 from elspeth.contracts import TokenCompleted
 from elspeth.contracts.enums import RowOutcome, RunStatus
-from elspeth.telemetry.events import RunFinished, RunStarted
+from elspeth.contracts.events import RunFinished, RunStarted
 from elspeth.telemetry.exporters.otlp import OTLPExporter
 
 
@@ -252,7 +252,7 @@ class TestOTLPSpanFormat:
     def test_dict_serialized_as_json_string(self, exporter_with_capture) -> None:
         """Dict fields are serialized as JSON strings (OTLP limitation)."""
         from elspeth.contracts.enums import CallStatus, CallType
-        from elspeth.telemetry.events import ExternalCallCompleted
+        from elspeth.contracts.events import ExternalCallCompleted
 
         exporter, captured = exporter_with_capture
 

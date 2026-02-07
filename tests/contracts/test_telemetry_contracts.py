@@ -45,7 +45,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.telemetry.events import ExternalCallCompleted
+from elspeth.contracts.events import ExternalCallCompleted
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 from tests.telemetry.fixtures import MockTelemetryConfig, TelemetryTestExporter

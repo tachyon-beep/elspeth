@@ -34,7 +34,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
 from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.events import (
+from elspeth.contracts.events import (
     PhaseChanged,
     RowCreated,
     RunFinished,

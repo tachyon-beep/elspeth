@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts import FieldContract, NodeType, PipelineRow, RoutingMode, SchemaContract, SourceRow
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,

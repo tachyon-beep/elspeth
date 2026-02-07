@@ -19,7 +19,7 @@ from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
@@ -1191,7 +1191,7 @@ class TestRowProcessorCoalesce:
         )
 
         # Need to create context for processing
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id=run.run_id, config={})
 
@@ -1353,7 +1353,7 @@ class TestAggregationCoalesceMetadataPropagation:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")

@@ -30,7 +30,7 @@ from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSc
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:

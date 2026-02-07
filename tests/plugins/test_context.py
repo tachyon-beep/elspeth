@@ -12,14 +12,14 @@ class TestPluginContext:
     """Context passed to all plugin operations."""
 
     def test_minimal_context(self) -> None:
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
         assert ctx.run_id == "run-001"
         assert ctx.config == {}
 
     def test_optional_integrations_default_none(self) -> None:
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
         # Phase 3 integration points - optional in Phase 2
@@ -28,7 +28,7 @@ class TestPluginContext:
         assert ctx.payload_store is None
 
     def test_start_span_without_tracer(self) -> None:
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
         # Should return nullcontext when no tracer
@@ -36,7 +36,7 @@ class TestPluginContext:
         assert isinstance(span_ctx, nullcontext)
 
     def test_get_config_value(self) -> None:
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(
             run_id="run-001",
@@ -52,7 +52,7 @@ class TestCheckpointAPI:
 
     def test_checkpoint_methods_exist(self) -> None:
         """PluginContext has checkpoint methods."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
         assert hasattr(ctx, "get_checkpoint")
@@ -61,14 +61,14 @@ class TestCheckpointAPI:
 
     def test_get_checkpoint_returns_none_when_empty(self) -> None:
         """Empty checkpoint returns None (not empty dict)."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
         assert ctx.get_checkpoint() is None
 
     def test_update_checkpoint_stores_data(self) -> None:
         """update_checkpoint stores data accessible via get_checkpoint."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
         ctx.update_checkpoint({"batch_id": "batch-123", "row_count": 5})
@@ -80,7 +80,7 @@ class TestCheckpointAPI:
 
     def test_update_checkpoint_merges_data(self) -> None:
         """Multiple update_checkpoint calls merge data."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
         ctx.update_checkpoint({"batch_id": "batch-123"})
@@ -93,7 +93,7 @@ class TestCheckpointAPI:
 
     def test_clear_checkpoint_removes_all_data(self) -> None:
         """clear_checkpoint removes all checkpoint data."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
         ctx.update_checkpoint({"batch_id": "batch-123"})
@@ -104,7 +104,7 @@ class TestCheckpointAPI:
 
     def test_checkpoint_typical_batch_workflow(self) -> None:
         """Checkpoint API supports typical batch transform workflow."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="run-001", config={})
 
@@ -136,7 +136,7 @@ class TestValidationErrorRecording:
 
     def test_record_validation_error_exists(self) -> None:
         """PluginContext has record_validation_error method."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={})
         assert hasattr(ctx, "record_validation_error")
@@ -144,7 +144,7 @@ class TestValidationErrorRecording:
 
     def test_record_validation_error_returns_quarantine_token(self) -> None:
         """record_validation_error returns token for tracking quarantined row."""
-        from elspeth.plugins.context import PluginContext, ValidationErrorToken
+        from elspeth.contracts.plugin_context import PluginContext, ValidationErrorToken
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
@@ -164,7 +164,7 @@ class TestValidationErrorRecording:
         """record_validation_error logs warning when no landscape configured."""
         import logging
 
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
@@ -184,7 +184,7 @@ class TestValidationErrorRecording:
 
     def test_record_validation_error_uses_id_field_as_row_id(self) -> None:
         """record_validation_error uses row's id field if present."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
@@ -199,7 +199,7 @@ class TestValidationErrorRecording:
 
     def test_record_validation_error_generates_row_id_from_hash(self) -> None:
         """record_validation_error generates row_id from content hash if no id field."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
@@ -218,7 +218,7 @@ class TestValidationErrorRecording:
         """record_validation_error records to landscape when configured."""
         from unittest.mock import MagicMock
 
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Create mock landscape recorder
         mock_landscape = MagicMock()
@@ -258,7 +258,7 @@ class TestValidationErrorDestination:
 
     def test_validation_error_token_has_destination(self) -> None:
         """ValidationErrorToken includes destination field."""
-        from elspeth.plugins.context import ValidationErrorToken
+        from elspeth.contracts.plugin_context import ValidationErrorToken
 
         token = ValidationErrorToken(
             row_id="row_1",
@@ -270,7 +270,7 @@ class TestValidationErrorDestination:
 
     def test_validation_error_token_defaults_to_discard(self) -> None:
         """ValidationErrorToken defaults to 'discard' if not specified."""
-        from elspeth.plugins.context import ValidationErrorToken
+        from elspeth.contracts.plugin_context import ValidationErrorToken
 
         token = ValidationErrorToken(row_id="row_1", node_id="source_node")
 
@@ -278,7 +278,7 @@ class TestValidationErrorDestination:
 
     def test_record_validation_error_requires_destination(self) -> None:
         """record_validation_error requires destination parameter."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
@@ -294,7 +294,7 @@ class TestValidationErrorDestination:
 
     def test_record_validation_error_with_discard_destination(self) -> None:
         """record_validation_error accepts 'discard' as destination."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
@@ -313,7 +313,7 @@ class TestRouteToSink:
 
     def test_route_to_sink_exists(self) -> None:
         """PluginContext has route_to_sink method."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="test_node")
         assert hasattr(ctx, "route_to_sink")
@@ -323,7 +323,7 @@ class TestRouteToSink:
         """route_to_sink logs the routing action."""
         import logging
 
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="source_node")
 
@@ -339,7 +339,7 @@ class TestRouteToSink:
 
     def test_route_to_sink_accepts_none_metadata(self) -> None:
         """route_to_sink works without metadata."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="test_node")
 
@@ -352,7 +352,7 @@ class TestTransformErrorRecording:
 
     def test_transform_error_token_exists(self) -> None:
         """TransformErrorToken can be created."""
-        from elspeth.plugins.context import TransformErrorToken
+        from elspeth.contracts.plugin_context import TransformErrorToken
 
         token = TransformErrorToken(
             token_id="tok_123",
@@ -367,7 +367,7 @@ class TestTransformErrorRecording:
 
     def test_transform_error_token_defaults_to_discard(self) -> None:
         """TransformErrorToken defaults to 'discard' if not specified."""
-        from elspeth.plugins.context import TransformErrorToken
+        from elspeth.contracts.plugin_context import TransformErrorToken
 
         token = TransformErrorToken(
             token_id="tok_123",
@@ -378,7 +378,7 @@ class TestTransformErrorRecording:
 
     def test_record_transform_error_without_landscape(self) -> None:
         """record_transform_error works without landscape (logs warning)."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="transform_node")
 
@@ -399,7 +399,7 @@ class TestTransformErrorRecording:
         """record_transform_error logs warning when no landscape configured."""
         import logging
 
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={}, node_id="transform_node")
 
@@ -419,7 +419,7 @@ class TestTransformErrorRecording:
         """record_transform_error stores in audit trail via mock."""
         from unittest.mock import MagicMock
 
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Create mock landscape recorder
         mock_landscape = MagicMock()
@@ -460,7 +460,7 @@ class TestTokenField:
 
     def test_token_field_defaults_to_none(self) -> None:
         """PluginContext.token defaults to None."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={})
         assert ctx.token is None
@@ -469,7 +469,7 @@ class TestTokenField:
         """PluginContext accepts TokenInfo via token parameter."""
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
@@ -492,7 +492,7 @@ class TestTokenField:
         """Token identity is preserved - multiple accesses return same object."""
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
@@ -515,7 +515,7 @@ class TestTokenField:
         """Token field can be set after construction (engine sets it per-row)."""
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={})
         assert ctx.token is None
@@ -554,7 +554,7 @@ class TestRecordCallTelemetryResponseHash:
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         emitted_events: list[Any] = []
 
@@ -597,7 +597,7 @@ class TestRecordCallTelemetryResponseHash:
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         emitted_events: list[Any] = []
 
@@ -634,7 +634,7 @@ class TestRecordCallTelemetryResponseHash:
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         emitted_events: list[Any] = []
 
@@ -671,7 +671,7 @@ class TestRecordCallTelemetryResponseHash:
         from unittest.mock import MagicMock
 
         from elspeth.contracts.enums import CallStatus, CallType
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         emitted_events: list[Any] = []
 

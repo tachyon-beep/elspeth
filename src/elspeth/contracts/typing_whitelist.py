@@ -118,15 +118,6 @@ SERIALIZATION_BOUNDARY_LOCATIONS: tuple[WhitelistEntry, ...] = (
         ),
     ),
     WhitelistEntry(
-        location="core/payload_store.py:PayloadStore.store(data)",
-        type_used="Any",
-        justification=(
-            "Payload store accepts any serializable data for content-addressed "
-            "storage. The stored blob is canonical JSON, but the input can be "
-            "any dict/list/scalar. Type is verified at serialization time."
-        ),
-    ),
-    WhitelistEntry(
         location="core/landscape/recorder.py (JSON columns)",
         type_used="str (JSON) → dict[str, Any]",
         justification=(

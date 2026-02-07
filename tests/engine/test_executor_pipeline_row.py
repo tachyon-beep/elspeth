@@ -66,7 +66,7 @@ class TestTransformExecutorPipelineRow:
         """TransformExecutor should pass PipelineRow to transform.process()."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -121,7 +121,7 @@ class TestTransformExecutorPipelineRow:
         """TransformExecutor should extract dict for Landscape recording."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -176,7 +176,7 @@ class TestTransformExecutorPipelineRow:
         """TransformExecutor should set ctx.contract from token.row_data.contract."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -236,7 +236,7 @@ class TestTransformExecutorPipelineRow:
         """TransformExecutor should create PipelineRow from result dict + contract."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         input_contract = _make_contract()
@@ -291,7 +291,7 @@ class TestTransformExecutorPipelineRow:
         """When transform returns error, token should be unchanged."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -341,7 +341,7 @@ class TestTransformExecutorPipelineRow:
         """stable_hash should be called with dict, not PipelineRow."""
         from elspeth.engine.executors import TransformExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -403,7 +403,7 @@ class TestGateExecutorPipelineRow:
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -459,7 +459,7 @@ class TestGateExecutorPipelineRow:
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -520,7 +520,7 @@ class TestGateExecutorPipelineRow:
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -576,7 +576,7 @@ class TestGateExecutorPipelineRow:
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         input_contract = _make_contract()
@@ -632,7 +632,7 @@ class TestGateExecutorPipelineRow:
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -685,7 +685,7 @@ class TestGateExecutorPipelineRow:
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -741,7 +741,7 @@ class TestGateExecutorPipelineRow:
         from elspeth.contracts.types import NodeID
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow - we'll mock the contract property to return None
         contract = _make_contract()
@@ -808,7 +808,7 @@ class TestSinkExecutorPipelineRow:
         from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup tokens with PipelineRow
         contract = _make_contract()
@@ -870,7 +870,7 @@ class TestSinkExecutorPipelineRow:
         from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -929,7 +929,7 @@ class TestSinkExecutorPipelineRow:
         from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow
         contract = _make_contract()
@@ -990,7 +990,7 @@ class TestSinkExecutorPipelineRow:
         from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup token with PipelineRow that has extra fields not in contract
         contract = _make_contract()  # Only declares 'value' field

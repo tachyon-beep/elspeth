@@ -6,7 +6,7 @@ import pytest
 
 from elspeth.plugins.azure.blob_sink import AzureBlobSink
 from elspeth.plugins.azure.blob_source import AzureBlobSource
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 

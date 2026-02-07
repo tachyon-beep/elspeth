@@ -17,7 +17,7 @@ from elspeth.contracts import NodeType, PipelineRow, SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
@@ -58,7 +58,7 @@ class TestProcessorBatchTransforms:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class SumTransform(BaseTransform):
@@ -168,7 +168,7 @@ class TestProcessorBatchTransforms:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class DoubleTransform(BaseTransform):
@@ -247,7 +247,7 @@ class TestProcessorBatchTransforms:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class SumTransform(BaseTransform):
@@ -738,7 +738,7 @@ class TestProcessorDeaggregation:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class NoneReturningTransform(BaseTransform):
@@ -842,7 +842,7 @@ class TestProcessorDeaggregation:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class NoneReturningTransform(BaseTransform):

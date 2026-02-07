@@ -1090,7 +1090,7 @@ class TestLandscapeExporterCompleteness:
         """
         from elspeth.contracts import Determinism
         from elspeth.core.operations import track_operation
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

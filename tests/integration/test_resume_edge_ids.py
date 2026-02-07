@@ -23,7 +23,7 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import edges_table
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.plugins.base import BaseGate
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 
 class SimpleGate(BaseGate):

@@ -26,7 +26,7 @@ from elspeth.engine.orchestrator.types import AggregationFlushResult, PipelineCo
 if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeRecorder
     from elspeth.engine.processor import RowProcessor
-    from elspeth.plugins.context import PluginContext
+    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.plugins.protocols import TransformProtocol
 
 

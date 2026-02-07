@@ -19,7 +19,7 @@ class TestSourceProtocol:
 
     def test_source_implementation(self) -> None:
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.protocols import SourceProtocol
 
         class OutputSchema(PluginSchema):
@@ -94,7 +94,7 @@ class TestSourceProtocol:
         from typing import Any
 
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.protocols import SourceProtocol
 
         class OutputSchema(PluginSchema):
@@ -140,7 +140,7 @@ class TestTransformProtocol:
 
     def test_transform_implementation(self) -> None:
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.protocols import TransformProtocol
         from elspeth.plugins.results import TransformResult
 
@@ -208,7 +208,7 @@ class TestTransformBatchSupport:
         """Transform.process() accepts single row dict."""
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class AnySchema(PluginSchema):
@@ -233,7 +233,7 @@ class TestTransformBatchSupport:
         """Transform.process() accepts list of row dicts when is_batch_aware=True."""
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class AnySchema(PluginSchema):
@@ -266,7 +266,7 @@ class TestTransformBatchSupport:
         """Transforms have is_batch_aware=False by default."""
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class AnySchema(PluginSchema):
@@ -289,7 +289,7 @@ class TestTransformBatchSupport:
         """Transforms can declare is_batch_aware=True for batch support."""
         from elspeth.contracts import Determinism, PluginSchema
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class AnySchema(PluginSchema):
@@ -352,7 +352,7 @@ class TestCoalesceProtocol:
     def test_quorum_requires_threshold(self) -> None:
         """QUORUM policy needs a quorum_threshold."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.protocols import CoalescePolicy, CoalesceProtocol
 
         class OutputSchema(PluginSchema):
@@ -397,7 +397,7 @@ class TestCoalesceProtocol:
     def test_coalesce_merge_behavior(self) -> None:
         """Test merge() combines branch outputs correctly."""
         from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.protocols import CoalescePolicy, CoalesceProtocol
 
         class OutputSchema(PluginSchema):
@@ -473,7 +473,7 @@ class TestSinkProtocol:
         """Test sink with batch write returning ArtifactDescriptor."""
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
         from elspeth.contracts.sink import OutputValidationResult
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.protocols import SinkProtocol
 
         class InputSchema(PluginSchema):
@@ -537,7 +537,7 @@ class TestSinkProtocol:
 
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
         from elspeth.contracts.sink import OutputValidationResult
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.protocols import SinkProtocol
 
         class InputSchema(PluginSchema):
@@ -627,7 +627,7 @@ class TestProtocolMetadata:
 
     def test_deterministic_transform(self) -> None:
         from elspeth.contracts import Determinism
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class MyTransform:
@@ -643,7 +643,7 @@ class TestProtocolMetadata:
 
     def test_nondeterministic_transform(self) -> None:
         from elspeth.contracts import Determinism
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class LLMTransform:

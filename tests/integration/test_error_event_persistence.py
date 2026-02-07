@@ -19,7 +19,7 @@ from elspeth.core.landscape.schema import (
     transform_errors_table,
     validation_errors_table,
 )
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 # Shared schema config for tests
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})

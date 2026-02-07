@@ -6,7 +6,7 @@ without a contract, causing ValueError at processor.py:712 in transform mode agg
 
 from __future__ import annotations
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.batch_stats import BatchStats
 
 

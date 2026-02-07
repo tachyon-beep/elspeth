@@ -45,7 +45,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
     def test_passthrough_preserves_all_fields(self, transform: TransformProtocol) -> None:
         """PassThrough MUST preserve all input fields in output."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test", config={})
         input_row = {"a": 1, "b": "two", "c": [1, 2, 3], "d": {"nested": True}}
@@ -61,7 +61,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
         """PassThrough MUST NOT mutate the input row."""
         from copy import deepcopy
 
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test", config={})
         input_row = {"id": 1, "nested": {"value": [1, 2, 3]}}
@@ -74,7 +74,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
     def test_passthrough_output_is_independent_copy(self, transform: TransformProtocol) -> None:
         """PassThrough output MUST be independent of input (deep copy)."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test", config={})
         input_row = {"id": 1, "nested": {"value": [1, 2, 3]}}
@@ -121,7 +121,7 @@ class TestPassThroughStrictSchemaContract(TransformContractTestBase):
         """Strict PassThrough MUST crash on wrong input type (upstream bug!)."""
         from pydantic import ValidationError
 
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test", config={})
         wrong_type_input = {"id": "not_an_int", "name": "test"}
@@ -151,7 +151,7 @@ class TestPassThroughPropertyBased:
     @pytest.fixture
     def ctx(self) -> Any:
         """Create a PluginContext."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         return PluginContext(run_id="test", config={})
 

@@ -23,7 +23,7 @@ from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 # Map schema field types to SQLAlchemy column types

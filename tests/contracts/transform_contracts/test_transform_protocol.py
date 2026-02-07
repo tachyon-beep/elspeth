@@ -37,7 +37,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:

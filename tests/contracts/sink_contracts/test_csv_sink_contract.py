@@ -15,7 +15,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
 
 from .test_sink_protocol import SinkContractTestBase, SinkDeterminismContractTestBase
@@ -357,7 +357,7 @@ class TestCSVSinkValidation:
         """Strict schema MUST crash on wrong type (upstream bug!)."""
         from pydantic import ValidationError
 
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         sink = CSVSink(
             {

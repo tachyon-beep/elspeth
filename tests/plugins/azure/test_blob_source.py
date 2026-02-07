@@ -9,7 +9,7 @@ import pytest
 from elspeth.contracts import SourceRow
 from elspeth.plugins.azure.blob_source import AzureBlobSource
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
 DYNAMIC_SCHEMA = {"mode": "observed"}

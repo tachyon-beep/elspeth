@@ -15,7 +15,7 @@ from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import CANONICAL_VERSION, stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sources.csv_source import CSVSource
 
 from .test_source_protocol import SourceContractPropertyTestBase

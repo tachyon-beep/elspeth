@@ -38,7 +38,7 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.processor import RowProcessor, _WorkItem
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult as PluginTransformResult
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 

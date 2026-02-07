@@ -36,7 +36,7 @@ def make_mock_sink(
         Mock sink instance with write() and flush() methods
     """
     from elspeth.contracts import ArtifactDescriptor
-    from elspeth.plugins.context import PluginContext
+    from elspeth.contracts.plugin_context import PluginContext
 
     class MockSink:
         def __init__(self) -> None:
@@ -69,7 +69,7 @@ class TestSinkExecutor:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -154,7 +154,7 @@ class TestSinkExecutor:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -201,7 +201,7 @@ class TestSinkExecutor:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -275,7 +275,7 @@ class TestSinkExecutor:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -359,7 +359,7 @@ class TestSinkExecutor:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -426,7 +426,7 @@ class TestSinkExecutor:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -545,7 +545,7 @@ class TestSinkExecutor:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -646,7 +646,7 @@ class TestSinkExecutor:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

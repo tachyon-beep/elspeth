@@ -6,7 +6,7 @@ from textwrap import dedent
 import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sources.csv_source import CSVSource
 
 

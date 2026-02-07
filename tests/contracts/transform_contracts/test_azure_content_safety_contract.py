@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.plugins.batching.mixin import BatchTransformMixin
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
 from .test_batch_transform_protocol import BatchTransformContractTestBase

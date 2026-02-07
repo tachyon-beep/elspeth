@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.truncate import Truncate
 from elspeth.testing import make_pipeline_row
 

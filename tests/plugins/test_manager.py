@@ -15,7 +15,7 @@ class TestPluginManager:
 
     def test_register_plugin(self) -> None:
         from elspeth.contracts import PluginSchema
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.hookspecs import hookimpl
         from elspeth.plugins.manager import PluginManager
         from elspeth.plugins.results import TransformResult
@@ -58,7 +58,7 @@ class TestPluginManager:
 
     def test_get_plugin_by_name(self) -> None:
         from elspeth.contracts import PluginSchema
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.hookspecs import hookimpl
         from elspeth.plugins.manager import PluginManager
         from elspeth.plugins.results import TransformResult

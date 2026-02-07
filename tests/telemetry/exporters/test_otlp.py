@@ -18,7 +18,7 @@ import pytest
 from elspeth.contracts import TokenCompleted
 from elspeth.contracts.enums import RowOutcome, RunStatus
 from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.events import (
+from elspeth.contracts.events import (
     RunFinished,
     RunStarted,
 )
@@ -447,7 +447,7 @@ class TestOTLPExporterSpanConversion:
         exporter, mock_sdk = self._create_configured_exporter()
 
         from elspeth.contracts.enums import CallStatus, CallType
-        from elspeth.telemetry.events import ExternalCallCompleted
+        from elspeth.contracts.events import ExternalCallCompleted
 
         event = ExternalCallCompleted(
             timestamp=datetime.now(UTC),

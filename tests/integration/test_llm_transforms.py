@@ -34,7 +34,7 @@ from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
 )
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
 from elspeth.plugins.llm.base import BaseLLMTransform
 from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform

@@ -20,7 +20,7 @@ import pytest
 
 from elspeth.contracts.enums import RowOutcome, RunStatus
 from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.events import (
+from elspeth.contracts.events import (
     RunFinished,
     RunStarted,
 )

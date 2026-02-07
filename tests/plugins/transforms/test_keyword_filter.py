@@ -9,12 +9,12 @@ from elspeth.plugins.config_base import PluginConfigError
 from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
-    from elspeth.plugins.context import PluginContext
+    from elspeth.contracts.plugin_context import PluginContext
 
 
 def make_mock_context() -> "PluginContext":
     """Create a mock PluginContext for testing."""
-    from elspeth.plugins.context import PluginContext
+    from elspeth.contracts.plugin_context import PluginContext
 
     return Mock(spec=PluginContext, run_id="test-run")
 

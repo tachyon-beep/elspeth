@@ -12,7 +12,7 @@ from typing import Any
 
 from elspeth.contracts import FieldContract, NodeID, NodeType, SchemaContract, SourceRow
 from elspeth.plugins.base import BaseGate, BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     GateResult,
     RoutingAction,

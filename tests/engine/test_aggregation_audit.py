@@ -21,7 +21,7 @@ from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.conftest import _TestTransformBase, as_batch_transform

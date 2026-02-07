@@ -16,7 +16,7 @@ from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
 from elspeth.testing import make_pipeline_row
 

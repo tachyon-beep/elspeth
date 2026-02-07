@@ -18,7 +18,7 @@ from elspeth.contracts.enums import NodeType, RoutingMode
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
-from elspeth.plugins.context import PluginContext, TransformErrorToken
+from elspeth.contracts.plugin_context import PluginContext, TransformErrorToken
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestTransformBase, as_transform
 

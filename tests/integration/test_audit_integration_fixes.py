@@ -11,7 +11,7 @@ from elspeth.contracts import EdgeInfo, ExecutionError, NodeType, RoutingMode, R
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.manager import PluginManager
 
 # Dynamic schema config for tests - PathConfig now requires schema

@@ -22,7 +22,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 from elspeth.testing import make_pipeline_row
 

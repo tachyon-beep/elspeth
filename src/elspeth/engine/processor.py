@@ -43,7 +43,7 @@ from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, TransformProtocol
 
 

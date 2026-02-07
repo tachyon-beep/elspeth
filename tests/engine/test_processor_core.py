@@ -20,7 +20,7 @@ from elspeth.contracts import PipelineRow, RoutingMode
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,

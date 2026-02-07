@@ -17,7 +17,7 @@ from elspeth.contracts.events import (
     TokenCompleted,
     TransformCompleted,
 )
-from elspeth.telemetry.events import (
+from elspeth.contracts.events import (
     ExternalCallCompleted,
     PhaseChanged,
     RowCreated,

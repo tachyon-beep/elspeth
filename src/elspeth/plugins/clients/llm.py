@@ -13,7 +13,7 @@ import structlog
 from elspeth.contracts import CallStatus, CallType
 from elspeth.core.canonical import stable_hash
 from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallback
-from elspeth.telemetry.events import ExternalCallCompleted
+from elspeth.contracts.events import ExternalCallCompleted
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder

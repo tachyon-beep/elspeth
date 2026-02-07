@@ -3,10 +3,6 @@
 allowed_external_types:
   # TUI display types - presentation-specific, not cross-boundary contracts
   - "tui/types:TokenDisplayInfo"
-  # Plugin execution context - framework infrastructure, not a data contract
-  - "plugins/context:PluginContext"
-  # Telemetry event types - internal telemetry infrastructure, not a data contract
-  - "telemetry/events:ExternalCallCompleted"
   # SSRF safety type - security infrastructure, tightly coupled to validation logic
   - "core/security/web:SSRFSafeRequest"
 
@@ -171,14 +167,14 @@ allowed_dict_patterns:
   # PLUGIN CONTEXT - Recording and routing
   # PluginContext methods handle dynamic data from pipeline execution
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/plugins/context.py:PluginContext.get_checkpoint:return"
-  - "src/elspeth/plugins/context.py:PluginContext.update_checkpoint:data"
-  - "src/elspeth/plugins/context.py:PluginContext.record_call:request_data"
-  - "src/elspeth/plugins/context.py:PluginContext.record_call:response_data"
-  - "src/elspeth/plugins/context.py:PluginContext.record_call:error"
-  - "src/elspeth/plugins/context.py:PluginContext.record_transform_error:row"
-  - "src/elspeth/plugins/context.py:PluginContext.route_to_sink:row"
-  - "src/elspeth/plugins/context.py:PluginContext.route_to_sink:metadata"
+  - "src/elspeth/contracts/plugin_context.py:PluginContext.get_checkpoint:return"
+  - "src/elspeth/contracts/plugin_context.py:PluginContext.update_checkpoint:data"
+  - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:request_data"
+  - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:response_data"
+  - "src/elspeth/contracts/plugin_context.py:PluginContext.record_call:error"
+  - "src/elspeth/contracts/plugin_context.py:PluginContext.record_transform_error:row"
+  - "src/elspeth/contracts/plugin_context.py:PluginContext.route_to_sink:row"
+  - "src/elspeth/contracts/plugin_context.py:PluginContext.route_to_sink:metadata"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # LANDSCAPE RECORDER - Audit trail recording
@@ -314,17 +310,6 @@ allowed_dict_patterns:
   - "src/elspeth/tui/widgets/node_detail.py:_validate_execution_error:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_transform_error:data"
   - "src/elspeth/tui/widgets/node_detail.py:_validate_artifact:data"
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # LANDSCAPE JOURNAL - Emergency backup JSONL stream
-  # Journal records SQL statements with dynamically-structured parameters.
-  # The record shape varies depending on the SQL being executed.
-  # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._append_records:records (list)"
-  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._serialize_record:record"
-  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._enrich_with_payloads:record"
-  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._payloads_for_params:return"
-  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._columns_to_values:return"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TELEMETRY EXPORTERS - External observability trust boundary

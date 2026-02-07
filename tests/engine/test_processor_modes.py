@@ -55,7 +55,7 @@ class TestProcessorPassthroughMode:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class PassthroughEnricher(BaseTransform):
@@ -201,7 +201,7 @@ class TestProcessorPassthroughMode:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         class BadPassthrough(BaseTransform):
@@ -284,7 +284,7 @@ class TestProcessorPassthroughMode:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class PassthroughEnricher(BaseTransform):
@@ -438,7 +438,7 @@ class TestProcessorTransformMode:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class GroupSplitter(BaseTransform):
@@ -591,7 +591,7 @@ class TestProcessorTransformMode:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class BatchAggregator(BaseTransform):
@@ -710,7 +710,7 @@ class TestProcessorTransformMode:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class GroupSplitter(BaseTransform):
@@ -892,7 +892,7 @@ class TestProcessorSingleMode:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class SumTransform(BaseTransform):
@@ -1040,7 +1040,7 @@ class TestProcessorSingleMode:
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import RowOutcome, TransformResult
 
         class SumTransform(BaseTransform):

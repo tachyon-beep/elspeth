@@ -25,7 +25,7 @@ from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema

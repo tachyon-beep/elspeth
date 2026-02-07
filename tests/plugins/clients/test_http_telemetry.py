@@ -11,7 +11,7 @@ import pytest
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.plugins.clients.http import AuditedHTTPClient
-from elspeth.telemetry.events import ExternalCallCompleted
+from elspeth.contracts.events import ExternalCallCompleted
 
 
 class TestHTTPClientTelemetry:

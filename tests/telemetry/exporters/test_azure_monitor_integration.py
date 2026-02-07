@@ -21,7 +21,7 @@ azure_monitor = pytest.importorskip(
 )
 
 from elspeth.contracts.enums import RowOutcome, RunStatus  # noqa: E402
-from elspeth.telemetry.events import RunFinished, RunStarted  # noqa: E402
+from elspeth.contracts.events import RunFinished, RunStarted  # noqa: E402
 from elspeth.telemetry.exporters.azure_monitor import AzureMonitorExporter  # noqa: E402
 
 

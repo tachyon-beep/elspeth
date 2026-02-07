@@ -34,7 +34,7 @@ from elspeth.core.landscape.schema import validation_errors_table
 from elspeth.plugins.sources.csv_source import CSVSource
 
 if TYPE_CHECKING:
-    from elspeth.plugins.context import PluginContext
+    from elspeth.contracts.plugin_context import PluginContext
 
 
 class MockContext:

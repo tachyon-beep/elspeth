@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 if TYPE_CHECKING:
     from elspeth.plugins.protocols import SinkProtocol

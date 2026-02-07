@@ -1008,7 +1008,7 @@ class TestAggregationExecutorCheckpoint:
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TriggerType
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         # Setup
@@ -1147,7 +1147,7 @@ class TestAggregationExecutorCheckpoint:
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TriggerType
         from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         # Setup
         recorder = LandscapeRecorder(real_landscape_db)

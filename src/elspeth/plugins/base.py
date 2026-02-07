@@ -30,7 +30,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     GateResult,
     TransformResult,

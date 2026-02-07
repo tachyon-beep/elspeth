@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import MetaData, Table, create_engine, select
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 # Strict schema config for tests - DataPluginConfig now requires schema
 # DatabaseSink requires fixed-column structure, so we use strict mode

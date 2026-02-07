@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.plugins.config_base import PluginConfigError, SinkPathConfig
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 
 
 class TestSinkPathConfigValidation:

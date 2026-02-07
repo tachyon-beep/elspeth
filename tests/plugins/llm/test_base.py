@@ -16,7 +16,7 @@ from elspeth.plugins.clients.llm import (
     RateLimitError,
 )
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.base import BaseLLMTransform, LLMConfig
 
 # Common schema config for dynamic field handling (accepts any fields)

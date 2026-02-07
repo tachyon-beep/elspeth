@@ -46,7 +46,7 @@ from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.protocols import (
     BatchTransformProtocol,
     GateProtocol,

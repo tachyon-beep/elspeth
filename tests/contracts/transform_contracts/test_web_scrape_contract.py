@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 
 from .test_transform_protocol import TransformContractPropertyTestBase

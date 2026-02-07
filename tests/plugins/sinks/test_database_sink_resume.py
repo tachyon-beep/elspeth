@@ -38,7 +38,7 @@ class TestDatabaseSinkResumeEndToEnd:
     @pytest.fixture
     def ctx(self):
         """Create a minimal plugin context."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         return PluginContext(run_id="test-run", config={})
 

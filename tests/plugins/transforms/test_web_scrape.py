@@ -14,7 +14,7 @@ import pytest
 import respx
 
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.plugins.transforms.web_scrape_errors import (
     NetworkError,

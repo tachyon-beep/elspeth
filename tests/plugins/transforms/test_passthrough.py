@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 # Common schema config for dynamic field handling (accepts any fields)

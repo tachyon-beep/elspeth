@@ -13,7 +13,7 @@ from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
 )
-from elspeth.telemetry.events import ExternalCallCompleted
+from elspeth.contracts.events import ExternalCallCompleted
 
 
 class TestLLMClientTelemetry:

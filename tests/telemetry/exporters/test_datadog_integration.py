@@ -22,7 +22,7 @@ ddtrace = pytest.importorskip(
 
 from elspeth.contracts import TokenCompleted  # noqa: E402
 from elspeth.contracts.enums import RowOutcome, RunStatus  # noqa: E402
-from elspeth.telemetry.events import RunFinished, RunStarted  # noqa: E402
+from elspeth.contracts.events import RunFinished, RunStarted  # noqa: E402
 from elspeth.telemetry.exporters.datadog import DatadogExporter  # noqa: E402
 
 
@@ -295,7 +295,7 @@ class TestDatadogSpanFormat:
         Note: ddtrace stores numeric values in _metrics, strings in _meta.
         """
         from elspeth.contracts.enums import CallStatus, CallType
-        from elspeth.telemetry.events import ExternalCallCompleted
+        from elspeth.contracts.events import ExternalCallCompleted
 
         exporter, captured = exporter_with_capture
 

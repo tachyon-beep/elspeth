@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.json_sink import JSONSink
 
 

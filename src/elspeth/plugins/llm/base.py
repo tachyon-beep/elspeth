@@ -21,7 +21,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import PoolConfig

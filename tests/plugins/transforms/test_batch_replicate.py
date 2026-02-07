@@ -9,7 +9,7 @@ the Tier 2 trust model - transforms must not coerce pipeline data types.
 
 import pytest
 
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 # Common schema config for dynamic field handling (accepts any fields)

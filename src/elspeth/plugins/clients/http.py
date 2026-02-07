@@ -26,7 +26,7 @@ from elspeth.core.security.web import (
     validate_url_for_ssrf,
 )
 from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallback
-from elspeth.telemetry.events import ExternalCallCompleted
+from elspeth.contracts.events import ExternalCallCompleted
 
 logger = structlog.get_logger(__name__)
 

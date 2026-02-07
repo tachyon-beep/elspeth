@@ -92,7 +92,7 @@ class TestTruncateStrictContract(TransformErrorContractTestBase):
         ctx: Any,
     ) -> None:
         """Contract: Strict mode MUST return error with missing_field reason."""
-        from elspeth.plugins.context import PluginContext
+        from elspeth.contracts.plugin_context import PluginContext
 
         ctx = PluginContext(run_id="test", config={})
         pipeline_row = make_pipeline_row(error_input)

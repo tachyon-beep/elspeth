@@ -26,7 +26,7 @@ from elspeth.contracts.events import (
     TransformCompleted,
 )
 from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.events import (
+from elspeth.contracts.events import (
     PhaseChanged,
     RunFinished,
     RunStarted,

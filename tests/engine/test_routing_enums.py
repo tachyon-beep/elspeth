@@ -11,7 +11,7 @@ import pytest
 
 from elspeth.contracts import NodeID, RoutingAction, RoutingKind, TokenInfo
 from elspeth.engine.executors import GateExecutor, GateOutcome, MissingEdgeError
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 

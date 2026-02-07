@@ -48,7 +48,7 @@ Usage:
 
 from elspeth.telemetry.buffer import BoundedBuffer
 from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.events import (
+from elspeth.contracts.events import (
     ExternalCallCompleted,
     FieldResolutionApplied,
     PhaseChanged,

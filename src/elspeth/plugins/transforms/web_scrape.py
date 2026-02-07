@@ -34,7 +34,7 @@ from elspeth.core.security.web import (
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.web_scrape_errors import (
