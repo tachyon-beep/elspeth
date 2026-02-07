@@ -6,6 +6,7 @@ and time-series aggregation. Data is stored for later analysis by the MCP
 server or direct SQL queries.
 """
 
+import contextlib
 import sqlite3
 import threading
 import uuid
@@ -842,8 +843,6 @@ class MetricsRecorder:
         """Close all database connections across all threads."""
         with self._lock:
             for conn in self._connections:
-                try:
+                with contextlib.suppress(sqlite3.ProgrammingError):
                     conn.close()
-                except sqlite3.ProgrammingError:
-                    pass  # Already closed
             self._connections.clear()

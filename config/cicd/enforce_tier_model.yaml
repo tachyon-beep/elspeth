@@ -202,10 +202,10 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/metrics.py:R6:MetricsRecorder:close:fp=69855a300376d5dc
+- key: testing/chaosllm/metrics.py:R7:MetricsRecorder:close:fp=cae006971eb80032
   owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
+  reason: Suppressing ProgrammingError on already-closed connections during shutdown
+  safety: Connection objects may be closed by their owning thread before close() runs
   expires: '2026-05-02'
 - key: testing/chaosllm_mcp/server.py:R6:_find_metrics_databases:fp=2bcfbfc1388cd9d8
   owner: architecture
