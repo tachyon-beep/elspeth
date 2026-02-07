@@ -3723,3 +3723,233 @@ class TestDivertEdges:
         error_edges = [e for e in divert_edges if e.label.startswith("__error_")]
         assert len(error_edges) == 2
         assert {e.label for e in error_edges} == {"__error_0__", "__error_1__"}
+
+
+class TestDivertCoalesceWarnings:
+    """Verify warnings for dangerous DIVERT + require_all coalesce combinations."""
+
+    def _build_graph_with_coalesce(self, settings):
+        """Build ExecutionGraph via production factory path, including coalesce."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.dag import ExecutionGraph
+
+        plugins = instantiate_plugins_from_config(settings)
+        return ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+    def test_no_warning_for_best_effort_with_on_error(self, plugin_manager) -> None:
+        """best_effort + DIVERT transform should NOT produce warnings."""
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={"path": "test.csv", "on_validation_failure": "discard", "schema": {"mode": "observed"}},
+            ),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+            ],
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="best_effort",
+                    merge="union",
+                    timeout_seconds=30.0,
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="output",
+        )
+
+        graph = self._build_graph_with_coalesce(settings)
+        warnings = graph.warn_divert_coalesce_interactions(
+            {cs.name: cs for cs in settings.coalesce}
+        )
+        assert len(warnings) == 0
+
+    def test_no_warning_for_on_error_discard(self, plugin_manager) -> None:
+        """on_error: discard produces no DIVERT edge, so no warning."""
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={"path": "test.csv", "on_validation_failure": "discard", "schema": {"mode": "observed"}},
+            ),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"on_error": "discard", "schema": {"mode": "observed"}}),
+            ],
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="output",
+        )
+
+        graph = self._build_graph_with_coalesce(settings)
+        warnings = graph.warn_divert_coalesce_interactions(
+            {cs.name: cs for cs in settings.coalesce}
+        )
+        assert len(warnings) == 0
+
+    def test_no_warning_for_divert_after_coalesce(self, plugin_manager) -> None:
+        """DIVERT transform AFTER the coalesce should not trigger warning."""
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={"path": "test.csv", "on_validation_failure": "discard", "schema": {"mode": "observed"}},
+            ),
+            transforms=[
+                # This transform is AFTER the coalesce (not between fork and coalesce)
+                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+            ],
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="output",
+        )
+
+        graph = self._build_graph_with_coalesce(settings)
+        warnings = graph.warn_divert_coalesce_interactions(
+            {cs.name: cs for cs in settings.coalesce}
+        )
+        # Transform is after coalesce (in the continue-edge spine after merge),
+        # not between fork gate and coalesce, so no warning
+        assert len(warnings) == 0
+
+    def test_source_quarantine_does_not_trigger_fork_warning(self, plugin_manager) -> None:
+        """Source quarantine DIVERT edges should not trigger fork/coalesce warnings."""
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "quarantine",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+                "quarantine": SinkSettings(plugin="json", options={"path": "q.json", "schema": {"mode": "observed"}}),
+            },
+            default_sink="output",
+        )
+
+        graph = self._build_graph_with_coalesce(settings)
+        warnings = graph.warn_divert_coalesce_interactions(
+            {cs.name: cs for cs in settings.coalesce}
+        )
+        # Source quarantine is on the source node (not a transform), so no warning
+        assert len(warnings) == 0
+
+    def test_graph_validation_warning_dataclass(self) -> None:
+        """GraphValidationWarning is frozen and has expected fields."""
+        from elspeth.core.dag import GraphValidationWarning
+
+        w = GraphValidationWarning(
+            code="TEST_CODE",
+            message="test message",
+            node_ids=("a", "b", "c"),
+        )
+        assert w.code == "TEST_CODE"
+        assert w.message == "test message"
+        assert w.node_ids == ("a", "b", "c")
