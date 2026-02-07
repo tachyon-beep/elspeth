@@ -1,7 +1,7 @@
 # ELSPETH Plugin Protocol Contract
 
-> **Status:** FINAL (v1.7)
-> **Last Updated:** 2026-02-05
+> **Status:** FINAL (v1.9)
+> **Last Updated:** 2026-02-08
 > **Authority:** This document is the master reference for all plugin interactions.
 
 ## Overview
@@ -212,7 +212,7 @@ All lifecycle hooks are REQUIRED in the protocol, even if implementation is `pas
 name: str                          # Plugin identifier (e.g., "csv", "api", "satellite")
 output_schema: type[PluginSchema]  # Schema of rows this source produces
 node_id: str | None                # Set by orchestrator after registration
-determinism: Determinism           # DETERMINISTIC, NON_DETERMINISTIC, or EXTERNAL
+determinism: Determinism           # See Determinism Declaration section for all 6 levels
 plugin_version: str                # Semantic version for reproducibility
 ```
 
@@ -412,6 +412,7 @@ determinism: Determinism
 plugin_version: str
 is_batch_aware: bool = False  # Set True for batch processing at aggregation nodes
 creates_tokens: bool = False  # Set True for deaggregation (1→N row expansion)
+transforms_adds_fields: bool = False  # Set True if transform adds fields to the output schema
 ```
 
 #### Token Creation (Deaggregation)
@@ -477,13 +478,14 @@ class SummaryTransform(BaseTransform):
 
 1. Transform is configured at an aggregation node (see "Aggregation" below)
 2. Engine buffers rows until trigger fires (count, timeout, condition)
-3. Engine calls `transform.process(rows: list[dict], ctx)` with the batch
+3. Engine calls `transform.process(rows: list[PipelineRow], ctx)` with the batch
 4. Transform returns aggregated result
 
+> **Implementation note:** Batch-aware transforms implement `BatchTransformProtocol` — a separate protocol from `TransformProtocol`. The key difference is the `process()` signature: `BatchTransformProtocol.process(rows: list[PipelineRow], ctx)` receives a list of `PipelineRow`, while `TransformProtocol.process(row: PipelineRow, ctx)` receives a single row. Both protocols share most attributes (`name`, `input_schema`, `output_schema`, `is_batch_aware`, `creates_tokens`), though `transforms_adds_fields` is only on `TransformProtocol`.
+
 **Key points:**
-- `is_batch_aware = False` (default): Transform always receives single `dict`
-- `is_batch_aware = True`: Transform MAY receive `list[dict]` at aggregation nodes
-- Transforms should handle both cases if `is_batch_aware = True`
+- `is_batch_aware = False` (default): Transform implements `TransformProtocol`, receives single `PipelineRow`
+- `is_batch_aware = True`: Transform implements `BatchTransformProtocol`, receives `list[PipelineRow]` at aggregation nodes
 - The engine decides when to batch based on pipeline configuration
 
 #### Optional Configuration
@@ -648,7 +650,7 @@ TransformResult.success_multi(
 )
 
 TransformResult.error(
-    reason={"reason": "invalid_data", "field": "amount"},
+    reason={"reason": "invalid_input", "field": "amount"},
     retryable=False,
     context_after=None,  # Optional operational metadata from partial execution
 )
@@ -817,10 +819,12 @@ class ArtifactDescriptor:
 **Factory methods:**
 
 ```python
-ArtifactDescriptor.for_file(path, content_hash, size_bytes)
-ArtifactDescriptor.for_database(url, table, content_hash, payload_size, row_count)
-ArtifactDescriptor.for_webhook(url, content_hash, request_size, response_code)
+ArtifactDescriptor.for_file(path: str, content_hash, size_bytes)
+ArtifactDescriptor.for_database(url: SanitizedDatabaseUrl, table, content_hash, payload_size, row_count)
+ArtifactDescriptor.for_webhook(url: SanitizedWebhookUrl, content_hash, request_size, response_code)
 ```
+
+> **URL sanitization is enforced at the type level.** `for_database()` and `for_webhook()` require pre-sanitized URL types, NOT plain strings. Use `SanitizedDatabaseUrl.from_raw_url(url)` or `SanitizedWebhookUrl.from_raw_url(url)` to strip credentials before passing to the factory. This prevents secrets from entering the audit trail. Both factory methods include `isinstance()` enforcement and raise `TypeError` on plain strings.
 
 #### content_hash Requirement
 
@@ -867,6 +871,24 @@ Sinks declare `idempotent: bool`:
 - `False`: Retry may cause duplicates (append-only files, non-idempotent APIs)
 
 Idempotency key format: `{run_id}:{token_id}:{sink_name}`
+
+#### Resume Capability
+
+Sinks declare `supports_resume: bool` to indicate they can append to existing output on resume:
+
+```python
+supports_resume: bool   # Can this sink append to existing output on resume?
+```
+
+Sinks that support resume implement three additional methods:
+
+| Method | Purpose |
+|--------|---------|
+| `configure_for_resume()` | Switch to append mode (called by engine on resume) |
+| `validate_output_target()` | Validate existing output matches configured schema |
+| `set_resume_field_resolution(mapping)` | Set source field resolution mapping before validation |
+
+Sinks that don't support resume (`supports_resume=False`) will never have these methods called — the CLI rejects resume before execution.
 
 #### Audit Records
 
@@ -976,16 +998,23 @@ Gate conditions are evaluated using a **restricted expression parser**, NOT Pyth
 - Field access: `row['field']`, `row.get('field')`
 - Comparisons: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - Boolean operators: `and`, `or`, `not`
+- Identity: `is`, `is not` (for `None` checks)
 - Membership: `in`, `not in`
-- Literals: strings, numbers, booleans, None
-- List/dict literals for membership checks
+- Arithmetic: `+`, `-`, `*`, `/`, `//`, `%`
+- Ternary: `x if condition else y`
+- Literals: strings, numbers, booleans, `None`
+- Collections: lists, dicts, tuples, sets (for membership checks)
 
 **NOT Allowed:**
 - Function calls (except `row.get()`)
 - Imports
 - Attribute access beyond row fields
-- Assignment
+- Assignment (including `:=`)
 - Lambda/comprehensions
+- `await`, `yield`
+- F-strings with expressions
+- Starred expressions (`*x`, `**x`)
+- Slice syntax
 
 This prevents code injection. An expression like `"__import__('os').system('rm -rf /')"` will be rejected at config validation time.
 
@@ -1000,7 +1029,7 @@ name: str                          # Plugin identifier (e.g., "safety_check", "m
 input_schema: type[PluginSchema]   # Schema of incoming rows
 output_schema: type[PluginSchema]  # Schema of outgoing rows (usually same as input)
 node_id: str | None                # Set by orchestrator after registration
-determinism: Determinism           # DETERMINISTIC, NON_DETERMINISTIC, or EXTERNAL_CALL
+determinism: Determinism           # See Determinism Declaration section for all 6 levels_CALL
 plugin_version: str                # Semantic version for reproducibility
 ```
 
@@ -1069,8 +1098,8 @@ class GateResult:
 
 # RoutingAction options:
 RoutingAction.continue_()              # Continue to next node in pipeline
-RoutingAction.route("sink_name")       # Route to named sink
-RoutingAction.fork(["path1", "path2"]) # Fork to multiple parallel paths
+RoutingAction.route("label")           # Route to labeled destination (resolved via routes config)
+RoutingAction.fork_to_paths(["path1", "path2"]) # Fork to multiple parallel paths
 ```
 
 **Example Plugin Gate:**
@@ -1103,7 +1132,7 @@ class SafetyGate(BaseGate):
 
         if score > self._threshold:
             # Add audit metadata before routing
-            modified_row = {**row.to_dict(), "safety_score": score, "flagged_at": ctx.run_started_at.isoformat()}
+            modified_row = {**row.to_dict(), "safety_score": score, "flagged": True}
             return GateResult(row=modified_row, action=RoutingAction.route("review_queue"))
 
         return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
@@ -1230,6 +1259,8 @@ Parent Token (T1)
 
 **Key property:** Waits for tokens from specified branches, combines based on policy.
 
+> **Note:** A `CoalesceProtocol` exists in `plugins/protocols.py` defining a plugin-level merge interface (`merge(branch_outputs, ctx)`). However, the current engine implementation uses config-driven merge strategies (union/nested/select) via the `CoalesceExecutor`. The protocol exists for future extensibility but is not currently exercised by the engine's merge path.
+
 #### Configuration
 
 ```yaml
@@ -1311,7 +1342,7 @@ Merged Token (T5)
 
 1. Configure an aggregation node in the pipeline
 2. Use a batch-aware transform (`is_batch_aware = True`) at that node
-3. Engine buffers rows and calls `transform.process(rows: list[dict])` when trigger fires
+3. Engine buffers rows and calls `transform.process(rows: list[PipelineRow], ctx)` when trigger fires
 
 #### Configuration
 
@@ -1381,7 +1412,7 @@ Multiple triggers can be combined (first one to fire wins).
      - `passthrough`: `BUFFERED` (non-terminal, will reappear as `COMPLETED`)
 3. Engine checks trigger conditions
 4. When trigger fires:
-   - Engine retrieves buffered rows as `list[dict]`
+   - Engine retrieves buffered rows as `list[PipelineRow]`
    - Engine calls `transform.process(rows, ctx)` with the batch
    - Batch state: `draft` → `executing` → `completed`
    - Output handling depends on `output_mode`:
@@ -1389,7 +1420,7 @@ Multiple triggers can be combined (first one to fire wins).
      - `transform`: New tokens created via `expand_token()` continue
    - Buffer is cleared for next batch
 
-**Important:** The engine owns the buffer, not the transform. Transforms simply receive `list[dict]` and return a result. This enables:
+**Important:** The engine owns the buffer, not the transform. Transforms simply receive `list[PipelineRow]` and return a result. This enables:
 - Crash recovery (buffers are checkpointed)
 - Consistent trigger evaluation
 - Clean audit trail
@@ -1480,7 +1511,7 @@ These operations are engine-level because:
 Plugins declare their determinism level:
 
 ```python
-class Determinism(Enum):
+class Determinism(StrEnum):
     DETERMINISTIC = "deterministic"          # Same input → same output, always
     SEEDED = "seeded"                        # Same input → same output given captured seed
     IO_READ = "io_read"                      # Reads from external state (files/env/time)
@@ -1543,6 +1574,8 @@ Plugins make calls; the engine throttles them.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.9 | 2026-02-08 | Second accuracy pass — Fixed `Determinism` comment (all 6 levels, not 3), `Enum` → `StrEnum`, `list[dict]` → `list[PipelineRow]` in aggregation section, `invalid_data` → `invalid_input` error category, `RoutingAction.route()` parameter clarification, `BatchTransformProtocol` attribute precision |
+| 1.8 | 2026-02-08 | Accuracy pass — Fixed `RoutingAction.fork()` → `fork_to_paths()`, documented `SanitizedDatabaseUrl`/`SanitizedWebhookUrl` for ArtifactDescriptor factories, documented `BatchTransformProtocol` as separate protocol, added `transforms_adds_fields` attribute, expanded expression language reference, fixed `ctx.run_started_at` reference, documented sink resume capability, noted `CoalesceProtocol` existence |
 | 1.7 | 2026-02-05 | **CRITICAL UPDATES**: (1) `TransformResult.success()` requires `success_reason` parameter (keyword-only, crashes if missing), (2) Row type changed from `dict[str, Any]` to `PipelineRow` in Transform/Gate signatures, (3) Added `context_after` field for operational metadata, (4) Added `contract` field and `to_pipeline_row()` methods on all result types, (5) Enhanced `flush()` documentation with durability guarantees, (6) Updated `SourceRow` to document `contract` parameter and `to_pipeline_row()` method, (7) Fixed `load()` return type to `Iterator[SourceRow]` |
 | 1.6 | 2026-01-20 | Gate documentation: clarified two approaches (config expressions AND plugin gates via `BaseGate`), added `GateResult` contract, plugin gate lifecycle, when-to-use guidance |
 | 1.5 | 2026-01-19 | Multi-row output: `creates_tokens` attribute, `TransformResult.success_multi()`, `rows` field, aggregation `output_mode` (passthrough/transform), `BUFFERED` and `EXPANDED` outcomes |

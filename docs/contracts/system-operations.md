@@ -1,6 +1,6 @@
 # ELSPETH System Operations Contract
 
-> **Status:** FINAL (v1.0)
+> **Status:** FINAL (v1.1)
 > **Last Updated:** 2026-02-08
 > **Authority:** This document is the master reference for all engine-level system operations.
 > **Companion:** [Plugin Protocol Contract](plugin-protocol.md) covers Source, Transform, and Sink plugins.
@@ -82,9 +82,9 @@ class RoutingAction:
 
 | Kind | Destinations | Mode | Constraint |
 |------|-------------|------|------------|
-| `CONTINUE` | Empty | `MOVE` only | No destination needed |
-| `ROUTE` | Exactly one | `MOVE` only | COPY forbidden (use `fork_to_paths` instead) |
-| `FORK_TO_PATHS` | Two or more | `COPY` only | Path names must be unique |
+| `CONTINUE` | Empty | `MOVE` (COPY forbidden) | No destination needed |
+| `ROUTE` | Exactly one | `MOVE` (COPY forbidden) | Use `fork_to_paths` for multi-destination |
+| `FORK_TO_PATHS` | One or more | `COPY` only | Path names must be unique, list must not be empty |
 
 ### RoutingReason (Audit Metadata)
 
@@ -101,8 +101,19 @@ class PluginGateReason(TypedDict):
     rule: str           # Description of the gate's logic
     matched_value: Any  # Value that triggered routing
     threshold: NotRequired[float]
+    field: NotRequired[str]        # Field name that was compared
+    comparison: NotRequired[str]   # Comparison operator used
 
-RoutingReason = ConfigGateReason | PluginGateReason | dict[str, Any]
+# Transform error routing
+class TransformErrorReason(TypedDict):
+    reason: str         # Error category string
+
+# Source quarantine routing
+class SourceQuarantineReason(TypedDict):
+    quarantine_error: str   # Description of the validation failure
+
+# Discriminated union — field presence distinguishes variants
+RoutingReason = ConfigGateReason | PluginGateReason | TransformErrorReason | SourceQuarantineReason
 ```
 
 ---
@@ -178,7 +189,7 @@ Route resolution:
 | Ternary | `x if condition else y` | Conditional expressions |
 | Arithmetic | `+`, `-`, `*`, `/`, `//`, `%` | For computed routing |
 | Literals | strings, numbers, booleans, `None` | Immutable values |
-| Collections | `[1, 2, 3]`, `{'a': 1}` | For membership checks |
+| Collections | `[1, 2, 3]`, `{'a': 1}`, `(1, 2)`, `{1, 2}` | Lists, dicts, tuples, sets for membership checks |
 
 **Forbidden constructs (rejected at parse time):**
 
@@ -193,6 +204,8 @@ Route resolution:
 | Names other than `row`, `True`, `False`, `None` | Scope escape |
 | Function calls (except `row.get()`) | Arbitrary execution |
 | Imports | Module system access |
+| Starred expressions (`*x`, `**x`) | Unpacking abuse |
+| Slice syntax (`[1:3]`) | Index manipulation |
 
 An expression like `"__import__('os').system('rm -rf /')"` is rejected at config validation time, not at runtime.
 
@@ -200,8 +213,9 @@ An expression like `"__import__('os').system('rm -rf /')"` is rejected at config
 
 | Error Type | When | Behavior |
 |------------|------|----------|
+| `ExpressionSyntaxError` | Expression is not valid Python syntax | Pipeline fails at config validation (before any rows) |
 | `ExpressionSecurityError` | Forbidden construct in expression | Pipeline fails at config validation (before any rows) |
-| `ExpressionEvaluationError` | Runtime error (KeyError, ZeroDivisionError, TypeError) | Token recorded as FAILED, pipeline crashes (row data caused the error in OUR expression — this is a config bug) |
+| `ExpressionEvaluationError` | Runtime error (KeyError, ZeroDivisionError, TypeError) | Node state recorded as FAILED, exception propagates to orchestrator which fails the run (row data caused the error in OUR expression — this is a config bug) |
 
 ### Plugin Gates
 
@@ -362,7 +376,7 @@ Gate returns RoutingAction.fork_to_paths(["path_a", "path_b"])
 GateExecutor creates fork_row (PipelineRow with contract)
     │
     ▼
-TokenManager.fork_token()
+TokenManager.fork_token(parent_token, branches, step_in_pipeline, run_id, row_data=None)
     │
     ├── LandscapeRecorder.fork_token()  ← ATOMIC OPERATION
     │   ├── Creates all child token records in audit DB
@@ -699,6 +713,7 @@ transforms:
 | `count` | N tokens accumulated | First trigger to fire wins |
 | `timeout_seconds` | Duration elapsed since batch start | Checked before each row |
 | `condition` | Row matches expression | Immediate flush |
+| `manual` | Explicitly triggered via API/CLI | On-demand flush |
 | End-of-source | Source exhausted | Always checked (implicit) |
 
 ### Aggregation Execution Flow
@@ -823,36 +838,41 @@ class TokenInfo:
 ### Complete Token State Diagram
 
 ```
-                    Source creates token
-                           │
-                           ▼
-                      ┌─────────┐
-                      │ CREATED │
-                      └────┬────┘
-                           │
-              ┌────────────┼────────────────────┐
-              │            │                    │
-              ▼            ▼                    ▼
-         ┌────────┐  ┌──────────┐        ┌───────────┐
-         │ FORKED │  │ BUFFERED │        │ Processing│
-         └────┬───┘  └────┬─────┘        └─────┬─────┘
-              │            │                    │
-         (children)   (on flush)     ┌──────────┼──────────┐
-                           │         │          │          │
-                           ▼         ▼          ▼          ▼
-                     ┌───────────┐ ┌──────┐ ┌────────┐ ┌──────────────────┐
-                     │ COMPLETED │ │ROUTED│ │FAILED  │ │CONSUMED_IN_BATCH │
-                     └───────────┘ └──────┘ └────────┘ └──────────────────┘
-                                                │
-                                           ┌────┼────┐
-                                           │         │
-                                           ▼         ▼
-                                    ┌───────────┐ ┌──────────┐
-                                    │QUARANTINED│ │COALESCED │
-                                    └───────────┘ └──────────┘
+                         Source creates token
+                                │
+               ┌────────────────┼──────────────────┐
+               │                │                  │
+               ▼                ▼                  ▼
+        ┌─────────────┐  ┌──────────┐       ┌───────────┐
+        │ QUARANTINED │  │ CREATED  │       │(valid row) │
+        └─────────────┘  │(invalid) │       └─────┬─────┘
+        (source validation └──────────┘             │
+         failure)                    ┌──────────────┼───────────────────┐
+                                     │              │                   │
+                                     ▼              ▼                   ▼
+                                ┌────────┐    ┌──────────┐       ┌───────────┐
+                                │ FORKED │    │ BUFFERED │       │ Processing│
+                                └────┬───┘    └────┬─────┘       └─────┬─────┘
+                                     │             │                   │
+                                (children)    (on flush)    ┌──────────┼──────────┬───────────┐
+                                                   │        │          │          │           │
+                                                   ▼        ▼          ▼          ▼           ▼
+                                             ┌─────────┐ ┌──────┐ ┌────────┐ ┌────────────┐ ┌─────────┐
+                                             │COMPLETED│ │ROUTED│ │ FAILED │ │CONSUMED_IN │ │EXPANDED │
+                                             └─────────┘ └──────┘ └────────┘ │   _BATCH   │ └─────────┘
+                                                                              └────────────┘
+
+                                             ┌──────────┐
+                                             │COALESCED │  ← from coalesce merge (consumed branch tokens)
+                                             └──────────┘
 ```
 
-All states except `BUFFERED` are terminal. Every token reaches exactly one terminal state — no silent drops.
+**Terminal states** (all except BUFFERED): COMPLETED, ROUTED, FORKED, FAILED, QUARANTINED, CONSUMED_IN_BATCH, COALESCED, EXPANDED. Every token reaches exactly one terminal state — no silent drops.
+
+**State origins:**
+- `QUARANTINED` — Source validation failure (not from FAILED)
+- `COALESCED` — Consumed in a coalesce merge (not from FAILED)
+- `EXPANDED` — Parent of a deaggregation 1→N expansion
 
 ---
 
@@ -860,4 +880,5 @@ All states except `BUFFERED` are terminal. Every token reaches exactly one termi
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1 | 2026-02-08 | Accuracy pass — Fixed RoutingReason union type (added TransformErrorReason, SourceQuarantineReason), corrected terminal states diagram (QUARANTINED/COALESCED/EXPANDED as independent states), fixed FORK_TO_PATHS minimum, added ExpressionSyntaxError, expanded fork_token() signature, added MANUAL trigger type, expanded expression language/forbidden constructs, added PluginGateReason optional fields |
 | 1.0 | 2026-02-08 | Initial contract — Gates (config + plugin), Forks, Coalesces, Aggregation, Token identity, Routing primitives |
