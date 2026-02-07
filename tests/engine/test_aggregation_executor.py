@@ -722,7 +722,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Don't buffer anything
         state = executor.get_checkpoint_state()
-        assert state == {"_version": "2.0"}  # Only version field when no buffers
+        assert state == {"_version": "2.1"}  # Only version field when no buffers
 
     def test_restore_from_checkpoint_reconstructs_full_token_info(self, real_landscape_db) -> None:
         """Restore reconstructs complete TokenInfo objects from checkpoint data."""
@@ -759,7 +759,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Checkpoint state with new format (full TokenInfo data)
         checkpoint_state = {
-            "_version": "2.0",
+            "_version": "2.1",
             node_id: {
                 "tokens": [
                     {
@@ -770,7 +770,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format (can be None)
                         "join_group_id": None,  # Required in v2.0 format (can be None)
                         "expand_group_id": None,  # Required in v2.0 format (can be None)
-                        "contract_version": "93577787f8ffd7ee162b5a153fcf970c",  # v2.0: contract hash (name+score fields)
+                        "contract_version": "93577787f8ffd7ee162b5a153fcf970c",  # contract hash (name+score fields)
                     },
                     {
                         "token_id": "token-102",
@@ -780,7 +780,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
-                        "contract_version": "93577787f8ffd7ee162b5a153fcf970c",  # v2.0: contract hash (name+score fields)
+                        "contract_version": "93577787f8ffd7ee162b5a153fcf970c",  # contract hash (name+score fields)
                     },
                 ],
                 "batch_id": "batch-123",
@@ -873,7 +873,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Simulate checkpoint state with 4 rows buffered (new format)
         checkpoint_state = {
-            "_version": "2.0",
+            "_version": "2.1",
             node_id: {
                 "tokens": [
                     {
@@ -884,7 +884,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format
                         "join_group_id": None,  # Required in v2.0 format
                         "expand_group_id": None,  # Required in v2.0 format
-                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # v2.0: contract hash (value field)
+                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # contract hash (value field)
                     }
                     for i in range(4)
                 ],
@@ -1045,7 +1045,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Simulate checkpoint with 2 buffered tokens (ready to flush)
         checkpoint_state: dict[str, Any] = {
-            "_version": "2.0",
+            "_version": "2.1",
             node_id: {
                 "tokens": [
                     {
@@ -1056,7 +1056,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format
                         "join_group_id": None,  # Required in v2.0 format
                         "expand_group_id": None,  # Required in v2.0 format
-                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # v2.0: contract hash (value field)
+                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # contract hash (value field)
                     },
                     {
                         "token_id": f"{test_prefix}token-102",
@@ -1066,7 +1066,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
-                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # v2.0: contract hash (value field)
+                        "contract_version": "acaff3625e64c8a6c9c281c7e6c1589c",  # contract hash (value field)
                     },
                 ],
                 "batch_id": batch.batch_id,
@@ -1572,7 +1572,7 @@ class TestAggregationExecutorCheckpoint:
         )
 
         # Restore from empty checkpoint (only version, no aggregation buffers)
-        executor.restore_from_checkpoint({"_version": "2.0"})
+        executor.restore_from_checkpoint({"_version": "2.1"})
 
         # VERIFY: No errors, buffers remain empty (but initialized for the node)
         assert node_id in executor._buffers
@@ -1611,7 +1611,7 @@ class TestAggregationExecutorCheckpoint:
                             "row_id": 1,
                             # "row_data" is MISSING
                             "branch_name": None,
-                            "contract_version": "807f89f2eb82f40bcbb5442bde74466a",  # v2.0: contract hash (empty fields)
+                            "contract_version": "807f89f2eb82f40bcbb5442bde74466a",  # contract hash (empty fields)
                         }
                     ],
                     "batch_id": None,
@@ -1669,7 +1669,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Build invalid checkpoint with the parameterized node data
         invalid_checkpoint = {
-            "_version": "2.0",
+            "_version": "2.1",
             node_id: checkpoint_node_data,
         }
 

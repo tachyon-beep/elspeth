@@ -358,7 +358,7 @@ class TestProcessorBatchTransforms:
         contract_version_hash = checkpoint_contract.version_hash()
 
         restored_buffer_state = {
-            "_version": "2.0",
+            "_version": "2.1",
             sum_node.node_id: {
                 "tokens": [
                     {
