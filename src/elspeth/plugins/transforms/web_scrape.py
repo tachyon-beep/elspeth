@@ -22,6 +22,7 @@ from pydantic import Field
 
 from elspeth.contracts import Determinism
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.security.web import (
     NetworkError as SSRFNetworkError,
@@ -34,7 +35,6 @@ from elspeth.core.security.web import (
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.web_scrape_errors import (
@@ -305,6 +305,8 @@ class WebScrapeTransform(BaseTransform):
             raise NetworkError(f"DNS resolution failed during redirect: {safe_request.original_url}: {e}") from e
         except httpx.TooManyRedirects as e:
             raise InvalidURLError(f"Too many redirects: {safe_request.original_url}: {e}") from e
+        finally:
+            client.close()
 
     def close(self) -> None:
         """Release resources."""

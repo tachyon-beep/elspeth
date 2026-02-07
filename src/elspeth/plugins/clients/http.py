@@ -20,13 +20,13 @@ import httpx
 import structlog
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.core.canonical import stable_hash
 from elspeth.core.security.web import (
     SSRFSafeRequest,
     validate_url_for_ssrf,
 )
 from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallback
-from elspeth.contracts.events import ExternalCallCompleted
 
 logger = structlog.get_logger(__name__)
 
@@ -140,6 +140,14 @@ class AuditedHTTPClient(AuditedClientBase):
         self._timeout = timeout
         self._base_url = base_url
         self._default_headers = headers or {}
+        # Shared httpx.Client for connection pooling and TCP reuse.
+        # httpx.Client is thread-safe; the internal pool handles concurrency.
+        # Per-request timeouts override the default via timeout= kwarg.
+        # follow_redirects=False: SSRF-safe methods manage redirects manually.
+        self._client = httpx.Client(
+            timeout=self._timeout,
+            follow_redirects=False,
+        )
 
     # Headers that may contain secrets - fingerprinted in audit trail
     _SENSITIVE_REQUEST_HEADERS = frozenset({"authorization", "x-api-key", "api-key", "x-auth-token", "proxy-authorization"})
@@ -260,6 +268,10 @@ class AuditedHTTPClient(AuditedClientBase):
         # netloc = [userinfo@]host[:port], hostname = just the host
         return parsed.hostname or "unknown"
 
+    def close(self) -> None:
+        """Close the underlying httpx client and release connections."""
+        self._client.close()
+
     def post(
         self,
         url: str,
@@ -310,12 +322,12 @@ class AuditedHTTPClient(AuditedClientBase):
         start = time.perf_counter()
 
         try:
-            with httpx.Client(timeout=effective_timeout) as client:
-                response = client.post(
-                    full_url,
-                    json=json,
-                    headers=merged_headers,
-                )
+            response = self._client.post(
+                full_url,
+                json=json,
+                headers=merged_headers,
+                timeout=effective_timeout,
+            )
 
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -525,12 +537,12 @@ class AuditedHTTPClient(AuditedClientBase):
         start = time.perf_counter()
 
         try:
-            with httpx.Client(timeout=effective_timeout) as client:
-                response = client.get(
-                    full_url,
-                    params=params,
-                    headers=merged_headers,
-                )
+            response = self._client.get(
+                full_url,
+                params=params,
+                headers=merged_headers,
+                timeout=effective_timeout,
+            )
 
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -746,15 +758,12 @@ class AuditedHTTPClient(AuditedClientBase):
         start = time.perf_counter()
 
         try:
-            with httpx.Client(
+            response = self._client.get(
+                connection_url,
+                headers=merged_headers,
+                extensions=extensions if extensions else None,
                 timeout=effective_timeout,
-                follow_redirects=False,
-            ) as client:
-                response = client.get(
-                    connection_url,
-                    headers=merged_headers,
-                    extensions=extensions if extensions else None,
-                )
+            )
 
             # Handle redirects with SSRF validation at each hop
             redirect_count = 0
@@ -972,12 +981,12 @@ class AuditedHTTPClient(AuditedClientBase):
 
             hop_start = time.perf_counter()
 
-            with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-                response = client.get(
-                    redirect_request.connection_url,
-                    headers=hop_headers,
-                    extensions=extensions if extensions else None,
-                )
+            response = self._client.get(
+                redirect_request.connection_url,
+                headers=hop_headers,
+                extensions=extensions if extensions else None,
+                timeout=timeout,
+            )
 
             hop_latency_ms = (time.perf_counter() - hop_start) * 1000
             redirects_followed += 1

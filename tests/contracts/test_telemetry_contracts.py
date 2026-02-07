@@ -40,12 +40,12 @@ from elspeth.contracts import (
     SourceRow,
 )
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
+from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.contracts.events import ExternalCallCompleted
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 from tests.telemetry.fixtures import MockTelemetryConfig, TelemetryTestExporter
@@ -318,14 +318,6 @@ class TestAuditedHTTPClientTelemetryContract:
         def telemetry_emit(event: ExternalCallCompleted) -> None:
             emitted_events.append(event)
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            base_url="https://api.example.com",
-            run_id="run_abc",
-            telemetry_emit=telemetry_emit,
-        )
-
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"result": "success"}
@@ -334,11 +326,15 @@ class TestAuditedHTTPClientTelemetryContract:
         mock_response.headers = {"content-type": "application/json"}
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client_instance = MagicMock()
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                base_url="https://api.example.com",
+                run_id="run_abc",
+                telemetry_emit=telemetry_emit,
+            )
+            mock_client_instance = mock_client_class.return_value
             mock_client_instance.post.return_value = mock_response
-            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
-            mock_client_instance.__exit__ = MagicMock(return_value=False)
-            mock_client_class.return_value = mock_client_instance
 
             client.post("/endpoint", json={"input": "test"})
 
@@ -371,20 +367,16 @@ class TestAuditedHTTPClientTelemetryContract:
         def telemetry_emit(event: ExternalCallCompleted) -> None:
             emitted_events.append(event)
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            base_url="https://api.example.com",
-            run_id="run_abc",
-            telemetry_emit=telemetry_emit,
-        )
-
         with patch("httpx.Client") as mock_client_class:
-            mock_client_instance = MagicMock()
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                base_url="https://api.example.com",
+                run_id="run_abc",
+                telemetry_emit=telemetry_emit,
+            )
+            mock_client_instance = mock_client_class.return_value
             mock_client_instance.post.side_effect = httpx.ConnectError("Connection failed")
-            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
-            mock_client_instance.__exit__ = MagicMock(return_value=False)
-            mock_client_class.return_value = mock_client_instance
 
             with pytest.raises(httpx.ConnectError):
                 client.post("/endpoint", json={"input": "test"})
@@ -410,14 +402,6 @@ class TestAuditedHTTPClientTelemetryContract:
         def telemetry_emit(event: ExternalCallCompleted) -> None:
             emitted_events.append(event)
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            base_url="https://api.example.com",
-            run_id="run_abc",
-            telemetry_emit=telemetry_emit,
-        )
-
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"data": "value"}
@@ -426,11 +410,15 @@ class TestAuditedHTTPClientTelemetryContract:
         mock_response.headers = {"content-type": "application/json"}
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client_instance = MagicMock()
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                base_url="https://api.example.com",
+                run_id="run_abc",
+                telemetry_emit=telemetry_emit,
+            )
+            mock_client_instance = mock_client_class.return_value
             mock_client_instance.get.return_value = mock_response
-            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
-            mock_client_instance.__exit__ = MagicMock(return_value=False)
-            mock_client_class.return_value = mock_client_instance
 
             client.get("/endpoint")
 
@@ -635,14 +623,6 @@ class TestPluginTelemetryThroughAuditedClients:
         def telemetry_emit(event: Any) -> None:
             exporter.export(event)
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state-1",
-            run_id="run-1",
-            telemetry_emit=telemetry_emit,
-            base_url="https://api.example.com",
-        )
-
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"success": True}
@@ -651,11 +631,15 @@ class TestPluginTelemetryThroughAuditedClients:
         mock_response.headers = {"content-type": "application/json"}
 
         with patch("httpx.Client") as mock_client_class:
-            mock_instance = MagicMock()
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state-1",
+                run_id="run-1",
+                telemetry_emit=telemetry_emit,
+                base_url="https://api.example.com",
+            )
+            mock_instance = mock_client_class.return_value
             mock_instance.post.return_value = mock_response
-            mock_instance.__enter__ = MagicMock(return_value=mock_instance)
-            mock_instance.__exit__ = MagicMock(return_value=False)
-            mock_client_class.return_value = mock_instance
 
             client.post("/endpoint", json={"data": "test"})
 
@@ -740,14 +724,6 @@ class TestTelemetryEmissionOrderContract:
         def telemetry_emit(event: Any) -> None:
             call_order.append("telemetry")
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state-1",
-            run_id="run-1",
-            telemetry_emit=telemetry_emit,
-            base_url="https://api.example.com",
-        )
-
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"success": True}
@@ -756,11 +732,15 @@ class TestTelemetryEmissionOrderContract:
         mock_response.headers = {"content-type": "application/json"}
 
         with patch("httpx.Client") as mock_client_class:
-            mock_instance = MagicMock()
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state-1",
+                run_id="run-1",
+                telemetry_emit=telemetry_emit,
+                base_url="https://api.example.com",
+            )
+            mock_instance = mock_client_class.return_value
             mock_instance.post.return_value = mock_response
-            mock_instance.__enter__ = MagicMock(return_value=mock_instance)
-            mock_instance.__exit__ = MagicMock(return_value=False)
-            mock_client_class.return_value = mock_instance
 
             client.post("/endpoint", json={"data": "test"})
 
@@ -885,14 +865,6 @@ class TestTelemetryFailureIsolationContract:
         def failing_telemetry_emit(event: Any) -> None:
             raise RuntimeError("Telemetry export failed!")
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state-1",
-            run_id="run-1",
-            telemetry_emit=failing_telemetry_emit,
-            base_url="https://api.example.com",
-        )
-
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"success": True}
@@ -901,11 +873,15 @@ class TestTelemetryFailureIsolationContract:
         mock_response.headers = {"content-type": "application/json"}
 
         with patch("httpx.Client") as mock_client_class:
-            mock_instance = MagicMock()
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state-1",
+                run_id="run-1",
+                telemetry_emit=failing_telemetry_emit,
+                base_url="https://api.example.com",
+            )
+            mock_instance = mock_client_class.return_value
             mock_instance.post.return_value = mock_response
-            mock_instance.__enter__ = MagicMock(return_value=mock_instance)
-            mock_instance.__exit__ = MagicMock(return_value=False)
-            mock_client_class.return_value = mock_instance
 
             # CONTRACT: Call should succeed despite telemetry failure
             response = client.post("/endpoint", json={"data": "test"})

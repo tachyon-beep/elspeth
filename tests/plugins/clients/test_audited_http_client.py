@@ -27,14 +27,6 @@ class TestAuditedHTTPClient:
         """Successful HTTP POST is recorded to audit trail with full response body."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            timeout=30.0,
-        )
-
         # Mock httpx.Client with JSON response
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -44,11 +36,15 @@ class TestAuditedHTTPClient:
         mock_response.text = '{"result": "success"}'
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                timeout=30.0,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.post(
                 "https://api.example.com/v1/process",
@@ -76,24 +72,20 @@ class TestAuditedHTTPClient:
         """Each call gets a unique, incrementing call index."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             # Make multiple calls
             client.post("https://api.example.com/first")
@@ -109,19 +101,15 @@ class TestAuditedHTTPClient:
         """Failed HTTP call records error details."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.side_effect = httpx.ConnectError("Connection refused")
-            mock_client_class.return_value = mock_client
 
             with pytest.raises(httpx.ConnectError):
                 client.post("https://api.example.com/v1/process")
@@ -146,30 +134,26 @@ class TestAuditedHTTPClient:
 
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            headers={
-                "Authorization": "Bearer secret-token",
-                "X-API-Key": "api-key-12345",
-                "Content-Type": "application/json",
-                "X-Request-Id": "req-123",
-            },
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                headers={
+                    "Authorization": "Bearer secret-token",
+                    "X-API-Key": "api-key-12345",
+                    "Content-Type": "application/json",
+                    "X-Request-Id": "req-123",
+                },
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/v1/process")
 
@@ -211,35 +195,32 @@ class TestAuditedHTTPClient:
         recorder1 = self._create_mock_recorder()
         recorder2 = self._create_mock_recorder()
 
-        # Client 1 with credential A
-        client1 = AuditedHTTPClient(
-            recorder=recorder1,
-            state_id="state_1",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            headers={"Authorization": "Bearer credential-A"},
-        )
-
-        # Client 2 with credential B (different)
-        client2 = AuditedHTTPClient(
-            recorder=recorder2,
-            state_id="state_2",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            headers={"Authorization": "Bearer credential-B"},
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            # Client 1 with credential A
+            client1 = AuditedHTTPClient(
+                recorder=recorder1,
+                state_id="state_1",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                headers={"Authorization": "Bearer credential-A"},
+            )
+
+            # Client 2 with credential B (different)
+            client2 = AuditedHTTPClient(
+                recorder=recorder2,
+                state_id="state_2",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                headers={"Authorization": "Bearer credential-B"},
+            )
+
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             # Same URL and body, different credentials
             client1.post("https://api.example.com/v1/process", json={"data": "test"})
@@ -269,28 +250,24 @@ class TestAuditedHTTPClient:
 
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            headers={
-                "Authorization": "Bearer secret-token",
-                "Content-Type": "application/json",
-            },
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                headers={
+                    "Authorization": "Bearer secret-token",
+                    "Content-Type": "application/json",
+                },
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/v1/process")
 
@@ -307,25 +284,21 @@ class TestAuditedHTTPClient:
         """Base URL is prepended to request path."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            base_url="https://api.example.com",
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                base_url="https://api.example.com",
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("/v1/process", json={"data": "value"})
 
@@ -342,26 +315,22 @@ class TestAuditedHTTPClient:
         """Base URL with trailing slash + URL with leading slash produces single slash."""
         recorder = self._create_mock_recorder()
 
-        # Both have slashes - would cause double slash with naive concat
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            base_url="https://api.example.com/",
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            # Both have slashes - would cause double slash with naive concat
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                base_url="https://api.example.com/",
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("/v1/process")
 
@@ -376,26 +345,22 @@ class TestAuditedHTTPClient:
         """Base URL without trailing slash + URL without leading slash produces correct URL."""
         recorder = self._create_mock_recorder()
 
-        # Neither has slashes - would cause missing slash with naive concat
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            base_url="https://api.example.com/v1",
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            # Neither has slashes - would cause missing slash with naive concat
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                base_url="https://api.example.com/v1",
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("process")
 
@@ -410,24 +375,20 @@ class TestAuditedHTTPClient:
         """Response body size is recorded in bytes."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b'{"result": "data", "count": 42}'
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/v1/process")
 
@@ -438,25 +399,21 @@ class TestAuditedHTTPClient:
         """Per-request headers are merged with default headers."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            headers={"Content-Type": "application/json"},
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                headers={"Content-Type": "application/json"},
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post(
                 "https://api.example.com/v1/process",
@@ -473,41 +430,30 @@ class TestAuditedHTTPClient:
         """Timeout configuration is passed to httpx client."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            timeout=60.0,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                timeout=60.0,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/v1/process")
 
         # Verify timeout was passed to Client constructor
-        mock_client_class.assert_called_once_with(timeout=60.0)
+        mock_client_class.assert_called_once_with(timeout=60.0, follow_redirects=False)
 
     def test_response_headers_recorded(self) -> None:
         """Response headers are recorded in audit trail."""
         recorder = self._create_mock_recorder()
-
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
 
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -516,11 +462,14 @@ class TestAuditedHTTPClient:
         mock_response.text = "{}"
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/v1/process")
 
@@ -533,25 +482,21 @@ class TestAuditedHTTPClient:
         """When no base_url, the full URL is used as-is."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            # No base_url
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                # No base_url
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://other-api.example.com/endpoint")
 
@@ -562,24 +507,20 @@ class TestAuditedHTTPClient:
         """HTTP call with None json body is handled."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             # Call without json
             client.post("https://api.example.com/endpoint")
@@ -590,13 +531,6 @@ class TestAuditedHTTPClient:
     def test_sensitive_response_headers_filtered(self) -> None:
         """Sensitive response headers (cookies, auth) are filtered from audit trail."""
         recorder = self._create_mock_recorder()
-
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
 
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -613,11 +547,14 @@ class TestAuditedHTTPClient:
         mock_response.text = "{}"
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/v1/process")
 
@@ -637,73 +574,60 @@ class TestAuditedHTTPClient:
         """Per-request timeout overrides the client's default timeout."""
         recorder = self._create_mock_recorder()
 
-        # Client has default timeout of 30s
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            timeout=30.0,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            # Client has default timeout of 30s
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                timeout=30.0,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             # Request with per-request timeout of 120s
             client.post("https://api.example.com/endpoint", timeout=120.0)
 
-        # Verify per-request timeout was used instead of default
-        mock_client_class.assert_called_once_with(timeout=120.0)
+        # Verify per-request timeout was passed to the post() call
+        mock_client.post.assert_called_once()
+        assert mock_client.post.call_args[1]["timeout"] == 120.0
 
     def test_none_timeout_uses_default(self) -> None:
         """When timeout=None is passed, the client's default timeout is used."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            timeout=45.0,  # Default
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                timeout=45.0,  # Default
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             # Request without explicit timeout
             client.post("https://api.example.com/endpoint")
 
-        # Verify default timeout was used
-        mock_client_class.assert_called_once_with(timeout=45.0)
+        # Verify default timeout was passed to the post() call
+        mock_client.post.assert_called_once()
+        assert mock_client.post.call_args[1]["timeout"] == 45.0
 
     def test_non_json_response_body_recorded_as_text(self) -> None:
         """Non-JSON response body is recorded as text."""
         recorder = self._create_mock_recorder()
-
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
 
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -712,11 +636,14 @@ class TestAuditedHTTPClient:
         mock_response.text = "Plain text response"
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/endpoint")
 
@@ -727,13 +654,6 @@ class TestAuditedHTTPClient:
         """JSON response body is recorded as parsed dict."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json; charset=utf-8"}
@@ -741,11 +661,14 @@ class TestAuditedHTTPClient:
         mock_response.text = '{"choices": [{"message": {"content": "Hello"}}]}'
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/endpoint")
 
@@ -756,13 +679,6 @@ class TestAuditedHTTPClient:
         """HTTP 4xx responses are recorded with ERROR status."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 401
         mock_response.headers = {"content-type": "application/json"}
@@ -771,11 +687,14 @@ class TestAuditedHTTPClient:
         mock_response.text = '{"error": "Unauthorized"}'
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.post("https://api.example.com/v1/process")
 
@@ -794,13 +713,6 @@ class TestAuditedHTTPClient:
         """HTTP 5xx responses are recorded with ERROR status."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 503
         mock_response.headers = {"content-type": "text/plain"}
@@ -808,11 +720,14 @@ class TestAuditedHTTPClient:
         mock_response.text = "Service Unavailable"
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.post("https://api.example.com/v1/process")
 
@@ -830,13 +745,6 @@ class TestAuditedHTTPClient:
         """HTTP 2xx responses (200-299) are recorded with SUCCESS status."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         # Test 201 Created
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 201
@@ -844,11 +752,14 @@ class TestAuditedHTTPClient:
         mock_response.content = b"{}"
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.post("https://api.example.com/v1/resource")
 
@@ -866,13 +777,6 @@ class TestAuditedHTTPClient:
         """
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 302
         mock_response.headers = {"location": "https://new-location.example.com"}
@@ -880,11 +784,14 @@ class TestAuditedHTTPClient:
         mock_response.text = ""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.post("https://api.example.com/v1/resource")
 
@@ -907,13 +814,6 @@ class TestAuditedHTTPClient:
         # Create 150KB text response (exceeds old 100KB truncation limit)
         large_text = "x" * 150_000
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "text/plain"}
@@ -921,11 +821,14 @@ class TestAuditedHTTPClient:
         mock_response.text = large_text
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/large-response")
 
@@ -951,13 +854,6 @@ class TestAuditedHTTPClient:
         json_str = json.dumps(large_json)
         assert len(json_str) > 100_000, "Test setup error: JSON not large enough"
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
@@ -965,11 +861,14 @@ class TestAuditedHTTPClient:
         mock_response.text = json_str
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/large-json")
 
@@ -995,13 +894,6 @@ class TestAuditedHTTPClient:
         # PNG file signature + minimal IHDR chunk
         binary_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "image/png"}
@@ -1010,11 +902,14 @@ class TestAuditedHTTPClient:
         # For this test, we're verifying the code path that uses .content instead
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.post("https://api.example.com/image")
 
@@ -1039,13 +934,6 @@ class TestAuditedHTTPClient:
         """
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         # JSON with NaN (Python's json.loads accepts this)
         json_with_nan = '{"value": NaN, "other": "data"}'
 
@@ -1056,11 +944,14 @@ class TestAuditedHTTPClient:
         mock_response.text = json_with_nan
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             # Should NOT crash - should record as parse failure
             response = client.post("https://api.example.com/endpoint")
@@ -1087,13 +978,6 @@ class TestAuditedHTTPClient:
         """
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         # JSON with Infinity (Python's json.loads accepts this)
         json_with_infinity = '{"value": Infinity, "count": 42}'
 
@@ -1104,11 +988,14 @@ class TestAuditedHTTPClient:
         mock_response.text = json_with_infinity
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             # Should NOT crash - should record as parse failure
             response = client.post("https://api.example.com/endpoint")
@@ -1126,13 +1013,6 @@ class TestAuditedHTTPClient:
         """JSON response containing -Infinity is recorded as parse failure."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         json_with_neg_infinity = '{"value": -Infinity}'
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -1142,11 +1022,14 @@ class TestAuditedHTTPClient:
         mock_response.text = json_with_neg_infinity
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.post("https://api.example.com/endpoint")
 
@@ -1163,13 +1046,6 @@ class TestAuditedHTTPClient:
         """
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         # NaN nested in array within object
         json_with_nested_nan = '{"data": {"values": [1, 2, NaN, 4]}}'
 
@@ -1180,11 +1056,14 @@ class TestAuditedHTTPClient:
         mock_response.text = json_with_nested_nan
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.post("https://api.example.com/endpoint")
 
@@ -1202,13 +1081,6 @@ class TestAuditedHTTPClient:
         """
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         # Valid JSON with edge cases
         valid_json = '{"null_value": null, "negative": -42.5, "empty": {}, "array": [1, 2, 3]}'
 
@@ -1219,11 +1091,14 @@ class TestAuditedHTTPClient:
         mock_response.text = valid_json
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.post("https://api.example.com/endpoint")
 
@@ -1257,14 +1132,6 @@ class TestAuditedHTTPClientGet:
         """Successful HTTP GET is recorded to audit trail with full response body."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            timeout=30.0,
-        )
-
         # Mock httpx.Client with HTML response
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
@@ -1273,11 +1140,15 @@ class TestAuditedHTTPClientGet:
         mock_response.text = "<html><body>Content</body></html>"
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                timeout=30.0,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.get.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.get("https://example.com/page")
 
@@ -1303,13 +1174,6 @@ class TestAuditedHTTPClientGet:
         """GET with query params records params in audit trail and passes to httpx."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
@@ -1317,11 +1181,14 @@ class TestAuditedHTTPClientGet:
         mock_response.text = '{"result": "ok"}'
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.get.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.get("https://api.example.com/search", params={"q": "test", "limit": 10})
 
@@ -1342,25 +1209,21 @@ class TestAuditedHTTPClientGet:
         """GET with base_url prepends base to path correctly."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            base_url="https://api.example.com",
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                base_url="https://api.example.com",
+            )
+            mock_client = mock_client_class.return_value
             mock_client.get.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.get("/v1/resource")
 
@@ -1377,19 +1240,15 @@ class TestAuditedHTTPClientGet:
         """Failed HTTP GET call records error details."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.get.side_effect = httpx.ConnectError("Connection refused")
-            mock_client_class.return_value = mock_client
 
             with pytest.raises(httpx.ConnectError):
                 client.get("https://example.com/page")
@@ -1408,25 +1267,21 @@ class TestAuditedHTTPClientGet:
 
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-            headers={"Authorization": "Bearer secret-token"},
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {}
         mock_response.content = b""
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+                headers={"Authorization": "Bearer secret-token"},
+            )
+            mock_client = mock_client_class.return_value
             mock_client.get.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.get("https://api.example.com/resource")
 
@@ -1442,13 +1297,6 @@ class TestAuditedHTTPClientGet:
         """GET with JSON response records parsed dict."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
@@ -1456,11 +1304,14 @@ class TestAuditedHTTPClientGet:
         mock_response.text = '{"items": [1, 2, 3]}'
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.get.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             client.get("https://api.example.com/data")
 
@@ -1471,13 +1322,6 @@ class TestAuditedHTTPClientGet:
         """GET with 4xx response is recorded with ERROR status."""
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 404
         mock_response.headers = {"content-type": "text/plain"}
@@ -1485,11 +1329,14 @@ class TestAuditedHTTPClientGet:
         mock_response.text = "Not Found"
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.get.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.get("https://example.com/missing")
 
@@ -1510,13 +1357,6 @@ class TestAuditedHTTPClientGet:
         """
         recorder = self._create_mock_recorder()
 
-        client = AuditedHTTPClient(
-            recorder=recorder,
-            state_id="state_123",
-            run_id="run_abc",
-            telemetry_emit=lambda event: None,
-        )
-
         json_with_nan = '{"metric": NaN}'
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -1526,11 +1366,14 @@ class TestAuditedHTTPClientGet:
         mock_response.text = json_with_nan
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
+            client = AuditedHTTPClient(
+                recorder=recorder,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
             mock_client.get.return_value = mock_response
-            mock_client_class.return_value = mock_client
 
             response = client.get("https://api.example.com/metrics")
 

@@ -9,13 +9,13 @@ from typing import Any
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import RateLimitSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.rate_limit import RateLimitRegistry
 from elspeth.engine import Orchestrator
 from elspeth.plugins.base import BaseTransform
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 
@@ -323,16 +323,6 @@ class TestAuditedClientRateLimiting:
             mock_recorder = MagicMock()
             mock_recorder.allocate_call_index.return_value = 0
 
-            # Create audited client WITH limiter
-            client = AuditedHTTPClient(
-                recorder=mock_recorder,
-                state_id="test-state-001",
-                run_id="test-run-001",
-                telemetry_emit=lambda event: None,
-                timeout=30.0,
-                limiter=limiter,
-            )
-
             # Mock httpx.Client to avoid actual network calls
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -342,11 +332,17 @@ class TestAuditedClientRateLimiting:
             mock_response.text = '{"result": "ok"}'
 
             with patch("httpx.Client") as mock_client_class:
-                mock_client_instance = MagicMock()
+                # Create audited client WITH limiter (inside patch so __init__ gets the mock)
+                client = AuditedHTTPClient(
+                    recorder=mock_recorder,
+                    state_id="test-state-001",
+                    run_id="test-run-001",
+                    telemetry_emit=lambda event: None,
+                    timeout=30.0,
+                    limiter=limiter,
+                )
+                mock_client_instance = mock_client_class.return_value
                 mock_client_instance.post.return_value = mock_response
-                mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
-                mock_client_instance.__exit__ = MagicMock(return_value=False)
-                mock_client_class.return_value = mock_client_instance
 
                 # Make a call
                 client.post("https://api.example.com/v1/test", json={"data": "value"})

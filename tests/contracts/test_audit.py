@@ -1493,7 +1493,7 @@ class TestEnumExhaustiveness:
 
     def test_call_type_all_values_known(self) -> None:
         """CallType enum has exactly the expected values."""
-        expected_values = {"LLM", "HTTP", "SQL", "FILESYSTEM"}
+        expected_values = {"LLM", "HTTP", "HTTP_REDIRECT", "SQL", "FILESYSTEM"}
         actual_values = {e.name for e in CallType}
         assert actual_values == expected_values
 

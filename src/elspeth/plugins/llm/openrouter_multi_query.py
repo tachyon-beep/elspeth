@@ -24,12 +24,12 @@ from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_multi_query_guaranteed_fields
 from elspeth.plugins.llm.multi_query import (
     CaseStudyConfig,
@@ -999,7 +999,9 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         finally:
             # Clean up cached clients for this state_id
             with self._http_clients_lock:
-                self._http_clients.pop(ctx.state_id, None)
+                client = self._http_clients.pop(ctx.state_id, None)
+            if client is not None:
+                client.close()
 
     def _process_single_row_internal(
         self,
@@ -1199,6 +1201,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         self._recorder = None
         with self._http_clients_lock:
+            for client in self._http_clients.values():
+                client.close()
             self._http_clients.clear()
         self._langfuse_client = None
 

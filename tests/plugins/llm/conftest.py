@@ -327,10 +327,14 @@ def chaosllm_openrouter_http_responses(
         )
 
     with patch("httpx.Client") as mock_client_class:
-        mock_client = Mock()
+        # httpx.Client() returns mock_client in two usage patterns:
+        # 1. Direct: self._client = httpx.Client(...)  (AuditedHTTPClient)
+        # 2. Context manager: with httpx.Client(...) as client:  (openrouter_batch)
+        # Both must route to the same mock with side_effects configured.
+        mock_client = mock_client_class.return_value
+        mock_client.__enter__ = Mock(return_value=mock_client)
+        mock_client.__exit__ = Mock(return_value=False)
         mock_client.post.side_effect = make_response
-        mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-        mock_client_class.return_value.__exit__ = Mock(return_value=None)
         yield mock_client
 
 

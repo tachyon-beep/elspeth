@@ -22,11 +22,11 @@ import httpx
 from pydantic import Field
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, is_capacity_error
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -282,7 +282,9 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         finally:
             # Clean up cached HTTP client for this state_id
             with self._http_clients_lock:
-                self._http_clients.pop(ctx.state_id, None)
+                client = self._http_clients.pop(ctx.state_id, None)
+            if client is not None:
+                client.close()
 
     def _process_single_with_state(
         self,

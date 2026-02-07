@@ -13,9 +13,9 @@ import pytest
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.llm.openrouter_multi_query import OpenRouterMultiQueryLLMTransform
 from elspeth.testing import make_pipeline_row
 
@@ -236,7 +236,7 @@ class TestSingleQueryProcessing:
 
         # Mock HTTP client to return 429
         with patch("httpx.Client") as mock_client_class:
-            mock_client = Mock()
+            mock_client = mock_client_class.return_value
             mock_response = Mock(spec=httpx.Response)
             mock_response.status_code = 429
             mock_response.headers = {"content-type": "application/json"}
@@ -248,8 +248,8 @@ class TestSingleQueryProcessing:
                 response=mock_response,
             )
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = Mock(return_value=None)
+
+
 
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
@@ -269,7 +269,7 @@ class TestSingleQueryProcessing:
         from elspeth.plugins.pooling import CapacityError
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = Mock()
+            mock_client = mock_client_class.return_value
             mock_response = Mock(spec=httpx.Response)
             mock_response.status_code = 503
             mock_response.headers = {"content-type": "application/json"}
@@ -281,8 +281,8 @@ class TestSingleQueryProcessing:
                 response=mock_response,
             )
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = Mock(return_value=None)
+
+
 
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
@@ -534,10 +534,10 @@ class TestRowProcessingWithPipelining:
             return mock_response
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = Mock()
+            mock_client = mock_client_class.return_value
             mock_client.post.side_effect = make_response
-            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = Mock(return_value=None)
+
+
 
             row = {
                 "cs1_bg": "bg",
@@ -771,7 +771,7 @@ class TestHTTPSpecificBehavior:
     ) -> None:
         """HTTP errors with non-JSON body are handled gracefully."""
         with patch("httpx.Client") as mock_client_class:
-            mock_client = Mock()
+            mock_client = mock_client_class.return_value
             mock_response = Mock(spec=httpx.Response)
             mock_response.status_code = 500
             mock_response.headers = {"content-type": "text/html"}
@@ -783,8 +783,8 @@ class TestHTTPSpecificBehavior:
                 response=mock_response,
             )
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = Mock(return_value=None)
+
+
 
             row = {
                 "cs1_bg": "data",
@@ -821,7 +821,7 @@ class TestHTTPSpecificBehavior:
         }
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = Mock()
+            mock_client = mock_client_class.return_value
             mock_response = Mock(spec=httpx.Response)
             mock_response.status_code = 200
             mock_response.headers = {"content-type": "application/json"}
@@ -830,8 +830,8 @@ class TestHTTPSpecificBehavior:
             mock_response.content = b""
             mock_response.raise_for_status = Mock()
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = Mock(return_value=None)
+
+
 
             row = {
                 "cs1_bg": "data",
@@ -872,7 +872,7 @@ class TestHTTPSpecificBehavior:
         }
 
         with patch("httpx.Client") as mock_client_class:
-            mock_client = Mock()
+            mock_client = mock_client_class.return_value
             mock_response = Mock(spec=httpx.Response)
             mock_response.status_code = 200
             mock_response.headers = {"content-type": "application/json"}
@@ -881,8 +881,8 @@ class TestHTTPSpecificBehavior:
             mock_response.content = b""
             mock_response.raise_for_status = Mock()
             mock_client.post.return_value = mock_response
-            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = Mock(return_value=None)
+
+
 
             row = {
                 "cs1_bg": "data",
@@ -952,10 +952,10 @@ class TestHTTPSpecificBehavior:
     ) -> None:
         """Network connection errors are handled gracefully."""
         with patch("httpx.Client") as mock_client_class:
-            mock_client = Mock()
+            mock_client = mock_client_class.return_value
             mock_client.post.side_effect = httpx.ConnectError("Connection refused")
-            mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = Mock(return_value=False)
+
+
 
             row = {
                 "cs1_bg": "data",

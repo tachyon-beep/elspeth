@@ -8,10 +8,10 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.contracts.plugin_context import PluginContext
 from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
@@ -306,8 +306,6 @@ class TestPromptShieldBatchProcessing:
         """Patch httpx.Client to prevent real HTTP calls."""
         with patch("httpx.Client") as mock_client_class:
             mock_instance = MagicMock()
-            mock_instance.__enter__ = MagicMock(return_value=mock_instance)
-            mock_instance.__exit__ = MagicMock(return_value=False)
             mock_client_class.return_value = mock_instance
             yield mock_instance
 
@@ -1100,8 +1098,6 @@ class TestPromptShieldInternalProcessing:
         """Patch httpx.Client to prevent real HTTP calls."""
         with patch("httpx.Client") as mock_client_class:
             mock_instance = MagicMock()
-            mock_instance.__enter__ = MagicMock(return_value=mock_instance)
-            mock_instance.__exit__ = MagicMock(return_value=False)
             mock_client_class.return_value = mock_instance
             yield mock_instance
 
