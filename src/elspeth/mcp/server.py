@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -1771,6 +1772,161 @@ class LandscapeAnalyzer:
         }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MCP Argument Validation (Tier 3 boundary)
+#
+# The MCP SDK delivers tool arguments as dict[str, Any]. This is a Tier 3
+# (external) trust boundary — the MCP client can send any JSON. We validate
+# types immediately rather than letting bad types travel through to SQLAlchemy
+# or analyzer methods.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True, slots=True)
+class _ArgSpec:
+    """Declarative schema for one MCP tool's arguments."""
+
+    required_str: tuple[str, ...] = ()
+    optional_str: tuple[str, ...] = ()  # defaults to None
+    optional_str_defaults: tuple[tuple[str, str], ...] = ()  # (name, default)
+    optional_int: tuple[tuple[str, int], ...] = ()  # (name, default)
+    optional_dict: tuple[str, ...] = ()  # defaults to None
+
+
+_TOOL_ARGS: dict[str, _ArgSpec] = {
+    # --- Core Query Tools ---
+    "list_runs": _ArgSpec(
+        optional_int=(("limit", 50),),
+        optional_str=("status",),
+    ),
+    "get_run": _ArgSpec(required_str=("run_id",)),
+    "get_run_summary": _ArgSpec(required_str=("run_id",)),
+    "list_nodes": _ArgSpec(required_str=("run_id",)),
+    "list_rows": _ArgSpec(
+        required_str=("run_id",),
+        optional_int=(("limit", 100), ("offset", 0)),
+    ),
+    "list_tokens": _ArgSpec(
+        required_str=("run_id",),
+        optional_str=("row_id",),
+        optional_int=(("limit", 100),),
+    ),
+    "list_operations": _ArgSpec(
+        required_str=("run_id",),
+        optional_str=("operation_type", "status"),
+        optional_int=(("limit", 100),),
+    ),
+    "get_operation_calls": _ArgSpec(required_str=("operation_id",)),
+    "explain_token": _ArgSpec(
+        required_str=("run_id",),
+        optional_str=("token_id", "row_id", "sink"),
+    ),
+    "get_errors": _ArgSpec(
+        required_str=("run_id",),
+        optional_str_defaults=(("error_type", "all"),),
+        optional_int=(("limit", 100),),
+    ),
+    "get_node_states": _ArgSpec(
+        required_str=("run_id",),
+        optional_str=("node_id", "status"),
+        optional_int=(("limit", 100),),
+    ),
+    "get_calls": _ArgSpec(required_str=("state_id",)),
+    "query": _ArgSpec(
+        required_str=("sql",),
+        optional_dict=("params",),
+    ),
+    # --- Precomputed Analysis Tools ---
+    "get_dag_structure": _ArgSpec(required_str=("run_id",)),
+    "get_performance_report": _ArgSpec(required_str=("run_id",)),
+    "get_error_analysis": _ArgSpec(required_str=("run_id",)),
+    "get_llm_usage_report": _ArgSpec(required_str=("run_id",)),
+    "describe_schema": _ArgSpec(),
+    "get_outcome_analysis": _ArgSpec(required_str=("run_id",)),
+    # --- Emergency Diagnostic Tools ---
+    "diagnose": _ArgSpec(),
+    "get_failure_context": _ArgSpec(
+        required_str=("run_id",),
+        optional_int=(("limit", 10),),
+    ),
+    "get_recent_activity": _ArgSpec(
+        optional_int=(("minutes", 60),),
+    ),
+    # --- Schema Contract Tools ---
+    "get_run_contract": _ArgSpec(required_str=("run_id",)),
+    "explain_field": _ArgSpec(required_str=("run_id", "field_name")),
+    "list_contract_violations": _ArgSpec(
+        required_str=("run_id",),
+        optional_int=(("limit", 100),),
+    ),
+}
+
+
+def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Validate MCP tool arguments at the Tier 3 boundary.
+
+    Checks required fields exist, validates types (str, int, dict), and
+    applies defaults for optional fields. Returns a new dict with only
+    the declared fields, preventing unexpected keys from leaking through.
+
+    Raises:
+        ValueError: Missing required field or unknown tool.
+        TypeError: Field has wrong type.
+    """
+    spec = _TOOL_ARGS.get(name)
+    if spec is None:
+        raise ValueError(f"Unknown tool: {name}")
+
+    validated: dict[str, Any] = {}
+
+    for fname in spec.required_str:
+        if fname not in arguments:
+            raise ValueError(f"'{name}' requires '{fname}'")
+        val = arguments[fname]
+        if not isinstance(val, str):
+            raise TypeError(
+                f"'{name}': '{fname}' must be string, got {type(val).__name__}"
+            )
+        validated[fname] = val
+
+    for fname in spec.optional_str:
+        val = arguments.get(fname)
+        if val is not None and not isinstance(val, str):
+            raise TypeError(
+                f"'{name}': '{fname}' must be string or null, got {type(val).__name__}"
+            )
+        validated[fname] = val
+
+    for fname, str_default in spec.optional_str_defaults:
+        val = arguments.get(fname, str_default)
+        if not isinstance(val, str):
+            raise TypeError(
+                f"'{name}': '{fname}' must be string, got {type(val).__name__}"
+            )
+        validated[fname] = val
+
+    for fname, int_default in spec.optional_int:
+        val = arguments.get(fname, int_default)
+        # JSON has no int/float distinction — accept both, convert to int
+        if isinstance(val, float) and val == int(val):
+            val = int(val)
+        if not isinstance(val, int) or isinstance(val, bool):
+            raise TypeError(
+                f"'{name}': '{fname}' must be integer, got {type(val).__name__}"
+            )
+        validated[fname] = val
+
+    for fname in spec.optional_dict:
+        val = arguments.get(fname)
+        if val is not None and not isinstance(val, dict):
+            raise TypeError(
+                f"'{name}': '{fname}' must be object or null, got {type(val).__name__}"
+            )
+        validated[fname] = val
+
+    return validated
+
+
 def create_server(database_url: str) -> Server:
     """Create MCP server with Landscape analysis tools.
 
@@ -2102,107 +2258,117 @@ def create_server(database_url: str) -> Server:
 
     @server.call_tool()  # type: ignore[misc, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-        """Handle tool calls."""
+        """Handle tool calls.
+
+        Arguments are validated at the Tier 3 boundary before dispatch.
+        ``_validate_tool_args`` checks required fields, types, and defaults.
+        """
         try:
+            # Validate arguments at the Tier 3 boundary — immediately,
+            # before any of the external data travels into analyzer methods.
+            args = _validate_tool_args(name, arguments)
+
             result: Any
             if name == "list_runs":
                 result = analyzer.list_runs(
-                    limit=arguments.get("limit", 50),
-                    status=arguments.get("status"),
+                    limit=args["limit"],
+                    status=args["status"],
                 )
             elif name == "get_run":
-                result = analyzer.get_run(arguments["run_id"])
+                result = analyzer.get_run(args["run_id"])
             elif name == "get_run_summary":
-                result = analyzer.get_run_summary(arguments["run_id"])
+                result = analyzer.get_run_summary(args["run_id"])
             elif name == "list_nodes":
-                result = analyzer.list_nodes(arguments["run_id"])
+                result = analyzer.list_nodes(args["run_id"])
             elif name == "list_rows":
                 result = analyzer.list_rows(
-                    run_id=arguments["run_id"],
-                    limit=arguments.get("limit", 100),
-                    offset=arguments.get("offset", 0),
+                    run_id=args["run_id"],
+                    limit=args["limit"],
+                    offset=args["offset"],
                 )
             elif name == "list_tokens":
                 result = analyzer.list_tokens(
-                    run_id=arguments["run_id"],
-                    row_id=arguments.get("row_id"),
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    row_id=args["row_id"],
+                    limit=args["limit"],
                 )
             elif name == "list_operations":
                 result = analyzer.list_operations(
-                    run_id=arguments["run_id"],
-                    operation_type=arguments.get("operation_type"),
-                    status=arguments.get("status"),
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    operation_type=args["operation_type"],
+                    status=args["status"],
+                    limit=args["limit"],
                 )
             elif name == "get_operation_calls":
-                result = analyzer.get_operation_calls(arguments["operation_id"])
+                result = analyzer.get_operation_calls(args["operation_id"])
             elif name == "explain_token":
                 result = analyzer.explain_token(
-                    run_id=arguments["run_id"],
-                    token_id=arguments.get("token_id"),
-                    row_id=arguments.get("row_id"),
-                    sink=arguments.get("sink"),
+                    run_id=args["run_id"],
+                    token_id=args["token_id"],
+                    row_id=args["row_id"],
+                    sink=args["sink"],
                 )
             elif name == "get_errors":
                 result = analyzer.get_errors(
-                    run_id=arguments["run_id"],
-                    error_type=arguments.get("error_type", "all"),
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    error_type=args["error_type"],
+                    limit=args["limit"],
                 )
             elif name == "get_node_states":
                 result = analyzer.get_node_states(
-                    run_id=arguments["run_id"],
-                    node_id=arguments.get("node_id"),
-                    status=arguments.get("status"),
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    node_id=args["node_id"],
+                    status=args["status"],
+                    limit=args["limit"],
                 )
             elif name == "get_calls":
-                result = analyzer.get_calls(arguments["state_id"])
+                result = analyzer.get_calls(args["state_id"])
             elif name == "query":
                 result = analyzer.query(
-                    sql=arguments["sql"],
-                    params=arguments.get("params"),
+                    sql=args["sql"],
+                    params=args["params"],
                 )
             # === Precomputed Analysis Tools ===
             elif name == "get_dag_structure":
-                result = analyzer.get_dag_structure(arguments["run_id"])
+                result = analyzer.get_dag_structure(args["run_id"])
             elif name == "get_performance_report":
-                result = analyzer.get_performance_report(arguments["run_id"])
+                result = analyzer.get_performance_report(args["run_id"])
             elif name == "get_error_analysis":
-                result = analyzer.get_error_analysis(arguments["run_id"])
+                result = analyzer.get_error_analysis(args["run_id"])
             elif name == "get_llm_usage_report":
-                result = analyzer.get_llm_usage_report(arguments["run_id"])
+                result = analyzer.get_llm_usage_report(args["run_id"])
             elif name == "describe_schema":
                 result = analyzer.describe_schema()
             elif name == "get_outcome_analysis":
-                result = analyzer.get_outcome_analysis(arguments["run_id"])
+                result = analyzer.get_outcome_analysis(args["run_id"])
             # === Emergency Diagnostic Tools ===
             elif name == "diagnose":
                 result = analyzer.diagnose()
             elif name == "get_failure_context":
                 result = analyzer.get_failure_context(
-                    run_id=arguments["run_id"],
-                    limit=arguments.get("limit", 10),
+                    run_id=args["run_id"],
+                    limit=args["limit"],
                 )
             elif name == "get_recent_activity":
                 result = analyzer.get_recent_activity(
-                    minutes=arguments.get("minutes", 60),
+                    minutes=args["minutes"],
                 )
             # === Schema Contract Tools ===
             elif name == "get_run_contract":
-                result = analyzer.get_run_contract(arguments["run_id"])
+                result = analyzer.get_run_contract(args["run_id"])
             elif name == "explain_field":
                 result = analyzer.explain_field(
-                    run_id=arguments["run_id"],
-                    field_name=arguments["field_name"],
+                    run_id=args["run_id"],
+                    field_name=args["field_name"],
                 )
             elif name == "list_contract_violations":
                 result = analyzer.list_contract_violations(
-                    run_id=arguments["run_id"],
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    limit=args["limit"],
                 )
             else:
+                # _validate_tool_args already raises for unknown tools,
+                # but keep this branch for defense-in-depth.
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
             return [TextContent(type="text", text=json.dumps(result, indent=2))]

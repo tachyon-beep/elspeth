@@ -343,6 +343,10 @@ allowed_dict_patterns:
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:params"
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:return (list)"
   - "src/elspeth/mcp/server.py:call_tool:arguments"
+  # _validate_tool_args bridges Tier 3 (MCP protocol) to validated args.
+  # Input is dict[str, Any] by protocol; return is validated but dynamic per-tool.
+  - "src/elspeth/mcp/server.py:_validate_tool_args:arguments"
+  - "src/elspeth/mcp/server.py:_validate_tool_args:return"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TESTING UTILITIES - Test infrastructure (not production code)
