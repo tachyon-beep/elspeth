@@ -180,13 +180,16 @@ class DAGNode(TypedDict):
 
 
 # Functional form because "from" is a Python keyword
-DAGEdge = TypedDict("DAGEdge", {
-    "from": str,
-    "to": str,
-    "label": str,
-    "mode": str,
-    "flow_type": str,
-})
+DAGEdge = TypedDict(
+    "DAGEdge",
+    {
+        "from": str,
+        "to": str,
+        "label": str,
+        "mode": str,
+        "flow_type": str,
+    },
+)
 
 
 class DAGStructureReport(TypedDict):
