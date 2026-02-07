@@ -382,11 +382,6 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_token_from_step:fp=36466e127d51a869
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=bd2be8e57cbe05de
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions

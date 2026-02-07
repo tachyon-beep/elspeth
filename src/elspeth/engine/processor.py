@@ -391,64 +391,6 @@ class RowProcessor:
         """
         return self._aggregation_executor.get_checkpoint_state()
 
-    def process_token_from_step(
-        self,
-        token: TokenInfo,
-        transforms: list[Any],
-        ctx: PluginContext,
-        start_step: int,
-    ) -> list[RowResult]:
-        """Process a token starting from a specific pipeline step.
-
-        Used for continuing processing after timeout-triggered aggregation flushes.
-        The token will be processed through remaining transforms starting at start_step.
-
-        Args:
-            token: The token to process
-            transforms: List of transforms in the pipeline
-            ctx: Plugin context
-            start_step: The step index to start processing from
-
-        Returns:
-            List of RowResults from processing
-        """
-        work_queue: deque[_WorkItem] = deque(
-            [
-                _WorkItem(
-                    token=token,
-                    start_step=start_step,
-                )
-            ]
-        )
-        results: list[RowResult] = []
-        iterations = 0
-
-        with self._spans.row_span(token.row_id, token.token_id):
-            while work_queue:
-                iterations += 1
-                if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
-
-                item = work_queue.popleft()
-                result, child_items = self._process_single_token(
-                    token=item.token,
-                    transforms=transforms,
-                    ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
-                    coalesce_name=item.coalesce_name,
-                )
-
-                if result is not None:
-                    if isinstance(result, list):
-                        results.extend(result)
-                    else:
-                        results.append(result)
-
-                work_queue.extend(child_items)
-
-        return results
-
     def flush_aggregation_timeout(
         self,
         node_id: NodeID,
@@ -665,7 +607,6 @@ class RowProcessor:
                 if more_transforms or needs_coalesce:
                     # Queue for remaining transforms with coalesce metadata
                     # NOTE: start_step is set to current 0-indexed position.
-                    # Orchestrator adds +1 when calling process_token_from_step.
                     child_items.append(
                         _WorkItem(
                             token=updated_token,
@@ -748,7 +689,6 @@ class RowProcessor:
                 if more_transforms or needs_coalesce:
                     # Queue expanded tokens for remaining transforms with coalesce metadata
                     # NOTE: start_step is set to current 0-indexed position.
-                    # Orchestrator adds +1 when calling process_token_from_step.
                     for token in expanded_tokens:
                         child_items.append(
                             _WorkItem(
@@ -1412,49 +1352,16 @@ class RowProcessor:
             duration_ms=0,
         )
 
-        # Initialize work queue with initial token starting at step 0
-        work_queue: deque[_WorkItem] = deque(
-            [
-                _WorkItem(
-                    token=token,
-                    start_step=0,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                )
-            ]
+        return self._drain_work_queue(
+            _WorkItem(
+                token=token,
+                start_step=0,
+                coalesce_at_step=coalesce_at_step,
+                coalesce_name=coalesce_name,
+            ),
+            transforms,
+            ctx,
         )
-        results: list[RowResult] = []
-        iterations = 0
-
-        with self._spans.row_span(token.row_id, token.token_id):
-            while work_queue:
-                iterations += 1
-                if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
-
-                item = work_queue.popleft()
-                result, child_items = self._process_single_token(
-                    token=item.token,
-                    transforms=transforms,
-                    ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
-                    coalesce_name=item.coalesce_name,
-                )
-                # Result can be:
-                # - None for held coalesce tokens
-                # - Single RowResult for most operations
-                # - List of RowResults for passthrough aggregation mode
-                if result is not None:
-                    if isinstance(result, list):
-                        results.extend(result)
-                    else:
-                        results.append(result)
-
-                # Add any child tokens to the queue
-                work_queue.extend(child_items)
-
-        return results
 
     def process_existing_row(
         self,
@@ -1507,44 +1414,16 @@ class RowProcessor:
             duration_ms=0,
         )
 
-        # Initialize work queue with token starting at step 0
-        work_queue: deque[_WorkItem] = deque(
-            [
-                _WorkItem(
-                    token=token,
-                    start_step=0,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                )
-            ]
+        return self._drain_work_queue(
+            _WorkItem(
+                token=token,
+                start_step=0,
+                coalesce_at_step=coalesce_at_step,
+                coalesce_name=coalesce_name,
+            ),
+            transforms,
+            ctx,
         )
-        results: list[RowResult] = []
-        iterations = 0
-
-        with self._spans.row_span(token.row_id, token.token_id):
-            while work_queue:
-                iterations += 1
-                if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
-
-                item = work_queue.popleft()
-                result, child_items = self._process_single_token(
-                    token=item.token,
-                    transforms=transforms,
-                    ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
-                    coalesce_name=item.coalesce_name,
-                )
-                if result is not None:
-                    if isinstance(result, list):
-                        results.extend(result)
-                    else:
-                        results.append(result)
-
-                work_queue.extend(child_items)
-
-        return results
 
     def process_token(
         self,
@@ -1560,43 +1439,16 @@ class RowProcessor:
 
         Used for mid-pipeline coalesce merges that must continue processing.
         """
-        work_queue: deque[_WorkItem] = deque(
-            [
-                _WorkItem(
-                    token=token,
-                    start_step=start_step,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                )
-            ]
+        return self._drain_work_queue(
+            _WorkItem(
+                token=token,
+                start_step=start_step,
+                coalesce_at_step=coalesce_at_step,
+                coalesce_name=coalesce_name,
+            ),
+            transforms,
+            ctx,
         )
-        results: list[RowResult] = []
-        iterations = 0
-
-        with self._spans.row_span(token.row_id, token.token_id):
-            while work_queue:
-                iterations += 1
-                if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
-
-                item = work_queue.popleft()
-                result, child_items = self._process_single_token(
-                    token=item.token,
-                    transforms=transforms,
-                    ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
-                    coalesce_name=item.coalesce_name,
-                )
-                if result is not None:
-                    if isinstance(result, list):
-                        results.extend(result)
-                    else:
-                        results.append(result)
-
-                work_queue.extend(child_items)
-
-        return results
 
     def _maybe_coalesce_token(
         self,
@@ -1762,6 +1614,51 @@ class RowProcessor:
             return sibling_results
 
         return []
+
+    def _drain_work_queue(
+        self,
+        initial_item: _WorkItem,
+        transforms: list[Any],
+        ctx: PluginContext,
+    ) -> list[RowResult]:
+        """Drain the work queue, processing tokens until empty.
+
+        Implements breadth-first DAG traversal. Each _process_single_token call
+        may produce child work items (from forks, expansions, etc.) which are
+        appended to the queue.
+        """
+        work_queue: deque[_WorkItem] = deque([initial_item])
+        results: list[RowResult] = []
+        iterations = 0
+
+        with self._spans.row_span(initial_item.token.row_id, initial_item.token.token_id):
+            while work_queue:
+                iterations += 1
+                if iterations > MAX_WORK_QUEUE_ITERATIONS:
+                    raise RuntimeError(
+                        f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. "
+                        f"Possible infinite loop in pipeline."
+                    )
+
+                item = work_queue.popleft()
+                result, child_items = self._process_single_token(
+                    token=item.token,
+                    transforms=transforms,
+                    ctx=ctx,
+                    start_step=item.start_step,
+                    coalesce_at_step=item.coalesce_at_step,
+                    coalesce_name=item.coalesce_name,
+                )
+
+                if result is not None:
+                    if isinstance(result, list):
+                        results.extend(result)
+                    else:
+                        results.append(result)
+
+                work_queue.extend(child_items)
+
+        return results
 
     def _process_single_token(
         self,
