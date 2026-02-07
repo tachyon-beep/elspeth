@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeID, NodeStateStatus, NodeType, PipelineRow, RoutingMode, RunStatus, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeStateStatus, NodeType, PipelineRow, RoutingMode, RunStatus, SourceRow
 from elspeth.contracts.audit import NodeStateCompleted
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
@@ -609,7 +609,6 @@ class TestNodeMetadataFromPlugin:
         the plugin class's plugin_version attribute.
         """
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
-        from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -680,20 +679,8 @@ class TestNodeMetadataFromPlugin:
             sinks={"default": as_sink(sink)},
         )
 
-        # Build graph
-        graph = ExecutionGraph()
-        schema_config = {"schema": {"mode": "observed"}}
-        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="versioned_source", config=schema_config)
-        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="versioned_transform", config=schema_config)
-        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="versioned_sink", config=schema_config)
-        graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
-        graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {0: NodeID("transform")}
-        graph._sink_id_map = {SinkName("default"): NodeID("sink")}
-        graph._default_sink = "default"
-
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape to verify node metadata
         recorder = LandscapeRecorder(db)
@@ -724,7 +711,6 @@ class TestNodeMetadataFromPlugin:
         in the Landscape for reproducibility tracking.
         """
         from elspeth.contracts import ArtifactDescriptor, PluginSchema
-        from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -795,20 +781,8 @@ class TestNodeMetadataFromPlugin:
             sinks={"default": as_sink(sink)},
         )
 
-        # Build graph
-        graph = ExecutionGraph()
-        schema_config = {"schema": {"mode": "observed"}}
-        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
-        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="nondeterministic_transform", config=schema_config)
-        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
-        graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
-        graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {0: NodeID("transform")}
-        graph._sink_id_map = {SinkName("default"): NodeID("sink")}
-        graph._default_sink = "default"
-
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape to verify determinism recorded
         recorder = LandscapeRecorder(db)
