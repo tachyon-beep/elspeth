@@ -559,7 +559,7 @@ class CoalesceExecutor:
 
         # Build audit metadata BEFORE completing node states (Bug l4h fix)
         # This allows us to include it in context_after for each consumed token
-        coalesce_metadata = {
+        coalesce_metadata: dict[str, Any] = {
             "policy": settings.policy,
             "merge_strategy": settings.merge,
             "expected_branches": settings.branches,

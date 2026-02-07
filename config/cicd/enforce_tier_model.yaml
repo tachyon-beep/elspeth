@@ -172,12 +172,12 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_find_audit_databases:fp=572ebacbfb2c5e4e
+- key: mcp/server.py:R6:_find_audit_databases:fp=d1b9da6750fcbc5b
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=511662d2990c72af
+- key: mcp/server.py:R6:_prompt_for_database:fp=4bf1b74c95450844
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -207,7 +207,7 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm_mcp/server.py:R6:_find_metrics_databases:fp=3729f174ca112356
+- key: testing/chaosllm_mcp/server.py:R6:_find_metrics_databases:fp=2bcfbfc1388cd9d8
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -737,17 +737,17 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R4:create_server:call_tool:fp=9387de44a997b269
+- key: mcp/server.py:R4:create_server:call_tool:fp=91fde7b3a1219e76
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=41048cde7fb560a1
+- key: mcp/server.py:R6:_prompt_for_database:fp=db88995ea304163f
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=7eb937bd5e55ab72
+- key: mcp/server.py:R6:_prompt_for_database:fp=ca7cd80408f8d4f3
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -877,12 +877,12 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=dbec59d6fc3896cb
+- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=e1b2cc34d0a57eea
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm_mcp/server.py:R4:create_server:call_tool:fp=4af35464aca091f9
+- key: testing/chaosllm_mcp/server.py:R4:create_server:call_tool:fp=e2c9b6f8afcfe19a
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
@@ -892,22 +892,22 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=bcb15a5be0e4322f
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=012ed1c9e0f416e2
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=4b463369eb9ec8b1
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=a3a02bbe7e7d9ab5
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=3d7e4160c5d552fe
+- key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=0637b11f30905a31
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=3129a2e93ac4a64a
+- key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=2c17f57ba9b8f0bb
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
