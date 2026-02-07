@@ -9,11 +9,11 @@ Usage:
     # Flat: 10,000 rows of id + text (for sentiment analysis)
     python -m scripts.generate_test_data flat --rows 10000 --output examples/chaosllm_sentiment/input.csv
 
-    # Multi: 10,000 rows of 2 case studies × 3 fields each (for multi-query assessment)
+    # Multi: 10,000 rows of 2 case studies x 3 fields each (for multi-query assessment)
     python -m scripts.generate_test_data multi --rows 10000 --case-studies 2 --fields-per-cs 3 \
         --output examples/chaosllm_endurance/input.csv
 
-    # Multi: 5,000 rows of 4 case studies × 2 fields each
+    # Multi: 5,000 rows of 4 case studies x 2 fields each
     python -m scripts.generate_test_data multi --rows 5000 --case-studies 4 --fields-per-cs 2 \
         --output my_custom_test.csv
 """
@@ -249,7 +249,7 @@ def multi(
             writer.writerow(_generate_multi_row(rng, i, case_studies, fields_per_cs))
 
     total_calls = rows * case_studies * 5  # assuming 5 criteria
-    typer.echo(f"Generated {rows} multi rows ({case_studies} case studies × {fields_per_cs} fields each) -> {output}")
+    typer.echo(f"Generated {rows} multi rows ({case_studies} case studies x {fields_per_cs} fields each) -> {output}")
     typer.echo(f"  With 5 criteria, this produces {total_calls:,} LLM calls")
 
 
