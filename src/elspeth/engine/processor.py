@@ -1397,7 +1397,8 @@ class RowProcessor:
         # Record source node_state (step_index=0) for audit lineage.
         # Source "processing" already happened in the plugin iterator — we record
         # the result immediately as COMPLETED with duration_ms=0.
-        source_input = source_row.row if isinstance(source_row.row, dict) else {"_raw": source_row.row}
+        # Valid SourceRows always have dict data (SourceRow.valid() takes dict[str, Any]).
+        source_input: dict[str, Any] = source_row.row
         source_state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=self._source_node_id,

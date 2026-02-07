@@ -1136,9 +1136,7 @@ class TestSourceNodeStates:
             for token in tokens:
                 states = recorder.get_node_states_for_token(token.token_id)
                 source_states = [s for s in states if s.step_index == 0]
-                assert len(source_states) == 1, (
-                    f"Expected exactly 1 source node_state (step_index=0), got {len(source_states)}"
-                )
+                assert len(source_states) == 1, f"Expected exactly 1 source node_state (step_index=0), got {len(source_states)}"
                 assert source_states[0].status == NodeStateStatus.COMPLETED
 
     def test_source_state_has_step_index_zero(self, payload_store) -> None:
