@@ -492,9 +492,13 @@ class TestEngineIntegrationOutcomes:
         # Note: COMPLETED token_outcomes are recorded by orchestrator at sink level,
         # not by the processor. The processor records node_states for transforms.
         # We verify the node_states were recorded correctly with hashes.
+        # States: source (step 0) + transform (step 1)
         states = recorder.get_node_states_for_token(result.token.token_id)
-        assert len(states) == 1, "Should have node_state for the transform"
-        state = states[0]
+        assert len(states) == 2, "Should have 2 node_states (source + transform)"
+        # Find the transform state (step_index > 0)
+        transform_states = [s for s in states if s.step_index > 0]
+        assert len(transform_states) == 1, "Should have 1 transform node_state"
+        state = transform_states[0]
         assert state.status == NodeStateStatus.COMPLETED, "Transform should complete successfully"
         assert state.input_hash is not None, "Input hash should be recorded"
         assert hasattr(state, "output_hash") and state.output_hash is not None, "Output hash should be recorded"

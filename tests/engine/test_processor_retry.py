@@ -336,6 +336,8 @@ class TestRowProcessorRetry:
             run_id="test-run",
             source_node_id=NodeID("source"),
             retry_manager=None,  # No retry
+            # Provide error edge for DIVERT routing (on_error="error_sink")
+            edge_map={(NodeID("t1"), "__error_0__"): "edge-err-1"},
         )
 
         processor._transform_executor = Mock()
@@ -382,6 +384,8 @@ class TestRowProcessorRetry:
             run_id="test-run",
             source_node_id=NodeID("source"),
             retry_manager=None,  # No retry configured
+            # Provide error edge for DIVERT routing (on_error="quarantine" is a sink name)
+            edge_map={(NodeID("llm_transform"), "__error_0__"): "edge-err-llm"},
         )
 
         processor._transform_executor = Mock()
@@ -602,6 +606,22 @@ class TestNoRetryAuditCompleteness:
             config={},
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
+        # Register error sink node and DIVERT edge for on_error="error_sink"
+        error_sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="error_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        error_edge = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=transform_node.node_id,
+            to_node_id=error_sink_node.node_id,
+            label="__error_0__",
+            mode=RoutingMode.DIVERT,
+        )
 
         class RateLimitedTransform(BaseTransform):
             """Transform that raises retryable LLM error."""
@@ -626,6 +646,7 @@ class TestNoRetryAuditCompleteness:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             retry_manager=None,
+            edge_map={(NodeID(transform_node.node_id), "__error_0__"): error_edge.edge_id},
         )
 
         # Must pass landscape for record_transform_error to work

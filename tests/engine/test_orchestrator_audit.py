@@ -97,8 +97,9 @@ class TestOrchestratorAuditTrail:
         token = tokens[0]
 
         # Verify node states have input/output hashes
+        # Expect: source (step 0) + identity transform (step 1) + sink (step varies)
         node_states = recorder.get_node_states_for_token(token.token_id)
-        assert len(node_states) >= 1  # At least one node state (transform)
+        assert len(node_states) >= 2  # At least source + transform
 
         for state in node_states:
             # All node states should have input_hash (proves we captured input)
@@ -1101,3 +1102,121 @@ class TestNodeMetadataFromPlugin:
         assert coalesce_node.determinism == Determinism.DETERMINISTIC, (
             f"Coalesce determinism should be DETERMINISTIC, got '{coalesce_node.determinism}'"
         )
+
+
+class TestSourceNodeStates:
+    """Verify source creates node_states at step_index=0 for audit lineage."""
+
+    def test_valid_row_creates_source_node_state(self, payload_store) -> None:
+        """Every valid row creates a COMPLETED source node_state at step_index=0."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+        source = ListSource([{"value": 1}, {"value": 2}], name="test_source")
+        sink = CollectSink(name="test_sink")
+
+        pipeline = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink)},
+        )
+        graph = build_production_graph(pipeline, default_sink="default")
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(pipeline, graph=graph, payload_store=payload_store)
+        recorder = LandscapeRecorder(db)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_processed == 2
+
+        rows = recorder.get_rows(result.run_id)
+        for row in rows:
+            tokens = recorder.get_tokens(row.row_id)
+            for token in tokens:
+                states = recorder.get_node_states_for_token(token.token_id)
+                source_states = [s for s in states if s.step_index == 0]
+                assert len(source_states) == 1, (
+                    f"Expected exactly 1 source node_state (step_index=0), got {len(source_states)}"
+                )
+                assert source_states[0].status == NodeStateStatus.COMPLETED
+
+    def test_source_state_has_step_index_zero(self, payload_store) -> None:
+        """Source node_state is always step_index=0, transforms start at step_index=1+."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from elspeth.plugins.results import TransformResult
+
+        db = LandscapeDB.in_memory()
+
+        class StepCheckTransform(BaseTransform):
+            name = "step_check"
+
+            class InputSchema(PluginSchema):
+                value: int
+
+            input_schema = InputSchema
+            output_schema = InputSchema
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"mode": "observed"}})
+
+            def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+
+        source = ListSource([{"value": 42}], name="test_source")
+        transform = StepCheckTransform()
+        sink = CollectSink(name="test_sink")
+
+        pipeline = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
+        )
+        graph = build_production_graph(pipeline, default_sink="default")
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(pipeline, graph=graph, payload_store=payload_store)
+        recorder = LandscapeRecorder(db)
+
+        rows = recorder.get_rows(result.run_id)
+        tokens = recorder.get_tokens(rows[0].row_id)
+        states = recorder.get_node_states_for_token(tokens[0].token_id)
+
+        step_indices = sorted(s.step_index for s in states)
+        assert step_indices[0] == 0, "Source should be step_index=0"
+        assert all(s > 0 for s in step_indices[1:]), "Transforms should have step_index > 0"
+
+    def test_source_state_node_id_matches_source(self, payload_store) -> None:
+        """Source node_state references the source node, not a transform."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+        source = ListSource([{"value": 1}], name="test_source")
+        sink = CollectSink(name="test_sink")
+
+        pipeline = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink)},
+        )
+        graph = build_production_graph(pipeline, default_sink="default")
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(pipeline, graph=graph, payload_store=payload_store)
+        recorder = LandscapeRecorder(db)
+
+        # Find the source node
+        nodes = recorder.get_nodes(result.run_id)
+        source_nodes = [n for n in nodes if n.node_type == NodeType.SOURCE]
+        assert len(source_nodes) == 1
+        source_node_id = source_nodes[0].node_id
+
+        # Verify source state references the source node
+        rows = recorder.get_rows(result.run_id)
+        tokens = recorder.get_tokens(rows[0].row_id)
+        states = recorder.get_node_states_for_token(tokens[0].token_id)
+        source_states = [s for s in states if s.step_index == 0]
+        assert source_states[0].node_id == source_node_id

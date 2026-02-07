@@ -45,7 +45,8 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.enums import NodeStateStatus
+from elspeth.contracts.errors import ExecutionError, OrchestrationInvariantError
 from elspeth.contracts.events import (
     PhaseAction,
     PhaseCompleted,
@@ -1220,6 +1221,31 @@ class Orchestrator:
                                 source_node_id=source_id,
                                 row_index=row_index,
                                 source_row=source_item,
+                            )
+
+                            # Record source node_state (step_index=0) for quarantine audit lineage.
+                            # Status is FAILED because the source validation rejected this row.
+                            quarantine_data = (
+                                source_item.row
+                                if isinstance(source_item.row, dict)
+                                else {"_raw": source_item.row}
+                            )
+                            quarantine_error_msg = source_item.quarantine_error or "unknown_validation_error"
+                            source_state = recorder.begin_node_state(
+                                token_id=quarantine_token.token_id,
+                                node_id=source_id,
+                                run_id=run_id,
+                                step_index=0,
+                                input_data=quarantine_data,
+                            )
+                            recorder.complete_node_state(
+                                state_id=source_state.state_id,
+                                status=NodeStateStatus.FAILED,
+                                duration_ms=0,
+                                error=ExecutionError(
+                                    exception=quarantine_error_msg,
+                                    type="ValidationError",
+                                ),
                             )
 
                             # Emit RowCreated telemetry AFTER Landscape recording succeeds

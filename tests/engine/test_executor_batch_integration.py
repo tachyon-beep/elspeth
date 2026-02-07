@@ -309,11 +309,39 @@ class TestExecutorBatchIntegration:
     def test_executor_error_handling_in_batch_transform(
         self,
         recorder: LandscapeRecorder,
-        executor: TransformExecutor,
         run_id: str,
         node_id: str,
     ) -> None:
         """Verify error handling works through batch transform."""
+        from elspeth.contracts.enums import RoutingMode
+        from elspeth.contracts.types import NodeID
+
+        # Register error sink node and DIVERT edge for on_error="error_sink"
+        schema = SchemaConfig.from_dict(DYNAMIC_SCHEMA)
+        error_sink_node = recorder.register_node(
+            run_id=run_id,
+            plugin_name="error_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=schema,
+        )
+        error_edge = recorder.register_edge(
+            run_id=run_id,
+            from_node_id=node_id,
+            to_node_id=error_sink_node.node_id,
+            label="__error_0__",
+            mode=RoutingMode.DIVERT,
+        )
+
+        # Create executor with error_edge_ids for DIVERT routing
+        spans = SpanFactory()
+        executor = TransformExecutor(
+            recorder,
+            spans,
+            error_edge_ids={NodeID(node_id): error_edge.edge_id},
+        )
+
         with patch("openai.AzureOpenAI") as mock_azure_class:
             mock_client = Mock()
             mock_client.chat.completions.create.side_effect = Exception("API error")

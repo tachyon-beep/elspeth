@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from elspeth.contracts import SourceRow
 
-from elspeth.contracts import PipelineRow
+from elspeth.contracts import PipelineRow, RoutingMode
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
@@ -144,9 +144,9 @@ class TestRowProcessor:
         # === P1: Audit trail verification ===
         # Note: COMPLETED token_outcomes are recorded by the orchestrator at sink level,
         # not by the processor. The processor records node_states for each transform.
-        # Verify node_states for each transform
+        # Verify node_states: source (step 0) + one per transform (steps 1, 2)
         states = recorder.get_node_states_for_token(result.token.token_id)
-        assert len(states) == 2, "Should have 2 node_states (one per transform)"
+        assert len(states) == 3, "Should have 3 node_states (source + 2 transforms)"
 
         # Verify hashes for each state
         for state in states:
@@ -154,9 +154,9 @@ class TestRowProcessor:
             assert state.status.value == "completed", "State should be completed"
             assert hasattr(state, "output_hash") and state.output_hash is not None, "Output hash should be recorded"
 
-        # Verify correct step indices (source is 0, transforms start at 1)
+        # Verify correct step indices (source is 0, transforms are 1 and 2)
         step_indices = {s.step_index for s in states}
-        assert step_indices == {1, 2}, "Steps should be 1 and 2"
+        assert step_indices == {0, 1, 2}, "Steps should be 0 (source), 1, and 2"
 
     def test_process_single_transform(self) -> None:
         """Single transform processes correctly."""
@@ -335,12 +335,33 @@ class TestRowProcessor:
 
         validator = self._make_validator_transform(on_error_config, transform.node_id)
 
+        # For sink-routed errors, register sink node and DIVERT edge
+        edge_map: dict[tuple[NodeID, str], str] = {}
+        if on_error_config is not None and on_error_config != "discard":
+            error_sink_node = recorder.register_node(
+                run_id=run.run_id,
+                plugin_name=on_error_config,
+                node_type=NodeType.SINK,
+                plugin_version="1.0",
+                config={},
+                schema_config=DYNAMIC_SCHEMA,
+            )
+            error_edge = recorder.register_edge(
+                run_id=run.run_id,
+                from_node_id=transform.node_id,
+                to_node_id=error_sink_node.node_id,
+                label="__error_0__",
+                mode=RoutingMode.DIVERT,
+            )
+            edge_map[(NodeID(transform.node_id), "__error_0__")] = error_edge.edge_id
+
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
+            edge_map=edge_map,
         )
 
         # Case 1: No on_error configured - should raise RuntimeError
@@ -379,10 +400,11 @@ class TestRowProcessor:
             assert outcome.error_hash is not None, "Error hash should be recorded"
             assert outcome.is_terminal is True
 
-            # Node state should be failed
+            # Node states: source (step 0, completed) + transform (step 1, failed)
             states = recorder.get_node_states_for_token(result.token.token_id)
-            assert len(states) == 1
-            assert states[0].status.value == "failed"
+            assert len(states) == 2, "Should have 2 node_states (source + transform)"
+            failed_states = [s for s in states if s.status.value == "failed"]
+            assert len(failed_states) == 1, "Should have 1 failed state (transform)"
 
         elif expected_behavior == RowOutcome.ROUTED:
             # ROUTED: Outcome recording is DEFERRED to sink_executor.write()
@@ -511,11 +533,11 @@ class TestRowProcessorTokenIdentity:
         assert result.outcome == RowOutcome.COMPLETED
 
         # Verify node states recorded with correct step indices
+        # Source (step 0) + 2 transforms (steps 1, 2)
         states = recorder.get_node_states_for_token(result.token.token_id)
-        assert len(states) == 2
-        # Steps should be 1 and 2 (source is 0, transforms start at 1)
+        assert len(states) == 3, "Should have 3 node_states (source + 2 transforms)"
         step_indices = {s.step_index for s in states}
-        assert step_indices == {1, 2}
+        assert step_indices == {0, 1, 2}, "Steps should be 0 (source), 1, and 2"
 
 
 class TestRowProcessorUnknownType:

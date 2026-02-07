@@ -227,10 +227,13 @@ class TestQuarantineIntegration:
         # Query the node_states table to confirm the record exists
         states = recorder.get_node_states_for_token(result.token.token_id)
 
-        # Should have exactly 1 node_state (for the transform)
-        assert len(states) == 1
+        # Should have 2 node_states: source (step 0, completed) + transform (step 1, failed)
+        assert len(states) == 2
 
-        state = states[0]
+        # Find the failed transform state
+        failed_states = [s for s in states if s.status.value == "failed"]
+        assert len(failed_states) == 1, "Should have 1 failed state (transform)"
+        state = failed_states[0]
         assert isinstance(state, NodeStateFailed)
         assert state.status.value == "failed"
         assert state.node_id == transform.node_id

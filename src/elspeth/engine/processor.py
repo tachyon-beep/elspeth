@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from elspeth.engine.executors import GateOutcome
     from elspeth.telemetry import TelemetryManager
 
-from elspeth.contracts.enums import OutputMode, RoutingKind, RoutingMode, TriggerType
+from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError, TransformErrorReason
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -1394,6 +1394,24 @@ class RowProcessor:
             source_row=source_row,
         )
 
+        # Record source node_state (step_index=0) for audit lineage.
+        # Source "processing" already happened in the plugin iterator — we record
+        # the result immediately as COMPLETED with duration_ms=0.
+        source_input = source_row.row if isinstance(source_row.row, dict) else {"_raw": source_row.row}
+        source_state = self._recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=self._source_node_id,
+            run_id=self._run_id,
+            step_index=0,
+            input_data=source_input,
+        )
+        self._recorder.complete_node_state(
+            state_id=source_state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data=source_input,
+            duration_ms=0,
+        )
+
         # Initialize work queue with initial token starting at step 0
         work_queue: deque[_WorkItem] = deque(
             [
@@ -1469,6 +1487,24 @@ class RowProcessor:
         token = self._token_manager.create_token_for_existing_row(
             row_id=row_id,
             row_data=row_data,
+        )
+
+        # Record source node_state (step_index=0) for resumed token lineage.
+        # The row already exists from the original run, but this new token
+        # needs its own source state for complete audit lineage.
+        resumed_input = row_data.to_dict()
+        source_state = self._recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=self._source_node_id,
+            run_id=self._run_id,
+            step_index=0,
+            input_data=resumed_input,
+        )
+        self._recorder.complete_node_state(
+            state_id=source_state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data=resumed_input,
+            duration_ms=0,
         )
 
         # Initialize work queue with token starting at step 0
