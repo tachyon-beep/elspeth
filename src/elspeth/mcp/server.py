@@ -30,11 +30,36 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.formatters import dataclass_to_dict, serialize_datetime
 from elspeth.core.landscape.lineage import explain
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.mcp.types import (
+    CallDetail,
+    ContractViolationsReport,
+    DAGStructureReport,
+    DiagnosticReport,
+    ErrorAnalysisReport,
+    ErrorResult,
+    ErrorsReport,
+    ExplainTokenResult,
+    FailureContextReport,
+    FieldExplanation,
+    FieldNotFoundError,
+    LLMUsageReport,
+    NodeDetail,
+    NodeStateRecord,
+    OperationCallRecord,
+    OperationRecord,
+    OutcomeAnalysisReport,
+    PerformanceReport,
+    RecentActivityReport,
+    RowRecord,
+    RunContractReport,
+    RunDetail,
+    RunRecord,
+    RunSummaryReport,
+    SchemaDescription,
+    TokenRecord,
+)
 
 logger = logging.getLogger(__name__)
-
-# JSON-serializable result type
-JsonResult = dict[str, Any] | list[dict[str, Any]]
 
 
 # Use shared implementations from landscape.formatters
@@ -58,7 +83,7 @@ class LandscapeAnalyzer:
         """Close database connection."""
         self._db.close()
 
-    def list_runs(self, limit: int = 50, status: str | None = None) -> list[dict[str, Any]]:
+    def list_runs(self, limit: int = 50, status: str | None = None) -> list[RunRecord]:
         """List pipeline runs.
 
         Args:
@@ -99,7 +124,7 @@ class LandscapeAnalyzer:
             for row in rows
         ]
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
+    def get_run(self, run_id: str) -> RunDetail | None:
         """Get details of a specific run.
 
         Args:
@@ -111,9 +136,9 @@ class LandscapeAnalyzer:
         run = self._recorder.get_run(run_id)
         if run is None:
             return None
-        return cast(dict[str, Any], _dataclass_to_dict(run))
+        return cast(RunDetail, _dataclass_to_dict(run))
 
-    def get_run_summary(self, run_id: str) -> dict[str, Any]:
+    def get_run_summary(self, run_id: str) -> RunSummaryReport | ErrorResult:
         """Get summary statistics for a run.
 
         Args:
@@ -242,11 +267,11 @@ class LandscapeAnalyzer:
                 "transform": transform_error_count,
                 "total": validation_error_count + transform_error_count,
             },
-            "outcome_distribution": outcome_distribution,
+            "outcome_distribution": outcome_distribution,  # type: ignore[typeddict-item]  # SA Row attr types
             "avg_state_duration_ms": round(avg_duration, 2) if avg_duration else None,
         }
 
-    def list_rows(self, run_id: str, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    def list_rows(self, run_id: str, limit: int = 100, offset: int = 0) -> list[RowRecord]:
         """List source rows for a run.
 
         Args:
@@ -278,7 +303,7 @@ class LandscapeAnalyzer:
             for row in rows
         ]
 
-    def list_nodes(self, run_id: str) -> list[dict[str, Any]]:
+    def list_nodes(self, run_id: str) -> list[NodeDetail]:
         """List all nodes (plugin instances) for a run.
 
         Args:
@@ -290,7 +315,7 @@ class LandscapeAnalyzer:
         nodes = self._recorder.get_nodes(run_id)
         return [_dataclass_to_dict(node) for node in nodes]
 
-    def list_tokens(self, run_id: str, row_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list_tokens(self, run_id: str, row_id: str | None = None, limit: int = 100) -> list[TokenRecord]:
         """List tokens for a run or specific row.
 
         Args:
@@ -338,7 +363,7 @@ class LandscapeAnalyzer:
         operation_type: str | None = None,
         status: str | None = None,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> list[OperationRecord]:
         """List source/sink operations for a run.
 
         Operations are the source/sink equivalent of node_states. They track
@@ -411,7 +436,7 @@ class LandscapeAnalyzer:
             for row in rows
         ]
 
-    def get_operation_calls(self, operation_id: str) -> list[dict[str, Any]]:
+    def get_operation_calls(self, operation_id: str) -> list[OperationCallRecord]:
         """Get external calls for a source/sink operation.
 
         Unlike get_calls() which takes a state_id for transform calls, this
@@ -452,7 +477,7 @@ class LandscapeAnalyzer:
         token_id: str | None = None,
         row_id: str | None = None,
         sink: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> ExplainTokenResult | ErrorResult:
         """Get complete lineage for a token or row.
 
         Args:
@@ -467,7 +492,7 @@ class LandscapeAnalyzer:
         result = explain(self._recorder, run_id, token_id=token_id, row_id=row_id, sink=sink)
         if result is None:
             return {"error": "Token or row not found, or no terminal tokens exist yet"}
-        result_dict = cast(dict[str, Any], _dataclass_to_dict(result))
+        result_dict = cast(ExplainTokenResult, _dataclass_to_dict(result))
 
         # Annotate routing_events with flow_type convenience field
         for event in result_dict.get("routing_events", []):
@@ -497,7 +522,7 @@ class LandscapeAnalyzer:
         run_id: str,
         error_type: str = "all",
         limit: int = 100,
-    ) -> dict[str, Any]:
+    ) -> ErrorsReport:
         """Get validation and/or transform errors for a run.
 
         Args:
@@ -512,7 +537,7 @@ class LandscapeAnalyzer:
 
         from elspeth.core.landscape.schema import transform_errors_table, validation_errors_table
 
-        result: dict[str, Any] = {"run_id": run_id}
+        result: ErrorsReport = {"run_id": run_id}  # type: ignore[typeddict-item]  # incrementally populated below
 
         with self._db.connection() as conn:
             if error_type in ("all", "validation"):
@@ -563,7 +588,7 @@ class LandscapeAnalyzer:
         node_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeStateRecord]:
         """Get node states (processing records) for a run.
 
         Args:
@@ -614,7 +639,7 @@ class LandscapeAnalyzer:
             for row in rows
         ]
 
-    def get_calls(self, state_id: str) -> list[dict[str, Any]]:
+    def get_calls(self, state_id: str) -> list[CallDetail]:
         """Get external calls for a node state.
 
         Args:
@@ -660,7 +685,7 @@ class LandscapeAnalyzer:
 
         return [dict(zip(columns, [_serialize_datetime(v) for v in row], strict=False)) for row in rows]
 
-    def get_dag_structure(self, run_id: str) -> dict[str, Any]:
+    def get_dag_structure(self, run_id: str) -> DAGStructureReport | ErrorResult:
         """Get the DAG structure for a run as a structured object.
 
         Returns nodes, edges, and a mermaid diagram for visualization.
@@ -715,14 +740,14 @@ class LandscapeAnalyzer:
 
         return {
             "run_id": run_id,
-            "nodes": node_list,
-            "edges": edge_list,
+            "nodes": node_list,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "edges": edge_list,  # type: ignore[typeddict-item]  # functional TypedDict with "from" keyword
             "node_count": len(nodes),
             "edge_count": len(edges),
             "mermaid": "\n".join(lines),
         }
 
-    def get_performance_report(self, run_id: str) -> dict[str, Any]:
+    def get_performance_report(self, run_id: str) -> PerformanceReport | ErrorResult:
         """Get performance analysis for a run.
 
         Identifies slow nodes, outliers, and processing bottlenecks.
@@ -808,12 +833,12 @@ class LandscapeAnalyzer:
             "run_id": run_id,
             "total_processing_time_ms": total_time_ms,
             "node_count": len(node_performance),
-            "bottlenecks": bottlenecks,
-            "high_variance_nodes": high_variance,
-            "node_performance": node_performance,
+            "bottlenecks": bottlenecks,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "high_variance_nodes": high_variance,  # type: ignore[typeddict-item]
+            "node_performance": node_performance,  # type: ignore[typeddict-item]
         }
 
-    def get_error_analysis(self, run_id: str) -> dict[str, Any]:
+    def get_error_analysis(self, run_id: str) -> ErrorAnalysisReport | ErrorResult:
         """Analyze errors for a run, grouping by type and identifying patterns.
 
         Args:
@@ -890,19 +915,19 @@ class LandscapeAnalyzer:
 
         return {
             "run_id": run_id,
-            "validation_errors": {
+            "validation_errors": {  # type: ignore[typeddict-item]  # structurally correct nested dict literals
                 "total": sum(r["count"] for r in validation_summary),
-                "by_source": validation_summary,
+                "by_source": validation_summary,  # type: ignore[typeddict-item]
                 "sample_data": [json.loads(r[0]) if r[0] else None for r in sample_val],
             },
-            "transform_errors": {
-                "total": sum(r["count"] for r in transform_summary),
-                "by_transform": transform_summary,
+            "transform_errors": {  # type: ignore[typeddict-item]  # structurally correct nested dict literals
+                "total": sum(r["count"] for r in transform_summary),  # type: ignore[misc]  # SA Row attr types
+                "by_transform": transform_summary,  # type: ignore[typeddict-item]
                 "sample_details": [json.loads(r[0]) if r[0] else None for r in sample_trans],
             },
         }
 
-    def get_llm_usage_report(self, run_id: str) -> dict[str, Any]:
+    def get_llm_usage_report(self, run_id: str) -> LLMUsageReport | ErrorResult:
         """Get LLM usage statistics for a run.
 
         Analyzes external calls that were LLM API calls.
@@ -1032,16 +1057,16 @@ class LandscapeAnalyzer:
 
         return {
             "run_id": run_id,
-            "call_types": call_type_summary,
+            "call_types": call_type_summary,  # type: ignore[typeddict-item]  # SA Row attr types
             "llm_summary": {
                 "total_calls": total_llm_calls,
                 "total_latency_ms": total_llm_latency,
                 "avg_latency_ms": round(total_llm_latency / total_llm_calls, 2) if total_llm_calls > 0 else None,
             },
-            "by_plugin": llm_by_plugin,
+            "by_plugin": llm_by_plugin,  # type: ignore[typeddict-item]  # incrementally-built dict
         }
 
-    def describe_schema(self) -> dict[str, Any]:
+    def describe_schema(self) -> SchemaDescription:
         """Describe the database schema for ad-hoc query exploration.
 
         Returns:
@@ -1084,12 +1109,12 @@ class LandscapeAnalyzer:
             }
 
         return {
-            "tables": tables,
+            "tables": tables,  # type: ignore[typeddict-item]  # nested dict literals from SA inspector
             "table_count": len(tables),
             "hint": "Use the 'query' tool with SELECT statements to explore data",
         }
 
-    def get_outcome_analysis(self, run_id: str) -> dict[str, Any]:
+    def get_outcome_analysis(self, run_id: str) -> OutcomeAnalysisReport | ErrorResult:
         """Analyze token outcomes for a run.
 
         Shows terminal state distribution, fork/join patterns, and sink routing.
@@ -1173,13 +1198,13 @@ class LandscapeAnalyzer:
                 "fork_operations": fork_count,
                 "join_operations": join_count,
             },
-            "outcome_distribution": outcomes,
-            "sink_distribution": sinks,
+            "outcome_distribution": outcomes,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "sink_distribution": sinks,  # type: ignore[typeddict-item]  # SA Row attr types
         }
 
     # === Emergency Diagnostic Tools (for when everything is on fire) ===
 
-    def diagnose(self) -> dict[str, Any]:
+    def diagnose(self) -> DiagnosticReport:
         """Emergency diagnostic: What's broken right now?
 
         Scans for failed runs, high error rates, stuck runs, and recent problems.
@@ -1348,8 +1373,8 @@ class LandscapeAnalyzer:
 
         return {
             "status": "CRITICAL" if any(p["severity"] == "CRITICAL" for p in problems) else "OK" if not problems else "WARNING",
-            "problems": problems,
-            "recent_runs": recent_summary,
+            "problems": problems,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "recent_runs": recent_summary,  # type: ignore[typeddict-item]
             "recommendations": recommendations,
             "next_steps": [
                 "Use list_runs() to see all runs with their status",
@@ -1359,7 +1384,7 @@ class LandscapeAnalyzer:
             ],
         }
 
-    def get_failure_context(self, run_id: str, limit: int = 10) -> dict[str, Any]:
+    def get_failure_context(self, run_id: str, limit: int = 10) -> FailureContextReport | ErrorResult:
         """Get comprehensive context about failures in a run.
 
         Use this when investigating why a run failed. Returns failed node states,
@@ -1482,9 +1507,9 @@ class LandscapeAnalyzer:
         return {
             "run_id": run_id,
             "run_status": run.status.value,
-            "failed_node_states": failed_state_list,
-            "transform_errors": transform_error_list,
-            "validation_errors": validation_error_list,
+            "failed_node_states": failed_state_list,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "transform_errors": transform_error_list,  # type: ignore[typeddict-item]
+            "validation_errors": validation_error_list,  # type: ignore[typeddict-item]
             "patterns": {
                 "plugins_failing": plugins_with_failures,
                 "has_retries": has_retries,
@@ -1499,7 +1524,7 @@ class LandscapeAnalyzer:
             ],
         }
 
-    def get_recent_activity(self, minutes: int = 60) -> dict[str, Any]:
+    def get_recent_activity(self, minutes: int = 60) -> RecentActivityReport:
         """Get recent pipeline activity timeline.
 
         Use this to understand what happened recently when investigating issues.
@@ -1573,12 +1598,12 @@ class LandscapeAnalyzer:
             "time_window_minutes": minutes,
             "total_runs": len(run_stats),
             "status_summary": status_counts,
-            "runs": run_stats,
+            "runs": run_stats,  # type: ignore[typeddict-item]  # structurally correct dict literals
         }
 
     # === Schema Contract Tools (Phase 5: Unified Schema Contracts) ===
 
-    def get_run_contract(self, run_id: str) -> dict[str, Any]:
+    def get_run_contract(self, run_id: str) -> RunContractReport | ErrorResult:
         """Get schema contract for a run.
 
         Shows the source schema contract with field resolution:
@@ -1616,12 +1641,12 @@ class LandscapeAnalyzer:
             "run_id": run_id,
             "mode": contract.mode,
             "locked": contract.locked,
-            "fields": fields,
+            "fields": fields,  # type: ignore[typeddict-item]  # structurally correct dict literals
             "field_count": len(fields),
             "version_hash": contract.version_hash(),
         }
 
-    def explain_field(self, run_id: str, field_name: str) -> dict[str, Any]:
+    def explain_field(self, run_id: str, field_name: str) -> FieldExplanation | ErrorResult | FieldNotFoundError:
         """Trace a field's provenance through the pipeline.
 
         Shows how a field was:
@@ -1668,7 +1693,7 @@ class LandscapeAnalyzer:
             "contract_mode": contract.mode,
         }
 
-    def list_contract_violations(self, run_id: str, limit: int = 100) -> dict[str, Any]:
+    def list_contract_violations(self, run_id: str, limit: int = 100) -> ContractViolationsReport | ErrorResult:
         """List contract violations for a run.
 
         Shows validation errors with contract details:
@@ -1741,7 +1766,7 @@ class LandscapeAnalyzer:
         return {
             "run_id": run_id,
             "total_violations": total_count,
-            "violations": violations,
+            "violations": violations,  # type: ignore[typeddict-item]  # structurally correct dict literals
             "limit": limit,
         }
 

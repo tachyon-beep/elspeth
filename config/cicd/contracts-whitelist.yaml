@@ -351,36 +351,12 @@ allowed_dict_patterns:
   - "src/elspeth/core/logging.py:_remove_internal_fields:return"
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # MCP SERVER - External tooling trust boundary
-  # MCP server methods return dynamic dicts for AI tooling consumption.
-  # The MCP protocol requires dict returns; typed responses would break clients.
+  # MCP SERVER - Genuinely dynamic patterns
+  # SQL query results have user-defined columns; call_tool receives MCP protocol input.
+  # All other MCP returns are now typed via TypedDicts in mcp/types.py.
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_runs:return (list)"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_run:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_run_summary:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_rows:return (list)"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_nodes:return (list)"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_tokens:return (list)"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.explain_token:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_errors:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_node_states:return (list)"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_calls:return (list)"
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:params"
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:return (list)"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_dag_structure:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_performance_report:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_error_analysis:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_llm_usage_report:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.describe_schema:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_outcome_analysis:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.diagnose:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_failure_context:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_recent_activity:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_operations:return (list)"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_operation_calls:return (list)"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_run_contract:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.explain_field:return"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_contract_violations:return"
   - "src/elspeth/mcp/server.py:call_tool:arguments"
 
   # ═══════════════════════════════════════════════════════════════════════════
