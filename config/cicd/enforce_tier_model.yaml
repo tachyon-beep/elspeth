@@ -412,15 +412,20 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=c63d6a7263caca87
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=302e2e66d8f5696b
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=156d0063c4158f68
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=7de2e8bd8e5f0b4f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=dccf8f1387fd8ff5
+  owner: architecture
+  reason: dict.get() is correct - not all branch names have a coalesce point mapping; returns None for non-coalescing branches
+  safety: None return triggers early exit, no silent fallback
   expires: '2026-05-02'
 - key: telemetry/manager.py:R1:TelemetryManager:_export_loop:fp=a8166fc10299a912
   owner: architecture
@@ -1658,7 +1663,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=4af3f7c99c832786
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=cb0249f88d0d6cda
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

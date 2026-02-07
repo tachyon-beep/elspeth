@@ -1676,6 +1676,79 @@ class RowProcessor:
 
         return True, None
 
+    def _notify_coalesce_of_lost_branch(
+        self,
+        current_token: TokenInfo,
+        reason: str,
+        child_items: list[_WorkItem],
+    ) -> list[RowResult]:
+        """Notify the coalesce executor that a forked branch was diverted.
+
+        Called when a forked token exits the pipeline early (error-routed,
+        quarantined, or failed). The coalesce executor re-evaluates merge
+        conditions and may trigger an immediate merge or failure for held
+        sibling tokens.
+
+        Args:
+            current_token: The forked token being diverted
+            reason: Machine-readable reason for the diversion
+            child_items: Mutable work queue — merged tokens are appended here
+
+        Returns:
+            List of RowResults for sibling tokens that failed as a consequence
+            of the branch loss. Empty if no consequences yet (still waiting).
+        """
+        if self._coalesce_executor is None or current_token.branch_name is None:
+            return []
+
+        coalesce_name = self._branch_to_coalesce.get(BranchName(current_token.branch_name))
+        if coalesce_name is None:
+            return []
+
+        coalesce_step = self._coalesce_step_map[coalesce_name]
+        outcome = self._coalesce_executor.notify_branch_lost(
+            coalesce_name=coalesce_name,
+            row_id=current_token.row_id,
+            lost_branch=current_token.branch_name,
+            reason=reason,
+            step_in_pipeline=coalesce_step,
+        )
+
+        if outcome is None:
+            return []
+
+        if outcome.merged_token is not None:
+            # Merge triggered — resume merged token at coalesce step
+            child_items.append(
+                _WorkItem(
+                    token=outcome.merged_token,
+                    start_step=coalesce_step,
+                )
+            )
+            return []
+
+        if outcome.failure_reason:
+            # Merge failed — build RowResults for held sibling tokens.
+            # DB outcomes are already recorded by the executor (outcomes_recorded=True).
+            # These RowResults propagate to the orchestrator for counter accounting.
+            sibling_results: list[RowResult] = []
+            for consumed_token in outcome.consumed_tokens:
+                self._emit_token_completed(consumed_token, RowOutcome.FAILED)
+                sibling_results.append(
+                    RowResult(
+                        token=consumed_token,
+                        final_data=consumed_token.row_data,
+                        outcome=RowOutcome.FAILED,
+                        error=FailureInfo(
+                            exception_type="CoalesceFailure",
+                            message=outcome.failure_reason,
+                        ),
+                    )
+                )
+            return sibling_results
+
+        return []
+
     def _process_single_token(
         self,
         token: TokenInfo,
@@ -1851,15 +1924,21 @@ class RowProcessor:
                     )
                     # Emit TokenCompleted telemetry AFTER Landscape recording
                     self._emit_token_completed(current_token, RowOutcome.FAILED)
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.FAILED,
-                            error=FailureInfo.from_max_retries_exceeded(e),
-                        ),
+                    # Notify coalesce if this is a forked branch
+                    sibling_results = self._notify_coalesce_of_lost_branch(
+                        current_token,
+                        f"max_retries_exceeded:{e}",
                         child_items,
                     )
+                    current_result = RowResult(
+                        token=current_token,
+                        final_data=current_token.row_data,
+                        outcome=RowOutcome.FAILED,
+                        error=FailureInfo.from_max_retries_exceeded(e),
+                    )
+                    if sibling_results:
+                        return ([current_result, *sibling_results], child_items)
+                    return (current_result, child_items)
 
                 if transform_result.status == "error":
                     # Determine outcome based on error routing
@@ -1875,27 +1954,40 @@ class RowProcessor:
                         )
                         # Emit TokenCompleted telemetry AFTER Landscape recording
                         self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
-                        return (
-                            RowResult(
-                                token=current_token,
-                                final_data=current_token.row_data,
-                                outcome=RowOutcome.QUARANTINED,
-                            ),
+                        # Notify coalesce if this is a forked branch
+                        sibling_results = self._notify_coalesce_of_lost_branch(
+                            current_token,
+                            f"quarantined:{error_detail}",
                             child_items,
                         )
+                        current_result = RowResult(
+                            token=current_token,
+                            final_data=current_token.row_data,
+                            outcome=RowOutcome.QUARANTINED,
+                        )
+                        if sibling_results:
+                            return ([current_result, *sibling_results], child_items)
+                        return (current_result, child_items)
                     else:
                         # Routed to error sink
                         # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
                         # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                        return (
-                            RowResult(
-                                token=current_token,
-                                final_data=current_token.row_data,
-                                outcome=RowOutcome.ROUTED,
-                                sink_name=error_sink,
-                            ),
+                        # Notify coalesce if this is a forked branch
+                        error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
+                        sibling_results = self._notify_coalesce_of_lost_branch(
+                            current_token,
+                            f"error_routed:{error_detail}",
                             child_items,
                         )
+                        current_result = RowResult(
+                            token=current_token,
+                            final_data=current_token.row_data,
+                            outcome=RowOutcome.ROUTED,
+                            sink_name=error_sink,
+                        )
+                        if sibling_results:
+                            return ([current_result, *sibling_results], child_items)
+                        return (current_result, child_items)
 
                 # Handle multi-row output (deaggregation)
                 # NOTE: This is ONLY for non-aggregation transforms. Aggregation

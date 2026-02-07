@@ -1913,3 +1913,554 @@ class TestCoalesceMetadataRecording:
         assert set(context["branches_arrived"]) == {"path_a", "path_b"}, (
             f"Expected branches_arrived=['path_a', 'path_b'], got {context.get('branches_arrived')}"
         )
+
+
+class TestBranchLossNotification:
+    """Tests for notify_branch_lost() — coalesce branch-loss notification.
+
+    When a forked token is error-routed before reaching the coalesce point,
+    the processor notifies the coalesce executor that the branch will never
+    arrive. This allows immediate re-evaluation of merge conditions.
+    """
+
+    def test_require_all_lost_branch_immediate_failure(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """require_all: any lost branch triggers immediate failure for held siblings."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+        )
+
+        # Create and fork token
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 42}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+        token_a = children[0]  # path_a
+
+        # path_a arrives and is held
+        outcome_a = executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        assert outcome_a.held is True
+
+        # path_b is error-routed (lost)
+        outcome = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_b",
+            reason="transform_error:division_by_zero",
+            step_in_pipeline=2,
+        )
+
+        # Should trigger immediate failure
+        assert outcome is not None
+        assert outcome.failure_reason is not None
+        assert "branch_lost" in outcome.failure_reason
+        assert "path_b" in outcome.failure_reason
+        assert outcome.outcomes_recorded is True
+        # Consumed tokens = the held sibling (path_a)
+        assert len(outcome.consumed_tokens) == 1
+        assert outcome.consumed_tokens[0].token_id == token_a.token_id
+
+    def test_best_effort_all_accounted_triggers_merge(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """best_effort: when all branches accounted for (arrived+lost), merge immediately."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="best_effort",
+            branches=["path_a", "path_b"],
+            timeout_seconds=60.0,
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 42}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+        token_a = children[0]
+
+        # path_a arrives and is held
+        outcome_a = executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        assert outcome_a.held is True
+
+        # path_b is lost — all branches accounted for, should merge with just path_a
+        outcome = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_b",
+            reason="error_routed:llm_call_failed",
+            step_in_pipeline=2,
+        )
+
+        assert outcome is not None
+        assert outcome.merged_token is not None
+        assert outcome.failure_reason is None
+        # Merged data should contain path_a's data
+        merged_data = outcome.merged_token.row_data.to_dict()
+        assert merged_data["value"] == 42
+
+    def test_best_effort_lost_first_then_arrive_triggers_merge_on_accept(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """best_effort: branch lost first, then other arrives → merge on accept()."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="best_effort",
+            branches=["path_a", "path_b"],
+            timeout_seconds=60.0,
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 99}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+        token_a = children[0]
+
+        # path_b lost first (before any arrivals)
+        outcome_lost = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_b",
+            reason="error_routed:timeout",
+            step_in_pipeline=2,
+        )
+        # Not all accounted yet — still waiting for path_a
+        assert outcome_lost is None
+
+        # path_a arrives — all branches now accounted for (1 arrived + 1 lost = 2 total)
+        outcome_accept = executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        assert outcome_accept.held is False
+        assert outcome_accept.merged_token is not None
+
+    def test_quorum_still_possible_after_one_loss(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """quorum: one lost branch still allows quorum to be met."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="quorum",
+            branches=["path_a", "path_b", "path_c"],
+            quorum_count=2,
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b", "path_c"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+        token_a = children[0]
+        token_b = children[1]
+
+        # path_c lost — quorum still possible (2 remaining >= 2 needed)
+        outcome_lost = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_c",
+            reason="error_routed:api_failure",
+            step_in_pipeline=2,
+        )
+        assert outcome_lost is None  # Still waiting
+
+        # path_a arrives — 1 arrived, need 2 for quorum
+        outcome_a = executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        assert outcome_a.held is True
+
+        # path_b arrives — 2 arrived, quorum met!
+        outcome_b = executor.accept(token_b, "merge_results", step_in_pipeline=2)
+        assert outcome_b.merged_token is not None
+
+    def test_quorum_impossible_after_losses(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """quorum: too many losses make quorum impossible → immediate failure."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="quorum",
+            branches=["path_a", "path_b", "path_c"],
+            quorum_count=2,
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        _children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b", "path_c"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # path_b lost — max_possible = 2 (a,c remaining), quorum=2 still possible
+        outcome1 = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_b",
+            reason="error_routed:failure",
+            step_in_pipeline=2,
+        )
+        assert outcome1 is None  # Still possible
+
+        # path_c lost — max_possible = 1 (only a remaining), quorum=2 impossible
+        outcome2 = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_c",
+            reason="error_routed:failure",
+            step_in_pipeline=2,
+        )
+        assert outcome2 is not None
+        assert outcome2.failure_reason is not None
+        assert "quorum_impossible" in outcome2.failure_reason
+        assert outcome2.outcomes_recorded is True
+
+    def test_branch_lost_before_any_arrival_creates_pending(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """Branch lost before any arrival creates pending entry with loss recorded."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # path_a lost before anyone arrives → require_all = immediate failure
+        outcome = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_a",
+            reason="error_routed:crash",
+            step_in_pipeline=2,
+        )
+
+        # require_all: any loss = immediate failure
+        # But no arrived tokens to fail — consumed_tokens should be empty
+        assert outcome is not None
+        assert outcome.failure_reason is not None
+        assert "branch_lost" in outcome.failure_reason
+        assert len(outcome.consumed_tokens) == 0
+
+    def test_merge_metadata_includes_branches_lost(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """Merge audit metadata includes branches_lost with loss reasons."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="best_effort",
+            branches=["path_a", "path_b"],
+            timeout_seconds=60.0,
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 42}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+        token_a = children[0]
+
+        # path_a arrives, path_b lost
+        executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        outcome = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_b",
+            reason="llm_call_failed",
+            step_in_pipeline=2,
+        )
+
+        assert outcome is not None
+        assert outcome.coalesce_metadata is not None
+        assert "branches_lost" in outcome.coalesce_metadata
+        assert outcome.coalesce_metadata["branches_lost"] == {"path_b": "llm_call_failed"}
+
+    def test_already_completed_notification_ignored(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """Lost branch notification after merge completed is safely ignored."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 42}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+        token_a = children[0]
+        token_b = children[1]
+
+        # Both arrive — merge happens
+        executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        outcome = executor.accept(token_b, "merge_results", step_in_pipeline=2)
+        assert outcome.merged_token is not None
+
+        # Late loss notification — should be ignored
+        late_outcome = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_a",
+            reason="late_error",
+            step_in_pipeline=2,
+        )
+        assert late_outcome is None
+
+    def test_normal_fork_coalesce_unaffected_by_lost_branches_field(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """Regression: normal fork/coalesce without errors still works (lost_branches empty)."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 42}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # Normal flow — both arrive, no losses
+        executor.accept(children[0], "merge_results", step_in_pipeline=2)
+        outcome = executor.accept(children[1], "merge_results", step_in_pipeline=2)
+
+        assert outcome.merged_token is not None
+        # branches_lost should be empty dict in metadata
+        assert outcome.coalesce_metadata is not None
+        assert outcome.coalesce_metadata["branches_lost"] == {}
+
+    def test_unregistered_coalesce_raises(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """notify_branch_lost on unregistered coalesce raises ValueError."""
+        executor, _token_manager, _source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+        )
+
+        with pytest.raises(ValueError, match="not registered"):
+            executor.notify_branch_lost(
+                coalesce_name="nonexistent",
+                row_id="row_1",
+                lost_branch="path_a",
+                reason="test",
+                step_in_pipeline=2,
+            )
+
+    def test_invalid_branch_name_raises(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """notify_branch_lost with unknown branch name raises ValueError."""
+        executor, _token_manager, _source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+        )
+
+        with pytest.raises(ValueError, match="not in expected branches"):
+            executor.notify_branch_lost(
+                coalesce_name="merge_results",
+                row_id="row_1",
+                lost_branch="path_x",
+                reason="test",
+                step_in_pipeline=2,
+            )
+
+    def test_already_arrived_branch_reported_lost_raises(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """Branch that already arrived cannot be reported as lost."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="require_all",
+            branches=["path_a", "path_b"],
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # path_a arrives
+        executor.accept(children[0], "merge_results", step_in_pipeline=2)
+
+        # Cannot report path_a as lost — it already arrived
+        with pytest.raises(ValueError, match="already arrived"):
+            executor.notify_branch_lost(
+                coalesce_name="merge_results",
+                row_id=initial_token.row_id,
+                lost_branch="path_a",
+                reason="should_not_happen",
+                step_in_pipeline=2,
+            )
+
+    def test_best_effort_all_branches_lost_fails(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """best_effort: all branches lost (no data) triggers failure."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="best_effort",
+            branches=["path_a", "path_b"],
+            timeout_seconds=60.0,
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # Both branches lost
+        outcome1 = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_a",
+            reason="error",
+            step_in_pipeline=2,
+        )
+        assert outcome1 is None  # Still waiting for path_b
+
+        outcome2 = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_b",
+            reason="error",
+            step_in_pipeline=2,
+        )
+        assert outcome2 is not None
+        assert outcome2.failure_reason == "all_branches_lost"
+        assert outcome2.outcomes_recorded is True
+
+    def test_first_policy_lost_branch_ignored(
+        self,
+        coalesce_setup,
+        run: Run,
+    ) -> None:
+        """first: lost branch notification returns None (first already merges on arrival)."""
+        executor, token_manager, source_node_id, _coalesce_node_id = coalesce_setup(
+            policy="first",
+            branches=["path_a", "path_b"],
+        )
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # Lost branch — first policy doesn't care
+        outcome = executor.notify_branch_lost(
+            coalesce_name="merge_results",
+            row_id=initial_token.row_id,
+            lost_branch="path_b",
+            reason="error",
+            step_in_pipeline=2,
+        )
+        assert outcome is None
