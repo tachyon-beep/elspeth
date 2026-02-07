@@ -253,10 +253,10 @@ def test_extract_content_produces_string(html: str, format: str):
     # This is a weak assertion but catches catastrophic failures
 
 
-@given(text(alphabet=characters(blacklist_characters="<>"), min_size=10, max_size=100))
+@given(text(alphabet=characters(blacklist_characters="<>&"), min_size=10, max_size=100))
 def test_extract_content_text_no_html_tags(content: str):
     """Text format should remove all HTML tags."""
-    # Generate content without < or > to avoid ambiguity
+    # Generate content without <, >, or & to avoid HTML entity ambiguity
     html = f"<html><body><p>{content}</p><div>More content</div></body></html>"
 
     result = extract_content(html, format="text")

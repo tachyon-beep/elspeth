@@ -100,14 +100,17 @@ def get_transform_execution_order(db: LandscapeDB, run_id: str, token_id: str) -
     """Get the step order in which transforms were executed for a token.
 
     Returns list of step numbers (step_index) in execution order.
+    Filters to transform node_states only (excludes source node_states).
     """
     with db.connection() as conn:
         results = conn.execute(
             text("""
                 SELECT ns.step_index
                 FROM node_states ns
+                JOIN nodes n ON ns.node_id = n.node_id AND ns.run_id = n.run_id
                 WHERE ns.run_id = :run_id
                   AND ns.token_id = :token_id
+                  AND n.node_type = 'transform'
                 ORDER BY ns.started_at, ns.step_index
             """),
             {"run_id": run_id, "token_id": token_id},
