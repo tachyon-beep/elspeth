@@ -2,7 +2,7 @@
 
 Supports two data shapes:
   - flat: Simple rows with id + text fields (for single-query LLM transforms)
-  - multi: Case study rows with N case studies × M input fields each
+  - multi: Case study rows with N case studies x M input fields each
            (for multi-query LLM transforms)
 
 Usage:

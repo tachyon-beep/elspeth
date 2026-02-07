@@ -67,6 +67,15 @@ if ! curl -sf "http://127.0.0.1:$CHAOS_PORT/health" > /dev/null 2>&1; then
     exit 1
 fi
 
+# Generate input data if not present (deterministic with seed 42)
+if [ ! -f examples/chaosllm_endurance/input.csv ]; then
+    echo "Generating 10,000 row input CSV..."
+    .venv/bin/python -m scripts.generate_test_data multi \
+        --rows 10000 --case-studies 2 --fields-per-cs 3 \
+        --output examples/chaosllm_endurance/input.csv --seed 42
+    echo ""
+fi
+
 START_TIME=$(date +%s)
 
 # --- Run Pipeline ---
