@@ -1,0 +1,49 @@
+# ChaosLLM config for the endurance test.
+#
+# Tuned for sustained high-throughput with moderate noise:
+# - ~8% HTTP error injection (retryable by pool AIMD)
+# - ~3% malformed response injection (non-retryable, quarantined)
+# - Fast latency (15ms base) to keep throughput high
+# - NO burst mode (AIMD backoff recovery is too slow for practical tests)
+# - Preset responses cycling through assessment scores
+#
+# NOTE: Connection-level errors (timeout, connection_reset) are disabled
+# because they cause unrecoverable pool failures in the multi-query plugin.
+
+server:
+  host: "127.0.0.1"
+  port: 8199
+  workers: 1
+
+metrics:
+  database: "file:chaosllm-metrics?mode=memory&cache=shared"
+
+response:
+  mode: preset
+  preset:
+    file: examples/chaosllm_endurance/responses.jsonl
+    selection: random
+
+latency:
+  base_ms: 15
+  jitter_ms: 10
+
+error_injection:
+  # HTTP errors (~8%) - retryable by the pool's AIMD backoff
+  rate_limit_pct: 3.0
+  capacity_529_pct: 2.0
+  service_unavailable_pct: 1.0
+  internal_error_pct: 1.0
+  bad_gateway_pct: 0.5
+  gateway_timeout_pct: 0.5
+  retry_after_sec: [0.5, 1]
+
+  # Malformed responses (~3%) - non-retryable, routes to quarantine
+  invalid_json_pct: 1.0
+  truncated_pct: 0.5
+  empty_body_pct: 0.5
+  missing_fields_pct: 1.0
+
+  # Bursts disabled - AIMD recovery is too slow for practical throughput
+  burst:
+    enabled: false
