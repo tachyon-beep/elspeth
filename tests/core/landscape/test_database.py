@@ -274,6 +274,30 @@ class TestSchemaCompatibility:
 
         assert "expand_group_id" in str(exc_info.value)
 
+    def test_missing_calls_table_fails_validation(self, tmp_path: Path) -> None:
+        """Database missing required tables should fail with SchemaCompatibilityError."""
+        import pytest
+        from sqlalchemy import text
+
+        from elspeth.core.landscape.database import (
+            LandscapeDB,
+            SchemaCompatibilityError,
+        )
+
+        db_path = tmp_path / "missing_calls.db"
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}")
+
+        with db.engine.begin() as conn:
+            conn.execute(text("DROP TABLE calls"))
+        db.close()
+
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            LandscapeDB.from_url(f"sqlite:///{db_path}", create_tables=False)
+
+        error_msg = str(exc_info.value)
+        assert "Missing tables" in error_msg
+        assert "calls" in error_msg
+
     def test_error_message_includes_remediation(self, tmp_path: Path) -> None:
         """Error message should tell user how to fix the problem."""
         import pytest
