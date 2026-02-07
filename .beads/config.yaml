@@ -65,3 +65,6 @@ sync-branch: "beads-sync"
 daemon:
   auto-commit: true
   auto-push: true
+
+hooks:
+  chain_strategy: replace
