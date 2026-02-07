@@ -758,7 +758,10 @@ class AuditedHTTPClient(AuditedClientBase):
 
             # Handle redirects with SSRF validation at each hop
             if follow_redirects:
-                response = self._follow_redirects_safe(response, max_redirects, effective_timeout, merged_headers)
+                response = self._follow_redirects_safe(
+                    response, max_redirects, effective_timeout, merged_headers,
+                    original_url=request.original_url,
+                )
 
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -902,6 +905,7 @@ class AuditedHTTPClient(AuditedClientBase):
         max_redirects: int,
         timeout: float,
         original_headers: dict[str, str],
+        original_url: str,
     ) -> httpx.Response:
         """Follow HTTP redirects with SSRF validation at each hop.
 
@@ -914,6 +918,10 @@ class AuditedHTTPClient(AuditedClientBase):
             max_redirects: Maximum number of redirect hops
             timeout: Request timeout for each hop
             original_headers: Headers from original request (minus Host, which is set per-hop)
+            original_url: Hostname-based URL for resolving relative redirects.
+                response.url is IP-based (from connection_url rewrite), so relative
+                Location headers must resolve against the original hostname URL to
+                preserve correct Host headers and TLS SNI.
 
         Returns:
             Final non-redirect response
@@ -923,17 +931,26 @@ class AuditedHTTPClient(AuditedClientBase):
             httpx.TooManyRedirects: If redirect chain exceeds max_redirects
         """
         redirects_followed = 0
+        # Track the logical hostname URL for resolving relative redirects.
+        # response.url is IP-based (from connection_url), so relative Location
+        # headers would resolve against the IP instead of the hostname.
+        hostname_url = httpx.URL(original_url)
 
         while response.is_redirect and redirects_followed < max_redirects:
             location = response.headers.get("location")
             if not location:
                 break
 
-            # Resolve relative URLs against the current URL
-            redirect_url = str(response.url.join(location))
+            # Resolve relative URLs against the hostname URL, NOT response.url
+            redirect_url = str(hostname_url.join(location))
 
             # CRITICAL: Validate the redirect target for SSRF
             redirect_request = validate_url_for_ssrf(redirect_url)
+
+            # Update hostname_url to the redirect target for the next iteration.
+            # If this was an absolute redirect to a different host, hostname_url
+            # now tracks that new host.
+            hostname_url = httpx.URL(redirect_url)
 
             # Build headers for this hop (Host header for virtual hosting)
             hop_headers = {k: v for k, v in original_headers.items() if k.lower() != "host"}
