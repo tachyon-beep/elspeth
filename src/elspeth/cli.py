@@ -18,13 +18,7 @@ from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
 from pydantic import ValidationError
 
 from elspeth import __version__
-from elspeth.contracts import ExecutionResult, ProgressEvent
-from elspeth.contracts.events import (
-    PhaseCompleted,
-    PhaseError,
-    PhaseStarted,
-    RunSummary,
-)
+from elspeth.contracts import ExecutionResult
 from elspeth.core.config import ElspethSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
@@ -772,145 +766,13 @@ def _execute_pipeline_with_instances(
         if verbose:
             typer.echo("Starting pipeline execution...")
 
-        # Create event bus and subscribe progress formatter
+        # Create event bus and subscribe formatters
+        from elspeth.cli_formatters import create_console_formatters, create_json_formatters, subscribe_formatters
         from elspeth.core import EventBus
 
         event_bus = EventBus()
-
-        # Choose formatters based on output format
-        if output_format == "json":
-            import json
-
-            # JSON formatters - output structured JSON for each event
-            def _format_phase_started_json(event: PhaseStarted) -> None:
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "phase_started",
-                            "phase": event.phase.value,
-                            "action": event.action.value,
-                            "target": event.target,
-                        }
-                    )
-                )
-
-            def _format_phase_completed_json(event: PhaseCompleted) -> None:
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "phase_completed",
-                            "phase": event.phase.value,
-                            "duration_seconds": event.duration_seconds,
-                        }
-                    )
-                )
-
-            def _format_phase_error_json(event: PhaseError) -> None:
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "phase_error",
-                            "phase": event.phase.value,
-                            "error": event.error_message,
-                            "target": event.target,
-                        }
-                    ),
-                    err=True,
-                )
-
-            def _format_run_summary_json(event: RunSummary) -> None:
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "run_completed",
-                            "run_id": event.run_id,
-                            "status": event.status.value,
-                            "total_rows": event.total_rows,
-                            "succeeded": event.succeeded,
-                            "failed": event.failed,
-                            "quarantined": event.quarantined,
-                            "duration_seconds": event.duration_seconds,
-                            "exit_code": event.exit_code,
-                        }
-                    )
-                )
-
-            def _format_progress_json(event: ProgressEvent) -> None:
-                rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
-                typer.echo(
-                    json.dumps(
-                        {
-                            "event": "progress",
-                            "rows_processed": event.rows_processed,
-                            "rows_succeeded": event.rows_succeeded,
-                            "rows_failed": event.rows_failed,
-                            "rows_quarantined": event.rows_quarantined,
-                            "elapsed_seconds": event.elapsed_seconds,
-                            "rows_per_second": rate,
-                        }
-                    )
-                )
-
-            # Subscribe JSON formatters
-            event_bus.subscribe(PhaseStarted, _format_phase_started_json)
-            event_bus.subscribe(PhaseCompleted, _format_phase_completed_json)
-            event_bus.subscribe(PhaseError, _format_phase_error_json)
-            event_bus.subscribe(RunSummary, _format_run_summary_json)
-            event_bus.subscribe(ProgressEvent, _format_progress_json)
-
-        else:  # console format (default)
-            # Console formatters for human-readable output
-            def _format_phase_started(event: PhaseStarted) -> None:
-                target_info = f" → {event.target}" if event.target else ""
-                typer.echo(f"[{event.phase.value.upper()}] {event.action.value.capitalize()}{target_info}...")
-
-            def _format_phase_completed(event: PhaseCompleted) -> None:
-                duration_str = f"{event.duration_seconds:.2f}s" if event.duration_seconds < 60 else f"{event.duration_seconds / 60:.1f}m"
-                typer.echo(f"[{event.phase.value.upper()}] ✓ Completed in {duration_str}")
-
-            def _format_phase_error(event: PhaseError) -> None:
-                target_info = f" ({event.target})" if event.target else ""
-                typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
-
-            def _format_run_summary(event: RunSummary) -> None:
-                status_symbols = {
-                    "completed": "✓",
-                    "partial": "⚠",
-                    "failed": "✗",
-                }
-                symbol = status_symbols[event.status.value]
-                # Build routed summary with destination breakdown
-                routed_summary = ""
-                if event.routed > 0:
-                    dest_parts = [f"{name}:{count}" for name, count in event.routed_destinations]
-                    dest_str = ", ".join(dest_parts) if dest_parts else ""
-                    routed_summary = f" | →{event.routed:,} routed"
-                    if dest_str:
-                        routed_summary += f" ({dest_str})"
-                typer.echo(
-                    f"\n{symbol} Run {event.status.value.upper()}: "
-                    f"{event.total_rows:,} rows processed | "
-                    f"✓{event.succeeded:,} succeeded | "
-                    f"✗{event.failed:,} failed | "
-                    f"⚠{event.quarantined:,} quarantined"
-                    f"{routed_summary} | "
-                    f"{event.duration_seconds:.2f}s total"
-                )
-
-            def _format_progress(event: ProgressEvent) -> None:
-                rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
-                typer.echo(
-                    f"  Processing: {event.rows_processed:,} rows | "
-                    f"{rate:.0f} rows/sec | "
-                    f"✓{event.rows_succeeded:,} ✗{event.rows_failed} ⚠{event.rows_quarantined}"
-                )
-
-            # Subscribe console formatters
-            event_bus.subscribe(PhaseStarted, _format_phase_started)
-            event_bus.subscribe(PhaseCompleted, _format_phase_completed)
-            event_bus.subscribe(PhaseError, _format_phase_error)
-            event_bus.subscribe(RunSummary, _format_run_summary)
-            event_bus.subscribe(ProgressEvent, _format_progress)
+        formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix="Run")
+        subscribe_formatters(event_bus, formatters)
 
         # Create runtime configs for external calls and checkpointing
         from elspeth.contracts.config.runtime import (
@@ -1459,69 +1321,12 @@ def _execute_resume_with_instances(
         aggregation_settings=aggregation_settings,
     )
 
-    # Create event bus for progress reporting
-    from elspeth.contracts.events import (
-        PhaseCompleted,
-        PhaseError,
-        PhaseStarted,
-        RunSummary,
-    )
+    # Create event bus and subscribe formatters
+    from elspeth.cli_formatters import create_console_formatters, subscribe_formatters
     from elspeth.core import EventBus
 
     event_bus = EventBus()
-
-    # Console formatters for human-readable output
-    def _format_phase_started(event: PhaseStarted) -> None:
-        target_info = f" → {event.target}" if event.target else ""
-        typer.echo(f"[{event.phase.value.upper()}] {event.action.value.capitalize()}{target_info}...")
-
-    def _format_phase_completed(event: PhaseCompleted) -> None:
-        duration_str = f"{event.duration_seconds:.2f}s" if event.duration_seconds < 60 else f"{event.duration_seconds / 60:.1f}m"
-        typer.echo(f"[{event.phase.value.upper()}] ✓ Completed in {duration_str}")
-
-    def _format_phase_error(event: PhaseError) -> None:
-        target_info = f" ({event.target})" if event.target else ""
-        typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
-
-    def _format_run_summary(event: RunSummary) -> None:
-        status_symbols = {
-            "completed": "✓",
-            "partial": "⚠",
-            "failed": "✗",
-        }
-        symbol = status_symbols[event.status.value]
-        # Build routed summary with destination breakdown
-        routed_summary = ""
-        if event.routed > 0:
-            dest_parts = [f"{name}:{count}" for name, count in event.routed_destinations]
-            dest_str = ", ".join(dest_parts) if dest_parts else ""
-            routed_summary = f" | →{event.routed:,} routed"
-            if dest_str:
-                routed_summary += f" ({dest_str})"
-        typer.echo(
-            f"\n{symbol} Resume {event.status.value.upper()}: "
-            f"{event.total_rows:,} rows processed | "
-            f"✓{event.succeeded:,} succeeded | "
-            f"✗{event.failed:,} failed | "
-            f"⚠{event.quarantined:,} quarantined"
-            f"{routed_summary} | "
-            f"{event.duration_seconds:.2f}s total"
-        )
-
-    def _format_progress(event: ProgressEvent) -> None:
-        rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
-        typer.echo(
-            f"  Processing: {event.rows_processed:,} rows | "
-            f"{rate:.0f} rows/sec | "
-            f"✓{event.rows_succeeded:,} ✗{event.rows_failed} ⚠{event.rows_quarantined}"
-        )
-
-    # Subscribe console formatters
-    event_bus.subscribe(PhaseStarted, _format_phase_started)
-    event_bus.subscribe(PhaseCompleted, _format_phase_completed)
-    event_bus.subscribe(PhaseError, _format_phase_error)
-    event_bus.subscribe(RunSummary, _format_run_summary)
-    event_bus.subscribe(ProgressEvent, _format_progress)
+    subscribe_formatters(event_bus, create_console_formatters(prefix="Resume"))
 
     # Create runtime configs for external calls and checkpointing
     from elspeth.contracts.config.runtime import (
