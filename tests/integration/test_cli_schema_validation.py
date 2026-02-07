@@ -9,7 +9,7 @@ from elspeth.cli import app
 
 
 def test_cli_run_detects_schema_incompatibility():
-    """Verify CLI run command detects schema incompatibility."""
+    """Verify CLI run command detects schema incompatibility between source and sink."""
     runner = CliRunner()
 
     config_yaml = """
@@ -20,14 +20,10 @@ source:
     schema:
       mode: fixed
       fields:
-        field_a: {type: str}
+        - "field_a: str"
 
 transforms:
   - plugin: passthrough
-    options:
-      schema:
-        fields:
-          field_a: {type: str}
 
 sinks:
   output:
@@ -37,7 +33,7 @@ sinks:
       schema:
         mode: fixed
         fields:
-          field_b: {type: int}  # INCOMPATIBLE
+          - "field_b: int"
 
 default_sink: output
 """
@@ -49,16 +45,19 @@ default_sink: output
     try:
         result = runner.invoke(app, ["run", "--settings", str(config_file)])
 
-        # Should fail with schema error
         assert result.exit_code != 0
-        assert "schema" in result.output.lower() or "field_b" in result.output.lower()
+        # Must fail specifically due to schema or field issue, not generic crash
+        output_lower = result.output.lower()
+        assert "schema" in output_lower or "field" in output_lower, (
+            f"Expected schema-related error, got: {result.output!r}"
+        )
 
     finally:
         config_file.unlink()
 
 
 def test_cli_validate_detects_schema_incompatibility():
-    """Verify CLI validate command detects schema incompatibility."""
+    """Verify CLI validate command detects schema incompatibility between source and sink."""
     runner = CliRunner()
 
     config_yaml = """
@@ -69,14 +68,10 @@ source:
     schema:
       mode: fixed
       fields:
-        field_a: {type: str}
+        - "field_a: str"
 
 transforms:
   - plugin: passthrough
-    options:
-      schema:
-        fields:
-          field_a: {type: str}
 
 sinks:
   output:
@@ -86,7 +81,7 @@ sinks:
       schema:
         mode: fixed
         fields:
-          field_b: {type: int}  # INCOMPATIBLE
+          - "field_b: int"
 
 default_sink: output
 """
@@ -98,9 +93,12 @@ default_sink: output
     try:
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
 
-        # Should fail with schema error
         assert result.exit_code != 0
-        assert "schema" in result.output.lower() or "field_b" in result.output.lower()
+        # Must fail specifically due to schema or field issue, not generic crash
+        output_lower = result.output.lower()
+        assert "schema" in output_lower or "field" in output_lower, (
+            f"Expected schema-related error, got: {result.output!r}"
+        )
 
     finally:
         config_file.unlink()

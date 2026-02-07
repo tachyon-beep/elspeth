@@ -17,42 +17,12 @@ def ctx() -> PluginContext:
     return PluginContext(run_id="test_resume", config={})
 
 
-class TestCSVSinkResumeInternal:
-    """Tests for internal resume state."""
+class TestCSVSinkResumeContract:
+    """Tests for CSVSink resume contract (public API)."""
 
     def test_csv_sink_supports_resume(self) -> None:
         """CSVSink should declare supports_resume=True."""
         assert CSVSink.supports_resume is True
-
-    def test_csv_sink_configure_for_resume_sets_append_mode(self) -> None:
-        """CSVSink.configure_for_resume should set mode to append."""
-        sink = CSVSink(
-            {
-                "path": "/tmp/test.csv",
-                "schema": STRICT_SCHEMA,
-                "mode": "write",  # Explicit write mode
-            }
-        )
-
-        assert sink._mode == "write"
-
-        sink.configure_for_resume()
-
-        assert sink._mode == "append"
-
-    def test_csv_sink_configure_for_resume_idempotent(self) -> None:
-        """Calling configure_for_resume multiple times should be safe."""
-        sink = CSVSink(
-            {
-                "path": "/tmp/test.csv",
-                "schema": STRICT_SCHEMA,
-            }
-        )
-
-        sink.configure_for_resume()
-        sink.configure_for_resume()  # Second call
-
-        assert sink._mode == "append"
 
 
 class TestCSVSinkResumeEndToEnd:

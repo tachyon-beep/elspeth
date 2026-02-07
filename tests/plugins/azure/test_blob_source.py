@@ -114,7 +114,8 @@ class TestAzureBlobSourceProtocol:
         """AzureBlobSource has name and output_schema."""
         assert AzureBlobSource.name == "azure_blob"
         source = AzureBlobSource(make_config())
-        assert hasattr(source, "output_schema")
+        # Direct access — crashes on missing (our code, our bug)
+        assert source.output_schema is not None
 
 
 class TestAzureBlobSourceConfigValidation:

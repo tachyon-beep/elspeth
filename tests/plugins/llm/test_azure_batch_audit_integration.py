@@ -115,30 +115,28 @@ def test_llm_calls_visible_in_explain(real_landscape_db) -> None:
         token_id=token.token_id,
     )
 
-    # Verify lineage has the batch state
+    # Verify lineage has exactly the batch state
     assert lineage is not None
-    assert len(lineage.node_states) >= 1
-
-    # Find the batch state
-    batch_state = next(
-        (s for s in lineage.node_states if s.node_id == batch_node.node_id),
-        None,
+    assert len(lineage.node_states) == 1, (
+        f"Expected exactly 1 node_state (batch), got {len(lineage.node_states)}: "
+        f"{[s.node_id for s in lineage.node_states]}"
     )
-    assert batch_state is not None, f"Batch state not found. States: {[s.node_id for s in lineage.node_states]}"
 
-    # Verify calls are included in the lineage
-    assert len(lineage.calls) >= 1, f"Expected at least 1 call, got {len(lineage.calls)}"
+    batch_state = lineage.node_states[0]
+    assert batch_state.node_id == batch_node.node_id
 
-    # Find LLM call
-    llm_call = next(
-        (c for c in lineage.calls if c.call_type == CallType.LLM),
-        None,
+    # Verify exactly 1 LLM call recorded against the batch state
+    assert len(lineage.calls) == 1, (
+        f"Expected exactly 1 call, got {len(lineage.calls)}: "
+        f"{[c.call_type for c in lineage.calls]}"
     )
-    assert llm_call is not None, f"LLM call not found. Calls: {[c.call_type for c in lineage.calls]}"
+
+    llm_call = lineage.calls[0]
+    assert llm_call.call_type == CallType.LLM
+    assert llm_call.status == CallStatus.SUCCESS
     # The Call object stores hashes, not raw data (audit trail design)
     assert llm_call.request_hash is not None
     assert llm_call.response_hash is not None
-    assert llm_call.status == CallStatus.SUCCESS
 
 
 @pytest.mark.integration
