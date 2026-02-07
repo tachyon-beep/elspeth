@@ -455,6 +455,28 @@ class CallRecordingMixin:
             for row in db_rows
         ]
 
+    def get_all_operation_calls_for_run(self, run_id: str) -> list[Call]:
+        """Get all operation-parented calls for a run (batch query).
+
+        Fetches all calls where operation_id is NOT NULL and the operation
+        belongs to the given run. This replaces per-operation get_operation_calls()
+        loops in the exporter.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Call models, ordered by operation_id then call_index
+        """
+        query = (
+            select(calls_table)
+            .join(operations_table, calls_table.c.operation_id == operations_table.c.operation_id)
+            .where(operations_table.c.run_id == run_id)
+            .order_by(calls_table.c.operation_id, calls_table.c.call_index)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_repo.load(r) for r in db_rows]
+
     def find_call_by_request_hash(
         self,
         run_id: str,

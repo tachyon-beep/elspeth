@@ -271,6 +271,27 @@ class BatchRecordingMixin:
         rows = self._ops.execute_fetchall(query)
         return [self._batch_member_repo.load(row) for row in rows]
 
+    def get_all_batch_members_for_run(self, run_id: str) -> list[BatchMember]:
+        """Get all batch members for a run (batch query).
+
+        Fetches all members for all batches in a run in one query,
+        replacing per-batch get_batch_members() loops in the exporter.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of BatchMember models, ordered by batch_id then ordinal
+        """
+        query = (
+            select(batch_members_table)
+            .join(batches_table, batch_members_table.c.batch_id == batches_table.c.batch_id)
+            .where(batches_table.c.run_id == run_id)
+            .order_by(batch_members_table.c.batch_id, batch_members_table.c.ordinal)
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._batch_member_repo.load(row) for row in rows]
+
     def retry_batch(self, batch_id: str) -> Batch:
         """Create a new batch attempt from a failed batch.
 

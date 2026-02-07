@@ -153,17 +153,10 @@ def explain(
     node_states = recorder.get_node_states_for_token(token_id)
     node_states.sort(key=lambda s: s.step_index)
 
-    # Get routing events for each state
-    routing_events: list[RoutingEvent] = []
-    for state in node_states:
-        events = recorder.get_routing_events(state.state_id)
-        routing_events.extend(events)
-
-    # Get external calls for each state
-    calls: list[Call] = []
-    for state in node_states:
-        state_calls = recorder.get_calls(state.state_id)
-        calls.extend(state_calls)
+    # Batch query: Get routing events and calls for all states at once (N+1 fix)
+    state_ids = [s.state_id for s in node_states]
+    routing_events = recorder.get_routing_events_for_states(state_ids)
+    calls = recorder.get_calls_for_states(state_ids)
 
     # Get parent tokens
     # TIER 1 TRUST: token_parents is audit data - crash on any anomaly

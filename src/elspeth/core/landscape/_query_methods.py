@@ -206,6 +206,53 @@ class QueryMethodsMixin:
         db_rows = self._ops.execute_fetchall(query)
         return [self._call_repo.load(r) for r in db_rows]
 
+    # === Batch Query Methods for State Sets (ech8: N+1 query fix for lineage) ===
+    #
+    # These methods fetch entities for a set of state IDs in a single query,
+    # replacing the N+1 pattern where per-state queries nested inside loops.
+
+    def get_routing_events_for_states(self, state_ids: list[str]) -> list[RoutingEvent]:
+        """Get routing events for multiple states in one query.
+
+        Args:
+            state_ids: List of state IDs to query
+
+        Returns:
+            List of RoutingEvent models, ordered by state_id then ordinal
+        """
+        if not state_ids:
+            return []
+        query = (
+            select(routing_events_table)
+            .where(routing_events_table.c.state_id.in_(state_ids))
+            .order_by(
+                routing_events_table.c.state_id,
+                routing_events_table.c.ordinal,
+                routing_events_table.c.event_id,
+            )
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._routing_event_repo.load(r) for r in db_rows]
+
+    def get_calls_for_states(self, state_ids: list[str]) -> list[Call]:
+        """Get external calls for multiple states in one query.
+
+        Args:
+            state_ids: List of state IDs to query
+
+        Returns:
+            List of Call models, ordered by state_id then call_index
+        """
+        if not state_ids:
+            return []
+        query = (
+            select(calls_table)
+            .where(calls_table.c.state_id.in_(state_ids))
+            .order_by(calls_table.c.state_id, calls_table.c.call_index)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_repo.load(r) for r in db_rows]
+
     # === Batch Query Methods (Bug 76r: N+1 query fix for exporter) ===
     #
     # These methods fetch all entities for a run in a single query,

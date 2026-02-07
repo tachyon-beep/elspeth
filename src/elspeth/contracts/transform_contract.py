@@ -7,6 +7,7 @@ their input and output contracts. This module bridges PluginSchema
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
@@ -20,6 +21,7 @@ _TYPE_MAP: dict[type, type] = {
     str: str,
     float: float,
     bool: bool,
+    datetime: datetime,
     type(None): type(None),
 }
 

@@ -1561,35 +1561,45 @@ class LandscapeAnalyzer:
                 .order_by(runs_table.c.started_at.desc())
             ).fetchall()
 
-            # Get processing stats for each run
-            run_stats = []
-            for run in recent_runs:
-                row_count = (
-                    conn.execute(select(func.count()).select_from(rows_table).where(rows_table.c.run_id == run.run_id)).scalar() or 0
-                )
+            if not recent_runs:
+                run_stats: list[dict[str, Any]] = []
+            else:
+                # Collect run IDs for batch queries
+                run_ids = [run.run_id for run in recent_runs]
 
-                state_count = (
-                    conn.execute(
-                        select(func.count()).select_from(node_states_table).where(node_states_table.c.run_id == run.run_id)
-                    ).scalar()
-                    or 0
-                )
+                # Batch query: Get row counts grouped by run_id (N+1 fix)
+                row_counts_result = conn.execute(
+                    select(rows_table.c.run_id, func.count().label("cnt"))
+                    .where(rows_table.c.run_id.in_(run_ids))
+                    .group_by(rows_table.c.run_id)
+                ).fetchall()
+                row_counts: dict[str, int] = {r.run_id: r.cnt for r in row_counts_result}
 
-                duration = None
-                if run.started_at and run.completed_at:
-                    duration = (run.completed_at - run.started_at).total_seconds()
+                # Batch query: Get state counts grouped by run_id (N+1 fix)
+                state_counts_result = conn.execute(
+                    select(node_states_table.c.run_id, func.count().label("cnt"))
+                    .where(node_states_table.c.run_id.in_(run_ids))
+                    .group_by(node_states_table.c.run_id)
+                ).fetchall()
+                state_counts: dict[str, int] = {r.run_id: r.cnt for r in state_counts_result}
 
-                run_stats.append(
-                    {
-                        "run_id": run.run_id[:12] + "...",
-                        "full_run_id": run.run_id,
-                        "status": run.status,
-                        "started": run.started_at.isoformat() if run.started_at else None,
-                        "duration_seconds": duration,
-                        "rows_processed": row_count,
-                        "node_executions": state_count,
-                    }
-                )
+                run_stats = []
+                for run in recent_runs:
+                    duration = None
+                    if run.started_at and run.completed_at:
+                        duration = (run.completed_at - run.started_at).total_seconds()
+
+                    run_stats.append(
+                        {
+                            "run_id": run.run_id[:12] + "...",
+                            "full_run_id": run.run_id,
+                            "status": run.status,
+                            "started": run.started_at.isoformat() if run.started_at else None,
+                            "duration_seconds": duration,
+                            "rows_processed": row_counts.get(run.run_id, 0),
+                            "node_executions": state_counts.get(run.run_id, 0),
+                        }
+                    )
 
         status_counts: dict[str, int] = {}
         for r in run_stats:

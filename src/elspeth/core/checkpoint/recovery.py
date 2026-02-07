@@ -204,50 +204,55 @@ class RecoveryManager:
 
         result: list[tuple[str, int, dict[str, Any]]] = []
 
+        # Batch query: Fetch all row metadata in one query (N+1 fix)
         with self._db.engine.connect() as conn:
-            for row_id in row_ids:
-                # Get row metadata
-                row_result = conn.execute(
-                    select(rows_table.c.row_index, rows_table.c.source_data_ref).where(rows_table.c.row_id == row_id)
-                ).fetchone()
+            rows_result = conn.execute(
+                select(rows_table.c.row_id, rows_table.c.row_index, rows_table.c.source_data_ref)
+                .where(rows_table.c.row_id.in_(row_ids))
+            ).fetchall()
 
-                if row_result is None:
-                    raise ValueError(f"Row {row_id} not found in database")
+        # Build lookup dict for row metadata
+        row_metadata: dict[str, tuple[int, str | None]] = {}
+        for r in rows_result:
+            row_metadata[r.row_id] = (r.row_index, r.source_data_ref)
 
-                row_index = row_result.row_index
-                source_data_ref = row_result.source_data_ref
+        for row_id in row_ids:
+            if row_id not in row_metadata:
+                raise ValueError(f"Row {row_id} not found in database")
 
-                if source_data_ref is None:
-                    raise ValueError(f"Row {row_id} has no source_data_ref - cannot resume without payload")
+            row_index, source_data_ref = row_metadata[row_id]
 
-                # Retrieve from payload store
-                try:
-                    payload_bytes = payload_store.retrieve(source_data_ref)
-                    degraded_data = json.loads(payload_bytes.decode("utf-8"))
-                except KeyError:
-                    raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from None
+            if source_data_ref is None:
+                raise ValueError(f"Row {row_id} has no source_data_ref - cannot resume without payload")
 
-                # TYPE FIDELITY RESTORATION:
-                # Re-validate through source schema to restore types.
-                # This is critical for datetime, Decimal, and other coerced types
-                # that canonical_json normalizes to strings.
-                # Schema is now REQUIRED - no fallback to degraded types.
-                validated = source_schema_class.model_validate(degraded_data)
-                row_data = validated.to_row()
+            # Retrieve from payload store
+            try:
+                payload_bytes = payload_store.retrieve(source_data_ref)
+                degraded_data = json.loads(payload_bytes.decode("utf-8"))
+            except KeyError:
+                raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from None
 
-                # DEFENSE-IN-DEPTH: Detect silent data loss from empty schemas
-                # If source data has fields but restored data is empty, the schema is losing data.
-                # This catches bugs like NullSourceSchema (no fields) being used for resume.
-                if degraded_data and not row_data:
-                    raise ValueError(
-                        f"Resume failed for row {row_id}: Schema validation returned empty data "
-                        f"but source had {len(degraded_data)} fields. "
-                        f"Schema class '{source_schema_class.__name__}' appears to have no fields defined. "
-                        f"Cannot resume - this would silently discard all row data. "
-                        f"The source plugin's schema must declare fields matching the stored row structure."
-                    )
+            # TYPE FIDELITY RESTORATION:
+            # Re-validate through source schema to restore types.
+            # This is critical for datetime, Decimal, and other coerced types
+            # that canonical_json normalizes to strings.
+            # Schema is now REQUIRED - no fallback to degraded types.
+            validated = source_schema_class.model_validate(degraded_data)
+            row_data = validated.to_row()
 
-                result.append((row_id, row_index, row_data))
+            # DEFENSE-IN-DEPTH: Detect silent data loss from empty schemas
+            # If source data has fields but restored data is empty, the schema is losing data.
+            # This catches bugs like NullSourceSchema (no fields) being used for resume.
+            if degraded_data and not row_data:
+                raise ValueError(
+                    f"Resume failed for row {row_id}: Schema validation returned empty data "
+                    f"but source had {len(degraded_data)} fields. "
+                    f"Schema class '{source_schema_class.__name__}' appears to have no fields defined. "
+                    f"Cannot resume - this would silently discard all row data. "
+                    f"The source plugin's schema must declare fields matching the stored row structure."
+                )
+
+            result.append((row_id, row_index, row_data))
 
         return result
 
