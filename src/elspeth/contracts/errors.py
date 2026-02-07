@@ -256,6 +256,8 @@ TransformErrorCategory = Literal[
     # Contract violations (schema validation)
     "contract_violation",
     "multiple_contract_violations",
+    # Executor lifecycle
+    "shutdown_requested",  # Worker stopped mid-retry due to executor shutdown
     # Generic (for tests and edge cases)
     "test_error",
     "property_test_error",
