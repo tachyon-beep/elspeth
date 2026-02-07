@@ -964,8 +964,7 @@ class TestPooledExecutorBugFixes:
             # AIMD delay decreases by recovery_step_ms per success, but should
             # still be much higher than min_dispatch_delay_ms of 10ms
             assert interval_ms >= 50, (
-                f"Dispatch {i} was {interval_ms:.1f}ms after {i - 1}, "
-                f"expected >= 50ms (AIMD congestion should slow dispatches)"
+                f"Dispatch {i} was {interval_ms:.1f}ms after {i - 1}, expected >= 50ms (AIMD congestion should slow dispatches)"
             )
 
         executor.shutdown()

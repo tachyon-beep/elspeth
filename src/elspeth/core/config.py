@@ -1420,8 +1420,7 @@ def _resolve_template_path(file_ref: str, settings_path: Path, label: str) -> Pa
         file_path.relative_to(config_root)
     except ValueError:
         raise TemplateFileError(
-            f"{label} path traversal blocked: {file_ref!r} resolves to "
-            f"{file_path} which is outside config directory {config_root}"
+            f"{label} path traversal blocked: {file_ref!r} resolves to {file_path} which is outside config directory {config_root}"
         ) from None
 
     if not file_path.exists():
