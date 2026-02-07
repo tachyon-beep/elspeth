@@ -196,6 +196,7 @@ class CallType(StrEnum):
 
     LLM = "llm"
     HTTP = "http"
+    HTTP_REDIRECT = "http_redirect"
     SQL = "sql"
     FILESYSTEM = "filesystem"
 

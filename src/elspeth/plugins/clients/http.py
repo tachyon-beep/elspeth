@@ -757,8 +757,9 @@ class AuditedHTTPClient(AuditedClientBase):
                 )
 
             # Handle redirects with SSRF validation at each hop
+            redirect_count = 0
             if follow_redirects:
-                response = self._follow_redirects_safe(
+                response, redirect_count = self._follow_redirects_safe(
                     response,
                     max_redirects,
                     effective_timeout,
@@ -806,6 +807,8 @@ class AuditedHTTPClient(AuditedClientBase):
                 "body_size": len(response.content),
                 "body": response_body,
             }
+            if redirect_count > 0:
+                response_data["redirect_count"] = redirect_count
 
             error_data: dict[str, Any] | None = None
             if not is_success:
@@ -909,7 +912,7 @@ class AuditedHTTPClient(AuditedClientBase):
         timeout: float,
         original_headers: dict[str, str],
         original_url: str,
-    ) -> httpx.Response:
+    ) -> tuple[httpx.Response, int]:
         """Follow HTTP redirects with SSRF validation at each hop.
 
         Each redirect target is independently resolved and validated against
@@ -927,7 +930,7 @@ class AuditedHTTPClient(AuditedClientBase):
                 preserve correct Host headers and TLS SNI.
 
         Returns:
-            Final non-redirect response
+            Tuple of (final non-redirect response, number of redirects followed)
 
         Raises:
             SSRFBlockedError: If any redirect target resolves to a blocked IP
@@ -943,6 +946,9 @@ class AuditedHTTPClient(AuditedClientBase):
             location = response.headers.get("location")
             if not location:
                 break
+
+            # Capture the URL we're redirecting FROM (before updating hostname_url)
+            redirect_from = str(hostname_url)
 
             # Resolve relative URLs against the hostname URL, NOT response.url
             redirect_url = str(hostname_url.join(location))
@@ -964,6 +970,8 @@ class AuditedHTTPClient(AuditedClientBase):
             if redirect_request.scheme == "https":
                 extensions["sni_hostname"] = redirect_request.sni_hostname
 
+            hop_start = time.perf_counter()
+
             with httpx.Client(timeout=timeout, follow_redirects=False) as client:
                 response = client.get(
                     redirect_request.connection_url,
@@ -971,7 +979,34 @@ class AuditedHTTPClient(AuditedClientBase):
                     extensions=extensions if extensions else None,
                 )
 
+            hop_latency_ms = (time.perf_counter() - hop_start) * 1000
             redirects_followed += 1
+
+            # Record this redirect hop in the audit trail.
+            # Each hop is a real network call — it may hit a different server.
+            hop_call_index = self._next_call_index()
+            hop_request_data = {
+                "method": "GET",
+                "url": redirect_url,
+                "resolved_ip": redirect_request.resolved_ip,
+                "hop_number": redirects_followed,
+                "redirect_from": redirect_from,
+                "headers": self._filter_request_headers(hop_headers),
+            }
+            hop_response_data = {
+                "status_code": response.status_code,
+                "headers": self._filter_response_headers(dict(response.headers)),
+            }
+
+            self._recorder.record_call(
+                state_id=self._state_id,
+                call_index=hop_call_index,
+                call_type=CallType.HTTP_REDIRECT,
+                status=CallStatus.SUCCESS if response.status_code < 400 else CallStatus.ERROR,
+                request_data=hop_request_data,
+                response_data=hop_response_data,
+                latency_ms=hop_latency_ms,
+            )
 
         if response.is_redirect and redirects_followed >= max_redirects:
             raise httpx.TooManyRedirects(
@@ -979,4 +1014,4 @@ class AuditedHTTPClient(AuditedClientBase):
                 request=response.request,
             )
 
-        return response
+        return response, redirects_followed

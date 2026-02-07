@@ -1612,12 +1612,12 @@ allow_hits:
   reason: httpx Client.get() method call - this is the external HTTP call with IP pinning
   safety: Response is fully recorded to audit trail with error handling
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=245aefe47a3f9c80
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=62c4590acd68b276
   owner: architecture
   reason: HTTP response headers - external system boundary, content-type may be missing
   safety: Defaults to empty string - safe fallback for content type detection
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=ede213a597923ce6
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=824d86b96f0dd024
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to request processing
@@ -1632,7 +1632,7 @@ allow_hits:
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Breaks redirect loop if missing - no silent failure
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=2c79da3d02ca6e65
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=56f2da70598cb68d
   owner: architecture
   reason: httpx Client.get() method call - redirect hop with SSRF-validated IP
   safety: Each redirect hop independently validated against SSRF blocklist
