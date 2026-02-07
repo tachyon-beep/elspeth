@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import csv
 import random
-import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -181,7 +180,7 @@ def _generate_multi_row(
 ) -> list[str]:
     """Generate a single multi-dimensional row."""
     row: list[str] = [f"user-{row_id:05d}"]
-    for cs_idx in range(1, num_case_studies + 1):
+    for _cs_idx in range(1, num_case_studies + 1):
         for field_idx in range(fields_per_cs):
             row.append(_generate_field(rng, field_idx))
     return row
