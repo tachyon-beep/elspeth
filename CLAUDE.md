@@ -158,35 +158,6 @@ def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
 | File reads (in transform) | File contents | Same validation as source plugins |
 | Message queue consume | Message payload | Parse format, validate schema, quarantine malformed messages |
 
-**Example from azure_multi_query_llm.py** (the correct pattern):
-
-```python
-# Line 227-236: External call (Tier 3 boundary created)
-try:
-    response = await self._llm_executor.execute_llm_call(...)
-except Exception as e:
-    return TransformResult.error(...)  # Wrapped immediately
-
-# Line 241-251: IMMEDIATE validation at boundary
-try:
-    parsed = json.loads(response.content)
-except json.JSONDecodeError:
-    return TransformResult.error(...)  # Can't parse - reject immediately
-
-# Line 253-263: Structure type validation (defense against non-dict JSON)
-if not isinstance(parsed, dict):
-    return TransformResult.error({
-        "reason": "invalid_json_type",
-        "expected": "object",
-        "actual": type(parsed).__name__
-    })
-
-# Line 266-274: NOW safe to use - it's validated Tier 2 data
-output[output_key] = parsed[json_field]  # No defensive .get() needed
-```
-
-From this point forward, `parsed` is treated as Tier 2 pipeline data. No more validation. No `.get()` calls. We trust it because we validated it at the boundary.
-
 ### Coercion Rules by Plugin Type
 
 | Plugin Type | Coercion Allowed? | Rationale |
@@ -203,7 +174,7 @@ From this point forward, `parsed` is treated as Tier 2 pipeline data. No more va
 | `self._config.field` | ❌ No | Our code, our config - crash on bug |
 | `self._internal_state` | ❌ No | Our code - crash on bug |
 | `landscape.get_row_state(token_id)` | ❌ No | Our data - crash on corruption |
-| `checkpoint_data["tokens"]` | ❌ No | Our data - we wrote this JSON (see below) |
+| `checkpoint_data["tokens"]` | ❌ No | Our data - we wrote this JSON |
 | `row["field"]` arithmetic/parsing | ✅ Yes | Their data values can fail operations |
 | `external_api.call(row["id"])` | ✅ Yes | External system, anything can happen |
 | `json.loads(external_response)` | ✅ Yes | External data - validate immediately |
@@ -212,7 +183,7 @@ From this point forward, `parsed` is treated as Tier 2 pipeline data. No more va
 **Rule of thumb:**
 
 - **Reading from Landscape tables?** Crash on any anomaly - it's our data.
-- **Reading checkpoints or deserialized audit JSON?** Crash on any anomaly - it's our data (see below).
+- **Reading checkpoints or deserialized audit JSON?** Crash on any anomaly - it's our data.
 - **Operating on row field values?** Wrap operations, return error result, quarantine row.
 - **Calling external systems?** Wrap call AND validate response immediately at boundary.
 - **Using already-validated external data?** Trust it - no defensive `.get()` needed.
@@ -222,36 +193,7 @@ From this point forward, `parsed` is treated as Tier 2 pipeline data. No more va
 
 ## Plugin Ownership: System Code, Not User Code
 
-**CRITICAL DISTINCTION:** All plugins (Sources, Transforms, Gates, Aggregations, Sinks) are **system-owned code**, not user-provided extensions.
-
-### What This Means
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                     SYSTEM-OWNED (Full Trust)                    │
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │   Sources    │  │  Transforms  │  │    Sinks     │           │
-│  │  (CSVSource, │  │ (FieldMapper,│  │  (CSVSink,   │           │
-│  │   APISource) │  │  LLMTransform)│  │   DBSink)    │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │    Engine    │  │  Landscape   │  │   Contracts  │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ processes
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     USER-OWNED (Zero Trust)                      │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                      USER DATA                            │   │
-│  │   CSV files, API responses, database rows, LLM outputs    │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
+All plugins (Sources, Transforms, Gates, Aggregations, Sinks) are **system-owned code**, not user-provided extensions. ELSPETH uses `pluggy` for clean architecture, NOT to accept arbitrary user plugins. Plugins are developed, tested, and deployed as part of ELSPETH with the same rigor as engine code.
 
 ### Implications for Error Handling
 
@@ -263,14 +205,10 @@ From this point forward, `parsed` is treated as Tier 2 pipeline data. No more va
 | User data has wrong type | Quarantine row, continue | Crash the pipeline |
 | User data missing field | Quarantine row, continue | Crash the pipeline |
 
-### Why This Matters for Audit Integrity
-
 A defective plugin that silently produces wrong results is **worse than a crash**:
 
 1. **Crash:** Pipeline stops, operator investigates, bug gets fixed
 2. **Silent wrong result:** Data flows through, gets recorded as "correct," auditors see garbage, trust is destroyed
-
-**Example of the problem:**
 
 ```python
 # WRONG - hides plugin bugs, destroys audit integrity
@@ -285,15 +223,6 @@ result = transform.process(row, ctx)  # Let it crash
 ```
 
 If `transform.process()` has a bug, we MUST know about it. Silently passing through the original row means the audit trail now contains data that "looks processed" but wasn't - this is evidence tampering.
-
-### NOT a Plugin Marketplace
-
-ELSPETH uses `pluggy` for clean architecture (hooks, extensibility), NOT to accept arbitrary user plugins:
-
-- Plugins are developed, tested, and deployed as part of ELSPETH
-- Plugin code is reviewed with the same rigor as engine code
-- Plugin bugs are system bugs - they get fixed in the codebase
-- Users configure which plugins to use, they don't write their own
 
 ## Core Architecture
 
@@ -481,75 +410,49 @@ Aggregation triggers fire in two ways:
 
 For streaming sources that may never end, combine timeout with count triggers, or implement periodic heartbeat rows at the source level.
 
-## Package Management: uv Required
+## Development
 
-**STRICT REQUIREMENT:** Use `uv` for ALL package management. Never use `pip` directly.
+**Package management:** Use `uv` for ALL package management. Never use `pip` directly.
 
 ```bash
 # Environment setup
-uv venv
-source .venv/bin/activate
+uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"      # Development with test tools
 uv pip install -e ".[llm]"      # With LLM support
 uv pip install -e ".[all]"      # Everything
 
-# Adding dependencies
-uv pip install <package>        # Install package
-uv pip freeze                   # Show installed packages
-
-# Running tests (always use venv python)
-.venv/bin/python -m pytest tests/
-.venv/bin/python -m mypy src/
-.venv/bin/python -m ruff check src/
-```
-
-## Development Commands
-
-```bash
-# Running tests
+# Tests and quality
 .venv/bin/python -m pytest tests/                     # All tests
 .venv/bin/python -m pytest tests/unit/                # Unit tests only
 .venv/bin/python -m pytest tests/integration/         # Integration tests
 .venv/bin/python -m pytest -k "test_fork"             # Tests matching pattern
 .venv/bin/python -m pytest -x                         # Stop on first failure
+.venv/bin/python -m mypy src/                         # Type checking
+.venv/bin/python -m ruff check src/                   # Linting
+.venv/bin/python -m ruff check --fix src/             # Auto-fix lint
 
-# Type checking and linting
-.venv/bin/python -m mypy src/
-.venv/bin/python -m ruff check src/
-.venv/bin/python -m ruff check --fix src/             # Auto-fix
+# Config contracts verification
+.venv/bin/python -m scripts.check_contracts
 
-# CLI commands
+# CLI
 elspeth run --settings pipeline.yaml --execute        # Execute pipeline
 elspeth resume <run_id>                               # Resume interrupted run
 elspeth validate --settings pipeline.yaml             # Validate config
 elspeth plugins list                                  # List available plugins
 elspeth purge --run <run_id>                          # Purge payload data
-
-# TUI-based commands (RC-2: limited functionality)
 elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
 ```
 
-## Landscape MCP Analysis Server
+### Landscape MCP Analysis Server
 
-**For debugging and investigation**, there's an MCP server that provides read-only access to the audit database. This is especially useful for Claude Code sessions investigating pipeline failures.
+For debugging pipeline failures, an MCP server provides read-only access to the audit database:
 
 ```bash
-# Run the MCP server (auto-discovers databases in current directory)
-elspeth-mcp
-
-# Or specify a database explicitly
-elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db
+elspeth-mcp                                                    # Auto-discovers databases
+elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db  # Explicit DB
 ```
 
-The server automatically finds `.db` files, prioritizing `audit.db` in `runs/` directories (pipeline outputs) and sorting by most recently modified.
-
-**Key tools for emergencies:**
-
-- `diagnose()` - First tool when something is broken. Finds failed runs, stuck runs, high error rates
-- `get_failure_context(run_id)` - Deep dive on a specific failure
-- `explain_token(run_id, token_id)` - Complete lineage for a specific row
-
-**Full documentation:** See `docs/guides/landscape-mcp-analysis.md` for the complete tool reference, common workflows, and database schema guide.
+**Key tools:** `diagnose()` (what's broken?), `get_failure_context(run_id)` (deep dive), `explain_token(run_id, token_id)` (row lineage). Full reference: `docs/guides/landscape-mcp-analysis.md`.
 
 ## Technology Stack
 
@@ -590,55 +493,14 @@ The server automatically finds `.db` files, prioritizing `audit.db` in `runs/` d
 
 Telemetry provides **real-time operational visibility** alongside the Landscape audit trail.
 
-**Key distinction:**
-
 - **Landscape**: Legal record, complete lineage, persisted forever, source of truth
 - **Telemetry**: Operational visibility, real-time streaming, ephemeral, for dashboards/alerting
 
-**No Silent Failures (Critical Principle):**
+**No Silent Failures:** Any telemetry emission point MUST either send what it has OR explicitly acknowledge "I have nothing" (with failure reason if applicable). Never silently swallow events or exceptions. This applies to `telemetry_emit` callbacks, `TelemetryManager.emit()`, exporter failures, and disabled states (log once at startup).
 
-Any time an object is polled or has an opportunity to emit telemetry, it MUST either:
+**Correlation:** Telemetry events include `run_id` and `token_id`. Use these to cross-reference with `elspeth explain` or the Landscape MCP server.
 
-1. **Send what it has** - emit the telemetry event normally, OR
-2. **Explicitly acknowledge "I have nothing"** - log that telemetry was requested but unavailable
-
-If an exception occurs during emission, the acknowledgment must include the failure reason:
-
-- "Telemetry emission failed: [exception details]"
-- Never silently swallow events or exceptions
-
-This applies to:
-
-- `telemetry_emit` callbacks in audited clients (HTTP, LLM)
-- `TelemetryManager.emit()` calls
-- Exporter failures
-- Disabled telemetry states (log once at startup that telemetry is disabled)
-
-**Available exporters:** Console (debugging), OTLP (Jaeger/Tempo/Honeycomb), Azure Monitor, Datadog
-
-**Basic configuration:**
-
-```yaml
-telemetry:
-  enabled: true
-  granularity: rows  # lifecycle | rows | full
-  backpressure_mode: block  # block (complete) | drop (fast)
-  exporters:
-    - name: console
-      format: pretty
-    - name: otlp
-      endpoint: ${OTEL_ENDPOINT}
-```
-
-**Granularity levels:**
-
-- `lifecycle`: Run start/complete, phase transitions (~10-20 events/run)
-- `rows`: Above + row creation, transform completion, gate routing (N x M events)
-- `full`: Above + external call details (LLM, HTTP, SQL)
-
-**Correlation workflow:** Telemetry events include `run_id` and `token_id`. When an alert fires in Datadog/Grafana, use the `run_id` to investigate with `elspeth explain` or the Landscape MCP server.
-
-**Full documentation:** See `docs/guides/telemetry.md` for exporter configuration, troubleshooting, and operational guidance.
+Full configuration guide (exporters, granularity levels, backpressure): `docs/guides/telemetry.md`.
 
 ## Critical Implementation Patterns
 
@@ -662,26 +524,7 @@ Test cases must cover: `numpy.int64`, `numpy.float64`, `pandas.Timestamp`, `NaT`
 
 ### PipelineRow to Dict Conversion
 
-**Always use `row.to_dict()` for explicit conversion.** While `dict(row)` works via duck typing, the explicit form is preferred for clarity.
-
-```python
-# PREFERRED - Explicit and clear intent
-output = row.to_dict()
-output["new_field"] = "value"
-return TransformResult.success(output)
-
-# AVOID - Works but implicit (duck typing via mapping protocol)
-output = dict(row)  # Loses contract metadata implicitly
-```
-
-**Why `to_dict()` is preferred:**
-
-- **Explicitness**: Makes the "conversion to plain dict" intention clear
-- **Contract awareness**: Signals that contract metadata is intentionally being discarded
-- **IDE support**: Better type checker and autocomplete support
-- **Consistency**: Matches established pattern in field_mapper, json_explode, truncate, etc.
-
-**Technical note:** PipelineRow implements Python's informal mapping protocol (`keys()`, `__getitem__()`, `__iter__()`), so `dict(row)` works correctly by duck typing. However, both approaches create a plain dict without contract metadata - the engine reconstructs PipelineRow from the transform's output schema/contract.
+Always use `row.to_dict()` for explicit conversion, not `dict(row)`. Both work (PipelineRow implements the mapping protocol), but `to_dict()` is the established pattern across all transforms.
 
 ### Terminal Row States
 
@@ -703,29 +546,6 @@ Every row reaches exactly one terminal state - no silent drops:
 - Each attempt recorded separately
 - Backoff metadata captured
 
-### Settings→Runtime Field Mapping
-
-**P2-2026-01-21 lesson:** Settings fields can be orphaned (validated but never used at runtime).
-
-```python
-# WRONG - Field exists in Settings but not wired to engine
-class RetrySettings(BaseModel):
-    exponential_base: float = 2.0  # Validated but ignored!
-
-# CORRECT - Explicit from_settings() mapping
-@dataclass
-class RuntimeRetryConfig:
-    exponential_base: float
-
-    @classmethod
-    def from_settings(cls, s: RetrySettings) -> "RuntimeRetryConfig":
-        return cls(exponential_base=s.exponential_base)  # Explicit!
-```
-
-**Verification:** Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`.
-
-See "Settings→Runtime Configuration Pattern" in Core Architecture for full documentation.
-
 ### Secret Handling
 
 Never store secrets directly - use HMAC fingerprints for audit:
@@ -734,93 +554,34 @@ Never store secrets directly - use HMAC fingerprints for audit:
 fingerprint = hmac.new(fingerprint_key, secret.encode(), hashlib.sha256).hexdigest()
 ```
 
-**Secret Loading:**
-
-Secrets can be loaded from environment variables (default) or Azure Key Vault:
+Secrets can be loaded from environment variables (default) or Azure Key Vault via the `secrets:` section in `settings.yaml`:
 
 ```yaml
-# Pipeline settings.yaml
 secrets:
   source: keyvault
-  vault_url: https://my-vault.vault.azure.net  # Must be literal URL
+  vault_url: https://my-vault.vault.azure.net  # Must be literal URL, not env var reference
   mapping:
     AZURE_OPENAI_KEY: azure-openai-key
     ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
 ```
 
-When `source: keyvault`, secrets are loaded at startup and injected into environment variables before config resolution. This means `${AZURE_OPENAI_KEY}` in your config will resolve to the Key Vault secret value.
-
-**IMPORTANT:** `vault_url` must be a literal HTTPS URL. Environment variable references like `${AZURE_KEYVAULT_URL}` are NOT supported because secrets must be loaded before environment variable resolution.
-
-**Fingerprint Key:**
-
-The `ELSPETH_FINGERPRINT_KEY` is used to compute HMAC fingerprints of secrets for the audit trail. Configure it:
-
-1. **Environment variable:** `export ELSPETH_FINGERPRINT_KEY=your-random-key`
-2. **Key Vault:** Include in your secrets mapping (recommended for production)
-
-**Audit Trail:**
-
-Secret resolutions are recorded in the `secret_resolutions` Landscape table, including:
-- Which vault the secret came from
-- The HMAC fingerprint (not the value)
-- Resolution latency
-
-**Deprecated:** `ELSPETH_KEYVAULT_URL` and `ELSPETH_KEYVAULT_SECRET_NAME` environment variables are no longer recognized. Use the `secrets:` configuration section instead.
+`vault_url` must be a literal HTTPS URL because secrets are loaded before environment variable resolution. Secret resolutions are recorded in the `secret_resolutions` Landscape table (vault source, HMAC fingerprint, latency).
 
 ### Test Path Integrity
 
-**Never bypass production code paths in tests.** When integration tests manually construct objects instead of using production factories, bugs hide in the untested path.
-
-**The Dual Code Path Problem:**
+**Never bypass production code paths in tests.** BUG-LINEAGE-01 hid for weeks because tests manually built `ExecutionGraph` objects instead of using `from_plugin_instances()`. Manual construction had the correct mapping; the production path had a different (wrong) one. Tests passed, production was broken.
 
 ```python
-# WRONG - Manual construction in tests bypasses production logic
-def test_fork_coalesce_manually_built():
-    graph = ExecutionGraph()
-    graph.add_node("source", ...)
-    graph._branch_to_coalesce = {"path_a": "merge1"}  # Manual assignment
-    # This test passes even when from_plugin_instances() is broken!
+# WRONG - bypasses production logic
+graph = ExecutionGraph()
+graph.add_node("source", ...)
+graph._branch_to_coalesce = {"path_a": "merge1"}  # Tests pass, production breaks
+
+# CORRECT - exercises the real code path
+graph = ExecutionGraph.from_plugin_instances(source=source, transforms=transforms, ...)
 ```
 
-```python
-# CORRECT - Uses production path
-def test_fork_coalesce_production_path():
-    graph = ExecutionGraph.from_plugin_instances(  # Production factory
-        source=source,
-        transforms=transforms,
-        sinks=sinks,
-        gates=gates,
-        coalesce_settings=coalesce_settings,
-        output_sink="output",
-    )
-    branch_map = graph.get_branch_to_coalesce_map()
-    # This test FAILS if from_plugin_instances() is broken!
-```
-
-**Why this matters:**
-
-- **BUG-LINEAGE-01** hid for weeks because tests manually built graphs
-- Manual construction had `branch_to_coalesce[branch] = coalesce_config.name` (correct)
-- Production path had `branch_to_coalesce[branch] = cid` (node_id - wrong!)
-- Tests passed, production was broken
-
-**Rules:**
-
-- ✅ Use `ExecutionGraph.from_plugin_instances()` in integration tests
-- ✅ Use `instantiate_plugins_from_config()` to get real plugin instances
-- ✅ Exercise the same code path that production uses
-- ❌ Manual `graph.add_node()` / `graph._field = value` bypasses validation
-- ❌ Direct attribute assignment skips production logic
-- ❌ "It's easier to test this way" creates blind spots
-
-**When manual construction is acceptable:**
-
-- Unit tests of graph algorithms (topological sort, cycle detection)
-- Testing graph visualization/rendering
-- Testing helper methods that don't depend on construction path
-
-**For integration tests:** Always use production factories.
+**Rules:** Integration tests MUST use `ExecutionGraph.from_plugin_instances()` and `instantiate_plugins_from_config()`. Manual construction is acceptable only for unit tests of isolated algorithms (topo sort, cycle detection, visualization).
 
 ## Configuration Precedence (High to Low)
 
@@ -875,37 +636,20 @@ src/elspeth/
 │   ├── batching/       # Batch-aware transform adapters
 │   └── pooling/        # Thread pool management for plugins
 ├── tui/                # Terminal UI (Textual) - explain screens and widgets
-├── cli.py              # Typer CLI (1700+ LOC)
+├── cli.py              # Typer CLI
 └── cli_helpers.py      # CLI utility functions
 ```
 
 ## No Legacy Code Policy
 
-**STRICT REQUIREMENT:** Legacy code, backwards compatibility, and compatibility shims are strictly forbidden.
+**STRICT REQUIREMENT:** Legacy code, backwards compatibility, and compatibility shims are strictly forbidden. WE HAVE NO USERS YET. Deferring breaking changes until we do is the opposite of what we want.
 
 ### Anti-Patterns - Never Do This
 
-The following are **strictly prohibited** under all circumstances:
-
-1. **Backwards Compatibility Code**
-   - No version checks (e.g., `if version < 2.0: old_code() else: new_code()`)
-   - No feature flags for old behavior
-   - No "compatibility mode" switches
-
-2. **Legacy Shims and Adapters**
-   - No adapter classes to support old interfaces
-   - No wrapper functions that translate old APIs to new ones
-   - No proxy objects for deprecated functionality
-
-3. **Deprecated Code Retention**
-   - No `@deprecated` decorators with code kept around
-   - No commented-out old implementations "for reference"
-   - No `_legacy` or `_old` suffixed functions
-
-4. **Migration Helpers**
-   - No code that supports "both old and new" simultaneously
-   - No gradual migration paths in the codebase
-   - No transition periods with dual implementations
+1. **Backwards Compatibility Code** - No version checks, feature flags for old behavior, or "compatibility mode" switches
+2. **Legacy Shims** - No adapter classes, wrapper functions, or proxy objects for deprecated functionality
+3. **Deprecated Code Retention** - No `@deprecated` decorators with code kept around, no commented-out implementations "for reference"
+4. **Migration Helpers** - No code supporting "both old and new" simultaneously
 
 ### The Rule
 
@@ -913,136 +657,41 @@ The following are **strictly prohibited** under all circumstances:
 
 - Don't rename unused variables to `_var` - delete the variable
 - Don't keep old code in comments - delete it (git history exists)
-- Don't add compatibility layers - change all call sites
+- Don't add compatibility layers - change all call sites in the same commit
 - Don't create abstractions to hide breaking changes - make the breaking change
 
-**Default stance:** If old code needs to be removed, delete it completely. If call sites need updating, update them all in the same commit.
-
-### Enforcement
-
-- Claude Code MUST NOT introduce backwards compatibility code
-- Claude Code MUST NOT create legacy shims or adapters
-- Claude Code MUST delete old code completely when making changes
-- Any legacy code patterns MUST be flagged and removed immediately
+If you are proposing a fix that involves "a patch or temporary workaround," STOP. We only have one chance to fix things pre-release. Make the fix right, not quick. This especially includes architectural defects. Lint failures, failing tests, and CI/CD issues must all be resolved to merge — no exceptions.
 
 ## Git Safety
 
-**STRICT REQUIREMENT:** Never run destructive git commands without explicit user permission.
+**Never run destructive git commands without explicit user permission:**
 
-### Destructive Commands (REQUIRE PERMISSION)
-
-The following commands can destroy uncommitted work or rewrite history. **ALWAYS ask before running:**
-
-- `git reset --hard` - Discards uncommitted changes
-- `git clean -f` - Deletes untracked files permanently
-- `git checkout -- <file>` - Discards uncommitted changes to file
+- `git reset --hard`, `git clean -f`, `git checkout -- <file>` - Discard uncommitted changes
 - `git push --force` - Rewrites remote history
 - `git rebase` (on pushed branches) - Rewrites shared history
 
-### When You Think You Need a Destructive Command
+**No git worktrees.** Use regular branches instead.
 
-**Don't.** Go back and get clarification from the user.
+**No git stash.** The stash/pop cycle has caused repeated data loss in this project — pre-commit hooks that stash/unstash silently destroy unstaged work when `stash pop` encounters conflicts. If you need to preserve work, commit it to a branch.
 
-## No Git Worktrees
+## Prohibition on Defensive Programming Patterns
 
-**STRICT REQUIREMENT:** Do not use git worktrees in this project.
+This codebase prohibits defensive patterns that mask bugs instead of fixing them. Do not use `.get()`, `getattr()`, `hasattr()`, `isinstance()`, or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types.
 
-Worktrees add complexity without benefit for our workflow:
-- They create divergence that leads to merge conflicts
-- Rebase/merge state can become corrupted across worktrees
-- "Isolation" is illusory when you still have to merge back
-- Regular branches are simpler and sufficient
+A common anti-pattern: an LLM hallucinates a field name, code fails, and the "fix" is `getattr(obj, "hallucinated_field", None)`. This hides the real bug. Fix the actual cause instead.
 
-**If you think you need a worktree:** You don't. Use a regular branch instead.
-
-## No Stashing, No Temporary File Movement
-
-**STRICT REQUIREMENT:** `git stash`, `git stash pop`, `git stash drop`, and ALL forms of temporary file displacement are **absolutely forbidden**.
-
-### What Is Forbidden
-
-- `git stash` / `git stash push` - Moves uncommitted work to a hidden stack
-- `git stash pop` / `git stash apply` - Restores stashed changes (often lossy)
-- `git stash drop` / `git stash clear` - Destroys stashed changes
-- Moving, copying, or renaming files as a "temporary" measure
-- Any operation that displaces the user's working tree state without explicit permission
-
-### Why This Is Forbidden
-
-Pre-commit hooks and agent workflows that stash/unstash silently cause **data loss**. The stash/pop cycle is inherently unsafe:
-
-1. `git stash --keep-index` before hooks separates staged from unstaged changes
-2. After the commit, `git stash pop` attempts to reapply unstaged changes
-3. If the pop encounters any conflict or corruption, **unstaged work is silently destroyed**
-4. The user sees a clean working tree and has no indication that changes were lost
-
-This has caused repeated data loss in this project. There is no safe use of stash in an automated context.
-
-### What To Do Instead
-
-- **Commit everything you want to keep.** Stage all changes before committing. If you need to commit a subset, commit the subset, then make the remaining changes in a follow-up commit.
-- **Never run operations that implicitly stash.** If a tool or hook wants to stash, that tool is broken for our workflow.
-- **If you think you need stash:** You don't. Commit your work to a branch instead.
-
-## PROHIBITION ON "DEFENSIVE PROGRAMMING" PATTERNS
-
-No Bug-Hiding Patterns: This codebase prohibits defensive patterns that mask bugs instead of fixing them. Do not use .get(), getattr(), hasattr(), isinstance(), or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. A common anti-pattern is when an LLM hallucinates a variable or field name, the code fails, and the "fix" is wrapping it in getattr(obj, "hallucinated_field", None) to silence the error—this hides the real bug. When code fails, fix the actual cause: correct the field name, migrate the data source to emit proper types, or fix the broken integration. Typed dataclasses with discriminator fields serve as contracts; access fields directly (obj.field) not defensively (obj.get("field")). If code would fail without a defensive pattern, that failure is a bug to fix, not a symptom to suppress.
+**Access typed dataclass fields directly** (`obj.field`), not defensively (`obj.get("field")`). If code would fail without a defensive pattern, that failure is a bug to fix.
 
 ### Legitimate Uses
 
-This prohibition does not extend to genuine use cases where defensive handling is necessary:
+Defensive handling IS appropriate at trust boundaries (see Three-Tier Trust Model above for the full rules and examples):
 
-**1. Operations on Row Values (Their Data)**
-
-Even type-valid row data can cause operation failures. Wrap these operations:
-
-```python
-# CORRECT - wrapping operations on their data
-def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-    try:
-        result = row["numerator"] / row["denominator"]  # Their data can be 0
-    except ZeroDivisionError:
-        return TransformResult.error(
-            {"reason": "division_by_zero"},
-            retryable=False,
-        )
-    return TransformResult.success(
-        {"result": result},
-        success_reason={"action": "calculated"},
-    )
-
-# WRONG - wrapping access to OUR internal state
-def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-    try:
-        batch_avg = self._total / self._batch_count  # OUR bug if _batch_count is 0
-    except ZeroDivisionError:
-        batch_avg = 0  # NO! This hides our initialization bug
-    return TransformResult.success(
-        {"batch_avg": batch_avg},
-        success_reason={"action": "averaged"},
-    )
-```
-
-**The distinction:** Wrapping `row["x"] / row["y"]` is correct because `row` is their data. Wrapping `self._x / self._y` is wrong because `self` is our code.
-
-**2. External System Boundaries**
-
-- **External API responses**: Validating JSON structure from LLM providers or HTTP endpoints before processing
-- **Source plugin input**: Coercing/validating external data at ingestion (see Three-Tier Trust Model above)
-
-**3. Framework Boundaries**
-
-- **Plugin schema contracts**: Type checking at plugin boundaries where external code meets the framework
-- **Configuration validation**: Pydantic validators rejecting malformed config at load time
-
-**4. Serialization**
-
-- **Pandas dtype normalization**: Converting `numpy.int64` → `int` in canonicalization (already documented above)
-- **Serialization polymorphism**: Handling `datetime`, `Decimal`, `bytes` in canonical JSON
+1. **Operations on row values** - Their data can cause operation failures (division by zero, parse errors). Wrap `row["x"] / row["y"]`, but NOT `self._x / self._y` (our bug if that fails).
+2. **External system boundaries** - Validate API/LLM responses immediately at the boundary.
+3. **Framework boundaries** - Plugin schema contracts, Pydantic config validation at load time.
+4. **Serialization** - pandas/numpy dtype normalization in canonical JSON.
 
 ### The Decision Test
-
-Ask yourself:
 
 | Question | If Yes | If No |
 |----------|--------|-------|
@@ -1052,9 +701,3 @@ Ask yourself:
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
 
 If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
-
-## FINAL COMMENT
-
-If you are thinking to yourself 'we can't break the schema because it will disrupt users' or 'we need to support old data formats', STOP. This codebase has a NO LEGACY CODE POLICY. We do not support backwards compatibility, legacy shims, or compatibility layers. When something is removed or changed, DELETE THE OLD CODE COMPLETELY. Fix all call sites in the same commit. Do not create adapters or compatibility modes. If you need to change a schema, change it fully and update all code that uses it. WE HAVE NO USERS. WE WILL HAVE USERS IN THE FUTURE, DEFERRING BREAKING CHANGES UNTIL WE HAVE USERS IS THE OPPOSITE OF WHAT WE WANT.
-
-If you are proposing or implementing a fix and it involves 'a patch or temporary workaround', STOP. This codebase does not allow patches or temporary workarounds. WE ONLY HAVE ONE CHANCE TO FIX THINGS PRE-RELEASE. Make the fix right, not quick. Do not create 5 hours of technical debt because you wanted to avoid 5 minutes of work today. THIS ESPECIALLY INCLUDES ARCHITECTURAL DEFECTS WHICH MUST BE FIXED PROPERLY NOW. Saying 'I didn't cause this' is not an excuse for disregarding lint, failing tests or CICD. They all must be resolved to merge code, no exceptions. Refusing to do the work now is false economy.
