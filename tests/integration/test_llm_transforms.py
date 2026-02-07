@@ -382,12 +382,16 @@ class TestOpenRouterLLMTransformIntegration:
     """
 
     @pytest.fixture
-    def recorder(self) -> LandscapeRecorder:
-        """Create recorder with in-memory DB."""
-        db = LandscapeDB.in_memory()
-        rec = LandscapeRecorder(db)
-        rec.record_call = Mock()  # type: ignore[method-assign]
-        return rec
+    def recorder(self, tmp_path) -> LandscapeRecorder:
+        """Create recorder with file-based DB for cross-thread access.
+
+        OpenRouterLLMTransform uses BatchTransformMixin which processes
+        rows in a background thread. SQLite in-memory databases are
+        per-connection, so the background thread would get an empty DB.
+        A file-based temp DB is shared across threads correctly.
+        """
+        db = LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
+        return LandscapeRecorder(db)
 
     @pytest.fixture
     def executor(self, recorder: LandscapeRecorder) -> TransformExecutor:
@@ -503,6 +507,15 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.row["llm_response_model"] == "anthropic/claude-3-opus"
         assert error_sink is None
 
+        # Verify audit trail - HTTP call was recorded via AuditedHTTPClient
+        calls = recorder.get_calls(ctx.state_id)
+        assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
+        http_call = calls[0]
+        assert http_call.call_type == CallType.HTTP
+        assert http_call.status == CallStatus.SUCCESS
+        assert http_call.request_hash is not None
+        assert http_call.response_hash is not None
+
         transform.close()
 
     @pytest.mark.chaosllm(internal_error_pct=100.0)
@@ -552,6 +565,12 @@ class TestOpenRouterLLMTransformIntegration:
 
         assert "500" in str(exc_info.value)
 
+        # Verify audit trail - error call was recorded via AuditedHTTPClient
+        calls = recorder.get_calls(ctx.state_id)
+        assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
+        assert calls[0].call_type == CallType.HTTP
+        assert calls[0].status == CallStatus.ERROR
+
         transform.close()
 
     @pytest.mark.chaosllm(rate_limit_pct=100.0)
@@ -600,6 +619,12 @@ class TestOpenRouterLLMTransformIntegration:
             )
 
         assert "429" in str(exc_info.value)
+
+        # Verify audit trail - rate limit error call was recorded
+        calls = recorder.get_calls(ctx.state_id)
+        assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
+        assert calls[0].call_type == CallType.HTTP
+        assert calls[0].status == CallStatus.ERROR
 
         transform.close()
 

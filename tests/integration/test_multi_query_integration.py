@@ -137,12 +137,16 @@ def mock_azure_openai_multi_query(
 
 
 @pytest.fixture
-def recorder() -> LandscapeRecorder:
-    """Create recorder with in-memory DB."""
-    db = LandscapeDB.in_memory()
-    rec = LandscapeRecorder(db)
-    rec.record_call = Mock()  # type: ignore[method-assign]
-    return rec
+def recorder(tmp_path) -> LandscapeRecorder:
+    """Create recorder with file-based DB for cross-thread access.
+
+    AzureMultiQueryLLMTransform uses BatchTransformMixin which processes
+    rows in a background thread. SQLite in-memory databases are
+    per-connection, so the background thread would get an empty DB.
+    A file-based temp DB is shared across threads correctly.
+    """
+    db = LandscapeDB.from_url(f"sqlite:///{tmp_path / 'audit.db'}")
+    return LandscapeRecorder(db)
 
 
 @pytest.fixture
@@ -275,6 +279,14 @@ class TestMultiQueryIntegration:
                     assert f"{cs}_{crit}_score" in output, f"Missing {cs}_{crit}_score"
                     assert f"{cs}_{crit}_rationale" in output, f"Missing {cs}_{crit}_rationale"
 
+            # Verify audit trail - LLM calls were recorded via AuditedLLMClient
+            from elspeth.contracts import CallStatus, CallType
+
+            calls = recorder.get_calls(ctx.state_id)
+            llm_calls = [c for c in calls if c.call_type == CallType.LLM]
+            assert len(llm_calls) == 10, f"Expected 10 LLM calls recorded, got {len(llm_calls)}"
+            assert all(c.status == CallStatus.SUCCESS for c in llm_calls)
+
             transform.close()
 
     def test_multiple_rows_through_multi_query(
@@ -361,5 +373,13 @@ class TestMultiQueryIntegration:
                 assert result.row is not None
                 assert "case_quality_score" in result.row
                 assert "case_safety_score" in result.row
+
+            # Verify audit trail - LLM calls recorded for at least the last state
+            from elspeth.contracts import CallStatus, CallType
+
+            calls = recorder.get_calls(ctx.state_id)
+            llm_calls = [c for c in calls if c.call_type == CallType.LLM]
+            assert len(llm_calls) == 2, f"Expected 2 LLM calls for last row, got {len(llm_calls)}"
+            assert all(c.status == CallStatus.SUCCESS for c in llm_calls)
 
             transform.close()
