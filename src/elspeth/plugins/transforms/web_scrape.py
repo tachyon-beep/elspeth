@@ -223,12 +223,11 @@ class WebScrapeTransform(BaseTransform):
         )
 
         return TransformResult.success(
-            output,
+            PipelineRow(output, output_contract),
             success_reason={
                 "action": "enriched",
                 "fields_added": [self._content_field, self._fingerprint_field],
             },
-            contract=output_contract,
         )
 
     def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: PluginContext) -> httpx.Response:

@@ -230,9 +230,8 @@ class _PassTransform(BaseTransform):
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         # Convert PipelineRow to dict and pass contract along
         return TransformResult.success(
-            row.to_dict(),
+            PipelineRow(row.to_dict(), row.contract),
             success_reason={"action": "passthrough"},
-            contract=row.contract,
         )
 
 
@@ -394,9 +393,8 @@ class TestAuditSweepErrorHandling:
                     return TransformResult.error({"reason": "test_error"})
                 # Convert PipelineRow to dict and pass contract along
                 return TransformResult.success(
-                    row.to_dict(),
+                    PipelineRow(row.to_dict(), row.contract),
                     success_reason={"action": "passthrough"},
-                    contract=row.contract,
                 )
 
         source = _ListSource([{"value": 1}, {"value": 2}, {"value": 3}])

@@ -10,7 +10,7 @@ in batch-aware transforms (aggregations). These tests verify:
 Extracted from test_processor.py to improve test organization.
 """
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from elspeth.contracts import SourceRow
@@ -98,9 +98,8 @@ class TestProcessorPassthroughMode:
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
                     return TransformResult.success_multi(
-                        cast(list[dict[str, Any] | PipelineRow], enriched),
+                        [PipelineRow(r, contract) for r in enriched],
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
                 # Single row mode
                 return TransformResult.success(rows, success_reason={"action": "test"})
@@ -325,9 +324,8 @@ class TestProcessorPassthroughMode:
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
                     return TransformResult.success_multi(
-                        cast(list[dict[str, Any] | PipelineRow], enriched),
+                        [PipelineRow(r, contract) for r in enriched],
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
@@ -345,7 +343,8 @@ class TestProcessorPassthroughMode:
                 self.node_id = node_id
 
             def process(self, row: "PipelineRow", ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "value": row["value"] * 2}, success_reason={"action": "test"})
+                output = {**row, "value": row["value"] * 2}
+                return TransformResult.success(PipelineRow(output, row.contract), success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -488,9 +487,8 @@ class TestProcessorTransformMode:
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
                     return TransformResult.success_multi(
-                        cast(list[dict[str, Any] | PipelineRow], output_rows),
+                        [PipelineRow(r, contract) for r in output_rows],
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
                 # Single row mode - not used in this test
                 return TransformResult.success(rows, success_reason={"action": "test"})
@@ -630,7 +628,7 @@ class TestProcessorTransformMode:
                     )
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -758,9 +756,8 @@ class TestProcessorTransformMode:
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
                     return TransformResult.success_multi(
-                        cast(list[dict[str, Any] | PipelineRow], output_rows),
+                        [PipelineRow(r, contract) for r in output_rows],
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
@@ -778,7 +775,8 @@ class TestProcessorTransformMode:
                 self.node_id = node_id
 
             def process(self, row: "PipelineRow", ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "count": row["count"] * 2, "doubled": True}, success_reason={"action": "test"})
+                output = {**row, "count": row["count"] * 2, "doubled": True}
+                return TransformResult.success(PipelineRow(output, row.contract), success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -930,7 +928,7 @@ class TestProcessorSingleMode:
                     )
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         class AddMarker(BaseTransform):
@@ -947,7 +945,8 @@ class TestProcessorSingleMode:
                 self.node_id = node_id
 
             def process(self, row: "PipelineRow", ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "marker": "DOWNSTREAM_EXECUTED"}, success_reason={"action": "test"})
+                output = {**row, "marker": "DOWNSTREAM_EXECUTED"}
+                return TransformResult.success(PipelineRow(output, row.contract), success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -1078,7 +1077,7 @@ class TestProcessorSingleMode:
                     )
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()

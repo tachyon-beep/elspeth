@@ -12,6 +12,7 @@ import pytest
 from elspeth.contracts import NodeStateStatus, NodeType, PipelineRow, RoutingMode, RowOutcome, SourceRow
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import GateName, NodeID
+from elspeth.testing import make_pipeline_row
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
@@ -467,7 +468,7 @@ class TestEngineIntegrationOutcomes:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
+                return TransformResult.success(make_pipeline_row({**row.to_dict(), "enriched": True}), success_reason={"action": "enrich"})
 
         processor = RowProcessor(
             recorder=recorder,
@@ -555,7 +556,7 @@ class TestEngineIntegrationOutcomes:
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 if row["value"] < 0:
                     return TransformResult.error({"reason": "validation_failed", "error": "negative_value"})
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         processor = RowProcessor(
             recorder=recorder,

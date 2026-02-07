@@ -7,6 +7,7 @@ without a contract, causing ValueError at processor.py:712 in transform mode agg
 from __future__ import annotations
 
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.transforms.batch_stats import BatchStats
 
 
@@ -51,24 +52,24 @@ def test_batch_stats_returns_contract_in_transform_mode():
     assert result.row["sum"] == 600
     assert result.row["mean"] == 200
 
-    # CRITICAL: Verify contract is provided
+    # CRITICAL: Verify contract is provided (now inside PipelineRow)
     # Without this, processor.py:712 would raise ValueError in transform mode
-    assert result.contract is not None, (
-        "BatchStats MUST provide contract for transform mode. Missing contract causes ValueError when aggregation creates new tokens."
+    assert isinstance(result.row, PipelineRow), (
+        "BatchStats MUST provide PipelineRow with contract for transform mode. Missing contract causes ValueError when aggregation creates new tokens."
     )
 
     # Verify contract is OBSERVED mode (correct for aggregation output)
-    assert result.contract.mode == "OBSERVED", "Contract should be OBSERVED mode"
+    assert result.row.contract.mode == "OBSERVED", "Contract should be OBSERVED mode"
 
     # Verify contract includes all output fields
     expected_fields = {"count", "sum", "batch_size", "mean", "category"}
-    contract_field_names = {fc.normalized_name for fc in result.contract.fields}
+    contract_field_names = {fc.normalized_name for fc in result.row.contract.fields}
     assert contract_field_names == expected_fields, (
         f"Contract should include all output fields. Expected {expected_fields}, got {contract_field_names}"
     )
 
     # Verify all fields are marked as inferred (OBSERVED mode pattern)
-    for field in result.contract.fields:
+    for field in result.row.contract.fields:
         assert field.source == "inferred", f"Field {field.normalized_name} should be inferred"
         assert field.python_type is object, f"Field {field.normalized_name} should have object type"
 
@@ -93,13 +94,13 @@ def test_batch_stats_contract_empty_batch():
     assert result.row["count"] == 0
     assert result.row["batch_empty"] is True
 
-    # CRITICAL: Contract must be provided even for empty batch
-    assert result.contract is not None, "Should provide contract for empty batch"
-    assert result.contract.mode == "OBSERVED"
+    # CRITICAL: Contract must be provided even for empty batch (inside PipelineRow)
+    assert isinstance(result.row, PipelineRow), "Should provide PipelineRow with contract for empty batch"
+    assert result.row.contract.mode == "OBSERVED"
 
     # Verify empty batch contract includes marker fields
     expected_fields = {"count", "sum", "mean", "batch_empty"}
-    contract_field_names = {fc.normalized_name for fc in result.contract.fields}
+    contract_field_names = {fc.normalized_name for fc in result.row.contract.fields}
     assert contract_field_names == expected_fields
 
 
@@ -121,6 +122,7 @@ def test_batch_stats_contract_without_mean():
     assert "mean" not in result.row
 
     # Verify contract reflects actual output fields
-    contract_field_names = {fc.normalized_name for fc in result.contract.fields}
+    assert isinstance(result.row, PipelineRow)
+    contract_field_names = {fc.normalized_name for fc in result.row.contract.fields}
     assert "mean" not in contract_field_names, "Contract should not include mean when disabled"
     assert contract_field_names == {"count", "sum", "batch_size"}

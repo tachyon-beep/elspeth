@@ -51,7 +51,7 @@ class TrackingTransform(BaseTransform):
         pass
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+        return TransformResult.success(row, success_reason={"action": "test"})
 
     def close(self) -> None:
         self.close_called = True
@@ -155,7 +155,7 @@ class TestOrchestratorCleanup:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
             # Uses default close() from BaseTransform (no-op)
 

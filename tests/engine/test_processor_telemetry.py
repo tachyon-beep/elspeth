@@ -69,7 +69,7 @@ class PassthroughTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class FailingTransform(BaseTransform):
@@ -572,13 +572,12 @@ class BatchAwareTransformForTelemetry(BaseTransform):
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
             return TransformResult.success(
-                output_row,
+                PipelineRow(output_row, contract) if contract else output_row,
                 success_reason={"action": "batch_aggregate"},
-                contract=contract,
             )
         else:
             # Single row mode
-            return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+            return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class FailingBatchAwareTransform(BaseTransform):
@@ -602,7 +601,7 @@ class FailingBatchAwareTransform(BaseTransform):
             return TransformResult.error({"reason": "intentional_failure"})
         else:
             # Single row mode - succeed (shouldn't be called in batch mode)
-            return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+            return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class PassthroughBatchAwareTransform(BaseTransform):
@@ -645,14 +644,16 @@ class PassthroughBatchAwareTransform(BaseTransform):
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
             return TransformResult.success_multi(
-                cast("list[dict[str, Any] | PipelineRow]", enriched_rows),
+                [PipelineRow(r, contract) for r in enriched_rows]
+                if contract
+                else cast("list[dict[str, Any] | PipelineRow]", enriched_rows),
                 success_reason={"action": "batch_passthrough"},
-                contract=contract,
             )
         else:
             # Single row mode
+            output = {**row.to_dict(), "batch_processed": False}
             return TransformResult.success(
-                {**row.to_dict(), "batch_processed": False},
+                PipelineRow(output, row.contract),
                 success_reason={"action": "passthrough"},
             )
 

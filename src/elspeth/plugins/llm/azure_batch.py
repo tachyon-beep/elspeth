@@ -400,17 +400,16 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            # Propagate success_reason AND contract from batch result
-            # Contract is critical for downstream transforms to access LLM-added fields
+            # result.rows[0] is already PipelineRow from _process_batch
             return TransformResult.success(
                 result.rows[0],
                 success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
-                contract=result.contract,
             )
         elif result.status == "error":
             return result
         else:
             # Empty rows from empty batch - shouldn't happen for single row
+            # row is already PipelineRow (the input)
             return TransformResult.success(
                 row,
                 success_reason={"action": "passthrough"},
@@ -1005,7 +1004,7 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         # Assemble output rows in original order
-        output_rows: list[dict[str, Any] | PipelineRow] = []
+        output_rows: list[dict[str, Any]] = []
         row_errors: list[RowErrorEntry] = []
 
         # Track which rows had template errors (excluded from batch)
@@ -1211,10 +1210,10 @@ class AzureBatchLLMTransform(BaseTransform):
         else:
             output_contract = None
 
+        assert output_contract is not None, "output_rows is non-empty so contract was built"
         return TransformResult.success_multi(
-            output_rows,
+            [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
-            contract=output_contract,
         )
 
     @property

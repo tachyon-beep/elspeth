@@ -66,7 +66,7 @@ class SumTransform(BaseTransform):
                 for key in output_row
             )
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-            return TransformResult.success(output_row, success_reason={"action": "sum"}, contract=contract)
+            return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "sum"})
         return TransformResult.success(rows.to_dict(), success_reason={"action": "passthrough"})
 
 

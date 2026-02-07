@@ -74,9 +74,8 @@ class BatchCollectorTransform(BaseTransform):
             )
 
             return TransformResult.success(
-                output,
+                PipelineRow(output, contract) if contract else output,
                 success_reason={"action": "batch"},
-                contract=contract,
             )
         else:
             # Single row - passthrough

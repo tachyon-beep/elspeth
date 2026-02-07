@@ -35,6 +35,7 @@ from elspeth.engine.clock import MockClock
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
+from elspeth.testing import make_pipeline_row
 from tests.conftest import (
     CallbackSource,
     _TestSchema,
@@ -125,10 +126,10 @@ class TestAggregationTimeoutIntegration:
                     total = sum(r.get("value", 0) for r in rows)
                     output_row = {"id": rows[0].get("id"), "value": total, "count": len(rows)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
                 else:
                     # Single row mode - passthrough
-                    return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                    return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         class CollectingSink(_TestSinkBase):
             """Sink that collects rows for verification."""
@@ -318,8 +319,8 @@ class TestAggregationTimeoutIntegration:
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects all rows."""
@@ -476,8 +477,8 @@ class TestAggregationTimeoutIntegration:
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
             """Simple sink."""
@@ -642,8 +643,8 @@ class TestEndOfSourceFlush:
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -787,11 +788,10 @@ class TestEndOfSourceFlush:
                     enriched = [{**r, "batch_total": batch_total, "batch_size": len(row)} for r in row]
                     contract = create_observed_contract(enriched[0]) if enriched else None
                     return TransformResult.success_multi(
-                        cast(list[dict[str, Any] | PipelineRow], enriched),
+                        [PipelineRow(r, contract) for r in enriched] if contract else cast(list[dict[str, Any] | PipelineRow], enriched),
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -939,11 +939,10 @@ class TestEndOfSourceFlush:
                     ]
                     contract = create_observed_contract(first_row)
                     return TransformResult.success_multi(
-                        output_rows,
+                        [PipelineRow(r, contract) for r in output_rows] if contract else output_rows,
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -1083,11 +1082,10 @@ class TestEndOfSourceFlush:
                     enriched = [{**r, "batch_total": batch_total} for r in row]
                     contract = create_observed_contract(enriched[0]) if enriched else None
                     return TransformResult.success_multi(
-                        cast(list[dict[str, Any] | PipelineRow], enriched),
+                        [PipelineRow(r, contract) for r in enriched] if contract else cast(list[dict[str, Any] | PipelineRow], enriched),
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
             """Second transform: adds 'processed' field."""
@@ -1101,7 +1099,7 @@ class TestEndOfSourceFlush:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({**row, "processed": True}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({**row, "processed": True}), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -1237,8 +1235,8 @@ class TestEndOfSourceFlush:
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
             """Second transform: adds 'processed' field."""
@@ -1253,7 +1251,8 @@ class TestEndOfSourceFlush:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
-                    {**row, "processed": True, "doubled_total": row.get("total", 0) * 2}, success_reason={"action": "test"}
+                    make_pipeline_row({**row, "processed": True, "doubled_total": row.get("total", 0) * 2}),
+                    success_reason={"action": "test"},
                 )
 
         class CollectorSink(_TestSinkBase):
@@ -1389,7 +1388,7 @@ class TestTimeoutFlushErrorHandling:
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure"})
                 # Single row passthrough (shouldn't happen in batch mode)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         # Create mock clock for deterministic timeout testing
         clock = MockClock(start=0.0)
@@ -1537,8 +1536,8 @@ class TestTimeoutFlushErrorHandling:
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         # Create mock clock for deterministic timeout testing
         clock = MockClock(start=0.0)
@@ -1724,7 +1723,7 @@ class TestTimeoutFlushErrorHandling:
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_passthrough_failure"})
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -1896,7 +1895,7 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "eos_failure"})
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class ShortSource(_TestSourceBase):
             """Source that emits 2 rows (won't trigger count=10)."""
@@ -2073,7 +2072,7 @@ class TestTimeoutFlushErrorHandling:
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_single_mode_failure"})
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -2236,7 +2235,7 @@ class TestTimeoutFlushErrorHandling:
                     # Batch flush - FAIL
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_transform_mode_failure"})
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -2419,8 +2418,8 @@ class TestTimeoutFlushStepIndexing:
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -2570,8 +2569,8 @@ class TestTimeoutFlushStepIndexing:
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -2722,8 +2721,8 @@ class TestExpectedOutputCountEnforcement:
                     total = sum(r.get("value", 0) for r in row)
                     output_row = {"total": total, "count": len(row)}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
             """Simple sink."""
@@ -2858,11 +2857,10 @@ class TestExpectedOutputCountEnforcement:
                     ]
                     contract = create_observed_contract(first_row)
                     return TransformResult.success_multi(
-                        output_rows,
+                        [PipelineRow(r, contract) for r in output_rows] if contract else output_rows,
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
             """Simple sink."""
@@ -2986,11 +2984,10 @@ class TestExpectedOutputCountEnforcement:
                     output_rows: list[dict[str, Any] | PipelineRow] = [first_row, {"part": 2}]
                     contract = create_observed_contract(first_row)
                     return TransformResult.success_multi(
-                        output_rows,
+                        [PipelineRow(r, contract) for r in output_rows] if contract else output_rows,
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
             """Simple sink."""
@@ -3126,11 +3123,10 @@ class TestExpectedOutputCountEnforcement:
                         create_observed_contract(first_row if isinstance(first_row, dict) else first_row.to_dict()) if output_rows else None
                     )
                     return TransformResult.success_multi(
-                        output_rows,
+                        [PipelineRow(r, contract) for r in output_rows] if contract else output_rows,
                         success_reason={"action": "test"},
-                        contract=contract,
                     )
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
             """Simple sink."""

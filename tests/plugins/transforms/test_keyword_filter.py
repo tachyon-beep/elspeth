@@ -259,7 +259,7 @@ class TestKeywordFilterProcessing:
         result = transform.process(make_pipeline_row(row), make_mock_context())
 
         assert result.status == "success"
-        assert result.row == row
+        assert result.row.to_dict() == row
 
     def test_row_with_match_returns_error(self) -> None:
         """Rows with pattern matches return error result."""

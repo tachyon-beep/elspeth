@@ -15,6 +15,7 @@ import pytest
 import respx
 
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.testing import make_pipeline_row
 
@@ -189,11 +190,11 @@ def test_contract_includes_output_fields(transform, mock_ctx):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
         assert result.status == "success"
-        # Contract MUST be provided so executor can use it
-        assert result.contract is not None, "TransformResult must include contract for new fields"
+        # Contract MUST be provided so executor can use it (now inside PipelineRow)
+        assert isinstance(result.row, PipelineRow), "TransformResult must include PipelineRow with contract for new fields"
 
         # Contract must include all output fields
-        field_names = {f.normalized_name for f in result.contract.fields}
+        field_names = {f.normalized_name for f in result.row.contract.fields}
 
         # Input field should be preserved
         assert "url" in field_names
@@ -216,10 +217,10 @@ def test_contract_field_types_are_correct(transform, mock_ctx):
     with patch("socket.getaddrinfo", _mock_getaddrinfo("93.184.216.34")):
         result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
 
-        assert result.contract is not None
+        assert isinstance(result.row, PipelineRow)
 
         # Get field contracts by name
-        field_by_name = {f.normalized_name: f for f in result.contract.fields}
+        field_by_name = {f.normalized_name: f for f in result.row.contract.fields}
 
         # Check types
         assert field_by_name["page_content"].python_type is str

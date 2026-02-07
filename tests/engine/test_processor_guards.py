@@ -123,7 +123,7 @@ class TestProcessorGuards:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> PluginTransformResult:
-                return PluginTransformResult.success(row.to_dict(), success_reason={"action": "pass"})
+                return PluginTransformResult.success(row, success_reason={"action": "pass"})
 
         transform = SimpleTransform(transform_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -210,9 +210,8 @@ class TestProcessorGuards:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> PluginTransformResult:
-                output = row.to_dict()
-                output[self._field_name] = self._field_value
-                return PluginTransformResult.success(output, success_reason={"action": "add_field"})
+                output = {**row.to_dict(), self._field_name: self._field_value}
+                return PluginTransformResult.success(PipelineRow(output, row.contract), success_reason={"action": "add_field"})
 
         # Register transforms and create instances
         transforms = []
@@ -308,8 +307,7 @@ class TestProcessorGuards:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> PluginTransformResult:
-                # Passthrough - return dict copy of row data
-                return PluginTransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return PluginTransformResult.success(row, success_reason={"action": "passthrough"})
 
         transform = PassthroughTransform(transform_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})

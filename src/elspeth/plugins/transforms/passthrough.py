@@ -85,9 +85,8 @@ class PassThrough(BaseTransform):
             self.input_schema.model_validate(row.to_dict())  # Raises on failure
 
         return TransformResult.success(
-            copy.deepcopy(row.to_dict()),
+            PipelineRow(copy.deepcopy(row.to_dict()), row.contract),
             success_reason={"action": "passthrough"},
-            contract=row.contract,
         )
 
     def close(self) -> None:

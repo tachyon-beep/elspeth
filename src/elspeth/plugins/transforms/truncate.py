@@ -145,12 +145,11 @@ class Truncate(BaseTransform):
         ]
 
         return TransformResult.success(
-            output,
+            PipelineRow(output, row.contract),
             success_reason={
                 "action": "transformed",
                 "fields_modified": fields_modified,
             },
-            contract=row.contract,
         )
 
     def close(self) -> None:

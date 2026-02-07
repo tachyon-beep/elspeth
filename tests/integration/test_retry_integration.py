@@ -29,6 +29,7 @@ from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
+from elspeth.testing import make_pipeline_row
 
 
 def _make_contract(data: dict[str, Any]) -> SchemaContract:
@@ -68,7 +69,7 @@ class FlakyTransform(BaseTransform):
         self.fail_count += 1
         if self.fail_count <= self.max_fails:
             raise ConnectionError(f"Transient failure attempt {self.fail_count}")
-        return TransformResult.success({"processed": True, **row}, success_reason={"action": "processed"})
+        return TransformResult.success(make_pipeline_row({"processed": True, **row}), success_reason={"action": "processed"})
 
 
 class AlwaysFailTransform(BaseTransform):

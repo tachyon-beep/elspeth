@@ -387,7 +387,7 @@ class TestPromptShieldBatchProcessing:
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
             assert result.status == "success"
-            assert result.row == row_data
+            assert result.row.to_dict() == row_data
         finally:
             transform.close()
 

@@ -18,7 +18,7 @@ from elspeth.contracts import Determinism, TransformErrorCategory, TransformErro
 from elspeth.contracts.errors import QueryFailureDetail
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
@@ -574,8 +574,13 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Build fields_added from output_mapping suffixes for this query
         fields_added = [f"{spec.output_prefix}_{field_config.suffix}" for field_config in self._output_mapping.values()]
+        observed = SchemaContract(
+            mode="OBSERVED",
+            fields=tuple(FieldContract(k, k, object, False, "inferred") for k in output),
+            locked=True,
+        )
         return TransformResult.success(
-            output,
+            PipelineRow(output, observed),
             success_reason={"action": "enriched", "fields_added": fields_added},
         )
 
@@ -653,14 +658,19 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         try:
             result = self._process_single_row_internal(row_data, ctx.state_id, token_id)
-            # Propagate contract on success
+            # Wrap output in PipelineRow with propagated contract
             if result.status == "success" and result.row is not None:
-                # Convert PipelineRow to dict for contract propagation
-                output_row = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
-                result.contract = propagate_contract(
+                output_row = result.row.to_dict()
+                output_contract = propagate_contract(
                     input_contract=input_contract,
                     output_row=output_row,
-                    transform_adds_fields=True,  # Multi-query transforms add multiple output fields
+                    transform_adds_fields=True,
+                )
+                assert result.success_reason is not None, "success status guarantees success_reason"
+                return TransformResult.success(
+                    PipelineRow(output_row, output_contract),
+                    success_reason=result.success_reason,
+                    context_after=result.context_after,
                 )
             return result
         finally:
@@ -735,8 +745,13 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         all_fields_added = [
             f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
         ]
+        observed = SchemaContract(
+            mode="OBSERVED",
+            fields=tuple(FieldContract(k, k, object, False, "inferred") for k in output),
+            locked=True,
+        )
         return TransformResult.success(
-            output,
+            PipelineRow(output, observed),
             success_reason={"action": "enriched", "fields_added": all_fields_added},
             context_after=pool_context,
         )

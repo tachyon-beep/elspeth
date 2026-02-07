@@ -58,7 +58,7 @@ class TestLifecycleHooks:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 call_order.append("process")
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class TrackedSource(_TestSourceBase):
             name = "tracked_source"
@@ -114,7 +114,7 @@ class TestLifecycleHooks:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 call_order.append("process")
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 call_order.append("on_complete")

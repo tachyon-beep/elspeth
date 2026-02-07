@@ -11,7 +11,7 @@ Test plugins inherit from base classes (BaseTransform)
 because the processor uses isinstance() for type-safe plugin detection.
 """
 
-from typing import Any, cast
+from typing import Any
 
 from elspeth.contracts import NodeType, PipelineRow, SourceRow
 from elspeth.contracts.plugin_context import PluginContext
@@ -22,6 +22,7 @@ from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
 )
+from elspeth.testing import make_pipeline_row
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
@@ -91,7 +92,7 @@ class TestProcessorBatchTransforms:
                     )
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -186,9 +187,11 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Batch mode - sum all values
-                    return TransformResult.success({"value": sum(r["value"] for r in rows)}, success_reason={"action": "test"})
+                    return TransformResult.success(
+                        make_pipeline_row({"value": sum(r["value"] for r in rows)}), success_reason={"action": "test"}
+                    )
                 # Single-row mode - double
-                return TransformResult.success({"value": rows["value"] * 2}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({"value": rows["value"] * 2}), success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -280,7 +283,7 @@ class TestProcessorBatchTransforms:
                     )
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success(output_row, success_reason={"action": "test"}, contract=contract)
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "test"})
                 return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
@@ -478,10 +481,10 @@ class TestProcessorBatchTransforms:
                     )
                     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
-                    return TransformResult.success(output_row, success_reason={"action": "type_check"}, contract=contract)
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "type_check"})
                 # Single row mode - also call .to_dict()
                 row_dict = rows.to_dict()
-                return TransformResult.success(row_dict, success_reason={"action": "type_check"})
+                return TransformResult.success(make_pipeline_row(row_dict), success_reason={"action": "type_check"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -595,9 +598,8 @@ class TestProcessorDeaggregation:
                 contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
                 return TransformResult.success_multi(
-                    cast(list[dict[str, Any] | PipelineRow], output_rows),
+                    [PipelineRow(r, contract) for r in output_rows],
                     success_reason={"action": "test"},
-                    contract=contract,
                 )
 
         # Setup real recorder
@@ -680,7 +682,9 @@ class TestProcessorDeaggregation:
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 # Return multi-row output (but creates_tokens=False, so should raise)
                 # Convert row to dict to avoid PipelineRow canonicalization issues
-                return TransformResult.success_multi([{**row}, {**row}], success_reason={"action": "test"})
+                return TransformResult.success_multi(
+                    [make_pipeline_row({**row}), make_pipeline_row({**row})], success_reason={"action": "test"}
+                )
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

@@ -25,6 +25,7 @@ from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
 )
+from elspeth.testing import make_pipeline_row
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
@@ -99,7 +100,7 @@ class TestRowProcessor:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
+                return TransformResult.success(make_pipeline_row({"value": row["value"] * 2}), success_reason={"action": "double"})
 
         class AddOneTransform(BaseTransform):
             name = "add_one"
@@ -111,7 +112,7 @@ class TestRowProcessor:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
+                return TransformResult.success(make_pipeline_row({"value": row["value"] + 1}), success_reason={"action": "add_one"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
         processor = RowProcessor(
@@ -195,7 +196,7 @@ class TestRowProcessor:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
+                return TransformResult.success(make_pipeline_row({**row.to_dict(), "enriched": True}), success_reason={"action": "enrich"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
         processor = RowProcessor(
@@ -285,7 +286,7 @@ class TestRowProcessor:
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 if row.get("value", 0) < 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "negative values not allowed"})
-                return TransformResult.success(row.to_dict(), success_reason={"action": "validate"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "validate"})
 
         return ValidatorTransform(node_id, on_error)
 
@@ -506,7 +507,7 @@ class TestRowProcessorTokenIdentity:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
         processor = RowProcessor(

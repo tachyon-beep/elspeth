@@ -46,19 +46,6 @@ from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, TransformProtocol
 
-
-def _extract_dict(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-    """Extract dict from PipelineRow or pass through dict.
-
-    This is a legitimate boundary operation when we need to create a NEW
-    PipelineRow with a different contract. We're not hiding bugs - we're
-    converting between representations at a known boundary.
-    """
-    if isinstance(row, PipelineRow):
-        return row.to_dict()
-    return row
-
-
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
 
@@ -586,15 +573,8 @@ class RowProcessor:
                     f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
                 )
 
-            # Contract validation for passthrough mode
-            if result.contract is None:
-                raise ValueError(
-                    f"Passthrough aggregation {transform.name} produced multi-row output but returned no contract. "
-                    f"Schema-changing aggregations must update contracts. This is a plugin bug."
-                )
-
-            # Convert output rows (plain dicts) to PipelineRow objects using contract
-            pipeline_rows = [PipelineRow(_extract_dict(row), result.contract) for row in result.rows]
+            # Transforms return PipelineRow objects in result.rows — use directly
+            pipeline_rows = list(result.rows)
 
             for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                 # Update token with enriched data, preserving all lineage metadata
@@ -663,18 +643,13 @@ class RowProcessor:
             # Create new tokens via expand_token using first buffered token as parent
             # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
             if buffered_tokens:
-                # B1: No fallback - schema-changing transforms MUST provide contract
-                # Per CLAUDE.md Three-Tier Trust Model: transforms are system code, bugs should crash
-                if result.contract is None:
-                    raise ValueError(
-                        f"Batch transform {transform.name} produced multi-row output but returned no contract. "
-                        f"Schema-changing transforms must update contracts. This is a plugin bug."
-                    )
+                # Extract contract from first output row (all rows share same contract)
+                output_contract = output_rows[0].contract
 
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
-                    expanded_rows=[_extract_dict(row) for row in output_rows],
-                    output_contract=result.contract,
+                    expanded_rows=[row.to_dict() for row in output_rows],
+                    output_contract=output_contract,
                     step_in_pipeline=audit_step,
                     run_id=self._run_id,
                     record_parent_outcome=False,
@@ -909,15 +884,8 @@ class RowProcessor:
                         f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
                     )
 
-                # P1: Passthrough aggregations must provide contracts to enable PipelineRow conversion
-                if result.contract is None:
-                    raise ValueError(
-                        f"Batch transform {transform.name} produced multi-row output but returned no contract. "
-                        f"Schema-changing transforms must update contracts. This is a plugin bug."
-                    )
-
-                # Convert output rows (plain dicts) to PipelineRow objects using contract
-                pipeline_rows = [PipelineRow(_extract_dict(row), result.contract) for row in result.rows]
+                # Transforms return PipelineRow objects in result.rows — use directly
+                pipeline_rows = list(result.rows)
 
                 # Build COMPLETED results for all buffered tokens with enriched data
                 # Check if there are more transforms after this one
@@ -1003,17 +971,13 @@ class RowProcessor:
                 # This establishes audit trail linkage
                 # NOTE: Don't record EXPANDED - triggering token gets CONSUMED_IN_BATCH below
 
-                # B1: No fallback - aggregations producing multi-row output MUST provide contract
-                if result.contract is None:
-                    raise ValueError(
-                        f"Aggregation {settings.name} produced multi-row output but returned no contract. "
-                        f"Schema-changing aggregations must update contracts. This is a plugin bug."
-                    )
+                # Extract contract from first output row (all rows share same contract)
+                output_contract = output_rows[0].contract
 
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=current_token,
-                    expanded_rows=[_extract_dict(row) for row in output_rows],
-                    output_contract=result.contract,
+                    expanded_rows=[row.to_dict() for row in output_rows],
+                    output_contract=output_contract,
                     step_in_pipeline=step,
                     run_id=self._run_id,
                     record_parent_outcome=False,
@@ -1916,22 +1880,14 @@ class RowProcessor:
                     # Deaggregation: create child tokens for each output row
                     # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
 
-                    # B1: No fallback - transforms producing multi-row output MUST provide contract
-                    # Per CLAUDE.md: Transforms are system code (Tier 1), bugs should crash immediately
-                    if transform_result.contract is None:
-                        raise ValueError(
-                            f"Transform {transform.name} produced multi-row output but returned no contract. "
-                            f"Schema-changing transforms must update contracts. This is a plugin bug."
-                        )
-
                     # is_multi_row check above guarantees rows is not None
                     assert transform_result.rows is not None, "is_multi_row guarantees rows is not None"
-                    # Convert any PipelineRow instances to dicts for TokenManager
-                    expanded_rows = [r.to_dict() if isinstance(r, PipelineRow) else r for r in transform_result.rows]
+                    # Extract contract from first output row (all rows share same contract)
+                    output_contract = transform_result.rows[0].contract
                     child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,
-                        expanded_rows=expanded_rows,
-                        output_contract=transform_result.contract,
+                        expanded_rows=[r.to_dict() for r in transform_result.rows],
+                        output_contract=output_contract,
                         step_in_pipeline=step,
                         run_id=self._run_id,
                     )

@@ -3,6 +3,8 @@
 
 from typing import Any
 
+from elspeth.testing import make_pipeline_row
+
 
 class TestPluginManager:
     """Plugin discovery and registration."""
@@ -36,7 +38,7 @@ class TestPluginManager:
                 pass
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "y": row["x"] * 2}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({**row, "y": row["x"] * 2}), success_reason={"action": "test"})
 
             def on_start(self, ctx: PluginContext) -> None:
                 pass
@@ -75,7 +77,7 @@ class TestPluginManager:
                 pass
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row), success_reason={"action": "test"})
 
             def on_start(self, ctx: PluginContext) -> None:
                 pass
@@ -92,7 +94,7 @@ class TestPluginManager:
                 pass
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row), success_reason={"action": "test"})
 
             def on_start(self, ctx: PluginContext) -> None:
                 pass

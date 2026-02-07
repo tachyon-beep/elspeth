@@ -20,6 +20,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.results import TransformResult
+from elspeth.testing import make_pipeline_row
 from tests.conftest import _TestTransformBase, as_transform
 
 # Dynamic schema for tests that don't care about specific fields
@@ -77,7 +78,7 @@ class TestTransformErrorRouting:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        transform = MockTransform(TransformResult.success({"value": 42}, success_reason={"action": "test"}))
+        transform = MockTransform(TransformResult.success(make_pipeline_row({"value": 42}), success_reason={"action": "test"}))
         transform.node_id = node.node_id
 
         ctx = PluginContext(
@@ -112,7 +113,7 @@ class TestTransformErrorRouting:
         )
 
         assert result.status == "success"
-        assert result.row == {"value": 42}
+        assert result.row.to_dict() == {"value": 42}
         assert updated_token.row_data.to_dict() == {"value": 42}
 
     def test_error_result_with_on_error_routes_to_sink(self, setup_landscape: tuple[Any, Any, Any]) -> None:

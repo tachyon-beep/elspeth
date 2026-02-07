@@ -661,9 +661,8 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             return TransformResult.success(
-                output,
+                PipelineRow(output, output_contract),
                 success_reason={"action": "enriched", "fields_added": [self._response_field]},
-                contract=output_contract,
             )
         finally:
             # Clean up cached client for this state_id to prevent unbounded growth

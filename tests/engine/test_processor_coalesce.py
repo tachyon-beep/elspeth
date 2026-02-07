@@ -200,7 +200,9 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row.to_dict(), "sentiment": "positive"}, success_reason={"action": "enrich"})
+                return TransformResult.success(
+                    make_pipeline_row({**row.to_dict(), "sentiment": "positive"}), success_reason={"action": "enrich"}
+                )
 
         class EnrichB(BaseTransform):
             name = "enrich_b"
@@ -212,7 +214,9 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row.to_dict(), "entities": ["ACME"]}, success_reason={"action": "enrich"})
+                return TransformResult.success(
+                    make_pipeline_row({**row.to_dict(), "entities": ["ACME"]}), success_reason={"action": "enrich"}
+                )
 
         # Config-driven fork gate
         fork_gate_config = GateSettings(
@@ -383,7 +387,9 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row.to_dict(), "sentiment": "positive"}, success_reason={"action": "enrich"})
+                return TransformResult.success(
+                    make_pipeline_row({**row.to_dict(), "sentiment": "positive"}), success_reason={"action": "enrich"}
+                )
 
         class EnrichB(BaseTransform):
             name = "enrich_b"
@@ -395,7 +401,9 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row.to_dict(), "entities": ["ACME"]}, success_reason={"action": "enrich"})
+                return TransformResult.success(
+                    make_pipeline_row({**row.to_dict(), "entities": ["ACME"]}), success_reason={"action": "enrich"}
+                )
 
         # Config-driven fork gate
         fork_gate_config = GateSettings(
@@ -1386,8 +1394,8 @@ class TestAggregationCoalesceMetadataPropagation:
                     total = sum(r.to_dict().get("value", 0) for r in row)
                     output_row = {"total": total}
                     contract = create_observed_contract(output_row)
-                    return TransformResult.success(output_row, success_reason={"action": "aggregate"}, contract=contract)
-                return TransformResult.success(dict(row.to_dict()), success_reason={"action": "passthrough"})
+                    return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "aggregate"})
+                return TransformResult.success(make_pipeline_row(dict(row.to_dict())), success_reason={"action": "passthrough"})
 
         agg_transform = as_transform(BatchAggForCoalesce())
 

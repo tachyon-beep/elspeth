@@ -282,11 +282,12 @@ class TestOrchestratorPayloadStoreIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+                output = {
+                    "value": row["value"],
+                    "doubled": row["value"] * 2,
+                }
                 return TransformResult.success(
-                    {
-                        "value": row["value"],
-                        "doubled": row["value"] * 2,
-                    },
+                    PipelineRow(output, row.contract),
                     success_reason={"action": "doubled"},
                 )
 

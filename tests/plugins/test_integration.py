@@ -136,7 +136,7 @@ class TestPluginSystemIntegration:
             result = transform.process(pipeline_row, ctx)
             assert result.status == "success"
             assert result.row is not None  # Success always has row
-            row_data = result.row if isinstance(result.row, dict) else result.row.to_dict()
+            row_data = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
             sink.write([row_data], ctx)  # write() takes list of rows
 
         # Verify results

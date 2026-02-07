@@ -173,7 +173,9 @@ class PassthroughTransform(_TestTransformBase):
         row_dict = row.to_dict() if isinstance(row, PipelineRow) else row
         result_contract = row.contract if isinstance(row, PipelineRow) else None
 
-        return TransformResult.success(row_dict, success_reason={"action": "passthrough"}, contract=result_contract)
+        return TransformResult.success(
+            PipelineRow(row_dict, result_contract) if result_contract else row_dict, success_reason={"action": "passthrough"}
+        )
 
 
 class CollectingSink(_TestSinkBase):

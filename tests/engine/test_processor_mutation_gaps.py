@@ -65,7 +65,7 @@ class PassthroughTransform(BaseTransform):
         self.node_id = node_id
 
     def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-        return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class BatchTransform(BaseTransform):
@@ -101,11 +101,10 @@ class BatchTransform(BaseTransform):
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
             return TransformResult.success(
-                output_row,
+                PipelineRow(output_row, contract) if contract else output_row,
                 success_reason={"action": "batch"},
-                contract=contract,
             )
-        return TransformResult.success(dict(row), success_reason={"action": "single"})
+        return TransformResult.success(row, success_reason={"action": "single"})
 
 
 class TestTriggerTypeFallback:

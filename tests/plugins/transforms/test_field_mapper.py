@@ -39,7 +39,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
-        assert result.row == {"new_name": "value", "other": 123}
+        assert result.row.to_dict() == {"new_name": "value", "other": 123}
         assert "old_name" not in result.row
 
     def test_rename_multiple_fields(self, ctx: PluginContext) -> None:
@@ -60,7 +60,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
-        assert result.row == {"firstName": "Alice", "lastName": "Smith", "id": 1}
+        assert result.row.to_dict() == {"firstName": "Alice", "lastName": "Smith", "id": 1}
 
     def test_select_fields_only(self, ctx: PluginContext) -> None:
         """Only include specified fields (drop others)."""
@@ -78,7 +78,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
-        assert result.row == {"id": 1, "name": "alice"}
+        assert result.row.to_dict() == {"id": 1, "name": "alice"}
         assert "secret" not in result.row
         assert "extra" not in result.row
 
@@ -116,7 +116,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
-        assert result.row == {"other_field": "value"}
+        assert result.row.to_dict() == {"other_field": "value"}
         assert "output" not in result.row
 
     def test_default_is_non_strict(self, ctx: PluginContext) -> None:
@@ -169,7 +169,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
-        assert result.row == row
+        assert result.row.to_dict() == row
 
     def test_requires_schema_config(self) -> None:
         """FieldMapper requires schema configuration."""
@@ -304,9 +304,9 @@ class TestFieldMapperContractPropagation:
         result = transform.process(row, ctx)
 
         assert result.status == "success"
-        assert result.contract is not None
+        assert isinstance(result.row, PipelineRow)
 
-        field_names = {f.normalized_name for f in result.contract.fields}
+        field_names = {f.normalized_name for f in result.row.contract.fields}
         assert "new_field" in field_names
         assert "old_field" not in field_names
         assert "other" in field_names
@@ -327,9 +327,9 @@ class TestFieldMapperContractPropagation:
         result = transform.process(row, ctx)
 
         assert result.status == "success"
-        assert result.contract is not None
+        assert isinstance(result.row, PipelineRow)
 
-        field_names = {f.normalized_name for f in result.contract.fields}
+        field_names = {f.normalized_name for f in result.row.contract.fields}
         assert field_names == {"kept"}  # Only the mapped field should remain
 
     def test_downstream_can_access_renamed_field(self, ctx: PluginContext) -> None:
@@ -347,12 +347,11 @@ class TestFieldMapperContractPropagation:
         result = mapper.process(row, ctx)
 
         assert result.status == "success"
-        assert result.contract is not None
         assert result.row is not None
-        assert isinstance(result.row, dict)
+        assert isinstance(result.row, PipelineRow)
 
-        # Create PipelineRow with output contract
-        output_row = PipelineRow(result.row, result.contract)
+        # result.row IS already a PipelineRow with contract
+        output_row = result.row
 
         # Downstream access via contract should work
         assert output_row["target"] == "value"

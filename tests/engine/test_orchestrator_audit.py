@@ -15,6 +15,7 @@ from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import Determinism, NodeStateStatus, NodeType, PipelineRow, RoutingMode, RunStatus, SourceRow
 from elspeth.contracts.audit import NodeStateCompleted
 from elspeth.plugins.base import BaseTransform
+from elspeth.testing import make_pipeline_row
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
@@ -53,7 +54,7 @@ class TestOrchestratorAuditTrail:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
         source = ListSource([{"value": 42}], name="test_source")
         transform = IdentityTransform()
@@ -527,7 +528,7 @@ class TestOrchestratorConfigRecording:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
         source = ListSource([{"value": 42}], name="test_source")
         transform = IdentityTransform()
@@ -647,7 +648,7 @@ class TestNodeMetadataFromPlugin:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "versioned"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "versioned"})
 
         class VersionedSink(_TestSinkBase):
             name = "versioned_sink"
@@ -749,7 +750,7 @@ class TestNodeMetadataFromPlugin:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "nondeterministic"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "nondeterministic"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -839,8 +840,8 @@ class TestNodeMetadataFromPlugin:
                 # Batch-aware: handles list or single row
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"value": total}, success_reason={"action": "batch_aggregated"})
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                    return TransformResult.success(make_pipeline_row({"value": total}), success_reason={"action": "batch_aggregated"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": 10}, {"value": 20}], name="test_source")
         batch_transform = NonDeterministicBatchTransform()
@@ -1135,7 +1136,7 @@ class TestSourceNodeStates:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
         source = ListSource([{"value": 42}], name="test_source")
         transform = StepCheckTransform()

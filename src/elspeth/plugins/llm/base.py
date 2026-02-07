@@ -364,9 +364,8 @@ class BaseLLMTransform(BaseTransform):
         )
 
         return TransformResult.success(
-            output,
+            PipelineRow(output, output_contract),
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
-            contract=output_contract,
         )
 
     def close(self) -> None:

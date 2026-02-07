@@ -87,7 +87,7 @@ class TestOrchestratorForkExecution:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = PassthroughTransform()

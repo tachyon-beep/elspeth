@@ -49,9 +49,13 @@ class MockBatchTransform(_TestTransformBase):
         if isinstance(row, list):
             # Batch mode: sum all 'x' values
             total = sum(r.get("x", 0) for r in row)
-            return TransformResult.success({"sum": total, "count": len(row)}, success_reason={"action": "sum_batch"})
+            output = {"sum": total, "count": len(row)}
+            return TransformResult.success(make_pipeline_row(output), success_reason={"action": "sum_batch"})
         # Single row mode
-        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})  # type: ignore[attr-defined]
+        return TransformResult.success(
+            make_pipeline_row(row.to_dict()),  # type: ignore[attr-defined]
+            success_reason={"action": "passthrough"},
+        )
 
 
 class FailingBatchTransform(_TestTransformBase):
@@ -255,7 +259,7 @@ class TestAggregationFlushAuditTrail:
 
         # Verify result
         assert result.status == "success"
-        assert result.row == {"sum": 30, "count": 2}
+        assert result.row.to_dict() == {"sum": 30, "count": 2}
 
         # Verify node_state was created with proper audit fields
         states = recorder.get_node_states_for_token(token1.token_id)

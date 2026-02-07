@@ -91,14 +91,7 @@ class SimpleTransform:
     _on_error: str | None = None
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        # Extract data dict from PipelineRow if needed
-        from elspeth.contracts.schema_contract import PipelineRow
-
-        if isinstance(row, PipelineRow):
-            row_data = row.to_dict()
-        else:
-            row_data = row
-        return TransformResult.success(row_data, success_reason={"action": "passthrough"})
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -211,14 +204,7 @@ class TestOrchestratorWiresTelemetryToContext:
             name = "callback_capturing"
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                # Extract data dict from PipelineRow
-                from elspeth.contracts.schema_contract import PipelineRow
-
-                if isinstance(row, PipelineRow):
-                    row_data = row.to_dict()
-                else:
-                    row_data = row
-                return TransformResult.success(row_data, success_reason={"action": "passthrough"})
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
             def on_start(self, ctx: Any) -> None:
                 nonlocal captured_callback

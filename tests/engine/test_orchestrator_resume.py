@@ -595,7 +595,7 @@ class TestOrchestratorResumeCleanup:
                 self.on_complete_called = False
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 self.on_complete_called = True
@@ -826,7 +826,7 @@ class TestOrchestratorResumeCleanup:
                 self.on_complete_called = False
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 self.on_complete_called = True

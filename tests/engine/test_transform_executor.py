@@ -6,6 +6,7 @@ import pytest
 from elspeth.contracts import NodeStateCompleted, NodeStateFailed, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.testing import make_pipeline_row
 from tests.conftest import as_transform
 from tests.engine.conftest import _TestSchema
 
@@ -54,7 +55,7 @@ class TestTransformExecutor:
             transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
+                return TransformResult.success(make_pipeline_row({"value": row["value"] * 2}), success_reason={"action": "double"})
 
         transform = DoubleTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -84,7 +85,7 @@ class TestTransformExecutor:
         )
 
         assert result.status == "success"
-        assert result.row == {"value": 42}
+        assert result.row.to_dict() == {"value": 42}
         # Audit fields populated
         assert result.input_hash is not None
         assert result.output_hash is not None
@@ -254,7 +255,7 @@ class TestTransformExecutor:
             transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
+                return TransformResult.success(make_pipeline_row({**row, "enriched": True}), success_reason={"action": "enrich"})
 
         transform = EnrichTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -316,7 +317,7 @@ class TestTransformExecutor:
             transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "identity"})
 
         transform = IdentityTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -535,7 +536,7 @@ class TestTransformExecutor:
             transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"result": "ok"}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({"result": "ok"}), success_reason={"action": "test"})
 
         transform = SuccessfulTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -596,7 +597,7 @@ class TestTransformExecutor:
             transforms_adds_fields: bool = False
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         transform = SimpleTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -677,7 +678,7 @@ class TestTransformExecutor:
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
-                    row.to_dict(),
+                    make_pipeline_row(row.to_dict()),
                     success_reason={"action": "enriched"},
                     context_after=pool_context,
                 )

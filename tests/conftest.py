@@ -832,7 +832,10 @@ def create_observed_contract(row: dict[str, Any]) -> "SchemaContract":
         # In aggregation transform
         rows = [{"total": 100, "count": 3}]
         contract = create_observed_contract(rows[0])
-        return TransformResult.success_multi(rows, contract=contract, success_reason={...})
+        return TransformResult.success_multi(
+            [PipelineRow(r, contract) for r in rows],
+            success_reason={...},
+        )
     """
     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 

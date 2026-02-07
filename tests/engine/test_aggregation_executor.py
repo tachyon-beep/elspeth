@@ -1116,7 +1116,7 @@ class TestAggregationExecutorCheckpoint:
 
             def process(self, rows: list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
                 total = sum(r["value"] for r in rows)
-                return TransformResult.success({"sum": total}, success_reason={"action": "sum_batch"})
+                return TransformResult.success(make_pipeline_row({"sum": total}), success_reason={"action": "sum_batch"})
 
         transform = MockBatchTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -1133,7 +1133,7 @@ class TestAggregationExecutorCheckpoint:
         # VERIFY: Flush succeeded
         assert result is not None, "Flush should return a result"
         assert result.status == "success", "Flush should succeed"
-        assert result.row == {"sum": 30}, "Transform should have computed sum"
+        assert dict(result.row) == {"sum": 30}, "Transform should have computed sum"
 
         # VERIFY: Consumed tokens match the buffered tokens
         assert len(consumed_tokens) == 2

@@ -38,7 +38,7 @@ class RateLimitAwareTransform(BaseTransform):
         # Record the time of this call
         self._call_times.append(time.perf_counter())
 
-        return TransformResult.success({"processed": True, **row}, success_reason={"action": "processed"})
+        return TransformResult.success(make_pipeline_row({"processed": True, **row}), success_reason={"action": "processed"})
 
     @property
     def call_times(self) -> list[float]:

@@ -52,9 +52,9 @@ class TestJSONExplodeHappyPath:
         assert len(result.rows) == 3
 
         # Each row should have the item and item_index
-        assert result.rows[0] == {"id": 1, "item": {"name": "a"}, "item_index": 0}
-        assert result.rows[1] == {"id": 1, "item": {"name": "b"}, "item_index": 1}
-        assert result.rows[2] == {"id": 1, "item": {"name": "c"}, "item_index": 2}
+        assert result.rows[0].to_dict() == {"id": 1, "item": {"name": "a"}, "item_index": 0}
+        assert result.rows[1].to_dict() == {"id": 1, "item": {"name": "b"}, "item_index": 1}
+        assert result.rows[2].to_dict() == {"id": 1, "item": {"name": "c"}, "item_index": 2}
 
     def test_creates_tokens_is_true(self) -> None:
         """JSONExplode has creates_tokens=True (deaggregation)."""
@@ -87,7 +87,7 @@ class TestJSONExplodeHappyPath:
         assert result.status == "success"
         assert not result.is_multi_row  # Single row result
         assert result.row is not None
-        assert result.row == {"id": 1, "item": None, "item_index": None}
+        assert result.row.to_dict() == {"id": 1, "item": None, "item_index": None}
 
     def test_custom_output_field_name(self, ctx: PluginContext) -> None:
         """Custom output_field name is respected."""
@@ -110,9 +110,9 @@ class TestJSONExplodeHappyPath:
         assert result.rows is not None
         assert len(result.rows) == 3
 
-        assert result.rows[0] == {"id": 1, "tag": "red", "item_index": 0}
-        assert result.rows[1] == {"id": 1, "tag": "green", "item_index": 1}
-        assert result.rows[2] == {"id": 1, "tag": "blue", "item_index": 2}
+        assert result.rows[0].to_dict() == {"id": 1, "tag": "red", "item_index": 0}
+        assert result.rows[1].to_dict() == {"id": 1, "tag": "green", "item_index": 1}
+        assert result.rows[2].to_dict() == {"id": 1, "tag": "blue", "item_index": 2}
 
     def test_include_index_false(self, ctx: PluginContext) -> None:
         """Can disable item_index field."""
@@ -136,8 +136,8 @@ class TestJSONExplodeHappyPath:
         assert len(result.rows) == 2
 
         # No item_index field
-        assert result.rows[0] == {"id": 1, "item": "a"}
-        assert result.rows[1] == {"id": 1, "item": "b"}
+        assert result.rows[0].to_dict() == {"id": 1, "item": "a"}
+        assert result.rows[1].to_dict() == {"id": 1, "item": "b"}
         assert "item_index" not in result.rows[0]
 
     def test_preserves_all_non_array_fields(self, ctx: PluginContext) -> None:
@@ -406,9 +406,9 @@ class TestJSONExplodeContractPropagation:
         result = transform.process(row, ctx)
 
         assert result.status == "success"
-        assert result.contract is not None
+        assert isinstance(result.rows[0], PipelineRow)
 
-        field_names = {f.normalized_name for f in result.contract.fields}
+        field_names = {f.normalized_name for f in result.rows[0].contract.fields}
         assert "item" in field_names
         assert "item_index" in field_names
         assert "items" not in field_names  # Array field removed
@@ -430,9 +430,9 @@ class TestJSONExplodeContractPropagation:
         result = transform.process(row, ctx)
 
         assert result.status == "success"
-        assert result.contract is not None
+        assert isinstance(result.row, PipelineRow)
 
-        field_names = {f.normalized_name for f in result.contract.fields}
+        field_names = {f.normalized_name for f in result.row.contract.fields}
         assert "item" in field_names
         assert "item_index" in field_names
         assert "items" not in field_names
@@ -453,13 +453,12 @@ class TestJSONExplodeContractPropagation:
         result = transform.process(row, ctx)
 
         assert result.status == "success"
-        assert result.contract is not None
         assert result.rows is not None
         assert len(result.rows) == 2
-        assert isinstance(result.rows[0], dict)
+        assert isinstance(result.rows[0], PipelineRow)
 
-        # Create PipelineRow with output contract for first child
-        output_row = PipelineRow(result.rows[0], result.contract)
+        # result.rows[0] IS already a PipelineRow with contract
+        output_row = result.rows[0]
 
         # Downstream access via contract should work
         assert output_row["tag"] == "python"

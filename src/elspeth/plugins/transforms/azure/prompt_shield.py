@@ -360,9 +360,8 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                 )
 
         return TransformResult.success(
-            row_dict,
+            PipelineRow(row_dict, row.contract),
             success_reason={"action": "validated"},
-            contract=row.contract,
         )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:

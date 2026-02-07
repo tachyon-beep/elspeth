@@ -56,7 +56,7 @@ class TestOrchestratorRetry:
                 # Fail with retryable error on first attempt
                 if attempt_count["count"] == 1:
                     raise ConnectionError("Transient failure")
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         # Settings with retry configuration
         settings = ElspethSettings(

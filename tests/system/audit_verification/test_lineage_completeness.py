@@ -59,7 +59,7 @@ class _PassthroughTransform(BaseTransform):
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
-        return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class _EnrichingTransform(BaseTransform):
@@ -76,9 +76,8 @@ class _EnrichingTransform(BaseTransform):
     def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
-        row_dict = row.to_dict()
-        enriched = {**row_dict, "enriched": True, "processed_by": self.name}
-        return TransformResult.success(enriched, success_reason={"action": "enrich"})
+        enriched = {**row.to_dict(), "enriched": True, "processed_by": self.name}
+        return TransformResult.success(PipelineRow(enriched, row.contract), success_reason={"action": "enrich"})
 
 
 def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:

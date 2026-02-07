@@ -131,13 +131,12 @@ class BatchStats(BaseTransform):
             output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
             return TransformResult.success(
-                result_data,
+                PipelineRow(result_data, output_contract),
                 success_reason={
                     "action": "processed",
                     "fields_added": ["count", "sum", "mean", "batch_empty"],
                     "metadata": {"empty_batch": True},
                 },
-                contract=output_contract,
             )
 
         # Extract numeric values - enforce type contract
@@ -198,9 +197,8 @@ class BatchStats(BaseTransform):
         output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
         return TransformResult.success(
-            result,
+            PipelineRow(result, output_contract),
             success_reason={"action": "processed", "fields_added": fields_added},
-            contract=output_contract,
         )
 
     def close(self) -> None:

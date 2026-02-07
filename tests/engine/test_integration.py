@@ -59,6 +59,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape import LandscapeDB
+from elspeth.testing import make_pipeline_row
 
 
 def _make_source_row(data: dict[str, Any]) -> SourceRow:
@@ -256,10 +257,12 @@ class TestEngineIntegration:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
-                    {
-                        "value": row["value"],
-                        "processed": True,
-                    },
+                    make_pipeline_row(
+                        {
+                            "value": row["value"],
+                            "processed": True,
+                        }
+                    ),
                     success_reason={"action": "test"},
                 )
 
@@ -358,7 +361,7 @@ class TestEngineIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({"n": row["n"] * 2}, success_reason={"action": "multiply"})
+                return TransformResult.success(make_pipeline_row({"n": row["n"] * 2}), success_reason={"action": "multiply"})
 
         class AddTenTransform(BaseTransform):
             name = "add_ten"
@@ -369,7 +372,7 @@ class TestEngineIntegration:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({"n": row["n"] + 10}, success_reason={"action": "add"})
+                return TransformResult.success(make_pipeline_row({"n": row["n"] + 10}), success_reason={"action": "add"})
 
         # Pipeline with multiple transforms
         source = ListSource([{"n": 1}, {"n": 2}, {"n": 3}, {"n": 4}, {"n": 5}], name="numbers")
@@ -653,7 +656,7 @@ class TestNoSilentAuditLoss:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "passthrough"})
 
         class ExplodingSink(_TestSinkBase):
             name = "exploding_sink"
@@ -734,7 +737,7 @@ class TestAuditTrailCompleteness:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "passthrough"})
 
         source = EmptySource()
         transform = IdentityTransform()
@@ -1175,7 +1178,7 @@ class TestForkCoalescePipelineIntegration:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({"sentiment": "positive"}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({"sentiment": "positive"}), success_reason={"action": "test"})
 
         class EntityTransform(BaseTransform):
             """Simulates entity extraction."""
@@ -1189,7 +1192,7 @@ class TestForkCoalescePipelineIntegration:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({"entities": ["ACME"]}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({"entities": ["ACME"]}), success_reason={"action": "test"})
 
         # Create components
         span_factory = SpanFactory()
@@ -1748,7 +1751,7 @@ class TestComplexDAGIntegration:
                 # Simple sentiment: "good" in text means positive
                 text = row["text"]
                 sentiment = "positive" if "good" in text.lower() else "neutral"
-                return TransformResult.success({**row, "sentiment": sentiment}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({**row, "sentiment": sentiment}), success_reason={"action": "test"})
 
         class EntityTransform(BaseTransform):
             """Extracts entities from text."""
@@ -1765,7 +1768,7 @@ class TestComplexDAGIntegration:
                 # Simple entity extraction: uppercase words are entities
                 text = row["text"]
                 entities = [word for word in text.split() if word.isupper()]
-                return TransformResult.success({**row, "entities": entities}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({**row, "entities": entities}), success_reason={"action": "test"})
 
         # Create components
         span_factory = SpanFactory()
@@ -2006,7 +2009,9 @@ class TestComplexDAGIntegration:
                 row_dict = row.to_dict()
                 if row_dict["value"] % 3 == 0:
                     return TransformResult.error({"reason": "validation_failed", "error": "divisible_by_3", "value": row_dict["value"]})
-                return TransformResult.success({"value": row_dict["value"], "processed": True}, success_reason={"action": "test"})
+                return TransformResult.success(
+                    make_pipeline_row({"value": row_dict["value"], "processed": True}), success_reason={"action": "test"}
+                )
 
         # Create pipeline with:
         # - 10 rows (values 1-10)
@@ -2174,7 +2179,9 @@ class TestRetryIntegration:
                     # Raise ConnectionError - this is retryable
                     raise ConnectionError(f"Transient failure attempt {attempt_counts[row_value]}")
 
-                return TransformResult.success({"value": row_value, "processed": True}, success_reason={"action": "test"})
+                return TransformResult.success(
+                    make_pipeline_row({"value": row_value, "processed": True}), success_reason={"action": "test"}
+                )
 
         # Create pipeline
         source = ListSource([{"value": 1}, {"value": 2}], name="test_source")
@@ -2290,7 +2297,9 @@ class TestRetryIntegration:
                     # Always fail with ConnectionError (retryable)
                     raise ConnectionError(f"Permanent failure for value=1, attempt {attempt_counts[row_value]}")
 
-                return TransformResult.success({"value": row_value, "processed": True}, success_reason={"action": "test"})
+                return TransformResult.success(
+                    make_pipeline_row({"value": row_value, "processed": True}), success_reason={"action": "test"}
+                )
 
         # Create pipeline with 2 rows: value=1 (fails) and value=2 (succeeds)
         source = ListSource([{"value": 1}, {"value": 2}], name="test_source")
@@ -2887,7 +2896,7 @@ class TestErrorRecovery:
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         # Create 10 rows: values 0-9
         # Even values (0, 2, 4, 6, 8) will fail -> 5 quarantined
@@ -2954,7 +2963,7 @@ class TestErrorRecovery:
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         # Create 4 rows: values 0-3
         # Even values (0, 2) will fail -> 2 quarantined with audit trail

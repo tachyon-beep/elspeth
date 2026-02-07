@@ -97,7 +97,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         source = TrackingSource([{"value": 1}, {"value": 2}])
         transform = TransformWithInvalidOnError()
@@ -141,7 +141,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         source = ListSource([{"value": 1}])
         transform = MyBadTransform()
@@ -189,7 +189,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         source = ListSource([{"value": 1}])
         transform = DiscardTransform()
@@ -226,7 +226,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         source = ListSource([{"value": 1}])
         transform = NormalTransform()
@@ -263,7 +263,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         source = ListSource([{"value": 1}])
         transform = ErrorRoutingTransform()
@@ -331,7 +331,7 @@ class TestTransformErrorSinkValidation:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 call_tracking["transform_process_called"] = True
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class TrackingSink(_TestSinkBase):
             """Sink that tracks write() calls."""

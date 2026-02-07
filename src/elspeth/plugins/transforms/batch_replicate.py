@@ -121,12 +121,24 @@ class BatchReplicate(BaseTransform):
         if not rows:
             # Empty batch - should not happen in normal operation
             # Return success with single empty-marker row
+            empty_data: dict[str, Any] = {"batch_empty": True}
+            empty_fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in empty_data
+            )
+            empty_contract = SchemaContract(mode="OBSERVED", fields=empty_fields, locked=True)
             return TransformResult.success(
-                {"batch_empty": True},
+                PipelineRow(empty_data, empty_contract),
                 success_reason={"action": "processed", "metadata": {"empty_batch": True}},
             )
 
-        output_rows: list[dict[str, Any] | PipelineRow] = []
+        output_rows: list[dict[str, Any]] = []
 
         for row in rows:
             # Get copies count - field is optional, type must be correct if present
@@ -181,12 +193,11 @@ class BatchReplicate(BaseTransform):
 
         # Return multiple rows - engine will create new tokens for each
         return TransformResult.success_multi(
-            output_rows,
+            [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={
                 "action": "processed",
                 "fields_added": ["copy_index"] if self._include_copy_index else [],
             },
-            contract=output_contract,
         )
 
     def close(self) -> None:

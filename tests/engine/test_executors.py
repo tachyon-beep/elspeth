@@ -233,7 +233,7 @@ class MockTransform(_TestTransformBase):
         on_error: str | None = None,
         raises: Exception | None = None,
     ) -> None:
-        self._result = result or TransformResult.success({"transformed": True}, success_reason={"action": "test"})
+        self._result = result or TransformResult.success(make_pipeline_row({"transformed": True}), success_reason={"action": "test"})
         self._on_error = on_error
         self._raises = raises
 
@@ -263,7 +263,7 @@ class TestTransformExecutor:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        transform = MockTransform(TransformResult.success({"output": 42}, success_reason={"action": "test"}))
+        transform = MockTransform(TransformResult.success(make_pipeline_row({"output": 42}), success_reason={"action": "test"}))
         transform.node_id = node.node_id
 
         ctx = PluginContext(
@@ -318,7 +318,7 @@ class TestTransformExecutor:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        transform = MockTransform(TransformResult.success({"value": 1}, success_reason={"action": "test"}))
+        transform = MockTransform(TransformResult.success(make_pipeline_row({"value": 1}), success_reason={"action": "test"}))
         transform.node_id = node.node_id
 
         ctx = PluginContext(
@@ -1389,7 +1389,7 @@ class TestTransformCanonicalValidation:
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
-                    {"value": nan},
+                    make_pipeline_row({"value": nan}),
                     success_reason={"action": "added_nan"},
                 )
 
@@ -1456,7 +1456,7 @@ class TestTransformCanonicalValidation:
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
-                    {"value": inf},
+                    make_pipeline_row({"value": inf}),
                     success_reason={"action": "added_inf"},
                 )
 
@@ -1519,15 +1519,17 @@ class TestTransformCanonicalValidation:
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
-                    {
-                        "string": "hello",
-                        "int": 42,
-                        "float": 3.14,
-                        "bool": True,
-                        "null": None,
-                        "list": [1, 2, 3],
-                        "nested": {"a": 1, "b": 2},
-                    },
+                    make_pipeline_row(
+                        {
+                            "string": "hello",
+                            "int": 42,
+                            "float": 3.14,
+                            "bool": True,
+                            "null": None,
+                            "list": [1, 2, 3],
+                            "nested": {"a": 1, "b": 2},
+                        }
+                    ),
                     success_reason={"action": "transformed"},
                 )
 

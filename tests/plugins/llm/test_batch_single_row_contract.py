@@ -87,9 +87,8 @@ class TestAzureBatchSingleRowContractPropagation:
         # This simulates what _download_results does when batch completes
         batch_output_row = {"customer_id": "C001", "text": "hello", "llm_response": "classified"}
         batch_result = TransformResult.success_multi(
-            [batch_output_row],
+            [PipelineRow(batch_output_row, output_contract)],
             success_reason={"action": "enriched", "fields_added": ["llm_response"]},
-            contract=output_contract,
         )
 
         with patch.object(transform, "_process_batch", return_value=batch_result):
@@ -100,15 +99,15 @@ class TestAzureBatchSingleRowContractPropagation:
         assert result.row is not None
         assert result.rows is None  # Single-row result
 
-        # CRITICAL: Contract must be preserved
-        assert result.contract is not None, "Contract lost in _process_single!"
-        assert result.contract == output_contract
+        # CRITICAL: Contract must be preserved (now lives inside PipelineRow)
+        assert isinstance(result.row, PipelineRow), "Contract lost in _process_single!"
+        assert result.row.contract == output_contract
 
         # Verify downstream transforms can access LLM-added fields
         # If contract is missing, TransformExecutor would fall back to output_schema
         # which doesn't include llm_response, causing KeyError downstream
         try:
-            resolved = result.contract.resolve_name("llm_response")
+            resolved = result.row.contract.resolve_name("llm_response")
             assert resolved == "llm_response", f"Expected 'llm_response', got '{resolved}'"
         except KeyError:
             pytest.fail("Contract missing 'llm_response' field - downstream access would fail!")
@@ -179,9 +178,8 @@ class TestOpenRouterBatchSingleRowContractPropagation:
         # Mock _process_batch to return success_multi with contract
         batch_output_row = {"customer_id": "C001", "text": "hello", "llm_response": "classified"}
         batch_result = TransformResult.success_multi(
-            [batch_output_row],
+            [PipelineRow(batch_output_row, output_contract)],
             success_reason={"action": "enriched", "fields_added": ["llm_response"]},
-            contract=output_contract,
         )
 
         with patch.object(transform, "_process_batch", return_value=batch_result):
@@ -192,13 +190,13 @@ class TestOpenRouterBatchSingleRowContractPropagation:
         assert result.row is not None
         assert result.rows is None  # Single-row result
 
-        # CRITICAL: Contract must be preserved
-        assert result.contract is not None, "Contract lost in _process_single!"
-        assert result.contract == output_contract
+        # CRITICAL: Contract must be preserved (now lives inside PipelineRow)
+        assert isinstance(result.row, PipelineRow), "Contract lost in _process_single!"
+        assert result.row.contract == output_contract
 
         # Verify downstream transforms can access LLM-added fields
         try:
-            resolved = result.contract.resolve_name("llm_response")
+            resolved = result.row.contract.resolve_name("llm_response")
             assert resolved == "llm_response", f"Expected 'llm_response', got '{resolved}'"
         except KeyError:
             pytest.fail("Contract missing 'llm_response' field - downstream access would fail!")

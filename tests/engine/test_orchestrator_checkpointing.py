@@ -100,7 +100,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = IdentityTransform()
@@ -158,7 +158,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         # 7 rows: should checkpoint at rows 3, 6 (sequence 3, 6)
         source = ListSource([{"value": i} for i in range(7)])
@@ -207,7 +207,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = IdentityTransform()
@@ -267,7 +267,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class GoodSink(_TestSinkBase):
             """Sink that succeeds."""
@@ -427,7 +427,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = IdentityTransform()
@@ -470,7 +470,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "identity"})
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         source = ListSource([{"value": 1}])
         transform = IdentityTransform()

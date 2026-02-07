@@ -19,10 +19,6 @@ allowed_dict_patterns:
   # Engine - row data handling
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
   - "src/elspeth/engine/processor.py:RowProcessor.get_aggregation_checkpoint_state:return"
-  - "src/elspeth/engine/processor.py:_extract_dict:row"
-  - "src/elspeth/engine/processor.py:_extract_dict:return"
-  - "src/elspeth/engine/executors.py:TransformExecutor._to_dict:r"
-  - "src/elspeth/engine/executors.py:TransformExecutor._to_dict:return"
   - "src/elspeth/engine/expression_parser.py:_ExpressionEvaluator.__init__:row"
   - "src/elspeth/engine/expression_parser.py:ExpressionParser.evaluate:row"
   - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
@@ -33,8 +29,6 @@ allowed_dict_patterns:
   - "src/elspeth/engine/executors.py:AggregationExecutor.restore_from_checkpoint:state"
   - "src/elspeth/engine/executors.py:AggregationExecutor.restore_state:state"
   - "src/elspeth/engine/executors.py:AggregationExecutor.get_restored_state:return"
-  - "src/elspeth/engine/executors.py:AggregationExecutor._to_dict_agg:r"
-  - "src/elspeth/engine/executors.py:AggregationExecutor._to_dict_agg:return"
 
   # Orchestrator - checkpoint state (refactored into orchestrator/core.py)
   - "src/elspeth/engine/orchestrator/core.py:Orchestrator._maybe_checkpoint:aggregation_state"

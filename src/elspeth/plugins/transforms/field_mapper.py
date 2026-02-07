@@ -143,13 +143,12 @@ class FieldMapper(BaseTransform):
         )
 
         return TransformResult.success(
-            output,
+            PipelineRow(output, output_contract),
             success_reason={
                 "action": "mapped",
                 "fields_modified": fields_modified,
                 "fields_added": fields_added,
             },
-            contract=output_contract,
         )
 
     def close(self) -> None:

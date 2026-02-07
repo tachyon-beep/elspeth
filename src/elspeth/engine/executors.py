@@ -380,24 +380,14 @@ class TransformExecutor:
             if not result.has_output_data:
                 raise RuntimeError(f"Transform '{transform.name}' returned success but has no output data")
 
-            # For single-row: output_data is the row
-            # For multi-row: output_data is the rows list (engine handles expansion)
-            output_data_with_pipe: dict[str, Any] | PipelineRow | list[dict[str, Any] | PipelineRow]
-            if result.row is not None:
-                output_data_with_pipe = result.row
-            else:
-                # has_output_data check above guarantees rows is not None when row is None
-                assert result.rows is not None, "has_output_data guarantees rows when row is None"
-                output_data_with_pipe = result.rows
-
             # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
-            def _to_dict(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-                return r.to_dict() if isinstance(r, PipelineRow) else r
-
-            if isinstance(output_data_with_pipe, list):
-                output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict(r) for r in output_data_with_pipe]
+            # Transforms return PipelineRow — extract underlying dicts for storage
+            output_data: dict[str, Any] | list[dict[str, Any]]
+            if result.row is not None:
+                output_data = result.row.to_dict()
             else:
-                output_data = _to_dict(output_data_with_pipe)
+                assert result.rows is not None, "has_output_data guarantees rows when row is None"
+                output_data = [r.to_dict() for r in result.rows]
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -416,10 +406,9 @@ class TransformExecutor:
 
                 # Compute evolved contract: input contract + fields added by transform
                 input_contract = token.row_data.contract
-                row_dict = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
                 evolved_contract = propagate_contract(
                     input_contract=input_contract,
-                    output_row=row_dict,
+                    output_row=result.row.to_dict(),
                     transform_adds_fields=True,
                 )
 
@@ -433,33 +422,15 @@ class TransformExecutor:
             # Update token with new PipelineRow, preserving all lineage metadata
             # For multi-row results, keep original row_data (engine will expand tokens later)
             if result.row is not None:
-                # Single-row result: create new PipelineRow from result dict + contract
-                # Contract fallback chain:
-                # 1. result.contract (if transform provides it)
-                # 2. transform.output_schema (create contract from schema)
-                #    All transforms have output_schema per protocol, so this always succeeds
-                if result.contract is not None:
-                    output_contract = result.contract
-                else:
-                    # Create contract from transform's output_schema
-                    # transform.output_schema is always non-None per TransformProtocol
-                    from elspeth.contracts.transform_contract import create_output_contract_from_schema
-
-                    output_contract = create_output_contract_from_schema(transform.output_schema)
-
-                # Extract dict if result.row is already a PipelineRow (boundary operation)
-                row_dict = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
-                new_row = PipelineRow(row_dict, output_contract)
-
-                # B2 fix: Log PipelineRow creation for observability
+                # Single-row result: transforms return PipelineRow with correct contract
                 slog.debug(
                     "pipeline_row_created",
                     token_id=token.token_id,
                     transform=transform.name,
-                    contract_mode=output_contract.mode,
+                    contract_mode=result.row.contract.mode,
                 )
 
-                updated_token = token.with_updated_data(new_row)
+                updated_token = token.with_updated_data(result.row)
             else:
                 # Multi-row result: keep original row_data (engine will expand tokens later)
                 updated_token = token.with_updated_data(token.row_data)
@@ -1432,11 +1403,12 @@ class AggregationExecutor:
 
         # Step 5: Complete node state
         if result.status == "success":
-            output_data_with_pipe: dict[str, Any] | PipelineRow | list[dict[str, Any] | PipelineRow]
+            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
+            output_data: dict[str, Any] | list[dict[str, Any]]
             if result.row is not None:
-                output_data_with_pipe = result.row
+                output_data = result.row.to_dict()
             elif result.rows is not None:
-                output_data_with_pipe = result.rows
+                output_data = [r.to_dict() for r in result.rows]
             else:
                 # Contract violation: success status requires output data
                 raise RuntimeError(
@@ -1445,15 +1417,6 @@ class AggregationExecutor:
                     f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
                     f"This is a plugin bug."
                 )
-
-            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
-            def _to_dict_agg(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-                return r.to_dict() if isinstance(r, PipelineRow) else r
-
-            if isinstance(output_data_with_pipe, list):
-                output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict_agg(r) for r in output_data_with_pipe]
-            else:
-                output_data = _to_dict_agg(output_data_with_pipe)
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,

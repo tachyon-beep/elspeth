@@ -986,7 +986,7 @@ class TestEndToEndPipeline:
                 row_dict = row.to_dict()
                 normalized = row_dict["raw_score"] / 100.0
                 return TransformResult.success(
-                    {**row_dict, "score": normalized},
+                    make_pipeline_row({**row_dict, "score": normalized}),
                     success_reason={"action": "normalize"},
                 )
 

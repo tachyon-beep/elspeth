@@ -11,6 +11,7 @@ from typing import Any
 
 from elspeth.contracts import FieldContract, NodeType, PipelineRow, RoutingMode, SchemaContract, SourceRow
 from elspeth.contracts.types import GateName, NodeID
+from elspeth.testing import make_pipeline_row
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
@@ -89,7 +90,7 @@ class TestRowProcessorGates:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "final": True}, success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row({**row.to_dict(), "final": True}), success_reason={"action": "test"})
 
         # Config-driven gate: always continues
         pass_gate = GateSettings(
@@ -446,7 +447,9 @@ class TestRowProcessorNestedForks:
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 # Note: .get() is allowed here - this is row data (their data, Tier 2)
-                return TransformResult.success({**row, "count": row.get("count", 0) + 1}, success_reason={"action": "count"})
+                return TransformResult.success(
+                    make_pipeline_row({**row.to_dict(), "count": row.get("count", 0) + 1}), success_reason={"action": "count"}
+                )
 
         # Config-driven fork gates
         gate1_config = GateSettings(

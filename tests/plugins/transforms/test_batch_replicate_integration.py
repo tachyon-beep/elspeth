@@ -61,25 +61,25 @@ def test_batch_replicate_returns_contract_with_multi_row_output():
     assert result.rows is not None, "Rows should not be None"
     assert len(result.rows) == 5, f"Expected 5 output rows (2+3), got {len(result.rows)}"
 
-    # CRITICAL: Verify contract is provided
+    # CRITICAL: Verify contract is provided (now inside PipelineRow)
     # Without this, processor.py:1826-1830 would raise ValueError
-    assert result.contract is not None, (
-        "BatchReplicate MUST provide contract for multi-row output. Missing contract causes ValueError during token expansion in processor."
+    assert isinstance(result.rows[0], PipelineRow), (
+        "BatchReplicate MUST provide PipelineRow with contract for multi-row output. Missing contract causes ValueError during token expansion in processor."
     )
 
     # Verify contract is OBSERVED mode (correct for inferred fields)
-    assert result.contract.mode == "OBSERVED", "Contract should be OBSERVED mode"
+    assert result.rows[0].contract.mode == "OBSERVED", "Contract should be OBSERVED mode"
 
     # Verify contract includes all output fields
     # BatchReplicate adds copy_index by default
     expected_fields = {"id", "copies", "copy_index"}
-    contract_field_names = {fc.normalized_name for fc in result.contract.fields}
+    contract_field_names = {fc.normalized_name for fc in result.rows[0].contract.fields}
     assert contract_field_names == expected_fields, (
         f"Contract should include all output fields. Expected {expected_fields}, got {contract_field_names}"
     )
 
     # Verify all fields are marked as inferred (OBSERVED mode pattern)
-    for field in result.contract.fields:
+    for field in result.rows[0].contract.fields:
         assert field.source == "inferred", f"Field {field.normalized_name} should be inferred"
         assert field.python_type is object, f"Field {field.normalized_name} should have object type"
 

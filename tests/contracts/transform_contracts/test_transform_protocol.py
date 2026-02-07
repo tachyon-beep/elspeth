@@ -38,6 +38,7 @@ from hypothesis import strategies as st
 
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
@@ -174,13 +175,13 @@ class TransformContractTestBase(ABC):
                 "Success TransformResult has no output data. Use TransformResult.success(row) or TransformResult.success_multi(rows)."
             )
 
-    def test_success_single_row_is_dict(
+    def test_success_single_row_is_pipeline_row(
         self,
         transform: TransformProtocol,
         valid_input: dict[str, Any],
         ctx: PluginContext,
     ) -> None:
-        """Contract: Success single-row output MUST be a dict."""
+        """Contract: Success single-row output MUST be a PipelineRow."""
         # Skip for transforms using BatchTransformMixin (use accept() instead)
         from elspeth.plugins.batching.mixin import BatchTransformMixin
 
@@ -190,15 +191,15 @@ class TransformContractTestBase(ABC):
         pipeline_row = make_pipeline_row(valid_input)
         result = transform.process(pipeline_row, ctx)
         if result.status == "success" and result.row is not None:
-            assert isinstance(result.row, dict), f"TransformResult.row is {type(result.row).__name__}, expected dict"
+            assert isinstance(result.row, PipelineRow), f"TransformResult.row is {type(result.row).__name__}, expected PipelineRow"
 
-    def test_success_multi_row_is_list(
+    def test_success_multi_row_is_list_of_pipeline_rows(
         self,
         transform: TransformProtocol,
         valid_input: dict[str, Any],
         ctx: PluginContext,
     ) -> None:
-        """Contract: Success multi-row output MUST be a list of dicts."""
+        """Contract: Success multi-row output MUST be a list of PipelineRows."""
         # Skip for transforms using BatchTransformMixin (use accept() instead)
         from elspeth.plugins.batching.mixin import BatchTransformMixin
 
@@ -210,7 +211,7 @@ class TransformContractTestBase(ABC):
         if result.status == "success" and result.rows is not None:
             assert isinstance(result.rows, list), f"TransformResult.rows is {type(result.rows).__name__}, expected list"
             for i, row in enumerate(result.rows):
-                assert isinstance(row, dict), f"TransformResult.rows[{i}] is {type(row).__name__}, expected dict"
+                assert isinstance(row, PipelineRow), f"TransformResult.rows[{i}] is {type(row).__name__}, expected PipelineRow"
 
     # =========================================================================
     # Lifecycle Contracts
@@ -313,7 +314,7 @@ class TransformContractPropertyTestBase(TransformContractTestBase):
             assert result2.status == "success"
             assert result1.row is not None
             assert result2.row is not None
-            assert result1.row == result2.row, "Deterministic transform produced different outputs"
+            assert result1.row.to_dict() == result2.row.to_dict(), "Deterministic transform produced different outputs"
 
 
 class TransformErrorContractTestBase(TransformContractTestBase):

@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from elspeth.contracts import (
+    PipelineRow,
     SourceRow,
 )
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -452,7 +453,7 @@ class TestOrchestratorContractRecording:
                 # Add new field
                 output = {**row.to_dict(), "score": 95.5}
                 return TransformResult.success(
-                    output,
+                    PipelineRow(output, row.contract),
                     success_reason={"action": "enriched"},
                 )
 

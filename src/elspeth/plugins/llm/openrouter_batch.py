@@ -377,12 +377,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            # Propagate success_reason AND contract from batch result
-            # Contract is critical for downstream transforms to access LLM-added fields
+            # result.rows[0] is already PipelineRow from _process_batch
             return TransformResult.success(
                 result.rows[0],
                 success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
-                contract=result.contract,
             )
         elif result.status == "error":
             return result
@@ -452,7 +450,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Assemble output rows in original order
         # Every row gets an output (success or with error markers) - no rows are dropped
-        output_rows: list[dict[str, Any] | PipelineRow] = []
+        output_rows: list[dict[str, Any]] = []
 
         for idx in range(len(rows)):
             if idx not in results:
@@ -504,10 +502,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         else:
             output_contract = None
 
+        assert output_contract is not None, "output_rows is non-empty so contract was built"
         return TransformResult.success_multi(
-            output_rows,
+            [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
-            contract=output_contract,
         )
 
     def _process_single_row(

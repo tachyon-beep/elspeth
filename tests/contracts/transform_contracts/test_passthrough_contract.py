@@ -55,7 +55,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
         assert result.status == "success"
         assert result.row is not None
-        assert result.row == input_row
+        assert result.row.to_dict() == input_row
 
     def test_passthrough_does_not_mutate_input(self, transform: TransformProtocol) -> None:
         """PassThrough MUST NOT mutate the input row."""
@@ -82,11 +82,8 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
         result = transform.process(pipeline_row, ctx)
         assert result.row is not None
-        row = result.row
-        assert isinstance(row, dict)
-        # After isinstance check, mypy should know row is dict, but Protocol returns object
-        # so we need to help it
-        nested = row["nested"]  # type: ignore[index]
+        row_dict = result.row.to_dict()
+        nested = row_dict["nested"]
         assert isinstance(nested, dict)
 
         # Mutate input after processing
@@ -177,7 +174,7 @@ class TestPassThroughPropertyBased:
 
         assert result.status == "success"
         assert result.row is not None
-        assert result.row == data
+        assert result.row.to_dict() == data
 
     @given(
         data=st.dictionaries(
@@ -198,4 +195,4 @@ class TestPassThroughPropertyBased:
         assert result2.status == "success"
         assert result1.row is not None
         assert result2.row is not None
-        assert result1.row == result2.row
+        assert result1.row.to_dict() == result2.row.to_dict()

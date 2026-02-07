@@ -141,9 +141,8 @@ class TestCompletedOutcomeTimingContract:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
-                    row.to_dict(),
+                    PipelineRow(row.to_dict(), row.contract),
                     success_reason={"action": "passthrough"},
-                    contract=row.contract,
                 )
 
         class FailingSink(_TestSinkBase):
@@ -234,9 +233,8 @@ class TestCompletedOutcomeTimingContract:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
-                    row.to_dict(),
+                    PipelineRow(row.to_dict(), row.contract),
                     success_reason={"action": "passthrough"},
-                    contract=row.contract,
                 )
 
         class FailingSink(_TestSinkBase):
@@ -312,9 +310,8 @@ class TestCompletedOutcomeTimingContract:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
-                    row.to_dict(),
+                    PipelineRow(row.to_dict(), row.contract),
                     success_reason={"action": "passthrough"},
-                    contract=row.contract,
                 )
 
         class FailingSink(_TestSinkBase):

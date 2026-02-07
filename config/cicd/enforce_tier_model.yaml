@@ -346,36 +346,6 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=e45664affb8b9f5c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=7817e2533f29b3b3
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=8d67892f8bcf88cd
-  owner: architecture
-  reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
-  safety: isinstance() discriminates documented union return type; no bug hiding
-  expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=302e2e66d8f5696b
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=7de2e8bd8e5f0b4f
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=fc6941785707f946
-  owner: architecture
-  reason: dict.get() is correct - not all branch names have a coalesce point mapping; returns None for non-coalescing branches
-  safety: None return triggers early exit, no silent fallback
-  expires: '2026-05-02'
 - key: telemetry/manager.py:R1:TelemetryManager:_export_loop:fp=a8166fc10299a912
   owner: architecture
   reason: Optional field access at trust boundary
@@ -1172,16 +1142,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=58a69ae36bfd1f89
-  owner: bugfix
-  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl to prevent credentials leaking to audit trail
-  safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
-  expires: null
-- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=2598c89700a4b6b1
-  owner: bugfix
-  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl to prevent tokens leaking to audit trail
-  safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
-  expires: null
 - key: core/security/secret_loader.py:R6:CompositeSecretLoader:get_secret:fp=8846ddf2a85396bb
   owner: bugfix
   reason: Intentional fallback pattern - CompositeSecretLoader tries loaders in priority order
@@ -1367,36 +1327,6 @@ allow_hits:
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check required to handle union type from batch processing
   expires: null
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:_to_dict:fp=6ef2582894e98372
-  owner: P1-2026-02-05-typecheck
-  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
-  safety: isinstance() check converts PipelineRow to dict for transform output
-  expires: null
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=3e656c030c37dc73
-  owner: P1-2026-02-05-typecheck
-  reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
-  safety: isinstance() check handles union type from transform output
-  expires: null
-- key: engine/executors.py:R5:AggregationExecutor:execute_flush:_to_dict_agg:fp=6843639153ff7b09
-  owner: P1-2026-02-05-typecheck
-  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
-  safety: isinstance() check converts PipelineRow to dict for aggregation output
-  expires: null
-- key: engine/executors.py:R5:AggregationExecutor:execute_flush:fp=a4dfab975966217a
-  owner: P1-2026-02-05-typecheck
-  reason: Internal boundary - list vs single row discrimination after mypy typecheck fixes
-  safety: isinstance() check handles union type from aggregation output
-  expires: null
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=80f4b2eb31815f95
-  owner: P1-2026-02-05-schema-evolution
-  reason: Internal boundary - PipelineRow vs dict discrimination for contract propagation
-  safety: isinstance() converts PipelineRow to dict for propagate_contract() call
-  expires: null
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=c38a7ce82fed6778
-  owner: P1-2026-02-05-schema-evolution
-  reason: Internal boundary - PipelineRow vs dict discrimination for token update
-  safety: isinstance() converts PipelineRow to dict when creating new token
-  expires: null
 - key: plugins/clients/http.py:R5:_contains_non_finite:fp=9370a8f4d789c2c1
   owner: architecture
   reason: isinstance() on float to detect NaN/Infinity in JSON - type discrimination for serialization
@@ -1417,22 +1347,7 @@ allow_hits:
   reason: User YAML config boundary - http_config is parsed from pipeline settings
   safety: Defaults to 30s timeout - safe fallback for optional config field
   expires: '2026-05-02'
-- key: engine/processor.py:R5:_extract_dict:fp=f5a5a4fa3692668f
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=cb0249f88d0d6cda
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: contracts/checkpoint.py:R5:ResumePoint:__post_init__:fp=06723188787bab6d
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: contracts/results.py:R5:_extract_dict_from_row:fp=81b80a123b326124
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1639,3 +1554,43 @@ allow_hits:
 - key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=4850854b4b37d852
   owner: architecture
   reason: HTTP redirect Location header - external system boundary, header may be absent
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=68707f1f0c08a72a
+  owner: architecture
+  reason: Retry boundary - LLMClientError exception type check for retryable classification
+  safety: Exception type dispatch for retry logic - not masking bugs
+  expires: '2026-05-08'
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=89c3776152997848
+  owner: architecture
+  reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
+  safety: Exception type dispatch for retry logic - not masking bugs
+  expires: '2026-05-08'
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=710bf0d5023ca815
+  owner: architecture
+  reason: dict.get() correct - not all branch names have coalesce point mapping, returns None for non-coalescing branches
+  safety: Returns None for non-coalescing branches - legitimate default
+  expires: '2026-05-08'
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=41cc9537ade82dc6
+  owner: architecture
+  reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
+  safety: isinstance() check required for discriminated union return type
+  expires: '2026-05-08'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=b3031983192a2ec1
+  owner: architecture
+  reason: Protocol dispatch - isinstance(transform, GateProtocol) for plugin type routing
+  safety: Protocol-based dispatch, not masking bugs - required for DAG execution
+  expires: '2026-05-08'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=0c9e5fade1347b5e
+  owner: architecture
+  reason: Protocol dispatch - isinstance(transform, TransformProtocol) for plugin type routing
+  safety: Protocol-based dispatch, not masking bugs - required for DAG execution
+  expires: '2026-05-08'
+- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=2300432a3c93d6b5
+  owner: bugfix
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl
+  safety: TypeError raised if wrong URL type - explicit failure, not masking
+  expires: null
+- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=e2fada7e3814d17c
+  owner: bugfix
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
+  safety: TypeError raised if wrong URL type - explicit failure, not masking
+  expires: null

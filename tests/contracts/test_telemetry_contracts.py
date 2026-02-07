@@ -131,9 +131,14 @@ class PassthroughTransform:
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, PipelineRow):
             row_data = row.to_dict()
+            contract = row.contract
         else:
             row_data = row
-        return TransformResult.success(row_data, success_reason={"action": "passthrough"})
+            contract = _make_contract(row_data)
+        return TransformResult.success(
+            PipelineRow(row_data, contract),
+            success_reason={"action": "passthrough"},
+        )
 
     def on_start(self, ctx: Any) -> None:
         pass

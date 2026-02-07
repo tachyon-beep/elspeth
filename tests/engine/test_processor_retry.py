@@ -20,6 +20,7 @@ from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
 )
+from elspeth.testing import make_pipeline_row
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 if TYPE_CHECKING:
@@ -174,7 +175,9 @@ class TestRowProcessorWorkQueue:
                 self.node_id = node_id
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "processed": True}, success_reason={"action": "processed"})
+                return TransformResult.success(
+                    make_pipeline_row({**row.to_dict(), "processed": True}), success_reason={"action": "processed"}
+                )
 
         # Config-driven fork gate
         splitter_gate = GateSettings(
@@ -269,7 +272,7 @@ class TestRowProcessorRetry:
                 raise ConnectionError("Transient network error")
             # Return success on 3rd attempt
             return (
-                TransformResult.success({"result": "ok"}, success_reason={"action": "test"}),
+                TransformResult.success(make_pipeline_row({"result": "ok"}), success_reason={"action": "test"}),
                 Mock(
                     token_id="t1",
                     row_id="r1",

@@ -22,6 +22,7 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
+from elspeth.testing import make_pipeline_row
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
@@ -98,7 +99,9 @@ class _FailOnceTransform(BaseTransform):
         if row_id in self._fail_row_ids and self._attempt_count[row_id] == 1:
             return TransformResult.error({"reason": "simulated_failure"})
 
-        return TransformResult.success({**row, "attempts": self._attempt_count[row_id]}, success_reason={"action": "test"})
+        return TransformResult.success(
+            make_pipeline_row({**row, "attempts": self._attempt_count[row_id]}), success_reason={"action": "test"}
+        )
 
 
 def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -202,7 +205,7 @@ class TestResumeIdempotence:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({**row, "value": row["value"] * 2}, success_reason={"action": "doubler"})
+                return TransformResult.success(make_pipeline_row({**row, "value": row["value"] * 2}), success_reason={"action": "doubler"})
 
         class CollectSink(_TestSinkBase):
             """Sink that collects rows."""
@@ -519,7 +522,7 @@ class TestRetryBehavior:
                             "error": f"Row {row['id']} failed validation",
                         }
                     )
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
 

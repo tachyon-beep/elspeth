@@ -186,7 +186,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -311,7 +311,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "passthrough"})
 
         # --- Phase 1: Simulate a partial run with crash ---
         # We manually create the database state that would exist if:
@@ -589,7 +589,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -642,7 +642,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
+                return TransformResult.success(make_pipeline_row({"value": row["value"] * 2}), success_reason={"action": "double"})
 
         class CapturingSink(_TestSinkBase):
             name = "capturing_sink"
@@ -759,7 +759,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(3)])
         transform = PassthroughTransform()
@@ -841,7 +841,7 @@ class TestCheckpointTimingInvariants:
                 super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "passthrough"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "passthrough"})
 
         # Process 5 rows
         source = ListSource([{"value": i} for i in range(5)])

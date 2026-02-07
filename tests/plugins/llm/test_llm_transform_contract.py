@@ -150,10 +150,10 @@ class TestLLMTransformContract:
         result = transform.process(pipeline_row, mock_context)
 
         assert result.status == "success"
-        # Result should have a contract (propagated with new fields)
-        assert result.contract is not None
+        # Result should have a contract (propagated with new fields, inside PipelineRow)
+        assert isinstance(result.row, PipelineRow)
         # Contract should include the new llm_result field
-        assert result.contract.get_field("llm_result") is not None
+        assert result.row.contract.get_field("llm_result") is not None
 
     def test_result_has_contract_even_with_minimal_input_contract(
         self,
@@ -181,7 +181,7 @@ class TestLLMTransformContract:
         result = transform.process(pipeline_row, mock_context)
 
         assert result.status == "success"
-        assert result.contract is not None  # Contract is propagated
+        assert isinstance(result.row, PipelineRow)  # Contract is propagated inside PipelineRow
 
     def test_template_error_with_original_name_minimal_contract(
         self,
@@ -235,13 +235,13 @@ class TestLLMTransformContract:
         result = transform.process(pipeline_row, mock_context)
 
         assert result.status == "success"
-        assert result.contract is not None
+        assert isinstance(result.row, PipelineRow)
 
         # New field should be in contract with inferred type
-        analysis_field = result.contract.get_field("analysis")
+        analysis_field = result.row.contract.get_field("analysis")
         assert analysis_field is not None
         assert analysis_field.python_type is str  # Inferred from string response
         assert analysis_field.source == "inferred"
 
         # Original fields should still be present
-        assert result.contract.get_field("product_name") is not None
+        assert result.row.contract.get_field("product_name") is not None

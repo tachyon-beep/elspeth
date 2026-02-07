@@ -41,6 +41,7 @@ from elspeth.core.config import (
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
+from elspeth.testing import make_pipeline_row
 from tests.conftest import (
     _TestSchema,
     _TestSinkBase,
@@ -228,10 +229,7 @@ class TestForkCoalescePipeline:
 
             def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
                 return TransformResult.success(
-                    {
-                        **row,
-                        "enriched": True,
-                    },
+                    make_pipeline_row({**row, "enriched": True}),
                     success_reason={"action": "enrich"},
                 )
 
@@ -464,7 +462,7 @@ class TestCoalesceSuccessMetrics:
                 # PipelineRow is immutable - must convert to dict, modify, and return
                 row_dict = row.to_dict() if hasattr(row, "to_dict") else row
                 row_dict["post_processed"] = True
-                return TransformResult.success(row_dict, success_reason={"action": "post_coalesce"})
+                return TransformResult.success(make_pipeline_row(row_dict), success_reason={"action": "post_coalesce"})
 
         settings = ElspethSettings(
             source=SourceSettings(
@@ -789,7 +787,7 @@ class TestCoalesceTimeoutIntegration:
                         {"reason": "intentional_failure", "error": "intentional_failure_for_timeout_test"},
                         retryable=False,
                     )
-                return TransformResult.success(dict(row), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "test"})
 
         class TimingSink(_TestSinkBase):
             """Sink that tracks when rows arrive."""
@@ -1014,9 +1012,8 @@ class TestForkAggregationCoalesce:
 
                     contract = create_observed_contract(output_row)
                     return TransformResult.success(
-                        output_row,
+                        PipelineRow(output_row, contract) if contract else output_row,
                         success_reason={"action": "sum_aggregation"},
-                        contract=contract,
                     )
                 # Single row mode (shouldn't happen with count trigger)
                 return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
@@ -1178,7 +1175,7 @@ class TestTerminalCoalesceBranchLoss:
                         {"reason": "branch_loss_test", "error": "intentional_failure"},
                         retryable=False,
                     )
-                return TransformResult.success(dict(row), success_reason={"action": "pass"})
+                return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "pass"})
 
         settings = ElspethSettings(
             source=SourceSettings(plugin="list_source", options={}),

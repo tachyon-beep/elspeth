@@ -31,6 +31,7 @@ from elspeth.contracts.results import (
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 from elspeth.engine.retry import MaxRetriesExceeded
+from elspeth.testing import make_pipeline_row
 
 
 def _make_observed_contract() -> SchemaContract:
@@ -48,26 +49,29 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_multi_row_success(self) -> None:
         """TransformResult.success_multi returns multiple rows."""
-        rows: list[dict[str, Any] | PipelineRow] = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}]
-        result = TransformResult.success_multi(rows, success_reason={"action": "test"})
+        raw_rows: list[dict[str, Any]] = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}]
+        pipeline_rows = [make_pipeline_row(r) for r in raw_rows]
+        result = TransformResult.success_multi(pipeline_rows, success_reason={"action": "test"})
 
         assert result.status == "success"
         assert result.row is None  # Single row field is None
-        assert result.rows == rows
+        assert result.rows is not None
         assert len(result.rows) == 2
 
     def test_transform_result_success_single_sets_rows_none(self) -> None:
         """TransformResult.success() sets rows to None for single-row output."""
-        result = TransformResult.success({"id": 1}, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row({"id": 1}), success_reason={"action": "test"})
 
         assert result.status == "success"
-        assert result.row == {"id": 1}
+        assert result.row.to_dict() == {"id": 1}
         assert result.rows is None
 
     def test_transform_result_is_multi_row(self) -> None:
         """is_multi_row property distinguishes single vs multi output."""
-        single = TransformResult.success({"id": 1}, success_reason={"action": "test"})
-        multi = TransformResult.success_multi([{"id": 1}, {"id": 2}], success_reason={"action": "test"})
+        single = TransformResult.success(make_pipeline_row({"id": 1}), success_reason={"action": "test"})
+        multi = TransformResult.success_multi(
+            [make_pipeline_row({"id": 1}), make_pipeline_row({"id": 2})], success_reason={"action": "test"}
+        )
 
         assert single.is_multi_row is False
         assert multi.is_multi_row is True
@@ -87,8 +91,8 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_has_output_data(self) -> None:
         """has_output_data property checks if ANY output exists."""
-        single = TransformResult.success({"id": 1}, success_reason={"action": "test"})
-        multi = TransformResult.success_multi([{"id": 1}], success_reason={"action": "test"})
+        single = TransformResult.success(make_pipeline_row({"id": 1}), success_reason={"action": "test"})
+        multi = TransformResult.success_multi([make_pipeline_row({"id": 1})], success_reason={"action": "test"})
         error = TransformResult.error({"reason": "test_error"})
 
         assert single.has_output_data is True
@@ -105,7 +109,7 @@ class TestTransformResultContextAfter:
 
     def test_context_after_defaults_to_none(self) -> None:
         """context_after should default to None when not provided."""
-        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})
         assert result.context_after is None
 
     def test_context_after_can_be_provided_to_success(self) -> None:
@@ -115,7 +119,7 @@ class TestTransformResultContextAfter:
             "pool_stats": {"max_concurrent_reached": 4},
         }
         result = TransformResult.success(
-            {"x": 1},
+            make_pipeline_row({"x": 1}),
             success_reason={"action": "enriched"},
             context_after=pool_context,
         )
@@ -135,7 +139,7 @@ class TestTransformResultContextAfter:
     def test_context_after_not_in_repr(self) -> None:
         """context_after should have repr=False for cleaner output."""
         result = TransformResult.success(
-            {"x": 1},
+            make_pipeline_row({"x": 1}),
             success_reason={"action": "test"},
             context_after={"pool_stats": {"large": "metadata"}},
         )
@@ -148,11 +152,11 @@ class TestTransformResult:
 
     def test_success_factory(self) -> None:
         """Success factory creates result with status='success' and row data."""
-        row = {"field": "value", "count": 42}
+        row = make_pipeline_row({"field": "value", "count": 42})
         result = TransformResult.success(row, success_reason={"action": "processed"})
 
         assert result.status == "success"
-        assert result.row == row
+        assert result.row is row
         assert result.reason is None
         assert result.retryable is False
         assert result.success_reason == {"action": "processed"}
@@ -187,7 +191,7 @@ class TestTransformResult:
 
     def test_status_is_literal_not_enum(self) -> None:
         """Status is Literal string, not enum - can compare directly to string."""
-        success = TransformResult.success({"x": 1}, success_reason={"action": "test"})
+        success = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})
         error = TransformResult.error({"reason": "test_error", "error": "msg"})
 
         # Direct string comparison works (not .value)
@@ -200,7 +204,7 @@ class TestTransformResult:
 
     def test_audit_fields_default_to_none(self) -> None:
         """Audit fields default to None, set by executor."""
-        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})
 
         assert result.input_hash is None
         assert result.output_hash is None
@@ -208,7 +212,7 @@ class TestTransformResult:
 
     def test_audit_fields_can_be_set(self) -> None:
         """Audit fields can be set after creation."""
-        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})
         result.input_hash = "abc123"
         result.output_hash = "def456"
         result.duration_ms = 12.5
@@ -219,7 +223,7 @@ class TestTransformResult:
 
     def test_audit_fields_not_in_repr(self) -> None:
         """Audit fields have repr=False for cleaner output."""
-        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})
         result.input_hash = "abc123"
 
         # audit fields should not appear in repr

@@ -81,9 +81,8 @@ class TestTransformExecutorPipelineRow:
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(
-            {"value": "processed"},
+            PipelineRow({"value": "processed"}, contract),
             success_reason={"action": "test"},
-            contract=contract,
         )
 
         # Mock recorder
@@ -136,9 +135,8 @@ class TestTransformExecutorPipelineRow:
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(
-            {"value": "processed"},
+            PipelineRow({"value": "processed"}, contract),
             success_reason={"action": "test"},
-            contract=contract,
         )
 
         # Mock recorder - capture what gets passed
@@ -190,9 +188,8 @@ class TestTransformExecutorPipelineRow:
             nonlocal captured_ctx
             captured_ctx = ctx
             return TransformResult.success(
-                {"value": "processed"},
+                PipelineRow({"value": "processed"}, contract),
                 success_reason={"action": "test"},
-                contract=contract,
             )
 
         mock_transform = MagicMock()
@@ -252,9 +249,8 @@ class TestTransformExecutorPipelineRow:
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(
-            {"value": "processed", "processed": True},
+            PipelineRow({"value": "processed", "processed": True}, output_contract),
             success_reason={"action": "test"},
-            contract=output_contract,  # Transform provides output contract
         )
 
         # Mock recorder
@@ -356,9 +352,8 @@ class TestTransformExecutorPipelineRow:
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(
-            {"value": "processed"},
+            PipelineRow({"value": "processed"}, contract),
             success_reason={"action": "test"},
-            contract=contract,
         )
 
         # Mock recorder

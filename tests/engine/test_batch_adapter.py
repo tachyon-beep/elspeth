@@ -47,7 +47,7 @@ class TestSharedBatchAdapter:
             registration_complete.wait()  # Wait for test setup to complete
             emit_allowed.wait()  # Wait for explicit signal
             token = _make_token("token-1", "row-1")
-            result = TransformResult.success({"output": "done"}, success_reason={"action": "test"})
+            result = TransformResult.success(make_pipeline_row({"output": "done"}), success_reason={"action": "test"})
             adapter.emit(token, result, "state-1")
 
         thread = threading.Thread(target=emit_when_signaled)
@@ -63,7 +63,7 @@ class TestSharedBatchAdapter:
         result = waiter.wait(timeout=5.0)
 
         assert result.status == "success"
-        assert result.row == {"output": "done"}
+        assert result.row.to_dict() == {"output": "done"}
 
         thread.join()
 
@@ -91,21 +91,21 @@ class TestSharedBatchAdapter:
             emit_events["token-2"].wait()
             adapter.emit(
                 _make_token("token-2", "row-2"),
-                TransformResult.success({"value": 2}, success_reason={"action": "test"}),
+                TransformResult.success(make_pipeline_row({"value": 2}), success_reason={"action": "test"}),
                 "state-2",
             )
 
             emit_events["token-1"].wait()
             adapter.emit(
                 _make_token("token-1", "row-1"),
-                TransformResult.success({"value": 1}, success_reason={"action": "test"}),
+                TransformResult.success(make_pipeline_row({"value": 1}), success_reason={"action": "test"}),
                 "state-1",
             )
 
             emit_events["token-3"].wait()
             adapter.emit(
                 _make_token("token-3", "row-3"),
-                TransformResult.success({"value": 3}, success_reason={"action": "test"}),
+                TransformResult.success(make_pipeline_row({"value": 3}), success_reason={"action": "test"}),
                 "state-3",
             )
 
@@ -125,9 +125,9 @@ class TestSharedBatchAdapter:
         result2 = waiter2.wait(timeout=5.0)
         result3 = waiter3.wait(timeout=5.0)
 
-        assert result1.row == {"value": 1}
-        assert result2.row == {"value": 2}
-        assert result3.row == {"value": 3}
+        assert result1.row.to_dict() == {"value": 1}
+        assert result2.row.to_dict() == {"value": 2}
+        assert result3.row.to_dict() == {"value": 3}
 
         thread.join()
 
@@ -143,7 +143,7 @@ class TestSharedBatchAdapter:
 
         # Emit result IMMEDIATELY (before wait is called)
         token = _make_token("token-fast", "row-1")
-        result = TransformResult.success({"fast": True}, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row({"fast": True}), success_reason={"action": "test"})
         adapter.emit(token, result, "state-fast")
 
         # Now wait - should return immediately since event is already set
@@ -152,7 +152,7 @@ class TestSharedBatchAdapter:
         elapsed = time.perf_counter() - start
 
         assert got_result.status == "success"
-        assert got_result.row == {"fast": True}
+        assert got_result.row.to_dict() == {"fast": True}
         assert elapsed < 0.1  # Should be nearly instant
 
     def test_timeout(self) -> None:
@@ -205,7 +205,7 @@ class TestSharedBatchAdapter:
         # Late result arrives after timeout
         adapter.emit(
             _make_token("token-late", "row-1"),
-            TransformResult.success({"late": "result"}, success_reason={"action": "test"}),
+            TransformResult.success(make_pipeline_row({"late": "result"}), success_reason={"action": "test"}),
             "state-late",
         )
 
@@ -257,7 +257,7 @@ class TestSharedBatchAdapter:
             for i in range(5):
                 adapter.emit(
                     _make_token(f"token-{i}", f"row-{i}"),
-                    TransformResult.success({"index": i}, success_reason={"action": "test"}),
+                    TransformResult.success(make_pipeline_row({"index": i}), success_reason={"action": "test"}),
                     f"state-{i}",
                 )
 
@@ -273,7 +273,7 @@ class TestSharedBatchAdapter:
         assert len(errors) == 0, f"Errors occurred: {errors}"
         assert len(results) == 5
         for i in range(5):
-            assert results[f"token-{i}"].row == {"index": i}
+            assert results[f"token-{i}"].row.to_dict() == {"index": i}
 
     def test_clear(self) -> None:
         """Test that clear() removes all state."""
@@ -286,7 +286,7 @@ class TestSharedBatchAdapter:
         # Emit a result that won't be consumed (orphaned due to no matching waiter key)
         adapter.emit(
             _make_token("token-orphan", "row-99"),
-            TransformResult.success({"orphan": True}, success_reason={"action": "test"}),
+            TransformResult.success(make_pipeline_row({"orphan": True}), success_reason={"action": "test"}),
             "state-orphan",
         )
 
@@ -321,24 +321,24 @@ class TestSharedBatchAdapter:
         # First worker finishes late (after timeout), emits with old state_id
         adapter.emit(
             _make_token("token-42", "row-42"),
-            TransformResult.success({"result": "stale"}, success_reason={"action": "test"}),
+            TransformResult.success(make_pipeline_row({"result": "stale"}), success_reason={"action": "test"}),
             "attempt-1",
         )
 
         # Retry worker finishes, emits with retry state_id
         adapter.emit(
             _make_token("token-42", "row-42"),
-            TransformResult.success({"result": "fresh"}, success_reason={"action": "test"}),
+            TransformResult.success(make_pipeline_row({"result": "fresh"}), success_reason={"action": "test"}),
             "attempt-2",
         )
 
         # First waiter gets the stale result (it's still registered)
         result1 = waiter1.wait(timeout=1.0)
-        assert result1.row == {"result": "stale"}
+        assert result1.row.to_dict() == {"result": "stale"}
 
         # Retry waiter gets the fresh result (correct behavior!)
         result2 = waiter2.wait(timeout=1.0)
-        assert result2.row == {"result": "fresh"}
+        assert result2.row.to_dict() == {"result": "fresh"}
 
     def test_timeout_race_cleans_up_late_result(self) -> None:
         """Test that timeout path cleans up results stored during race window.
@@ -377,7 +377,7 @@ class TestSharedBatchAdapter:
         # This is what happens when emit() executes between event.wait() timeout
         # and wait()'s lock acquisition
         with adapter._lock:
-            adapter._results[key] = TransformResult.success({"race": "leaked"}, success_reason={"action": "test"})
+            adapter._results[key] = TransformResult.success(make_pipeline_row({"race": "leaked"}), success_reason={"action": "test"})
             adapter._waiters[key].set()  # Signal (even though we're about to timeout)
             del adapter._waiters[key]  # emit() removes waiter entry
 

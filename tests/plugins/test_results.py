@@ -5,6 +5,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from elspeth.testing import make_pipeline_row
+
 
 class TestRowOutcome:
     """Terminal states for rows."""
@@ -85,9 +87,9 @@ class TestTransformResult:
     def test_success_result(self) -> None:
         from elspeth.plugins.results import TransformResult
 
-        result = TransformResult.success({"value": 42}, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row({"value": 42}), success_reason={"action": "test"})
         assert result.status == "success"
-        assert result.row == {"value": 42}
+        assert result.row.to_dict() == {"value": 42}
         assert result.retryable is False
 
     def test_error_result(self) -> None:
@@ -105,7 +107,7 @@ class TestTransformResult:
         """Phase 3 integration: audit fields must exist."""
         from elspeth.plugins.results import TransformResult
 
-        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row({"x": 1}), success_reason={"action": "test"})
         # These fields are set by the engine in Phase 3
         assert hasattr(result, "input_hash")
         assert hasattr(result, "output_hash")

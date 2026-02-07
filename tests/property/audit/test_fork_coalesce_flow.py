@@ -27,6 +27,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
+from elspeth.testing import make_pipeline_row
 from tests.conftest import (
     MockPayloadStore,
     _TestSchema,
@@ -179,7 +180,7 @@ class _EnrichTransform(BaseTransform):
         super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
+        return TransformResult.success(make_pipeline_row({**row, "enriched": True}), success_reason={"action": "enrich"})
 
 
 class _CollectSink(_TestSinkBase):
