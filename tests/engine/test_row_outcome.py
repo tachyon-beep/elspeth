@@ -4,7 +4,6 @@ This module tests the engine's RowResult dataclass with RowOutcome enum values.
 RowOutcome enum contract tests are in tests/contracts/test_enums.py.
 """
 
-
 from elspeth.contracts import RowOutcome, RowResult, TokenInfo
 from elspeth.testing import make_pipeline_row
 

@@ -259,9 +259,7 @@ class TestTransformBatchSupport:
         ctx = PluginContext(run_id="test", config={})
 
         # Batch mode
-        result = transform.process(
-            [make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx
-        )
+        result = transform.process([make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx)
         assert result.row == {"total": 6, "count": 3}
 
     def test_transform_is_batch_aware_default_false(self) -> None:

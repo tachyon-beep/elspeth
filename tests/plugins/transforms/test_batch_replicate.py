@@ -7,7 +7,6 @@ Contract enforcement tests verify that wrong types raise TypeError per
 the Tier 2 trust model - transforms must not coerce pipeline data types.
 """
 
-
 import pytest
 
 from elspeth.plugins.context import PluginContext

@@ -1,6 +1,5 @@
 """Tests for FieldMapper transform."""
 
-
 import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow

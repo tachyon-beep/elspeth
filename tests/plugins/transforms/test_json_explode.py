@@ -9,7 +9,6 @@ THREE-TIER TRUST MODEL:
 - No TransformResult.error() for type violations - they are bugs to fix
 """
 
-
 import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow
