@@ -817,10 +817,10 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=82656a27217db06a
+- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=f513c50d96f3295a
   owner: architecture
   reason: Tier 2 contract enforcement - isinstance validates copies_field type before arithmetic
-  safety: Wrong types crash (upstream bug); wrong values return TransformResult.error()
+  safety: Wrong types crash (upstream bug); wrong values quarantined with error marker
   expires: '2026-05-02'
 - key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=9160e4e0b95ed5e8
   owner: architecture

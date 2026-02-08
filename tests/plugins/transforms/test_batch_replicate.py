@@ -162,8 +162,8 @@ class TestBatchReplicateTypeEnforcement:
         with pytest.raises(TypeError, match="must be int, got NoneType"):
             transform.process(rows, ctx)
 
-    def test_zero_copies_returns_error_result(self, ctx: PluginContext) -> None:
-        """Zero copies value returns error result (Tier 2 operation safety)."""
+    def test_zero_copies_quarantined_with_error_marker(self, ctx: PluginContext) -> None:
+        """Zero copies row is quarantined with error marker (Tier 2 operation safety)."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -176,13 +176,14 @@ class TestBatchReplicateTypeEnforcement:
         rows = [make_pipeline_row({"id": 1, "copies": 0})]
 
         result = transform.process(rows, ctx)
-        assert result.status == "error"
-        assert result.reason["reason"] == "all_rows_invalid_copies"
-        assert result.reason["row_errors"][0]["row_index"] == 0
-        assert "0" in result.reason["row_errors"][0]["reason"]  # value captured in reason string
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 1  # Original row passed through with error marker
+        assert result.rows[0]["_replicate_error"]["reason"] == "invalid_copies"
+        assert result.rows[0]["_replicate_error"]["value"] == 0
 
-    def test_negative_copies_returns_error_result(self, ctx: PluginContext) -> None:
-        """Negative copies value returns error result (Tier 2 operation safety)."""
+    def test_negative_copies_quarantined_with_error_marker(self, ctx: PluginContext) -> None:
+        """Negative copies row is quarantined with error marker (Tier 2 operation safety)."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -195,13 +196,14 @@ class TestBatchReplicateTypeEnforcement:
         rows = [make_pipeline_row({"id": 1, "copies": -1})]
 
         result = transform.process(rows, ctx)
-        assert result.status == "error"
-        assert result.reason["reason"] == "all_rows_invalid_copies"
-        assert result.reason["row_errors"][0]["row_index"] == 0
-        assert "-1" in result.reason["row_errors"][0]["reason"]  # value captured in reason string
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 1  # Original row passed through with error marker
+        assert result.rows[0]["_replicate_error"]["reason"] == "invalid_copies"
+        assert result.rows[0]["_replicate_error"]["value"] == -1
 
-    def test_negative_copies_skipped_with_valid_rows(self, ctx: PluginContext) -> None:
-        """Rows with negative copies are skipped; valid rows still processed."""
+    def test_invalid_copies_quarantined_alongside_valid_rows(self, ctx: PluginContext) -> None:
+        """Rows with invalid copies are quarantined; valid rows still replicated."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -219,7 +221,13 @@ class TestBatchReplicateTypeEnforcement:
         result = transform.process(rows, ctx)
         assert result.status == "success"
         assert result.rows is not None
-        assert len(result.rows) == 2  # 2 copies of row 2, row 1 skipped
+        assert len(result.rows) == 3  # 1 quarantined + 2 copies of row 2
+        # First row is the quarantined one (original order preserved)
+        assert result.rows[0]["_replicate_error"]["reason"] == "invalid_copies"
+        assert result.rows[0]["id"] == 1
+        # Next two are copies of row 2
+        assert result.rows[1]["id"] == 2
+        assert result.rows[2]["id"] == 2
 
     def test_error_message_indicates_upstream_bug(self, ctx: PluginContext) -> None:
         """Error message explicitly indicates upstream validation bug."""
