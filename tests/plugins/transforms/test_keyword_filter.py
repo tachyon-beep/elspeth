@@ -282,8 +282,8 @@ class TestKeywordFilterProcessing:
         assert result.reason["field"] == "content"
         assert result.reason["matched_pattern"] == r"\bpassword\b"
 
-    def test_error_includes_context_snippet(self) -> None:
-        """Error result includes surrounding context."""
+    def test_error_includes_positional_metadata(self) -> None:
+        """Error result includes positional metadata instead of content."""
         from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 
         transform = KeywordFilter(
@@ -299,8 +299,9 @@ class TestKeywordFilterProcessing:
 
         assert result.status == "error"
         assert result.reason is not None
-        assert "match_context" in result.reason
-        assert "ssn" in result.reason["match_context"]
+        assert result.reason["match_position"] == 20
+        assert result.reason["match_length"] == 3
+        assert result.reason["field_length"] == len(row["content"])
 
     def test_scans_multiple_fields(self) -> None:
         """Transform scans all configured fields."""
