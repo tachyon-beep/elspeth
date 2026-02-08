@@ -230,6 +230,7 @@ extend-immutable-calls = ["typer.Option", "typer.Argument"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["T20"]  # Allow print in tests
+"tests_v2/**/*.py" = ["T20"]  # Allow print in tests (v2 suite)
 "scripts/**/*.py" = ["T20"]  # Allow print in CLI scripts
 "alembic/**/*.py" = ["E402"]  # Alembic env.py has imports after config setup
 "vulture_whitelist.py" = ["B018", "F821"]  # Vulture whitelist uses bare names
