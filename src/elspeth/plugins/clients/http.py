@@ -758,12 +758,20 @@ class AuditedHTTPClient(AuditedClientBase):
         start = time.perf_counter()
 
         try:
-            response = self._client.get(
-                connection_url,
-                headers=merged_headers,
-                extensions=extensions if extensions else None,
+            # Ephemeral client for SSRF-safe requests: connection_url uses the
+            # resolved IP (e.g. https://1.2.3.4:443/path), so all hostnames sharing
+            # an IP would map to the same pool key. A shared client would reuse a
+            # TLS connection established for hostname-A when requesting hostname-B,
+            # silently skipping SNI negotiation and certificate verification.
+            with httpx.Client(
                 timeout=effective_timeout,
-            )
+                follow_redirects=False,
+            ) as ssrf_client:
+                response = ssrf_client.get(
+                    connection_url,
+                    headers=merged_headers,
+                    extensions=extensions if extensions else None,
+                )
 
             # Handle redirects with SSRF validation at each hop
             redirect_count = 0
@@ -981,12 +989,18 @@ class AuditedHTTPClient(AuditedClientBase):
 
             hop_start = time.perf_counter()
 
-            response = self._client.get(
-                redirect_request.connection_url,
-                headers=hop_headers,
-                extensions=extensions if extensions else None,
+            # Ephemeral client per redirect hop: same TLS/SNI isolation rationale
+            # as the initial SSRF-safe request — IP-based connection_url would
+            # cause the pool to reuse connections across different hostnames.
+            with httpx.Client(
                 timeout=timeout,
-            )
+                follow_redirects=False,
+            ) as hop_client:
+                response = hop_client.get(
+                    redirect_request.connection_url,
+                    headers=hop_headers,
+                    extensions=extensions if extensions else None,
+                )
 
             hop_latency_ms = (time.perf_counter() - hop_start) * 1000
             redirects_followed += 1

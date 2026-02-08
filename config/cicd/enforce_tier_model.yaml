@@ -1536,9 +1536,9 @@ allow_hits:
 - key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=fd83274374bde4f7
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=1e64e43b98341872
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=4ca4e2477ece4e30
   owner: architecture
-  reason: httpx Client.get() method call - this is the external HTTP call with IP pinning
+  reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
 - key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=218c21461d517b71
   owner: architecture
   reason: httpx Client.get() method call - this is the external HTTP call with IP pinning
@@ -1551,7 +1551,7 @@ allow_hits:
 - key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=23c341af1cdd3b1e
   owner: architecture
   reason: HTTP redirect Location header - external system boundary, header may be absent
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=4850854b4b37d852
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=48a4d8f531e7c27d
   owner: architecture
   reason: HTTP redirect Location header - external system boundary, header may be absent
 - key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=68707f1f0c08a72a

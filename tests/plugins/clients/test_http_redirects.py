@@ -7,7 +7,7 @@ Verifies that:
    CallType.HTTP_REDIRECT with correct lineage data.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import httpx
 import pytest
@@ -19,17 +19,36 @@ from elspeth.plugins.clients.http import AuditedHTTPClient
 
 @pytest.fixture
 def http_client():
-    """Create AuditedHTTPClient with mocked dependencies."""
-    with patch("elspeth.plugins.clients.http.httpx.Client"):
+    """Create AuditedHTTPClient with mocked dependencies.
+
+    Patches httpx.Client so that:
+    - The shared self._client (created in __init__) is a mock
+    - Ephemeral clients created via `with httpx.Client(...) as c:` return
+      a controllable mock — accessible as http_client._ephemeral_mock
+    """
+    ephemeral_mock = MagicMock()
+    # Context manager protocol: __enter__ returns the mock itself
+    ephemeral_mock.__enter__ = Mock(return_value=ephemeral_mock)
+    ephemeral_mock.__exit__ = Mock(return_value=False)
+
+    with patch("elspeth.plugins.clients.http.httpx.Client") as MockClient:
+        # First call: shared client in __init__
+        # Subsequent calls: ephemeral clients in get_ssrf_safe / _follow_redirects_safe
+        shared_mock = MagicMock()
+        MockClient.side_effect = [shared_mock, ephemeral_mock, ephemeral_mock, ephemeral_mock, ephemeral_mock, ephemeral_mock]
+
         recorder = Mock()
         recorder.record_call = Mock()
-        yield AuditedHTTPClient(
+        client = AuditedHTTPClient(
             recorder=recorder,
             state_id="test-state-001",
             run_id="test-run-001",
             telemetry_emit=Mock(),
             timeout=30.0,
         )
+        # Expose the ephemeral mock for tests to set up return values
+        client._ephemeral_mock = ephemeral_mock
+        yield client
 
 
 def _make_redirect_response(location: str, status_code: int = 301, url: str = "https://93.184.216.34:443/old-path") -> httpx.Response:
@@ -73,7 +92,7 @@ class TestRelativeRedirectResolution:
         final_response = _make_final_response()
 
         mock_validate.return_value = _make_ssrf_request("https://example.com/new-path")
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         result, count = http_client._follow_redirects_safe(
             response=redirect_response,
@@ -95,7 +114,7 @@ class TestRelativeRedirectResolution:
         final_response = _make_final_response()
 
         mock_validate.return_value = _make_ssrf_request("https://api.example.com/api/v2/resource")
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         http_client._follow_redirects_safe(
             response=redirect_response,
@@ -118,7 +137,7 @@ class TestAbsoluteRedirectResolution:
         final_response = _make_final_response()
 
         mock_validate.return_value = _make_ssrf_request("https://other.com/page", ip="198.51.100.1")
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         http_client._follow_redirects_safe(
             response=redirect_response,
@@ -145,7 +164,7 @@ class TestChainedRedirects:
             _make_ssrf_request("https://example.com/step2"),
             _make_ssrf_request("https://example.com/step3"),
         ]
-        http_client._client.get.side_effect = [redirect2, final_response]
+        http_client._ephemeral_mock.get.side_effect = [redirect2, final_response]
 
         result, count = http_client._follow_redirects_safe(
             response=redirect1,
@@ -172,7 +191,7 @@ class TestChainedRedirects:
             _make_ssrf_request("https://new.com/", ip="203.0.113.1"),
             _make_ssrf_request("https://new.com/page", ip="203.0.113.1"),
         ]
-        http_client._client.get.side_effect = [redirect2, final_response]
+        http_client._ephemeral_mock.get.side_effect = [redirect2, final_response]
 
         result, count = http_client._follow_redirects_safe(
             response=redirect1,
@@ -200,7 +219,7 @@ class TestHostHeaderAndSNI:
 
         ssrf_req = _make_ssrf_request("https://example.com/new-path")
         mock_validate.return_value = ssrf_req
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         http_client._follow_redirects_safe(
             response=redirect_response,
@@ -211,7 +230,7 @@ class TestHostHeaderAndSNI:
         )
 
         # Check the headers passed to client.get()
-        call_kwargs = http_client._client.get.call_args
+        call_kwargs = http_client._ephemeral_mock.get.call_args
         headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers")
         assert headers["Host"] == "example.com"
 
@@ -223,7 +242,7 @@ class TestHostHeaderAndSNI:
 
         ssrf_req = _make_ssrf_request("https://secure.example.com/secure-path")
         mock_validate.return_value = ssrf_req
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         http_client._follow_redirects_safe(
             response=redirect_response,
@@ -233,7 +252,7 @@ class TestHostHeaderAndSNI:
             original_url="https://secure.example.com/old-path",
         )
 
-        call_kwargs = http_client._client.get.call_args
+        call_kwargs = http_client._ephemeral_mock.get.call_args
         extensions = call_kwargs.kwargs.get("extensions") or call_kwargs[1].get("extensions")
         assert extensions["sni_hostname"] == "secure.example.com"
 
@@ -268,7 +287,7 @@ class TestRedirectAuditRecording:
         final_response = _make_final_response()
 
         mock_validate.return_value = _make_ssrf_request("https://example.com/new-path")
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         http_client._follow_redirects_safe(
             response=redirect_response,
@@ -299,7 +318,7 @@ class TestRedirectAuditRecording:
             _make_ssrf_request("https://example.com/step2"),
             _make_ssrf_request("https://example.com/step3"),
         ]
-        http_client._client.get.side_effect = [redirect2, final_response]
+        http_client._ephemeral_mock.get.side_effect = [redirect2, final_response]
 
         http_client._follow_redirects_safe(
             response=redirect1,
@@ -331,7 +350,7 @@ class TestRedirectAuditRecording:
         final_response = _make_final_response()
 
         mock_validate.return_value = _make_ssrf_request("https://other.com/page", ip="198.51.100.1")
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         http_client._follow_redirects_safe(
             response=redirect_response,
@@ -352,7 +371,7 @@ class TestRedirectAuditRecording:
         final_response = _make_final_response()
 
         mock_validate.return_value = _make_ssrf_request("https://example.com/new-path", ip="93.184.216.34")
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         http_client._follow_redirects_safe(
             response=redirect_response,
@@ -372,7 +391,7 @@ class TestRedirectAuditRecording:
         final_response = _make_final_response()
 
         mock_validate.return_value = _make_ssrf_request("https://example.com/new-path")
-        http_client._client.get.return_value = final_response
+        http_client._ephemeral_mock.get.return_value = final_response
 
         http_client._follow_redirects_safe(
             response=redirect_response,
