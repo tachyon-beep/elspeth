@@ -791,8 +791,9 @@ class TestProfilingInstrumentation:
                 assert len(collector.results) == 100
 
                 # With instant LLM responses, overhead should be minimal
-                # 100 rows x 4 queries = 400 queries, batch overhead should be < 1s
-                assert elapsed < 1.0, f"Batch overhead too high: {elapsed:.2f}s"
+                # 100 rows x 4 queries = 400 queries, batch overhead should be < 5s
+                # (generous threshold for CI runners with variable CPU scheduling)
+                assert elapsed < 5.0, f"Batch overhead too high: {elapsed:.2f}s"
 
                 print("\nBatch processing overhead:")
                 print("  100 rows x 4 queries = 400 queries")
