@@ -14,7 +14,7 @@ PromptTemplate is the audit-critical path for LLM prompts. Key invariants:
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -58,7 +58,10 @@ class TestTemplateHashProperties:
     @settings(max_examples=100)
     def test_template_hash_deterministic(self, template_str: str) -> None:
         """Property: Same template string always produces same hash."""
-        t1 = PromptTemplate(template_str)
+        try:
+            t1 = PromptTemplate(template_str)
+        except TemplateError:
+            assume(False)  # Skip invalid Jinja2 syntax
         t2 = PromptTemplate(template_str)
         assert t1.template_hash == t2.template_hash
 
@@ -66,7 +69,10 @@ class TestTemplateHashProperties:
     @settings(max_examples=100)
     def test_template_hash_is_64_hex_chars(self, template_str: str) -> None:
         """Property: template_hash is always 64 hex characters (SHA-256)."""
-        t = PromptTemplate(template_str)
+        try:
+            t = PromptTemplate(template_str)
+        except TemplateError:
+            assume(False)  # Skip invalid Jinja2 syntax
         assert len(t.template_hash) == 64
         assert all(c in "0123456789abcdef" for c in t.template_hash)
 
