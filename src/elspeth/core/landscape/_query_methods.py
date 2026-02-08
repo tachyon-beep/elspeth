@@ -218,15 +218,18 @@ class QueryMethodsMixin:
             state_ids: List of state IDs to query
 
         Returns:
-            List of RoutingEvent models, ordered by state_id then ordinal
+            List of RoutingEvent models, ordered by execution order
+            (step_index, attempt, ordinal, event_id)
         """
         if not state_ids:
             return []
         query = (
             select(routing_events_table)
+            .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
             .where(routing_events_table.c.state_id.in_(state_ids))
             .order_by(
-                routing_events_table.c.state_id,
+                node_states_table.c.step_index,
+                node_states_table.c.attempt,
                 routing_events_table.c.ordinal,
                 routing_events_table.c.event_id,
             )
@@ -241,11 +244,21 @@ class QueryMethodsMixin:
             state_ids: List of state IDs to query
 
         Returns:
-            List of Call models, ordered by state_id then call_index
+            List of Call models, ordered by execution order
+            (step_index, attempt, call_index)
         """
         if not state_ids:
             return []
-        query = select(calls_table).where(calls_table.c.state_id.in_(state_ids)).order_by(calls_table.c.state_id, calls_table.c.call_index)
+        query = (
+            select(calls_table)
+            .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+            .where(calls_table.c.state_id.in_(state_ids))
+            .order_by(
+                node_states_table.c.step_index,
+                node_states_table.c.attempt,
+                calls_table.c.call_index,
+            )
+        )
         db_rows = self._ops.execute_fetchall(query)
         return [self._call_repo.load(r) for r in db_rows]
 
@@ -302,7 +315,8 @@ class QueryMethodsMixin:
             run_id: Run ID
 
         Returns:
-            List of RoutingEvent models, ordered by state_id then ordinal
+            List of RoutingEvent models, ordered by execution order
+            (step_index, attempt, ordinal, event_id)
         """
         # JOIN through node_states to filter by run_id
         query = (
@@ -310,7 +324,8 @@ class QueryMethodsMixin:
             .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
             .where(node_states_table.c.run_id == run_id)
             .order_by(
-                routing_events_table.c.state_id,
+                node_states_table.c.step_index,
+                node_states_table.c.attempt,
                 routing_events_table.c.ordinal,
                 routing_events_table.c.event_id,
             )
@@ -328,7 +343,8 @@ class QueryMethodsMixin:
             run_id: Run ID
 
         Returns:
-            List of Call models, ordered by state_id then call_index
+            List of Call models, ordered by execution order
+            (step_index, attempt, call_index)
         """
         # JOIN through node_states to filter by run_id
         # Only state-parented calls (state_id IS NOT NULL)
@@ -336,7 +352,11 @@ class QueryMethodsMixin:
             select(calls_table)
             .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
             .where(node_states_table.c.run_id == run_id)
-            .order_by(calls_table.c.state_id, calls_table.c.call_index)
+            .order_by(
+                node_states_table.c.step_index,
+                node_states_table.c.attempt,
+                calls_table.c.call_index,
+            )
         )
         db_rows = self._ops.execute_fetchall(query)
         return [self._call_repo.load(r) for r in db_rows]

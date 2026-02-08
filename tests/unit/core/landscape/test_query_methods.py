@@ -927,3 +927,186 @@ class TestExplainRow:
 
         assert lineage is not None
         assert lineage.source_data is None
+
+
+class TestRoutingEventsOrderedByExecution:
+    """Verify batch routing event queries return execution order, not state_id order.
+
+    Regression test for elspeth-rapid-11eh: the N+1 query refactor (ech8)
+    introduced ordering by state_id (UUID4 hex — random) instead of
+    execution order (step_index, attempt).
+    """
+
+    def _setup_three_states(self):
+        """Create 3 node states with state_ids that sort opposite to execution order.
+
+        State IDs are chosen so that lexicographic sort (zzz > bbb > aaa)
+        is the *reverse* of execution order (step=0/att=0, step=0/att=1, step=1/att=0).
+        If the query still sorts by state_id, the test will fail.
+        """
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="t1",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="transform-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="t2",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="transform-2",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_edge("run-1", "source-0", "transform-1", "continue", RoutingMode.MOVE, edge_id="edge-1")
+        recorder.register_edge("run-1", "transform-1", "transform-2", "continue", RoutingMode.MOVE, edge_id="edge-2")
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+        recorder.create_token("row-1", token_id="tok-1")
+
+        # State IDs chosen to sort OPPOSITE to execution order:
+        # zzz > bbb > aaa lexicographically, but execution order is aaa, bbb, zzz
+        # step=0, attempt=0 → state_id="zzz..." (sorts LAST lexicographically)
+        recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"x": 1}, state_id="zzz-state-first-exec")
+        # step=0, attempt=1 (retry) → state_id="bbb..." (sorts MIDDLE)
+        recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"x": 1}, state_id="bbb-state-retry", attempt=1)
+        # step=1, attempt=0 → state_id="aaa..." (sorts FIRST lexicographically)
+        recorder.begin_node_state("tok-1", "transform-2", "run-1", 1, {"x": 1}, state_id="aaa-state-second-step")
+
+        return recorder
+
+    def test_routing_events_for_states_ordered_by_step_index_and_attempt(self):
+        recorder = self._setup_three_states()
+        state_ids = ["zzz-state-first-exec", "bbb-state-retry", "aaa-state-second-step"]
+        for sid in state_ids:
+            recorder.record_routing_event(state_id=sid, edge_id="edge-1", mode=RoutingMode.MOVE)
+
+        events = recorder.get_routing_events_for_states(state_ids)
+
+        assert len(events) == 3
+        # Execution order: step=0/att=0, step=0/att=1, step=1/att=0
+        assert events[0].state_id == "zzz-state-first-exec"
+        assert events[1].state_id == "bbb-state-retry"
+        assert events[2].state_id == "aaa-state-second-step"
+
+    def test_all_routing_events_for_run_ordered_by_step_index_and_attempt(self):
+        recorder = self._setup_three_states()
+        state_ids = ["zzz-state-first-exec", "bbb-state-retry", "aaa-state-second-step"]
+        for sid in state_ids:
+            recorder.record_routing_event(state_id=sid, edge_id="edge-1", mode=RoutingMode.MOVE)
+
+        events = recorder.get_all_routing_events_for_run("run-1")
+
+        assert len(events) == 3
+        assert events[0].state_id == "zzz-state-first-exec"
+        assert events[1].state_id == "bbb-state-retry"
+        assert events[2].state_id == "aaa-state-second-step"
+
+
+class TestCallsOrderedByExecution:
+    """Verify batch call queries return execution order, not state_id order.
+
+    Regression test for elspeth-rapid-11eh: same root cause as above.
+    """
+
+    def _setup_three_states(self):
+        """Create 3 node states with state_ids that sort opposite to execution order."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="t1",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="transform-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="t2",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="transform-2",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_edge("run-1", "source-0", "transform-1", "continue", RoutingMode.MOVE, edge_id="edge-1")
+        recorder.register_edge("run-1", "transform-1", "transform-2", "continue", RoutingMode.MOVE, edge_id="edge-2")
+        recorder.create_row("run-1", "source-0", 0, {"x": 1}, row_id="row-1")
+        recorder.create_token("row-1", token_id="tok-1")
+
+        # Same strategy: state_ids sort opposite to execution order
+        recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"x": 1}, state_id="zzz-state-first-exec")
+        recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"x": 1}, state_id="bbb-state-retry", attempt=1)
+        recorder.begin_node_state("tok-1", "transform-2", "run-1", 1, {"x": 1}, state_id="aaa-state-second-step")
+
+        return recorder
+
+    def test_calls_for_states_ordered_by_step_index_and_attempt(self):
+        recorder = self._setup_three_states()
+        state_ids = ["zzz-state-first-exec", "bbb-state-retry", "aaa-state-second-step"]
+        for i, sid in enumerate(state_ids):
+            recorder.record_call(
+                state_id=sid,
+                call_index=0,
+                call_type=CallType.LLM,
+                status=CallStatus.SUCCESS,
+                request_data={"prompt": f"call-{i}"},
+                response_data={"out": f"resp-{i}"},
+                latency_ms=50.0,
+            )
+
+        calls = recorder.get_calls_for_states(state_ids)
+
+        assert len(calls) == 3
+        # Execution order: step=0/att=0, step=0/att=1, step=1/att=0
+        assert calls[0].state_id == "zzz-state-first-exec"
+        assert calls[1].state_id == "bbb-state-retry"
+        assert calls[2].state_id == "aaa-state-second-step"
+
+    def test_all_calls_for_run_ordered_by_step_index_and_attempt(self):
+        recorder = self._setup_three_states()
+        state_ids = ["zzz-state-first-exec", "bbb-state-retry", "aaa-state-second-step"]
+        for i, sid in enumerate(state_ids):
+            recorder.record_call(
+                state_id=sid,
+                call_index=0,
+                call_type=CallType.LLM,
+                status=CallStatus.SUCCESS,
+                request_data={"prompt": f"call-{i}"},
+                response_data={"out": f"resp-{i}"},
+                latency_ms=50.0,
+            )
+
+        calls = recorder.get_all_calls_for_run("run-1")
+
+        assert len(calls) == 3
+        assert calls[0].state_id == "zzz-state-first-exec"
+        assert calls[1].state_id == "bbb-state-retry"
+        assert calls[2].state_id == "aaa-state-second-step"
