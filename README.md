@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Status: RC-2](https://img.shields.io/badge/status-RC--2-yellow.svg)]()
+![Status: RC-2](https://img.shields.io/badge/status-RC--2-yellow.svg)
 
 Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every decision traceable to its source.
 
@@ -15,6 +15,7 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [The Sense/Decide/Act Model](#the-sensedecideact-model)
+- [Data Trust Model](#data-trust-model)
 - [Example Use Cases](#example-use-cases)
 - [Usage](#usage)
   - [Running Pipelines](#running-pipelines)
@@ -55,8 +56,12 @@ uv pip install -e ".[dev]"
 # Validate configuration
 elspeth validate --settings examples/threshold_gate/settings.yaml
 
-# Run a pipeline
+# Run a pipeline (audit DB created at the path in settings.yaml landscape.url)
 elspeth run --settings examples/threshold_gate/settings.yaml --execute
+
+# Explore why a row reached its destination
+elspeth explain --run <run_id> --row <row_id> \
+  --database examples/threshold_gate/runs/audit.db
 
 # Resume an interrupted run
 elspeth resume <run_id>
@@ -68,14 +73,14 @@ See [Your First Pipeline](docs/guides/your-first-pipeline.md) for a complete wal
 
 ## The Sense/Decide/Act Model
 
-```
+```text
 SENSE (Sources)  →  DECIDE (Transforms/Gates)  →  ACT (Sinks)
      │                       │                        │
   Load data            Process & classify       Route to outputs
 ```
 
 | Stage | What It Does | Examples |
-|-------|--------------|----------|
+| ----- | ------------ | -------- |
 | **Sense** | Load data from any source | CSV, JSON, APIs, databases, message queues |
 | **Decide** | Transform and classify rows | LLM query, ML inference, rules engine, threshold gate |
 | **Act** | Route to appropriate outputs | File output, database insert, alert webhook, review queue |
@@ -93,10 +98,42 @@ gates:
 
 ---
 
+## Data Trust Model
+
+ELSPETH enforces a **three-tier trust model** that governs how data is handled at every stage of the pipeline:
+
+| Tier | Data Source | Trust Level | Error Strategy |
+| ---- | ----------- | ----------- | -------------- |
+| **Tier 1** | Audit database (Landscape) | Full trust | Crash on any anomaly — bad audit data means corruption or tampering |
+| **Tier 2** | Pipeline data (post-source) | Elevated trust | Types are valid (source validated them); wrap operations on row values |
+| **Tier 3** | External input (sources, API responses) | Zero trust | Validate at boundary, coerce where possible, quarantine failures |
+
+**Coercion is only allowed at trust boundaries:** sources ingesting external data, and transforms receiving LLM/API responses. Once data enters the pipeline with valid types, downstream transforms trust those types. Wrong types downstream are upstream bugs to fix, not data quality issues to handle gracefully.
+
+This means a CSV with garbage in row 500 won't crash your 10,000-row pipeline (Tier 3: quarantine the row, keep processing). But a corrupted audit record will crash immediately (Tier 1: the audit trail is the legal record, and silently coercing bad data would be evidence tampering).
+
+```text
+EXTERNAL DATA              PIPELINE DATA              AUDIT TRAIL
+(zero trust)               (elevated trust)           (full trust)
+
+┌─────────────────┐        ┌─────────────────┐        ┌─────────────────┐
+│ External Source │        │ Transform/Sink  │        │ Landscape DB    │
+│                 │        │                 │        │                 │
+│ • Coerce OK     │───────►│ • No coercion   │───────►│ • Crash on      │
+│ • Validate      │ types  │ • Expect types  │ record │   any anomaly   │
+│ • Quarantine    │ valid  │ • Wrap ops on   │ what   │ • No coercion   │
+│   failures      │        │   row values    │ we saw │   ever          │
+└─────────────────┘        └─────────────────┘        └─────────────────┘
+```
+
+See [Data Trust and Error Handling](docs/guides/data-trust-and-error-handling.md) for the complete model with code examples.
+
+---
+
 ## Example Use Cases
 
 | Domain | Sense | Decide | Act |
-|--------|-------|--------|-----|
+| ------ | ----- | ------ | --- |
 | **Tender Evaluation** | CSV of submissions | LLM classification + safety gates | Results CSV, abuse review queue |
 | **Weather Monitoring** | Sensor API feed | Threshold + ML anomaly detection | Routine log, warning, emergency alert |
 | **Satellite Operations** | Telemetry stream | Anomaly classifier | Routine log, investigation ticket |
@@ -302,9 +339,9 @@ sinks:
       # restore_source_headers: true
 ```
 
-| Option | Use When |
-|--------|----------|
-| `display_headers` | You need custom output names or don't want source coupling |
+| Option                   | Use When                                                          |
+| ------------------------ | ----------------------------------------------------------------- |
+| `display_headers`        | You need custom output names or don't want source coupling        |
 | `restore_source_headers` | You want to restore exact original headers from normalized source |
 
 Transform-added fields (not in source) use their normalized names when restoring.
@@ -428,7 +465,7 @@ docker run --rm ghcr.io/johnm-dta/elspeth health --json
 ```
 
 | Mount | Purpose |
-|-------|---------|
+| ----- | ------- |
 | `/app/config` | Pipeline YAML (read-only) |
 | `/app/input` | Source data (read-only) |
 | `/app/output` | Sink outputs (read-write) |
@@ -440,7 +477,7 @@ See [Docker Guide](docs/guides/docker.md) for complete deployment documentation.
 
 ## Architecture
 
-```
+```text
 elspeth/
 ├── src/elspeth/
 │   ├── core/           # Config, canonical JSON, DAG, rate limiting, retention
@@ -457,7 +494,7 @@ elspeth/
 ```
 
 | Component | Technology | Purpose |
-|-----------|------------|---------|
+| --------- | ---------- | ------- |
 | CLI | Typer | Commands: run, explain, validate, resume, purge |
 | TUI | Textual | Interactive lineage explorer |
 | Config | Dynaconf + Pydantic | Multi-source with env var expansion |
@@ -474,7 +511,7 @@ See [Architecture Documentation](ARCHITECTURE.md) for C4 diagrams and detailed d
 ## Documentation
 
 | Document | Audience | Content |
-|----------|----------|---------|
+| -------- | -------- | ------- |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Developers | C4 diagrams, data flows, component details |
 | [PLUGIN.md](PLUGIN.md) | Plugin Authors | How to create sources, transforms, sinks |
 | [docs/design/requirements.md](docs/design/requirements.md) | All | 323 verified requirements with implementation status |
@@ -499,7 +536,7 @@ See [Architecture Documentation](ARCHITECTURE.md) for C4 diagrams and detailed d
 ### Consider Alternatives
 
 | If You Need | Consider Instead |
-|-------------|------------------|
+| ----------- | ---------------- |
 | High-throughput ETL | Spark, dbt |
 | Sub-second streaming | Flink, Kafka Streams |
 | Simple scripts, no audit | Plain Python |
@@ -516,7 +553,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev,azure]"
 
-# Azure Blob integration tests (Azurite emulator)
+# Install Azurite (Azure Blob Storage emulator for integration tests)
 npm install
 
 # Run tests
