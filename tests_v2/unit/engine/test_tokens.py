@@ -3,6 +3,8 @@
 
 from typing import Any
 
+import pytest
+
 from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.testing import make_field
@@ -29,6 +31,26 @@ def _make_pipeline_row(data: dict[str, Any], contract: SchemaContract | None = N
     if contract is None:
         contract = _make_observed_contract(*data.keys())
     return PipelineRow(data, contract)
+
+
+def _make_manager_context() -> tuple[Any, Any, str, str]:
+    """Create TokenManager + recorder context for unit tests."""
+    from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+    from elspeth.engine.tokens import TokenManager
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    run = recorder.begin_run(config={}, canonical_version="v1")
+    source = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="source",
+        node_type=NodeType.SOURCE,
+        plugin_version="1.0",
+        config={},
+        schema_config=DYNAMIC_SCHEMA,
+    )
+    manager = TokenManager(recorder)
+    return manager, recorder, run.run_id, source.node_id
 
 
 class TestTokenManager:
@@ -882,3 +904,106 @@ class TestTokenManagerExpand:
             db_token = recorder.get_token(child.token_id)
             assert db_token is not None
             assert db_token.step_in_pipeline == 5
+
+
+class TestTokenManagerBoundaryPaths:
+    """Coverage for error guards and quarantine/resume token paths."""
+
+    def test_create_initial_token_requires_contract(self) -> None:
+        manager, _recorder, run_id, source_node_id = _make_manager_context()
+
+        with pytest.raises(ValueError, match="must have contract"):
+            manager.create_initial_token(
+                run_id=run_id,
+                source_node_id=source_node_id,
+                row_index=0,
+                source_row=SourceRow.valid({"value": 42}, contract=None),
+            )
+
+    def test_create_quarantine_token_rejects_non_quarantined_source_row(self) -> None:
+        manager, _recorder, run_id, source_node_id = _make_manager_context()
+
+        with pytest.raises(ValueError, match="requires a quarantined"):
+            manager.create_quarantine_token(
+                run_id=run_id,
+                source_node_id=source_node_id,
+                row_index=0,
+                source_row=_make_source_row({"value": 42}),
+            )
+
+    def test_create_quarantine_token_preserves_dict_payload(self) -> None:
+        manager, _recorder, run_id, source_node_id = _make_manager_context()
+
+        token = manager.create_quarantine_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=SourceRow.quarantined(
+                row={"raw": "invalid"},
+                error="bad data",
+                destination="quarantine",
+            ),
+        )
+
+        assert token.row_data.to_dict() == {"raw": "invalid"}
+        assert token.row_data.contract.mode == "OBSERVED"
+        assert token.row_data.contract.fields == ()
+        assert token.row_data.contract.locked is False
+
+    def test_create_quarantine_token_wraps_non_dict_payload(self) -> None:
+        manager, _recorder, run_id, source_node_id = _make_manager_context()
+
+        token = manager.create_quarantine_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=SourceRow.quarantined(
+                row=["not", "a", "dict"],
+                error="bad row type",
+                destination="quarantine",
+            ),
+        )
+
+        assert token.row_data.to_dict() == {"_raw": ["not", "a", "dict"]}
+        assert token.row_data.contract.mode == "OBSERVED"
+
+    def test_create_token_for_existing_row_creates_new_token(self) -> None:
+        manager, recorder, run_id, source_node_id = _make_manager_context()
+
+        original = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"id": 1}),
+        )
+        restored_row = _make_pipeline_row({"id": 1, "restored": True})
+
+        resumed = manager.create_token_for_existing_row(
+            row_id=original.row_id,
+            row_data=restored_row,
+        )
+
+        assert resumed.row_id == original.row_id
+        assert resumed.token_id != original.token_id
+        assert resumed.row_data is restored_row
+        assert recorder.get_token(resumed.token_id) is not None
+
+    def test_expand_token_requires_locked_output_contract(self) -> None:
+        manager, _recorder, run_id, source_node_id = _make_manager_context()
+
+        parent = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"x": 1}),
+        )
+        unlocked_contract = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+
+        with pytest.raises(ValueError, match="must be locked"):
+            manager.expand_token(
+                parent_token=parent,
+                expanded_rows=[{"value": 1}],
+                output_contract=unlocked_contract,
+                step_in_pipeline=1,
+                run_id=run_id,
+            )
