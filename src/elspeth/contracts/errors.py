@@ -397,6 +397,9 @@ class TransformErrorReason(TypedDict):
     # Content filtering context
     matched_pattern: NotRequired[str]
     match_context: NotRequired[str]
+    match_position: NotRequired[int]  # Start offset of match in field value
+    match_length: NotRequired[int]  # Length of matched substring
+    field_length: NotRequired[int]  # Total length of scanned field value
     categories: NotRequired[list[str] | dict[str, dict[str, Any]]]  # List of names OR detailed severity/threshold map
     attacks: NotRequired[dict[str, bool]]  # Prompt shield attack flags (user_prompt_attack, document_attack)
 

@@ -563,15 +563,11 @@ class Orchestrator:
             )
 
             # Record secret resolutions in audit trail (deferred from pre-run loading)
-            # This records which secrets were loaded from where, with fingerprints (not values)
+            # Resolutions already contain pre-computed fingerprints (no plaintext values)
             if secret_resolutions:
-                from elspeth.core.security.fingerprint import get_fingerprint_key
-
-                fingerprint_key = get_fingerprint_key()
                 recorder.record_secret_resolutions(
                     run_id=run.run_id,
                     resolutions=secret_resolutions,
-                    fingerprint_key=fingerprint_key,
                 )
 
             # Emit telemetry AFTER Landscape succeeds - Landscape is the legal record

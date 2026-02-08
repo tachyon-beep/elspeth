@@ -106,7 +106,11 @@ class TestKeyVaultSource:
         assert record["secret_name"] == "my-api-key-secret"
         assert "timestamp" in record
         assert "latency_ms" in record
-        assert record["secret_value"] == "test-secret-value"  # For fingerprinting
+
+        # Verify fingerprint is present (not plaintext value)
+        assert "fingerprint" in record
+        assert "secret_value" not in record  # Plaintext must NOT be in record
+        assert len(record["fingerprint"]) == 64  # SHA256 hex digest
 
         # Verify timestamp is reasonable
         import time
@@ -454,7 +458,8 @@ class TestEdgeCases:
             resolutions = load_secrets_from_config(config)
 
         assert os.environ["UNICODE_KEY"] == unicode_value
-        assert resolutions[0]["secret_value"] == unicode_value
+        assert "fingerprint" in resolutions[0]
+        assert "secret_value" not in resolutions[0]
 
     def test_keyvault_secret_with_newlines(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Multiline secrets (e.g., private keys) are preserved correctly."""
@@ -488,7 +493,8 @@ ygWyZbTbDqpVlTTSV1+xJ0VU1NM/X2rL
 
         assert os.environ["MULTILINE_KEY"] == multiline_value
         assert "\n" in os.environ["MULTILINE_KEY"]
-        assert resolutions[0]["secret_value"] == multiline_value
+        assert "fingerprint" in resolutions[0]
+        assert "secret_value" not in resolutions[0]
 
     def test_keyvault_very_long_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Very long secrets (25KB) are supported."""
@@ -518,7 +524,8 @@ ygWyZbTbDqpVlTTSV1+xJ0VU1NM/X2rL
             resolutions = load_secrets_from_config(config)
 
         assert os.environ["LONG_KEY"] == long_value
-        assert len(resolutions[0]["secret_value"]) == 25 * 1024
+        assert "fingerprint" in resolutions[0]
+        assert "secret_value" not in resolutions[0]
 
 
 class TestIdempotency:
@@ -592,9 +599,14 @@ class TestIdempotency:
         # Both resolution lists are independent objects
         assert resolutions1 is not resolutions2
 
-        # Both should have the same secret value
-        assert resolutions1[0]["secret_value"] == "consistent-value"
-        assert resolutions2[0]["secret_value"] == "consistent-value"
+        # Both should have fingerprint (not plaintext)
+        assert "fingerprint" in resolutions1[0]
+        assert "fingerprint" in resolutions2[0]
+        assert "secret_value" not in resolutions1[0]
+        assert "secret_value" not in resolutions2[0]
+
+        # Same secret produces same fingerprint across calls
+        assert resolutions1[0]["fingerprint"] == resolutions2[0]["fingerprint"]
 
         # Both should have all required fields
         for res in [resolutions1[0], resolutions2[0]]:

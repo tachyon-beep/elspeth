@@ -7,9 +7,9 @@ them into environment variables before config resolution.
 IMPORTANT: This module reuses the existing KeyVaultSecretLoader from
 secret_loader.py to avoid code duplication and maintain consistent caching.
 
-AMENDED: Returns resolution records for deferred audit recording.
-Secrets are loaded BEFORE the run is created, so audit recording must happen
-later when run_id is available.
+Resolution records are returned with HMAC fingerprints (not plaintext values)
+for deferred audit recording. Fingerprinting happens immediately after each
+secret is loaded — plaintext values never leave this module.
 
 Usage:
     from elspeth.core.config import SecretsConfig
@@ -22,7 +22,7 @@ Usage:
     )
     resolutions = load_secrets_from_config(config)
     # Now os.environ["AZURE_OPENAI_KEY"] contains the secret value
-    # resolutions can be passed to orchestrator for audit recording
+    # resolutions contain fingerprints (not values) for audit recording
 """
 
 from __future__ import annotations
@@ -54,6 +54,8 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
 
     When source is 'keyvault', all mapped secrets are loaded from Azure
     Key Vault and injected into os.environ, overriding any existing values.
+    Each secret is fingerprinted immediately after loading — plaintext values
+    never leave this function.
 
     Args:
         config: SecretsConfig specifying source and mapping
@@ -61,10 +63,9 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
     Returns:
         List of resolution records for deferred audit recording.
         Each record contains: env_var_name, source, vault_url, secret_name,
-        timestamp, latency_ms, secret_value (for fingerprinting).
+        timestamp, latency_ms, fingerprint (HMAC-SHA256 hex digest).
 
-        NOTE: secret_value is included so the caller can compute fingerprints
-        with the appropriate key. It should NOT be stored directly.
+        Plaintext secret values are NOT included in the returned records.
 
     Raises:
         SecretLoadError: If any secret cannot be loaded (fail fast)
@@ -125,8 +126,17 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
             ) from e
         raise SecretLoadError(f"Failed to initialize Key Vault loader for {config.vault_url}\nError: {e}") from e
 
-    # Load each mapped secret and collect resolution records
+    # Load each mapped secret, fingerprint immediately, collect resolution records.
+    # Plaintext values are fingerprinted and discarded within this loop iteration —
+    # they never accumulate in the resolutions list.
+    from elspeth.core.security.fingerprint import get_fingerprint_key, secret_fingerprint
+
     resolutions: list[dict[str, Any]] = []
+
+    # Fingerprint key is available after loading ELSPETH_FINGERPRINT_KEY
+    # (either from env or from Key Vault earlier in this loop).
+    # Defer key acquisition until the first non-fingerprint-key secret.
+    fingerprint_key: bytes | None = None
 
     for env_var_name, keyvault_secret_name in config.mapping.items():
         start_time = time.time()
@@ -135,9 +145,14 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
             latency_ms = (time.time() - start_time) * 1000
 
             # Inject into environment (overrides existing)
-            os.environ[env_var_name] = secret_value
+            os.environ[env_var_name] = str(secret_value)
 
-            # Record for deferred audit (includes secret_value for fingerprinting)
+            # Compute fingerprint immediately — plaintext never leaves this function.
+            # Acquire fingerprint key lazily (it may have just been loaded above).
+            if fingerprint_key is None:
+                fingerprint_key = get_fingerprint_key()
+            fp = secret_fingerprint(str(secret_value), key=fingerprint_key)
+
             resolutions.append(
                 {
                     "env_var_name": env_var_name,
@@ -146,7 +161,7 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
                     "secret_name": keyvault_secret_name,
                     "timestamp": start_time,
                     "latency_ms": latency_ms,
-                    "secret_value": secret_value,  # For fingerprinting, NOT for storage
+                    "fingerprint": fp,
                 }
             )
 

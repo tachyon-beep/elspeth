@@ -33,9 +33,10 @@ class TestRecordSecretResolutions:
             canonical_version="v1",
         )
 
-        # Resolution record from load_secrets_from_config()
+        # Resolution record with pre-computed fingerprint (as load_secrets_from_config now returns)
         fingerprint_key = b"test-fingerprint-key"
         secret_value = "super-secret-api-key-12345"
+        expected_fingerprint = secret_fingerprint(secret_value, key=fingerprint_key)
         timestamp = time.time()
 
         resolutions = [
@@ -46,7 +47,7 @@ class TestRecordSecretResolutions:
                 "secret_name": "azure-openai-key",
                 "timestamp": timestamp,
                 "latency_ms": 150.5,
-                "secret_value": secret_value,
+                "fingerprint": expected_fingerprint,
             }
         ]
 
@@ -54,7 +55,6 @@ class TestRecordSecretResolutions:
         recorder.record_secret_resolutions(
             run_id=run.run_id,
             resolutions=resolutions,
-            fingerprint_key=fingerprint_key,
         )
 
         # Verify stored in database
@@ -74,8 +74,7 @@ class TestRecordSecretResolutions:
         assert row.timestamp == timestamp
         assert row.resolution_latency_ms == 150.5
 
-        # Verify fingerprint is computed correctly (NOT the raw secret)
-        expected_fingerprint = secret_fingerprint(secret_value, key=fingerprint_key)
+        # Verify fingerprint is stored correctly (NOT the raw secret)
         assert row.fingerprint == expected_fingerprint
         assert row.fingerprint != secret_value  # Sanity check: not the raw secret
 
@@ -92,6 +91,13 @@ class TestRecordSecretResolutions:
         fingerprint_key = b"test-fingerprint-key"
         timestamp = time.time()
 
+        # Pre-compute fingerprints (as load_secrets_from_config now does)
+        secrets = {
+            "API_KEY_1": "secret-value-1",
+            "API_KEY_2": "secret-value-2",
+            "DB_PASSWORD": "secret-db-password",
+        }
+
         resolutions = [
             {
                 "env_var_name": "API_KEY_1",
@@ -100,7 +106,7 @@ class TestRecordSecretResolutions:
                 "secret_name": "api-key-1",
                 "timestamp": timestamp,
                 "latency_ms": 100.0,
-                "secret_value": "secret-value-1",
+                "fingerprint": secret_fingerprint(secrets["API_KEY_1"], key=fingerprint_key),
             },
             {
                 "env_var_name": "API_KEY_2",
@@ -109,7 +115,7 @@ class TestRecordSecretResolutions:
                 "secret_name": "api-key-2",
                 "timestamp": timestamp + 0.1,
                 "latency_ms": 120.0,
-                "secret_value": "secret-value-2",
+                "fingerprint": secret_fingerprint(secrets["API_KEY_2"], key=fingerprint_key),
             },
             {
                 "env_var_name": "DB_PASSWORD",
@@ -118,20 +124,16 @@ class TestRecordSecretResolutions:
                 "secret_name": "database-password",
                 "timestamp": timestamp + 0.2,
                 "latency_ms": 200.0,
-                "secret_value": "secret-db-password",
+                "fingerprint": secret_fingerprint(secrets["DB_PASSWORD"], key=fingerprint_key),
             },
         ]
-
-        # Build reference mapping BEFORE calling recorder (it strips secret_value)
-        env_var_to_secret: dict[str, str] = {str(r["env_var_name"]): str(r["secret_value"]) for r in resolutions}
 
         recorder.record_secret_resolutions(
             run_id=run.run_id,
             resolutions=resolutions,
-            fingerprint_key=fingerprint_key,
         )
 
-        # Verify secret_value was stripped from input dicts
+        # Verify no plaintext values in resolution records
         for r in resolutions:
             assert "secret_value" not in r
 
@@ -152,7 +154,7 @@ class TestRecordSecretResolutions:
 
         # Verify each has correct fingerprint
         for row in rows:
-            expected_fp = secret_fingerprint(env_var_to_secret[row.env_var_name], key=fingerprint_key)
+            expected_fp = secret_fingerprint(secrets[row.env_var_name], key=fingerprint_key)
             assert row.fingerprint == expected_fp
 
     def test_empty_resolutions_does_nothing(self) -> None:
@@ -169,7 +171,6 @@ class TestRecordSecretResolutions:
         recorder.record_secret_resolutions(
             run_id=run.run_id,
             resolutions=[],
-            fingerprint_key=b"key",
         )
 
         # Verify nothing stored
@@ -198,14 +199,13 @@ class TestRecordSecretResolutions:
                 "secret_name": None,
                 "timestamp": time.time(),
                 "latency_ms": None,
-                "secret_value": "value",
+                "fingerprint": secret_fingerprint("value", key=b"key"),
             }
         ]
 
         recorder.record_secret_resolutions(
             run_id=run.run_id,
             resolutions=resolutions,
-            fingerprint_key=b"key",
         )
 
         with db.connection() as conn:
@@ -238,7 +238,7 @@ class TestRecordSecretResolutions:
                 "secret_name": "secret-a",
                 "timestamp": timestamp,
                 "latency_ms": 100.0,
-                "secret_value": "secret-value-AAA",
+                "fingerprint": secret_fingerprint("secret-value-AAA", key=fingerprint_key),
             },
             {
                 "env_var_name": "VAR_B",
@@ -247,14 +247,13 @@ class TestRecordSecretResolutions:
                 "secret_name": "secret-b",
                 "timestamp": timestamp,
                 "latency_ms": 100.0,
-                "secret_value": "secret-value-BBB",
+                "fingerprint": secret_fingerprint("secret-value-BBB", key=fingerprint_key),
             },
         ]
 
         recorder.record_secret_resolutions(
             run_id=run.run_id,
             resolutions=resolutions,
-            fingerprint_key=fingerprint_key,
         )
 
         with db.connection() as conn:
@@ -271,6 +270,7 @@ class TestRecordSecretResolutions:
 
         fingerprint_key = b"consistent-key"
         secret_value = "the-same-secret"
+        fp = secret_fingerprint(secret_value, key=fingerprint_key)
 
         # First run
         run1 = recorder.begin_run(
@@ -287,10 +287,9 @@ class TestRecordSecretResolutions:
                     "secret_name": "my-secret",
                     "timestamp": time.time(),
                     "latency_ms": 100.0,
-                    "secret_value": secret_value,
+                    "fingerprint": fp,
                 }
             ],
-            fingerprint_key=fingerprint_key,
         )
 
         # Second run with same secret
@@ -308,10 +307,9 @@ class TestRecordSecretResolutions:
                     "secret_name": "my-secret",
                     "timestamp": time.time(),
                     "latency_ms": 100.0,
-                    "secret_value": secret_value,
+                    "fingerprint": fp,
                 }
             ],
-            fingerprint_key=fingerprint_key,
         )
 
         # Get fingerprints from both runs

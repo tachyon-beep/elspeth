@@ -561,11 +561,14 @@ class ResponseGenerator:
         mode = mode_override if mode_override is not None else self._config.mode
 
         # Generate content based on mode
+        max_len = self._config.max_template_length
         if mode == "random":
             content = self._generate_random_text()
         elif mode == "template":
             # Use override template if provided
             if template_override is not None:
+                if len(template_override) > max_len:
+                    raise ValueError(f"Template override exceeds max length ({len(template_override)} > {max_len})")
                 template = self._jinja_env.from_string(template_override)
                 content = template.render(
                     request=request,

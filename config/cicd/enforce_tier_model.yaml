@@ -622,15 +622,15 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=45d7f91fa3e95728
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=223134d03cb7c869
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional HTTP header access - X-Fake-Response-Mode is an optional override header (Tier 3)
+  safety: Falls back to None when absent - correct for optional headers
   expires: '2026-05-02'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=da53fb5f17aab8ee
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=d0f2fafff977cf37
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: Optional HTTP header access - X-Fake-Template is an optional override header (Tier 3)
+  safety: Falls back to None when absent - correct for optional headers
   expires: '2026-05-02'
 - key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=0d867cb3140ddc37
   owner: architecture
@@ -712,20 +712,20 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=3e5f449fe83d3c46
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=9ccb09d5a6b09cbe
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: External HTTP request body - messages field is optional per OpenAI spec (Tier 3)
+  safety: Falls back to empty list - correct for optional request field
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=b8f580c3d8818c70
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=eab5668c5261146c
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: External HTTP request body - model field is optional per OpenAI spec (Tier 3)
+  safety: Falls back to "unknown" - correct for optional request field
   expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=8bd668fa1c1402bd
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=783f28b03b567ca6
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
+  reason: External HTTP request body - model field is optional per OpenAI spec (Tier 3)
+  safety: Falls back to "gpt-4" default - correct for optional request field
   expires: '2026-05-02'
 - key: testing/chaosllm/cli.py:R6:_version_callback:fp=e2b51655e4d22702
   owner: architecture

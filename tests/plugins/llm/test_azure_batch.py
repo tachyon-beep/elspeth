@@ -322,7 +322,7 @@ class TestAzureBatchLLMTransformInit:
         assert transform._max_wait_hours == 6
 
     def test_azure_config_property(self) -> None:
-        """azure_config property returns correct values."""
+        """azure_config property returns config without api_key."""
         transform = AzureBatchLLMTransform(
             {
                 "deployment_name": "my-gpt4o-batch",
@@ -337,9 +337,10 @@ class TestAzureBatchLLMTransformInit:
 
         config = transform.azure_config
         assert config["endpoint"] == "https://my-resource.openai.azure.com"
-        assert config["api_key"] == "azure-api-key"
         assert config["api_version"] == "2024-06-01"
         assert config["provider"] == "azure_batch"
+        # api_key must NOT be exposed in config property
+        assert "api_key" not in config
 
     def test_deployment_name_property(self) -> None:
         """deployment_name property returns correct value."""

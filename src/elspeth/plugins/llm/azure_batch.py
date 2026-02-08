@@ -1307,11 +1307,12 @@ class AzureBatchLLMTransform(BaseTransform):
         """Azure configuration for executor (if needed).
 
         Returns:
-            Dict containing endpoint, api_key, api_version, and provider
+            Dict containing endpoint, api_version, and provider.
+            API key is intentionally excluded to prevent accidental exposure
+            in checkpoints, logs, or audit records.
         """
         return {
             "endpoint": self._endpoint,
-            "api_key": self._api_key,
             "api_version": self._api_version,
             "provider": "azure_batch",
         }

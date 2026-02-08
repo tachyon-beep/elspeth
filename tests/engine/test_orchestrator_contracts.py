@@ -537,8 +537,12 @@ class TestOrchestratorSecretResolutions:
         graph = build_production_graph(config, default_sink="default")
         orchestrator = Orchestrator(db)
 
-        # Create secret resolutions like load_secrets_from_config() would
+        # Create secret resolutions like load_secrets_from_config() now returns
+        # (with pre-computed fingerprint, no plaintext value)
+        from elspeth.core.security.fingerprint import secret_fingerprint
+
         timestamp = time.time()
+        fp = secret_fingerprint("secret-value-xyz", key=b"test-fingerprint-key")
         secret_resolutions = [
             {
                 "env_var_name": "TEST_API_KEY",
@@ -547,7 +551,7 @@ class TestOrchestratorSecretResolutions:
                 "secret_name": "test-api-key",
                 "timestamp": timestamp,
                 "latency_ms": 100.0,
-                "secret_value": "secret-value-xyz",
+                "fingerprint": fp,
             }
         ]
 
@@ -564,7 +568,6 @@ class TestOrchestratorSecretResolutions:
         from sqlalchemy import select
 
         from elspeth.core.landscape.schema import secret_resolutions_table
-        from elspeth.core.security.fingerprint import secret_fingerprint
 
         with db.engine.connect() as conn:
             resolution_row = conn.execute(
@@ -578,9 +581,8 @@ class TestOrchestratorSecretResolutions:
             assert resolution_row.secret_name == "test-api-key"
             assert resolution_row.resolution_latency_ms == 100.0
 
-            # Verify fingerprint is correct
-            expected_fp = secret_fingerprint("secret-value-xyz", key=b"test-fingerprint-key")
-            assert resolution_row.fingerprint == expected_fp
+            # Verify pre-computed fingerprint was stored correctly
+            assert resolution_row.fingerprint == fp
 
     def test_no_secret_resolutions_when_not_provided(self, payload_store) -> None:
         """Orchestrator works normally when secret_resolutions is None."""

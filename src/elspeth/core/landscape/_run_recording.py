@@ -356,7 +356,6 @@ class RunRecordingMixin:
         self,
         run_id: str,
         resolutions: list[dict[str, Any]],
-        fingerprint_key: bytes,
     ) -> None:
         """Record secret resolution events from deferred records.
 
@@ -367,25 +366,9 @@ class RunRecordingMixin:
             run_id: The run ID to associate resolutions with
             resolutions: List of resolution records from load_secrets_from_config().
                 Each record contains: env_var_name, source, vault_url, secret_name,
-                timestamp, latency_ms, secret_value (for fingerprinting).
-            fingerprint_key: Key for computing secret fingerprints (HMAC-SHA256)
-
-        Note:
-            This method mutates each dict in ``resolutions``: the ``secret_value``
-            key is deleted after fingerprinting to clear plaintext secrets from
-            memory. Callers must not access ``secret_value`` after this call.
+                timestamp, latency_ms, fingerprint (pre-computed HMAC-SHA256).
         """
-        from elspeth.core.security.fingerprint import secret_fingerprint
-
         for rec in resolutions:
-            # Compute fingerprint (secret_value was included for this purpose)
-            # Direct access - resolutions come from load_secrets_from_config() which
-            # always includes these fields for keyvault source (our code, not user data)
-            fp = secret_fingerprint(rec["secret_value"], key=fingerprint_key)
-
-            # Clear plaintext secret from memory immediately after fingerprinting
-            del rec["secret_value"]
-
             self._ops.execute_insert(
                 secret_resolutions_table.insert().values(
                     resolution_id=generate_id(),
@@ -395,7 +378,7 @@ class RunRecordingMixin:
                     source=rec["source"],
                     vault_url=rec["vault_url"],
                     secret_name=rec["secret_name"],
-                    fingerprint=fp,
+                    fingerprint=rec["fingerprint"],
                     resolution_latency_ms=rec["latency_ms"],
                 )
             )
