@@ -119,12 +119,18 @@ class TransformResult:
     context_after: dict[str, Any] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Validate invariants - success results MUST have success_reason."""
+        """Validate invariants - success results MUST have success_reason and output data."""
         if self.status == "success" and self.success_reason is None:
             raise ValueError(
                 "TransformResult with status='success' MUST provide success_reason. "
                 "Use TransformResult.success(row, success_reason={'action': '...'}) "
                 "to create success results. Missing success_reason is a plugin bug."
+            )
+        if self.status == "success" and self.row is None and self.rows is None:
+            raise ValueError(
+                "TransformResult with status='success' MUST have output data (row or rows). "
+                "Use TransformResult.success(row, ...) or TransformResult.success_multi(rows, ...) "
+                "to create success results. Missing output data is a plugin bug."
             )
 
     @property

@@ -625,29 +625,17 @@ class TestOpenRouterBatchSingleRowFallback:
     """
 
     def test_process_single_crashes_on_unexpected_batch_result(self) -> None:
-        """_process_single raises RuntimeError on unexpected _process_batch result.
+        """TransformResult __post_init__ rejects success without output data.
 
-        Defense-in-depth: if _process_batch somehow returns success without
-        rows (should never happen), we crash rather than silently pass through.
+        Defense-in-depth: status="success" with no row/rows is rejected at
+        construction time by the dataclass invariant — the invalid state
+        can never exist.
         """
-        transform = OpenRouterBatchLLMTransform(_make_valid_config())
-        ctx = _create_mock_context()
-        row = {"text": "Test"}
-
-        # Mock _process_batch to return an invalid state:
-        # status="success" but rows=None (violates contract)
-        # Note: We must provide success_reason to pass __post_init__ validation,
-        # but the result is still invalid because neither row nor rows is set.
-        invalid_result = TransformResult(
-            status="success",
-            row=None,  # Single-row not set
-            rows=None,  # Multi-row not set either - INVALID for success
-            reason=None,
-            success_reason={"action": "processed"},  # Required for success status
-        )
-
-        with (
-            patch.object(transform, "_process_batch", return_value=invalid_result),
-            pytest.raises(RuntimeError, match="Unexpected result from _process_batch"),
-        ):
-            transform.process(make_pipeline_row(row), ctx)
+        with pytest.raises(ValueError, match="MUST have output data"):
+            TransformResult(
+                status="success",
+                row=None,  # Single-row not set
+                rows=None,  # Multi-row not set either - INVALID for success
+                reason=None,
+                success_reason={"action": "processed"},  # Required for success status
+            )

@@ -27,7 +27,7 @@ class TestKeywordFilterContract(TransformContractPropertyTestBase):
                 "on_error": "quarantine_sink",
             }
         )
-        assert t._on_error is not None
+        assert t.on_error is not None
         return t
 
     @pytest.fixture
@@ -46,7 +46,7 @@ class TestKeywordFilterErrorContract(TransformErrorContractTestBase):
                 "on_error": "quarantine_sink",
             }
         )
-        assert t._on_error is not None
+        assert t.on_error is not None
         return t
 
     @pytest.fixture

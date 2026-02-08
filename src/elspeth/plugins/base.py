@@ -91,6 +91,11 @@ class BaseTransform(ABC):
     # None means: transform doesn't return errors, OR errors are bugs.
     _on_error: str | None = None
 
+    @property
+    def on_error(self) -> str | None:
+        """Error routing destination for this transform."""
+        return self._on_error
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 

@@ -165,6 +165,10 @@ class TestTransformProtocol:
             transforms_adds_fields = False  # Schema evolution tracking
             _on_error: str | None = None  # Error routing (WP-11.99b)
 
+            @property
+            def on_error(self) -> str | None:
+                return self._on_error
+
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
 

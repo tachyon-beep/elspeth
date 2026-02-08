@@ -345,7 +345,7 @@ class TestBaseLLMTransformInit:
             }
         )
 
-        assert transform._on_error == "error_sink"
+        assert transform.on_error == "error_sink"
 
 
 class TestBaseLLMTransformProcess:

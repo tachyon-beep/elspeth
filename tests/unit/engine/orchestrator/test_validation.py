@@ -40,7 +40,7 @@ def _make_transform(*, node_id: str, name: str, on_error: str | None = None) -> 
     transform = Mock(spec=TransformProtocol)
     transform.node_id = node_id
     transform.name = name
-    transform._on_error = on_error
+    transform.on_error = on_error
     return transform
 
 

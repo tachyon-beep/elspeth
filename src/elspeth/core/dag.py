@@ -823,7 +823,7 @@ class ExecutionGraph:
         for i, transform in enumerate(transforms):
             if isinstance(transform, GateProtocol):
                 continue
-            on_error = transform._on_error
+            on_error = transform.on_error
             if on_error is not None and on_error != "discard" and SinkName(on_error) in sink_ids:
                 graph.add_edge(
                     transform_ids[i],

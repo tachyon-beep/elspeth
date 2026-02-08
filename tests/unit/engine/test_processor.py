@@ -136,7 +136,7 @@ def _make_mock_transform(
     transform = Mock(spec=TransformProtocol)
     transform.node_id = node_id
     transform.name = name
-    transform._on_error = on_error
+    transform.on_error = on_error
     transform.is_batch_aware = is_batch_aware
     transform.creates_tokens = creates_tokens
     if result is not None:

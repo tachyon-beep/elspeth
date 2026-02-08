@@ -445,8 +445,8 @@ class TransformExecutor:
                 context_after=result.context_after,
             )
 
-            # Handle error routing - _on_error is part of TransformProtocol
-            on_error = transform._on_error
+            # Handle error routing - on_error is part of TransformProtocol
+            on_error = transform.on_error
 
             if on_error is None:
                 raise RuntimeError(

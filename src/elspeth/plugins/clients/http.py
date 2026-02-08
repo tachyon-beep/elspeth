@@ -356,7 +356,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     response_body = {
                         "_json_parse_failed": True,
                         "_error": error,
-                        "_raw_text": response.text,
+                        "_raw_text": response.text[:10_000],
                     }
                 else:
                     response_body = parsed
@@ -571,7 +571,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     response_body = {
                         "_json_parse_failed": True,
                         "_error": error,
-                        "_raw_text": response.text,
+                        "_raw_text": response.text[:10_000],
                     }
                 else:
                     response_body = parsed
@@ -804,7 +804,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     response_body = {
                         "_json_parse_failed": True,
                         "_error": error,
-                        "_raw_text": response.text,
+                        "_raw_text": response.text[:10_000],
                     }
                 else:
                     response_body = parsed

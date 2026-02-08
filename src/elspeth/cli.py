@@ -215,24 +215,23 @@ def _ensure_output_directories(config: ElspethSettings) -> list[str]:
 
     # 3. Ensure sink output directories exist (for file-based sinks)
     for sink_name, sink_config in config.sinks.items():
-        # Check if sink has a path option (CSVSink, JSONSink)
-        if hasattr(sink_config, "options") and isinstance(sink_config.options, dict):
-            sink_path = sink_config.options.get("path")
-            if sink_path:
-                sink_file = Path(sink_path)
-                sink_parent = sink_file.parent
+        # SinkSettings.options is always dict[str, Any]; "path" key present for file-based sinks
+        sink_path = sink_config.options.get("path")
+        if sink_path:
+            sink_file = Path(sink_path)
+            sink_parent = sink_file.parent
 
-                if sink_parent and str(sink_parent) != ".":
-                    resolved_sink_parent = sink_parent.resolve()
-                    if not sink_parent.exists():
-                        try:
-                            sink_parent.mkdir(parents=True, exist_ok=True)
-                        except OSError as e:
-                            errors.append(
-                                f"Cannot create sink '{sink_name}' output directory: {resolved_sink_parent}\n  Output path: {sink_path}\n  Error: {e}"
-                            )
-                    elif not sink_parent.is_dir():
-                        errors.append(f"Sink '{sink_name}' output path parent exists but is not a directory: {resolved_sink_parent}")
+            if sink_parent and str(sink_parent) != ".":
+                resolved_sink_parent = sink_parent.resolve()
+                if not sink_parent.exists():
+                    try:
+                        sink_parent.mkdir(parents=True, exist_ok=True)
+                    except OSError as e:
+                        errors.append(
+                            f"Cannot create sink '{sink_name}' output directory: {resolved_sink_parent}\n  Output path: {sink_path}\n  Error: {e}"
+                        )
+                elif not sink_parent.is_dir():
+                    errors.append(f"Sink '{sink_name}' output path parent exists but is not a directory: {resolved_sink_parent}")
 
     return errors
 

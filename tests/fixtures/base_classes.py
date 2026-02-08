@@ -170,6 +170,11 @@ class _TestTransformBase:
     transforms_adds_fields: bool = False
     _on_error: str | None = None
 
+    @property
+    def on_error(self) -> str | None:
+        """Error routing destination for this transform."""
+        return self._on_error
+
     def __init__(self) -> None:
         self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
 

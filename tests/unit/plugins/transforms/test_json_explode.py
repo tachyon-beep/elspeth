@@ -320,9 +320,9 @@ class TestJSONExplodeConfiguration:
             }
         )
 
-        # _on_error is None because JSONExplode uses DataPluginConfig,
+        # on_error is None because JSONExplode uses DataPluginConfig,
         # not TransformDataConfig, and doesn't set _on_error
-        assert transform._on_error is None
+        assert transform.on_error is None
 
     def test_array_field_is_required(self) -> None:
         """array_field config is required - raises PluginConfigError."""

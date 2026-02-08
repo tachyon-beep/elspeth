@@ -112,10 +112,10 @@ def _make_transform(
 ) -> MagicMock:
     """Create a mock transform (non-batch)."""
     # Use spec to avoid MagicMock auto-creating 'accept' attribute
-    t = MagicMock(spec=["name", "node_id", "_on_error", "transforms_adds_fields", "process"])
+    t = MagicMock(spec=["name", "node_id", "on_error", "transforms_adds_fields", "process"])
     t.name = name
     t.node_id = node_id
-    t._on_error = on_error
+    t.on_error = on_error
     t.transforms_adds_fields = adds_fields
     return t
 

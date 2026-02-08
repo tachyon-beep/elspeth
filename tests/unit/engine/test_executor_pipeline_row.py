@@ -79,7 +79,7 @@ class TestTransformExecutorPipelineRow:
         mock_transform = MagicMock()
         mock_transform.name = "test_transform"
         mock_transform.node_id = "transform_001"
-        mock_transform._on_error = None
+        mock_transform.on_error = None
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(
@@ -133,7 +133,7 @@ class TestTransformExecutorPipelineRow:
         mock_transform = MagicMock()
         mock_transform.name = "test_transform"
         mock_transform.node_id = "transform_001"
-        mock_transform._on_error = None
+        mock_transform.on_error = None
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(
@@ -197,7 +197,7 @@ class TestTransformExecutorPipelineRow:
         mock_transform = MagicMock()
         mock_transform.name = "test_transform"
         mock_transform.node_id = "transform_001"
-        mock_transform._on_error = None
+        mock_transform.on_error = None
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process = capture_ctx
@@ -247,7 +247,7 @@ class TestTransformExecutorPipelineRow:
         mock_transform = MagicMock()
         mock_transform.name = "test_transform"
         mock_transform.node_id = "transform_001"
-        mock_transform._on_error = None
+        mock_transform.on_error = None
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(
@@ -300,7 +300,7 @@ class TestTransformExecutorPipelineRow:
         mock_transform = MagicMock()
         mock_transform.name = "test_transform"
         mock_transform.node_id = "transform_001"
-        mock_transform._on_error = "discard"  # Has error handler
+        mock_transform.on_error = "discard"  # Has error handler
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.error(
@@ -350,7 +350,7 @@ class TestTransformExecutorPipelineRow:
         mock_transform = MagicMock()
         mock_transform.name = "test_transform"
         mock_transform.node_id = "transform_001"
-        mock_transform._on_error = None
+        mock_transform.on_error = None
         # Delete accept to prevent batch transform detection
         del mock_transform.accept
         mock_transform.process.return_value = TransformResult.success(

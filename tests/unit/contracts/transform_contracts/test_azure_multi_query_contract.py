@@ -127,7 +127,7 @@ class TestAzureMultiQueryLLMAuditTrail:
             }
         )
 
-        assert transform._on_error is not None
+        assert transform.on_error is not None
 
 
 class TestAzureMultiQueryBatchContract(BatchTransformContractTestBase):

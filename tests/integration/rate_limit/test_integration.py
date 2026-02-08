@@ -10,6 +10,8 @@ Migrated from tests/integration/test_rate_limit_integration.py
 import time
 from typing import Any
 
+import pytest
+
 from elspeth.contracts import TransformResult
 from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
 from elspeth.contracts.plugin_context import PluginContext
@@ -108,76 +110,113 @@ class TestRateLimitRegistryInContext:
 
 
 class TestRateLimitThrottling:
-    """Test that rate limiting actually throttles requests."""
+    """Test that rate limiting actually throttles requests.
 
-    def test_rate_limiter_throttles_excess_requests(self) -> None:
-        """Verify rate limiter blocks when bucket is full.
+    These tests use try_acquire() for deterministic bucket-full detection
+    and acquire(timeout=...) for blocking verification. No wall-clock timing
+    assertions — the rate limiter's logic is purely computational.
+    """
 
-        The bucket can hold requests_per_minute tokens. With 10 req/min:
-        - First 10 calls go through immediately (filling the bucket)
-        - 11th call must wait for a token to leak (the bucket to drain)
+    def test_rate_limiter_rejects_excess_requests(self) -> None:
+        """Rate limiter rejects requests after bucket is exhausted.
+
+        With 10 req/min bucket: first 10 try_acquire() succeed, 11th fails.
+        Deterministic — no wall-clock dependency.
         """
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_minute=10,  # 10 per minute
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
 
         try:
-            transform = RateLimitAwareTransform({"service_name": "throttle_test"})
+            limiter = registry.get_limiter("throttle_test")
+
+            # First 10 acquisitions fill the bucket
+            for i in range(10):
+                assert limiter.try_acquire(), f"Call {i + 1} should succeed (bucket holds 10)"
+
+            # 11th is rejected — bucket is full
+            assert not limiter.try_acquire(), "11th call should be rejected (bucket full)"
+        finally:
+            registry.close()
+
+    def test_rate_limiter_blocking_acquire_times_out(self) -> None:
+        """acquire() blocks and raises TimeoutError when bucket is full.
+
+        Verifies the blocking path through the registry-created limiter,
+        exercising the same code path as production PluginContext usage.
+        """
+        settings = RateLimitSettings(
+            enabled=True,
+            default_requests_per_minute=10,
+        )
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
+
+        try:
+            limiter = registry.get_limiter("blocking_test")
+
+            # Exhaust the bucket
+            for _ in range(10):
+                limiter.acquire()
+
+            # Blocking acquire should time out (bucket won't refill in 50ms)
+            with pytest.raises(TimeoutError):
+                limiter.acquire(timeout=0.05)
+        finally:
+            registry.close()
+
+    def test_rate_limiter_wired_through_transform(self) -> None:
+        """Rate limiter works end-to-end through PluginContext and transform.
+
+        Exercises the full integration path: Registry -> PluginContext -> Transform.
+        First 10 rows process successfully, then the bucket is exhausted.
+        """
+        settings = RateLimitSettings(
+            enabled=True,
+            default_requests_per_minute=10,
+        )
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
+
+        try:
+            transform = RateLimitAwareTransform({"service_name": "wiring_test"})
             ctx = PluginContext(
                 run_id="test-run",
                 config={},
                 rate_limit_registry=registry,
             )
 
-            # Make 11 calls - first 10 should be instant (bucket holds 10)
-            # The 11th should block waiting for a leak
-            for i in range(11):
-                transform.process(make_pipeline_row({"id": i}), ctx)
+            # Process 10 rows — all should succeed (fills bucket)
+            for i in range(10):
+                result = transform.process(make_pipeline_row({"id": i}), ctx)
+                assert result.status == "success", f"Row {i} should process successfully"
 
-            call_times = transform.call_times
-            assert len(call_times) == 11
+            assert len(transform.call_times) == 10
 
-            # First 10 calls should be nearly instant
-            first_10_delta = call_times[9] - call_times[0]
-            assert first_10_delta < 0.1, f"First 10 calls took {first_10_delta * 1000:.0f}ms (expected instant)"
-
-            # 11th call should have waited for a token leak
-            # With 10 req/min, we need to wait for tokens to leak
-            wait_for_11th = call_times[10] - call_times[9]
-            assert wait_for_11th >= 0.05, f"11th call should have waited, only waited {wait_for_11th * 1000:.0f}ms"
+            # Underlying limiter should now be exhausted
+            limiter = registry.get_limiter("wiring_test")
+            assert not limiter.try_acquire(), "Bucket should be full after 10 rows"
         finally:
             registry.close()
 
     def test_disabled_rate_limit_no_throttle(self) -> None:
-        """Verify disabled rate limiting doesn't throttle."""
+        """Disabled rate limiting never rejects requests."""
         settings = RateLimitSettings(
             enabled=False,
-            default_requests_per_minute=1,  # Would be slow if enabled
+            default_requests_per_minute=1,  # Would reject after 1 if enabled
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
 
         try:
-            transform = RateLimitAwareTransform({"service_name": "no_throttle_test"})
-            ctx = PluginContext(
-                run_id="test-run",
-                config={},
-                rate_limit_registry=registry,
-            )
+            limiter = registry.get_limiter("no_throttle_test")
 
-            # Make 5 calls rapidly
-            for i in range(5):
-                transform.process(make_pipeline_row({"id": i}), ctx)
-
-            call_times = transform.call_times
-            assert len(call_times) == 5
-
-            # Total time should be very short (no rate limiting)
-            total_time = call_times[-1] - call_times[0]
-            assert total_time < 0.1, f"Expected fast calls, took {total_time * 1000:.0f}ms"
+            # All calls succeed even though requests_per_minute=1
+            for i in range(20):
+                assert limiter.try_acquire(), f"Disabled limiter should never reject (call {i + 1})"
         finally:
             registry.close()
 

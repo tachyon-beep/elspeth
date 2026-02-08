@@ -1141,7 +1141,7 @@ class RowProcessor:
                     #
                     # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
                     # for audit trail completeness (same as TransformExecutor error handling)
-                    on_error = transform._on_error
+                    on_error = transform.on_error
                     if on_error is None:
                         raise RuntimeError(
                             f"Transform '{transform.name}' raised retryable LLMClientError but has no "
@@ -1189,7 +1189,7 @@ class RowProcessor:
                 #
                 # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
                 # for audit trail completeness (same as TransformExecutor error handling)
-                on_error = transform._on_error
+                on_error = transform.on_error
                 if on_error is None:
                     raise RuntimeError(
                         f"Transform '{transform.name}' raised retryable {type(e).__name__} but has no "

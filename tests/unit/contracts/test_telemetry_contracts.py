@@ -119,6 +119,10 @@ class PassthroughTransform:
     transforms_adds_fields = False
     _on_error: str | None = None
 
+    @property
+    def on_error(self) -> str | None:
+        return self._on_error
+
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, PipelineRow):
             row_data = row.to_dict()
