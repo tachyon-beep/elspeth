@@ -20,7 +20,7 @@ tests_v2/
 ├── conftest.py                          # ROOT: markers, autouse cleanup, Hypothesis profiles
 ├── fixtures/                            # Shared test infrastructure (importable, not conftest)
 │   ├── __init__.py
-│   ├── factories.py                     # *** CRITICAL: Single-point-of-change factories ***
+│   ├── factories.py                     # *** Re-exports from elspeth.testing + test-only factories ***
 │   ├── base_classes.py                  # _TestSourceBase, _TestSinkBase, _TestTransformBase
 │   ├── plugins.py                       # ListSource, CollectSink, PassTransform, FailTransform, etc.
 │   ├── stores.py                        # MockPayloadStore, MockClock
@@ -205,11 +205,11 @@ tests_v2/
 │   │  GROUP 3: INTEGRATION                                                  │
 │   │  Speed: <60s. Real DB (in-memory SQLite). Multiple components wired.   │
 │   │  Marker: @pytest.mark.integration                                      │
-│   │  Fixture scope: module (DB), function (recorder, plugins)              │
+│   │  Fixture scope: function (DB, recorder, plugins — full isolation)      │
 │   └─────────────────────────────────────────────────────────────────────────┘
 │
 ├── integration/
-│   ├── conftest.py                      # landscape_db (module), recorder (function)
+│   ├── conftest.py                      # landscape_db (function), recorder (function)
 │   │
 │   ├── pipeline/
 │   │   ├── test_linear.py               # Source -> Transform -> Sink
@@ -448,43 +448,63 @@ def _auto_close_telemetry_managers() -> Iterator[None]:
     ...
 ```
 
-### 2. `fixtures/factories.py` — THE ANTI-REWRITE LAYER
+### 2. `fixtures/factories.py` — Two-Layer Factory Architecture
 
-**This is the single most important scaffolding file.** Every backbone type that tests construct
-gets a factory here. When a constructor signature changes, you update ONE file, not 90.
+**This is the single most important scaffolding decision.** Every backbone type that tests construct
+gets a factory function. When a constructor signature changes, you update ONE function, not 90.
 
 **The problem today:** `SchemaContract`/`FieldContract` construction is copy-pasted across 90+ files.
 `_make_observed_contract()` has been independently reimplemented 12 times. `make_plugin_context()`
 lives in 3 separate conftest files. When `SourceRow.valid()` grew a mandatory `contract` parameter,
 dozens of tests broke.
 
+**The existing partial solution:** `src/elspeth/testing/__init__.py` already exports
+`make_pipeline_row()`, which 66 test files already import. But it covers only one type.
+
+**The architecture:** Two layers, not one.
+
+| Layer | Location | Contains | Imported by |
+|-------|----------|----------|-------------|
+| **Production factories** | `src/elspeth/testing/` | Factories for production types (SchemaContract, PipelineRow, SourceRow, TransformResult, GateResult, ArtifactDescriptor, events, result types) | Tests AND production benchmarks |
+| **Test-only factories** | `tests_v2/fixtures/factories.py` | Re-exports from `elspeth.testing` + factories for test doubles (mock PluginContext, mock landscape, ExecutionGraph builders, populate_run) | Tests only |
+
 **The rule:** Tests NEVER call backbone constructors directly. They call factories.
+Production-type factories live in `elspeth.testing` (extending what's already there).
+Mock/test-infrastructure factories live in `tests_v2/fixtures/factories.py`.
+
+**Why two layers?**
+- `elspeth.testing` is *shipped code* — its factories are importable by anyone writing tests
+  against ELSPETH (benchmarks, example validation, plugin development). Changes here absorb
+  constructor signature churn for the entire ecosystem.
+- `tests_v2/fixtures/factories.py` is *test infrastructure* — mock objects, graph builders
+  with fake plugins, database population helpers. These should never leak into production code.
+
+**The decision test:** "Could a production benchmark or example script use this factory?"
+If yes → `elspeth.testing`. If no (it uses Mock, test doubles, or fake data) → `fixtures/factories.py`.
+
+#### Layer 1: `src/elspeth/testing/__init__.py` (extend existing module)
+
+The existing `make_pipeline_row()` becomes one of many. Add all production-type factories here:
 
 ```python
-# tests_v2/fixtures/factories.py
-"""Single-point-of-change factories for all backbone types.
+# src/elspeth/testing/__init__.py
+"""Test infrastructure for ELSPETH pipelines.
 
-RULE: When a backbone type's constructor changes, update the factory here.
-      Tests that use factories need ZERO changes.
+Factories for constructing production types with sensible defaults.
+When a backbone type's constructor changes, update the factory here.
+Tests and benchmarks that use factories need ZERO changes.
 
-These are plain functions, not fixtures. Import and call directly:
-    from tests_v2.fixtures.factories import make_row, make_source_row, make_context
+Usage:
+    from elspeth.testing import make_row, make_source_row, make_contract
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import Mock
-from uuid import uuid4
 
 from elspeth.contracts import (
     ArtifactDescriptor,
-    Determinism,
-    NodeType,
     PipelineRow,
-    RowOutcome,
-    RunStatus,
     SourceRow,
 )
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -504,14 +524,9 @@ def make_contract(
     """Build a SchemaContract from data or explicit field types.
 
     Usage:
-        # Infer from data (most common - 80% of tests)
-        contract = make_contract({"id": 1, "name": "Alice"})
-
-        # Explicit types (for tests that care about typing)
-        contract = make_contract(fields={"id": int, "name": str})
-
-        # Bare contract (for tests that don't care about fields)
-        contract = make_contract()
+        contract = make_contract({"id": 1, "name": "Alice"})       # Infer from data
+        contract = make_contract(fields={"id": int, "name": str})   # Explicit types
+        contract = make_contract()                                   # Bare contract
     """
     if fields is not None:
         field_contracts = tuple(
@@ -549,12 +564,7 @@ def make_field(
     required: bool = False,
     source: str = "inferred",
 ) -> FieldContract:
-    """Build a single FieldContract.
-
-    Usage:
-        field = make_field("amount_usd", float, required=True)
-        field = make_field("Amount USD", str, original_name="Amount USD")
-    """
+    """Build a single FieldContract."""
     return FieldContract(
         normalized_name=name,
         original_name=original_name or name,
@@ -565,7 +575,7 @@ def make_field(
 
 
 # =============================================================================
-# PipelineRow / SourceRow — The #2 source of rewrite pain
+# PipelineRow / SourceRow
 # =============================================================================
 
 def make_row(
@@ -577,14 +587,9 @@ def make_row(
     """Build a PipelineRow from a dict.
 
     Usage:
-        # Most common: just pass data
         row = make_row({"id": 1, "name": "Alice"})
-
-        # With kwargs shorthand
-        row = make_row(id=1, name="Alice")
-
-        # With explicit contract
-        row = make_row({"id": 1}, contract=my_contract)
+        row = make_row(id=1, name="Alice")                 # kwargs shorthand
+        row = make_row({"id": 1}, contract=my_contract)     # explicit contract
     """
     if data is None:
         data = kwargs
@@ -593,18 +598,17 @@ def make_row(
     return PipelineRow(data, contract)
 
 
+# Preserve backward compatibility with existing 66 call sites
+make_pipeline_row = make_row
+
+
 def make_source_row(
     data: dict[str, Any] | None = None,
     *,
     contract: SchemaContract | None = None,
     **kwargs: Any,
 ) -> SourceRow:
-    """Build a valid SourceRow from a dict.
-
-    Usage:
-        row = make_source_row({"id": 1, "name": "Alice"})
-        row = make_source_row(id=1, name="Alice")
-    """
+    """Build a valid SourceRow from a dict."""
     if data is None:
         data = kwargs
     if contract is None:
@@ -765,10 +769,6 @@ def make_artifact(
     )
 
 
-# =============================================================================
-# PluginContext — Currently defined in 3 separate conftest files
-# =============================================================================
-
 def make_token_info(
     row_id: str = "row-1",
     token_id: str | None = None,
@@ -783,6 +783,56 @@ def make_token_info(
         row_data=make_row(data or {}),
     )
 
+# ... (remaining production-type factories: make_run_result, make_flush_result,
+#      make_row_result, make_failure_info, make_pipeline_config, event factories,
+#      structural dict factories — see "Additional Factory Functions" below)
+```
+
+#### Layer 2: `tests_v2/fixtures/factories.py` (test-only infrastructure)
+
+This file re-exports everything from `elspeth.testing` for convenience, then adds factories
+that use test doubles (Mock objects, fake data, direct DB inserts). These MUST NOT go in
+`elspeth.testing` because they import `unittest.mock` and construct fake infrastructure.
+
+```python
+# tests_v2/fixtures/factories.py
+"""Test-only factories and re-exports from elspeth.testing.
+
+Layer 1 (elspeth.testing): Production-type factories — no mocks, no fakes.
+Layer 2 (this file):        Test infrastructure — mocks, graph builders, DB population.
+
+Usage:
+    from tests_v2.fixtures.factories import make_row, make_context, make_graph_linear
+    # make_row comes from elspeth.testing (re-exported)
+    # make_context and make_graph_linear are test-only (defined here)
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import Mock
+
+# --- Re-export all production factories for single-import convenience ---
+from elspeth.testing import (  # noqa: F401
+    make_artifact,
+    make_contract,
+    make_error,
+    make_field,
+    make_gate_continue,
+    make_gate_fork,
+    make_gate_route,
+    make_row,
+    make_source_row,
+    make_source_row_quarantined,
+    make_success,
+    make_success_multi,
+    make_token_info,
+)
+
+
+# =============================================================================
+# PluginContext — Uses Mock(), so test-only
+# =============================================================================
 
 def make_context(
     *,
@@ -795,14 +845,9 @@ def make_context(
     """Build a PluginContext with sensible test defaults.
 
     Usage:
-        # Minimal (most common)
-        ctx = make_context()
-
-        # With custom state_id (for retry tests)
-        ctx = make_context(state_id="state-retry-3")
-
-        # With real landscape recorder
-        ctx = make_context(landscape=recorder)
+        ctx = make_context()                            # Minimal (mock landscape)
+        ctx = make_context(state_id="state-retry-3")    # Custom state_id
+        ctx = make_context(landscape=recorder)           # Real landscape recorder
     """
     from elspeth.contracts.context import PluginContext
 
@@ -824,7 +869,26 @@ def make_context(
 
 
 # =============================================================================
-# ExecutionGraph — Prevent BUG-LINEAGE-01 pattern
+# ExecutionGraph — Manual construction for unit tests ONLY
+# =============================================================================
+#
+# TIER RULES (BUG-LINEAGE-01 prevention):
+#
+#   unit/         → make_graph_linear(), make_graph_fork() are OK.
+#                   These test graph algorithms in isolation (cycle detection,
+#                   topo sort, visualization) where fake plugin names are fine.
+#
+#   property/     → make_graph_linear(), make_graph_fork() are OK.
+#                   Property tests verify graph invariants (acyclicity, single
+#                   source) and don't need real plugin wiring.
+#
+#   integration/  → MUST use ExecutionGraph.from_plugin_instances().
+#   e2e/            These tiers test the real pipeline assembly path. Manual
+#   performance/    construction would hide mapping bugs (BUG-LINEAGE-01).
+#
+# If you're writing an integration test and tempted to use make_graph_linear(),
+# that's a sign your test setup should go through the full plugin instantiation
+# path instead. See fixtures/pipeline.py for helpers that do this correctly.
 # =============================================================================
 
 def make_graph_linear(
@@ -835,12 +899,12 @@ def make_graph_linear(
 ) -> "ExecutionGraph":
     """Build a linear ExecutionGraph: source -> t1 -> t2 -> ... -> sink.
 
-    Usage:
-        # Minimal: source -> sink
-        graph = make_graph_linear()
+    WARNING: For unit/property tests only. Integration+ tests MUST use
+    ExecutionGraph.from_plugin_instances() to exercise the real assembly path.
 
-        # With transforms: source -> enrich -> classify -> sink
-        graph = make_graph_linear("enrich", "classify")
+    Usage:
+        graph = make_graph_linear()                        # source -> sink
+        graph = make_graph_linear("enrich", "classify")    # source -> t1 -> t2 -> sink
     """
     from elspeth.core.dag import ExecutionGraph
 
@@ -870,13 +934,14 @@ def make_graph_fork(
 ) -> "ExecutionGraph":
     """Build a fork/join ExecutionGraph.
 
+    WARNING: For unit/property tests only. Integration+ tests MUST use
+    ExecutionGraph.from_plugin_instances() to exercise the real assembly path.
+
     Usage:
         graph = make_graph_fork({
             "path_a": ["transform_a1", "transform_a2"],
             "path_b": ["transform_b1"],
         })
-        # source -> gate -> path_a: [t_a1, t_a2] -> coalesce -> sink
-        #                -> path_b: [t_b1]        ->
     """
     from elspeth.core.dag import ExecutionGraph
 
@@ -1060,20 +1125,21 @@ needed updating. When `FieldContract` gained `source`, 90 more. The factory abso
 adds a `version` field, or `FieldContract` gets a `nullable` flag — we update `make_row()`,
 `make_contract()`, and `make_field()` once. Zero test files change.
 
-**Impact quantification:** This factory layer absorbs changes to these types:
+**Impact quantification:** The two-layer factory architecture absorbs changes to these types:
 
-| Type Changed | Without Factories | With Factories |
-|-------------|-------------------|----------------|
-| `SchemaContract` adds parameter | ~90 files | 1 file (`make_contract`) |
-| `SourceRow.valid()` signature change | ~45 files | 1 file (`make_source_row`) |
-| `PipelineRow` constructor change | ~55 files | 1 file (`make_row`) |
-| `PluginContext` adds field | ~95 files | 1 file (`make_context`) |
-| `TransformResult.success()` changes | ~424 call sites | 1 file (`make_success`) |
-| `FieldContract` restructured | ~90 files | 1 file (`make_field`) |
-| `GateResult` + `RoutingAction` change | ~12 files | 1 file (`make_gate_*`) |
+| Type Changed | Without Factories | With Factories | Which Layer |
+|-------------|-------------------|----------------|-------------|
+| `SchemaContract` adds parameter | ~90 files | 1 file (`make_contract`) | `elspeth.testing` |
+| `SourceRow.valid()` signature change | ~45 files | 1 file (`make_source_row`) | `elspeth.testing` |
+| `PipelineRow` constructor change | ~55 files | 1 file (`make_row`) | `elspeth.testing` |
+| `PluginContext` adds field | ~95 files | 1 file (`make_context`) | `fixtures/factories.py` |
+| `TransformResult.success()` changes | ~424 call sites | 1 file (`make_success`) | `elspeth.testing` |
+| `FieldContract` restructured | ~90 files | 1 file (`make_field`) | `elspeth.testing` |
+| `GateResult` + `RoutingAction` change | ~12 files | 1 file (`make_gate_*`) | `elspeth.testing` |
 
 **Migration rule:** When migrating a test from v1 to v2, replace ALL direct backbone constructor
-calls with factory calls. This is the tax for never having to rewrite the test again.
+calls with factory calls. Import from `tests_v2.fixtures.factories` (which re-exports
+`elspeth.testing` plus test-only additions) for a single import path.
 
 #### Additional Factory Functions (from full codebase audit)
 
@@ -1446,45 +1512,49 @@ def make_transform_error_token(
     )
 ```
 
-**Full factory inventory** (updated with audit findings):
+**Full factory inventory** (updated with audit findings and layer assignments):
 
-| Factory | Type It Wraps | Test Sites Today | Deps |
-|---------|--------------|-----------------|------|
-| `make_contract()` | SchemaContract | 90 files | FieldContract |
-| `make_field()` | FieldContract | 90 files | none |
-| `make_row()` | PipelineRow | 55 files | SchemaContract |
-| `make_source_row()` | SourceRow | 45 files | SchemaContract |
-| `make_success()` | TransformResult.success | 310 sites | PipelineRow |
-| `make_success_multi()` | TransformResult.success_multi | ~20 sites | PipelineRow |
-| `make_error()` | TransformResult.error | 113 sites | none |
-| `make_context()` | PluginContext | 95 files | TokenInfo |
-| `make_token_info()` | TokenInfo | 42 files | PipelineRow |
-| `make_gate_continue/route/fork()` | GateResult | 12 files | RoutingAction |
-| `make_artifact()` | ArtifactDescriptor | 23 files | none |
-| `make_graph_linear/fork()` | ExecutionGraph | 39 files | none |
-| `make_run_id()` | str (uuid) | many | none |
-| `make_run_record()` | RunRecord | many | LandscapeRecorder |
-| `populate_run()` | multi-table insert | many | LandscapeDB |
-| `make_run_result()` | RunResult | 7 files | none |
-| `make_flush_result()` | AggregationFlushResult | 9 files | none |
-| `make_execution_counters()` | ExecutionCounters | **0 files** | none |
-| `make_row_result()` | RowResult | 12 files | TokenInfo |
-| `make_failure_info()` | FailureInfo | 4 files | none |
-| `make_exception_result()` | ExceptionResult | 4 files | none |
-| `make_pipeline_config()` | PipelineConfig | 298 files | none |
-| `make_phase_started()` | PhaseStarted | **0 files** | none |
-| `make_phase_completed()` | PhaseCompleted | **0 files** | none |
-| `make_run_summary()` | RunSummary | **0 files** | none |
-| `make_external_call_completed()` | ExternalCallCompleted | 14 files | none |
-| `make_transform_completed()` | TransformCompleted | 19 files | none |
-| `make_token_completed()` | TokenCompleted | 24 files | none |
-| `make_success_reason()` | dict (TransformSuccessReason) | 310 sites | none |
-| `make_error_reason()` | dict (TransformErrorReason) | 113 sites | none |
-| `make_coalesce_context()` | dict (coalesce metadata) | 80 sites | none |
-| `make_batch_checkpoint()` | dict (batch checkpoint) | ~60 files | none |
-| `make_contract_audit_record()` | ContractAuditRecord | **1 file** | FieldAuditRecord |
-| `make_validation_error_token()` | ValidationErrorToken | 4 files | none |
-| `make_transform_error_token()` | TransformErrorToken | 4 files | none |
+| Factory | Type It Wraps | Test Sites Today | Layer |
+|---------|--------------|-----------------|-------|
+| `make_contract()` | SchemaContract | 90 files | `elspeth.testing` |
+| `make_field()` | FieldContract | 90 files | `elspeth.testing` |
+| `make_row()` | PipelineRow | 55 files | `elspeth.testing` |
+| `make_source_row()` | SourceRow | 45 files | `elspeth.testing` |
+| `make_success()` | TransformResult.success | 310 sites | `elspeth.testing` |
+| `make_success_multi()` | TransformResult.success_multi | ~20 sites | `elspeth.testing` |
+| `make_error()` | TransformResult.error | 113 sites | `elspeth.testing` |
+| `make_context()` | PluginContext | 95 files | `fixtures/factories` (uses Mock) |
+| `make_token_info()` | TokenInfo | 42 files | `elspeth.testing` |
+| `make_gate_continue/route/fork()` | GateResult | 12 files | `elspeth.testing` |
+| `make_artifact()` | ArtifactDescriptor | 23 files | `elspeth.testing` |
+| `make_graph_linear/fork()` | ExecutionGraph | 39 files | `fixtures/factories` (unit/property only) |
+| `make_run_id()` | str (uuid) | many | `fixtures/factories` |
+| `make_run_record()` | RunRecord | many | `fixtures/factories` (needs recorder) |
+| `populate_run()` | multi-table insert | many | `fixtures/factories` (needs DB) |
+| `make_run_result()` | RunResult | 7 files | `elspeth.testing` |
+| `make_flush_result()` | AggregationFlushResult | 9 files | `elspeth.testing` |
+| `make_execution_counters()` | ExecutionCounters | **0 files** | `elspeth.testing` |
+| `make_row_result()` | RowResult | 12 files | `elspeth.testing` |
+| `make_failure_info()` | FailureInfo | 4 files | `elspeth.testing` |
+| `make_exception_result()` | ExceptionResult | 4 files | `elspeth.testing` |
+| `make_pipeline_config()` | PipelineConfig | 298 files | `elspeth.testing` |
+| `make_phase_started()` | PhaseStarted | **0 files** | `elspeth.testing` |
+| `make_phase_completed()` | PhaseCompleted | **0 files** | `elspeth.testing` |
+| `make_run_summary()` | RunSummary | **0 files** | `elspeth.testing` |
+| `make_external_call_completed()` | ExternalCallCompleted | 14 files | `elspeth.testing` |
+| `make_transform_completed()` | TransformCompleted | 19 files | `elspeth.testing` |
+| `make_token_completed()` | TokenCompleted | 24 files | `elspeth.testing` |
+| `make_success_reason()` | dict (TransformSuccessReason) | 310 sites | `elspeth.testing` |
+| `make_error_reason()` | dict (TransformErrorReason) | 113 sites | `elspeth.testing` |
+| `make_coalesce_context()` | dict (coalesce metadata) | 80 sites | `fixtures/factories` (test-only struct) |
+| `make_batch_checkpoint()` | dict (batch checkpoint) | ~60 files | `fixtures/factories` (test-only struct) |
+| `make_contract_audit_record()` | ContractAuditRecord | **1 file** | `elspeth.testing` |
+| `make_validation_error_token()` | ValidationErrorToken | 4 files | `elspeth.testing` |
+| `make_transform_error_token()` | TransformErrorToken | 4 files | `elspeth.testing` |
+
+**Layer decision rule:** Does it use `Mock()`, `unittest.mock`, fake data structures, or
+direct DB inserts? → `fixtures/factories`. Does it construct a real production type with
+sensible defaults? → `elspeth.testing`.
 
 ### Types We Should Have But Don't (Currently Raw Dicts)
 
@@ -1542,14 +1612,19 @@ Contains:
 
 ### 6. `fixtures/landscape.py`
 
-Fixture factories with proper scoping documentation.
+Fixture factories with function-scoped isolation.
+
+**Why function scope everywhere?** Module-scoped databases create test interdependence — if
+test A inserts data with a specific `run_id`, test B may accidentally query it. The v1 suite
+documented this fragility as "use unique run_ids to avoid data pollution." v2 eliminates it
+by mechanism: every test gets a fresh database. In-memory SQLite schema creation is ~5ms —
+negligible compared to test logic.
 
 Contains:
 - `make_landscape_db()` - factory for in-memory LandscapeDB
 - `make_recorder()` - factory for LandscapeRecorder
 - Fixtures:
-  - `landscape_db_module` (module-scoped) - for integration tests
-  - `landscape_db_function` (function-scoped) - for e2e tests
+  - `landscape_db` (function-scoped) - fresh in-memory SQLite per test
   - `recorder` (function-scoped) - wraps landscape_db
   - `real_landscape_recorder_with_payload_store` (function-scoped)
 - Helpers:
@@ -1559,7 +1634,11 @@ Contains:
 
 ### 7. `fixtures/pipeline.py`
 
-High-level pipeline construction helpers.
+High-level pipeline construction helpers for integration/e2e tests.
+
+**These use `ExecutionGraph.from_plugin_instances()`** — the real production assembly path.
+This is the correct way to build graphs in integration+ tiers (see BUG-LINEAGE-01 tier rules
+in `fixtures/factories.py`).
 
 Contains:
 - `build_linear_pipeline(source_data, transforms, sink)` -> `(source, transforms, sinks, graph)`
@@ -1615,7 +1694,7 @@ from .settings import STANDARD_SETTINGS, DETERMINISM_SETTINGS
 - Provides `property_list_source`, `property_collect_sink` fixtures
 
 **`integration/conftest.py`**
-- `landscape_db` (module-scoped, in-memory SQLite)
+- `landscape_db` (function-scoped, in-memory SQLite — full isolation per test)
 - `recorder` (function-scoped)
 - `resume_test_env` fixture (checkpoint + recovery + payload)
 - `keyvault_url` fixture (from env/CLI)
@@ -1735,8 +1814,7 @@ conftest.py (root)
 ├── fixtures/landscape.py (depends on stores)
 │   ├── make_landscape_db()
 │   ├── make_recorder()
-│   ├── [fixture] landscape_db_module [module scope]
-│   ├── [fixture] landscape_db_function [function scope]
+│   ├── [fixture] landscape_db [function scope — fresh per test]
 │   ├── [fixture] recorder [function scope]
 │   ├── populate_run()
 │   └── assert_lineage_complete()
