@@ -21,7 +21,11 @@ if TYPE_CHECKING:
     from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
-from elspeth.contracts.errors import TransformErrorReason, TransformSuccessReason
+from elspeth.contracts.errors import (
+    PluginContractViolation,
+    TransformErrorReason,
+    TransformSuccessReason,
+)
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.routing import RoutingAction
 
@@ -212,6 +216,21 @@ class TransformResult:
         """
         if not rows:
             raise ValueError("success_multi requires at least one row")
+        # All rows must share the same contract identity. Mixed contracts
+        # would silently mislabel child tokens, corrupting downstream
+        # contract-based validation. Transforms are system-owned code,
+        # so mixed contracts = plugin bug.
+        first_contract = rows[0].contract
+        for i in range(1, len(rows)):
+            if rows[i].contract is not first_contract:
+                raise PluginContractViolation(
+                    f"success_multi() received rows with inconsistent contracts: "
+                    f"row 0 has {first_contract.mode if first_contract else None} contract "
+                    f"with {len(first_contract.fields) if first_contract else 0} fields, "
+                    f"but row {i} has {rows[i].contract.mode if rows[i].contract else None} contract "
+                    f"with {len(rows[i].contract.fields) if rows[i].contract else 0} fields. "
+                    f"All rows in a multi-row result must share the same contract instance."
+                )
         return cls(
             status="success",
             row=None,

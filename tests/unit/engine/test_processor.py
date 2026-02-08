@@ -551,6 +551,26 @@ class TestProcessRowMultiRowOutput:
                 ctx=ctx,
             )
 
+    def test_multi_row_with_inconsistent_contracts_raises(self) -> None:
+        """Multi-row result with mixed contracts must crash at construction (plugin bug).
+
+        Validation lives in TransformResult.success_multi() — it fires before
+        the result can reach any consumer in the processor.
+        """
+        from elspeth.contracts.errors import PluginContractViolation
+
+        contract_a = make_contract(fields={"value": int}, mode="OBSERVED")
+        contract_b = make_contract(fields={"other": str}, mode="OBSERVED")
+        output_rows = [
+            make_row({"value": 1}, contract=contract_a),
+            make_row({"other": "x"}, contract=contract_b),
+        ]
+        with pytest.raises(PluginContractViolation, match="inconsistent contracts"):
+            TransformResult.success_multi(
+                output_rows,
+                success_reason={"action": "expand"},
+            )
+
 
 # =============================================================================
 # process_existing_row (resume path)

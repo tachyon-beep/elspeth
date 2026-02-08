@@ -138,7 +138,19 @@ def load_secrets_from_config(config: SecretsConfig) -> list[dict[str, Any]]:
     # Defer key acquisition until the first non-fingerprint-key secret.
     fingerprint_key: bytes | None = None
 
+    # Ensure ELSPETH_FINGERPRINT_KEY is loaded first when present in mapping.
+    # Without this, a mapping where ELSPETH_FINGERPRINT_KEY appears after other
+    # secrets would fail: get_fingerprint_key() reads os.environ, but the Key Vault
+    # secret hasn't been injected yet. User YAML ordering must not cause failures.
+    _FP_KEY = "ELSPETH_FINGERPRINT_KEY"
+    ordered_mapping: list[tuple[str, str]] = []
+    if _FP_KEY in config.mapping:
+        ordered_mapping.append((_FP_KEY, config.mapping[_FP_KEY]))
     for env_var_name, keyvault_secret_name in config.mapping.items():
+        if env_var_name != _FP_KEY:
+            ordered_mapping.append((env_var_name, keyvault_secret_name))
+
+    for env_var_name, keyvault_secret_name in ordered_mapping:
         start_time = time.time()
         try:
             secret_value, _ref = loader.get_secret(keyvault_secret_name)

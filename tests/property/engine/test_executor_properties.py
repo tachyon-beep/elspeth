@@ -142,12 +142,25 @@ class TestTransformResultProperties:
         """Property: TransformResult.success_multi() preserves all rows unchanged.
 
         Multi-row output must preserve each row exactly as provided.
+        All rows share a single contract instance (required by success_multi).
         """
-        result = TransformResult.success_multi(cast(list[dict[str, Any] | PipelineRow], rows), success_reason={"action": "test"})
+        from elspeth.testing import make_contract
+
+        # Build a shared contract from the union of all keys across rows
+        all_keys: dict[str, type] = {}
+        for r in rows:
+            all_keys.update(dict.fromkeys(r, object))
+        contract = make_contract(fields=all_keys) if all_keys else make_contract()
+
+        pipeline_rows = [PipelineRow(r, contract) for r in rows]
+        result = TransformResult.success_multi(pipeline_rows, success_reason={"action": "test"})
 
         assert result.status == "success"
         assert result.row is None
-        assert result.rows == rows
+        assert result.rows is not None
+        assert len(result.rows) == len(rows)
+        for orig, actual in zip(rows, result.rows, strict=True):
+            assert actual.to_dict() == orig
         assert result.reason is None
         assert result.is_multi_row
         assert result.has_output_data

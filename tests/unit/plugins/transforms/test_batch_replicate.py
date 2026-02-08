@@ -162,8 +162,8 @@ class TestBatchReplicateTypeEnforcement:
         with pytest.raises(TypeError, match="must be int, got NoneType"):
             transform.process(rows, ctx)
 
-    def test_zero_copies_quarantined_with_error_marker(self, ctx: PluginContext) -> None:
-        """Zero copies row is quarantined with error marker (Tier 2 operation safety)."""
+    def test_zero_copies_returns_error_when_all_invalid(self, ctx: PluginContext) -> None:
+        """All rows with zero copies returns error result (no valid output to expand)."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -176,14 +176,13 @@ class TestBatchReplicateTypeEnforcement:
         rows = [make_pipeline_row({"id": 1, "copies": 0})]
 
         result = transform.process(rows, ctx)
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 1  # Original row passed through with error marker
-        assert result.rows[0]["_replicate_error"]["reason"] == "invalid_copies"
-        assert result.rows[0]["_replicate_error"]["value"] == 0
+        assert result.status == "error"
+        assert result.reason["reason"] == "all_rows_failed"
+        assert "1 rows quarantined" in result.reason["error"]
+        assert result.reason["row_errors"][0]["reason"] == "invalid_copies"
 
-    def test_negative_copies_quarantined_with_error_marker(self, ctx: PluginContext) -> None:
-        """Negative copies row is quarantined with error marker (Tier 2 operation safety)."""
+    def test_negative_copies_returns_error_when_all_invalid(self, ctx: PluginContext) -> None:
+        """All rows with negative copies returns error result."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -196,11 +195,9 @@ class TestBatchReplicateTypeEnforcement:
         rows = [make_pipeline_row({"id": 1, "copies": -1})]
 
         result = transform.process(rows, ctx)
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 1  # Original row passed through with error marker
-        assert result.rows[0]["_replicate_error"]["reason"] == "invalid_copies"
-        assert result.rows[0]["_replicate_error"]["value"] == -1
+        assert result.status == "error"
+        assert result.reason["reason"] == "all_rows_failed"
+        assert result.reason["row_errors"][0]["reason"] == "invalid_copies"
 
     def test_invalid_copies_quarantined_alongside_valid_rows(self, ctx: PluginContext) -> None:
         """Rows with invalid copies are quarantined; valid rows still replicated."""
@@ -221,13 +218,15 @@ class TestBatchReplicateTypeEnforcement:
         result = transform.process(rows, ctx)
         assert result.status == "success"
         assert result.rows is not None
-        assert len(result.rows) == 3  # 1 quarantined + 2 copies of row 2
-        # First row is the quarantined one (original order preserved)
-        assert result.rows[0]["_replicate_error"]["reason"] == "invalid_copies"
-        assert result.rows[0]["id"] == 1
-        # Next two are copies of row 2
+        assert len(result.rows) == 2  # Only valid copies of row 2
+        assert result.rows[0]["id"] == 2
+        assert result.rows[0]["copy_index"] == 0
         assert result.rows[1]["id"] == 2
-        assert result.rows[2]["id"] == 2
+        assert result.rows[1]["copy_index"] == 1
+        # Quarantine info in success_reason.metadata
+        assert result.success_reason["metadata"]["quarantined_count"] == 1
+        assert result.success_reason["metadata"]["quarantined"][0]["reason"] == "invalid_copies"
+        assert result.success_reason["metadata"]["quarantined"][0]["row_data"]["id"] == 1
 
     def test_error_message_indicates_upstream_bug(self, ctx: PluginContext) -> None:
         """Error message explicitly indicates upstream validation bug."""

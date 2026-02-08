@@ -2325,6 +2325,76 @@ default_sink: output
         assert settings.source.options.get("api_key") == "sk-secret-key"
         assert "api_key_redacted" not in settings.source.options
 
+    # === Tests for fingerprint key collision ===
+
+    def test_fingerprint_collision_rejects_preexisting_fingerprint_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Config with both secret and _fingerprint fields must be rejected.
+
+        Without this check, an attacker could inject a fake fingerprint by
+        including both 'api_key' and 'api_key_fingerprint' in the YAML —
+        the real HMAC would be computed then overwritten by the fake value.
+        """
+        from elspeth.core.config import SecretFingerprintError, _fingerprint_secrets
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        with pytest.raises(SecretFingerprintError, match=r"api_key.*api_key_fingerprint"):
+            _fingerprint_secrets(
+                {
+                    "api_key": "real-secret",
+                    "api_key_fingerprint": "attacker-controlled",
+                    "model": "gpt-4",
+                }
+            )
+
+    def test_fingerprint_collision_detected_in_nested_dicts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Collision detection must work in nested structures."""
+        from elspeth.core.config import SecretFingerprintError, _fingerprint_secrets
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        with pytest.raises(SecretFingerprintError, match=r"token.*token_fingerprint"):
+            _fingerprint_secrets(
+                {
+                    "auth": {
+                        "token": "nested-secret",
+                        "token_fingerprint": "fake",
+                    }
+                }
+            )
+
+    def test_fingerprint_collision_not_triggered_for_nonsecret_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fields ending in _fingerprint that aren't collisions should be preserved."""
+        from elspeth.core.config import _fingerprint_secrets
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        result = _fingerprint_secrets(
+            {
+                "browser_fingerprint": "some-hash",
+                "device_id": "abc123",
+            }
+        )
+
+        assert result["browser_fingerprint"] == "some-hash"
+        assert result["device_id"] == "abc123"
+
+    def test_fingerprint_collision_not_triggered_without_secret_field(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A _fingerprint field alone (without the secret field) is fine."""
+        from elspeth.core.config import _fingerprint_secrets
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        # api_key_fingerprint exists but api_key does not — no collision
+        result = _fingerprint_secrets(
+            {
+                "api_key_fingerprint": "pre-computed-hash",
+                "model": "gpt-4",
+            }
+        )
+
+        assert result["api_key_fingerprint"] == "pre-computed-hash"
+
     # === Tests for DSN password handling ===
 
     def test_dsn_password_sanitized(self, monkeypatch: pytest.MonkeyPatch) -> None:

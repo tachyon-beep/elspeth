@@ -367,6 +367,57 @@ class TestErrorHandling:
         assert os.environ["ELSPETH_FINGERPRINT_KEY"] == "fingerprint-key-from-vault"
         assert os.environ["MY_API_KEY"] == "value-for-my-api-key-secret"
 
+    def test_fingerprint_key_loaded_regardless_of_mapping_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ELSPETH_FINGERPRINT_KEY in mapping works even when listed AFTER other secrets.
+
+        Regression test: Previously, if ELSPETH_FINGERPRINT_KEY appeared after
+        other secrets in the mapping, get_fingerprint_key() would fail because
+        the Key Vault secret hadn't been injected into os.environ yet. The fix
+        ensures ELSPETH_FINGERPRINT_KEY is always loaded first.
+        """
+        # Ensure fingerprint key is NOT in environment initially
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("MY_API_KEY", raising=False)
+
+        call_order: list[str] = []
+
+        def mock_get_secret(name: str) -> MagicMock:
+            call_order.append(name)
+            secret = MagicMock()
+            if name == "elspeth-fingerprint-key":
+                secret.value = "fingerprint-key-from-vault"
+            else:
+                secret.value = f"value-for-{name}"
+            return secret
+
+        mock_client = MagicMock()
+        mock_client.get_secret.side_effect = mock_get_secret
+
+        # CRITICAL: ELSPETH_FINGERPRINT_KEY listed AFTER another secret
+        config = SecretsConfig(
+            source="keyvault",
+            vault_url="https://test-vault.vault.azure.net",
+            mapping={
+                "MY_API_KEY": "my-api-key-secret",  # Listed first
+                "ELSPETH_FINGERPRINT_KEY": "elspeth-fingerprint-key",  # Listed second
+            },
+        )
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            resolutions = load_secrets_from_config(config)
+
+        # Both secrets loaded successfully
+        assert len(resolutions) == 2
+        assert os.environ["ELSPETH_FINGERPRINT_KEY"] == "fingerprint-key-from-vault"
+        assert os.environ["MY_API_KEY"] == "value-for-my-api-key-secret"
+
+        # CRITICAL: Fingerprint key was loaded FIRST despite mapping order
+        assert call_order[0] == "elspeth-fingerprint-key"
+        assert call_order[1] == "my-api-key-secret"
+
     def test_fingerprint_key_in_env_allows_keyvault_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When ELSPETH_FINGERPRINT_KEY is already in environment, secrets load normally."""
         # Set fingerprint key in environment

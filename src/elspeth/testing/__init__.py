@@ -251,11 +251,26 @@ def make_success_multi(
     rows: list[dict[str, Any] | PipelineRow],
     *,
     reason: TransformSuccessReason | None = None,
+    contract: SchemaContract | None = None,
 ) -> TransformResult:
-    """Build a TransformResult.success_multi() from multiple rows."""
+    """Build a TransformResult.success_multi() from multiple rows.
+
+    All rows share a single contract instance (required by success_multi).
+    When *rows* contains dicts, a shared contract is built from the union
+    of all keys.  Pre-built PipelineRow instances must already share
+    the same contract identity.
+    """
     from elspeth.plugins.results import TransformResult
 
-    pipeline_rows = [make_row(r) if isinstance(r, dict) else r for r in rows]
+    # Build a shared contract from the union of all dict keys if needed.
+    if contract is None:
+        all_keys: dict[str, type] = {}
+        for r in rows:
+            if isinstance(r, dict):
+                all_keys.update(dict.fromkeys(r, object))
+        contract = make_contract(all_keys) if all_keys else make_contract({})
+
+    pipeline_rows = [make_row(r, contract=contract) if isinstance(r, dict) else r for r in rows]
     return TransformResult.success_multi(
         pipeline_rows,
         success_reason=reason or {"action": "test"},

@@ -1882,7 +1882,7 @@ class RowProcessor:
 
                     # is_multi_row check above guarantees rows is not None
                     assert transform_result.rows is not None, "is_multi_row guarantees rows is not None"
-                    # Extract contract from first output row (all rows share same contract)
+                    # Contract consistency is enforced by TransformResult.success_multi()
                     output_contract = transform_result.rows[0].contract
                     child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,

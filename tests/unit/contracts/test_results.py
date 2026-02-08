@@ -49,8 +49,9 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_multi_row_success(self) -> None:
         """TransformResult.success_multi returns multiple rows."""
+        contract = _make_observed_contract()
         raw_rows: list[dict[str, Any]] = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}]
-        pipeline_rows = [make_pipeline_row(r) for r in raw_rows]
+        pipeline_rows = [PipelineRow(r, contract) for r in raw_rows]
         result = TransformResult.success_multi(pipeline_rows, success_reason={"action": "test"})
 
         assert result.status == "success"
@@ -68,9 +69,11 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_is_multi_row(self) -> None:
         """is_multi_row property distinguishes single vs multi output."""
+        contract = _make_observed_contract()
         single = TransformResult.success(make_pipeline_row({"id": 1}), success_reason={"action": "test"})
         multi = TransformResult.success_multi(
-            [make_pipeline_row({"id": 1}), make_pipeline_row({"id": 2})], success_reason={"action": "test"}
+            [PipelineRow({"id": 1}, contract), PipelineRow({"id": 2}, contract)],
+            success_reason={"action": "test"},
         )
 
         assert single.is_multi_row is False
@@ -88,6 +91,30 @@ class TestTransformResultMultiRow:
         assert result.status == "error"
         assert result.row is None
         assert result.rows is None
+
+    def test_success_multi_rejects_mixed_contracts(self) -> None:
+        """success_multi raises PluginContractViolation when rows have different contracts."""
+        from elspeth.contracts.errors import PluginContractViolation
+        from elspeth.testing import make_contract
+
+        contract_a = make_contract(fields={"value": int})
+        contract_b = make_contract(fields={"other": str})
+        rows = [
+            PipelineRow({"value": 1}, contract_a),
+            PipelineRow({"other": "x"}, contract_b),
+        ]
+        with pytest.raises(PluginContractViolation, match="inconsistent contracts"):
+            TransformResult.success_multi(rows, success_reason={"action": "expand"})
+
+    def test_success_multi_accepts_same_contract(self) -> None:
+        """success_multi accepts rows that all share the same contract instance."""
+        contract = _make_observed_contract()
+        rows = [
+            PipelineRow({"value": 1}, contract),
+            PipelineRow({"value": 2}, contract),
+        ]
+        result = TransformResult.success_multi(rows, success_reason={"action": "expand"})
+        assert result.is_multi_row
 
     def test_transform_result_has_output_data(self) -> None:
         """has_output_data property checks if ANY output exists."""

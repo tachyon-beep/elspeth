@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.errors import TransformSuccessReason
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -138,7 +139,8 @@ class BatchReplicate(BaseTransform):
                 success_reason={"action": "processed", "metadata": {"empty_batch": True}},
             )
 
-        output_rows: list[dict[str, Any]] = []
+        valid_rows: list[dict[str, Any]] = []
+        quarantined: list[dict[str, Any]] = []
 
         for row in rows:
             # Get copies count - field is optional, type must be correct if present
@@ -158,15 +160,15 @@ class BatchReplicate(BaseTransform):
 
                 # Value-level validation: copies must be >= 1
                 # Tier 2 operation safety - type is correct but value is unsafe
-                # Quarantine: include original row with error marker, don't replicate
                 if raw_copies < 1:
-                    quarantined = row.to_dict()
-                    quarantined["_replicate_error"] = {
-                        "reason": "invalid_copies",
-                        "field": self._copies_field,
-                        "value": raw_copies,
-                    }
-                    output_rows.append(quarantined)
+                    quarantined.append(
+                        {
+                            "reason": "invalid_copies",
+                            "field": self._copies_field,
+                            "value": raw_copies,
+                            "row_data": row.to_dict(),
+                        }
+                    )
                     continue
 
                 copies = raw_copies
@@ -177,33 +179,51 @@ class BatchReplicate(BaseTransform):
                 output = row.to_dict()  # Shallow copy preserves original data
                 if self._include_copy_index:
                     output["copy_index"] = copy_idx
-                output_rows.append(output)
+                valid_rows.append(output)
 
-        # Create OBSERVED contract from first output row
-        # Multi-row transforms must provide contracts for token expansion (processor.py:1826)
-        if output_rows:
-            fields = tuple(
-                FieldContract(
-                    normalized_name=key,
-                    original_name=key,
-                    python_type=object,  # OBSERVED mode - infer all as object type
-                    required=False,
-                    source="inferred",
-                )
-                for key in output_rows[0]
+        # If ALL rows were quarantined, return error — no valid output to expand
+        if not valid_rows:
+            return TransformResult.error(
+                {
+                    "reason": "all_rows_failed",
+                    "error": f"All {len(quarantined)} rows quarantined: invalid copies values",
+                    "row_errors": [{"row_index": i, "reason": q["reason"]} for i, q in enumerate(quarantined)],
+                },
+                retryable=False,
             )
-            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-        else:
-            # Empty output - create empty contract (shouldn't happen per validation)
-            output_contract = SchemaContract(mode="OBSERVED", fields=(), locked=True)
 
-        # Return multiple rows - engine will create new tokens for each
+        # Build contract from union of ALL valid output row keys (not just first)
+        all_keys: dict[str, None] = {}
+        for r in valid_rows:
+            for key in r:
+                all_keys[key] = None
+
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=object,  # OBSERVED mode - infer all as object type
+                required=False,
+                source="inferred",
+            )
+            for key in all_keys
+        )
+        output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+        success_reason: TransformSuccessReason = {
+            "action": "processed",
+            "fields_added": ["copy_index"] if self._include_copy_index else [],
+        }
+        if quarantined:
+            success_reason["metadata"] = {
+                "quarantined_count": len(quarantined),
+                "quarantined": quarantined,
+            }
+
+        # Return only valid replicated rows — quarantined rows are in success_reason
         return TransformResult.success_multi(
-            [PipelineRow(r, output_contract) for r in output_rows],
-            success_reason={
-                "action": "processed",
-                "fields_added": ["copy_index"] if self._include_copy_index else [],
-            },
+            [PipelineRow(r, output_contract) for r in valid_rows],
+            success_reason=success_reason,
         )
 
     def close(self) -> None:

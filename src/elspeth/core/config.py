@@ -117,12 +117,14 @@ class SecretsConfig(BaseModel):
 
 
 class SecretFingerprintError(Exception):
-    """Raised when secrets are found but cannot be fingerprinted.
+    """Raised when secret fingerprinting fails.
 
     This occurs when:
-    - Secret-like field names are found in config
-    - ELSPETH_FINGERPRINT_KEY is not set
-    - ELSPETH_ALLOW_RAW_SECRETS is not set to 'true'
+    - Secret-like field names are found in config but ELSPETH_FINGERPRINT_KEY
+      is not set and ELSPETH_ALLOW_RAW_SECRETS is not 'true'
+    - A config dict contains both a secret field (e.g., 'api_key') and the
+      corresponding fingerprint field ('api_key_fingerprint'), which would
+      allow the pre-existing value to overwrite the computed HMAC fingerprint
     """
 
     pass
@@ -1159,6 +1161,18 @@ def _fingerprint_secrets(
             return key, value, False
 
     def _recurse(d: dict[str, Any]) -> dict[str, Any]:
+        # Detect collision: a secret field and its _fingerprint counterpart both present.
+        # Without this check, the pre-existing _fingerprint value would silently overwrite
+        # the computed HMAC, allowing an attacker to inject a fake fingerprint.
+        for key in d:
+            if isinstance(d[key], str) and _is_secret_field(key):
+                fp_key = f"{key}_fingerprint"
+                if fp_key in d:
+                    raise SecretFingerprintError(
+                        f"Config contains both '{key}' and '{fp_key}'. "
+                        f"The '{fp_key}' field is auto-generated from '{key}' during "
+                        f"fingerprinting — remove '{fp_key}' from your configuration."
+                    )
         result = {}
         for key, value in d.items():
             new_key, new_value, _was_secret = _process_value(key, value)

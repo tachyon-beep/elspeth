@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import networkx as nx
-import structlog
 from networkx import MultiDiGraph
 
 from elspeth.contracts import EdgeInfo, RoutingMode, check_compatibility, error_edge_label
@@ -38,15 +37,6 @@ class GraphValidationError(Exception):
     """Raised when graph validation fails."""
 
     pass
-
-
-@dataclass(frozen=True)
-class GraphValidationWarning:
-    """Non-fatal validation concern that doesn't prevent execution."""
-
-    code: str  # e.g., "DIVERT_COALESCE_REQUIRE_ALL"
-    message: str  # Human-readable description
-    node_ids: tuple[str, ...]  # Affected nodes
 
 
 # Config stored on graph nodes varies by node type:
@@ -868,10 +858,6 @@ class ExecutionGraph:
         # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
         graph.validate_edge_compatibility()
 
-        # PHASE 3 WARNINGS: Check for dangerous divert+coalesce interactions
-        if coalesce_settings:
-            graph.warn_divert_coalesce_interactions({cs.name: cs for cs in coalesce_settings})
-
         return graph
 
     def get_sink_id_map(self) -> dict[SinkName, NodeID]:
@@ -967,87 +953,6 @@ class ExecutionGraph:
             Used by the executor to resolve route labels from gates.
         """
         return dict(self._route_resolution_map)
-
-    def warn_divert_coalesce_interactions(
-        self,
-        coalesce_settings: dict[str, CoalesceSettings],
-    ) -> list[GraphValidationWarning]:
-        """Check for DIVERT edges on paths between fork gates and require_all coalesces.
-
-        If a transform between a fork gate and a require_all coalesce has
-        on_error routing (DIVERT edge), any row hitting that error path will
-        cause the downstream coalesce to lose a branch — guaranteed failure.
-
-        Returns:
-            List of warnings (may be empty). Warnings are non-fatal.
-        """
-        slog = structlog.get_logger()
-        warnings: list[GraphValidationWarning] = []
-
-        # 1. Find all transform node_ids that have outgoing DIVERT edges
-        divert_transforms: set[str] = set()
-        for edge_info in self.get_edges():
-            if edge_info.mode == RoutingMode.DIVERT:
-                node_info = self.get_node_info(edge_info.from_node)
-                if node_info.node_type == "transform":
-                    divert_transforms.add(edge_info.from_node)
-
-        if not divert_transforms:
-            return warnings
-
-        # 2. Build subgraph of only "continue" edges (the main pipeline spine)
-        continue_edges = [(u, v) for u, v, d in self._graph.edges(data=True) if d.get("label") == "continue"]
-        spine: nx.DiGraph[str] = nx.DiGraph(continue_edges)
-
-        # 3. For each require_all coalesce, find fork gates feeding it
-        #    and check for DIVERT transforms on the spine between them
-        for coalesce_name, settings in coalesce_settings.items():
-            if settings.policy != "require_all":
-                continue
-
-            coalesce_node_id = self._coalesce_id_map.get(CoalesceName(coalesce_name))
-            if coalesce_node_id is None:
-                continue
-
-            # Find fork gates: predecessors of coalesce with branch labels
-            fork_gate_ids: set[str] = set()
-            for pred_id in self._graph.predecessors(coalesce_node_id):
-                for _u, v, edge_data in self._graph.edges(pred_id, data=True):
-                    if v == coalesce_node_id and edge_data.get("label") in settings.branches:
-                        fork_gate_ids.add(pred_id)
-                        break
-
-            # For each fork gate, walk the continue-edge spine to coalesce
-            for gate_id in fork_gate_ids:
-                try:
-                    path = nx.shortest_path(spine, gate_id, coalesce_node_id)
-                except nx.NetworkXNoPath:
-                    continue
-
-                # Check intermediate nodes (exclude gate and coalesce themselves)
-                for node_id in path[1:-1]:
-                    if node_id in divert_transforms:
-                        warning = GraphValidationWarning(
-                            code="DIVERT_COALESCE_REQUIRE_ALL",
-                            message=(
-                                f"Transform '{node_id}' between fork gate '{gate_id}' "
-                                f"and coalesce '{coalesce_name}' has on_error routing to "
-                                f"an error sink. If any row hits this error path, the "
-                                f"downstream coalesce with require_all policy will lose "
-                                f"a branch. Consider best_effort or quorum policy, "
-                                f"or use on_error: discard."
-                            ),
-                            node_ids=(node_id, gate_id, coalesce_node_id),
-                        )
-                        warnings.append(warning)
-                        slog.warning(
-                            "dag_validation_warning",
-                            code=warning.code,
-                            message=warning.message,
-                            node_ids=warning.node_ids,
-                        )
-
-        return warnings
 
     def validate_edge_compatibility(self) -> None:
         """Validate schema compatibility for all edges in the graph.
