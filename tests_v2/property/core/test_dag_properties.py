@@ -687,16 +687,8 @@ class TestGuaranteedFieldsProperties:
         assert effective == guaranteed, f"Gate should inherit upstream guarantees: {guaranteed}, got {effective}"
 
     @given(
-        g1=st.frozensets(
-            st.text(min_size=1, max_size=6, alphabet=st.characters(whitelist_categories=["L"])),
-            min_size=1,
-            max_size=3,
-        ),
-        g2=st.frozensets(
-            st.text(min_size=1, max_size=6, alphabet=st.characters(whitelist_categories=["L"])),
-            min_size=1,
-            max_size=3,
-        ),
+        g1=st.frozensets(ascii_field_names, min_size=1, max_size=3),
+        g2=st.frozensets(ascii_field_names, min_size=1, max_size=3),
     )
     @settings(max_examples=50)
     def test_guarantees_propagate_through_chain(self, g1: frozenset[str], g2: frozenset[str]) -> None:
