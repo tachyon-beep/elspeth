@@ -742,6 +742,7 @@ class TestAzureBatchLLMTransformResume:
         mock_batch.id = "batch-456"
         mock_batch.status = "completed"
         mock_batch.output_file_id = "output-file-789"
+        mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
         # Mock output file content
@@ -835,6 +836,7 @@ class TestAzureBatchLLMTransformResume:
         mock_batch.id = "batch-456"
         mock_batch.status = "completed"
         mock_batch.output_file_id = "output-file-789"
+        mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
         output_content = Mock()
@@ -1008,6 +1010,7 @@ class TestAzureBatchLLMTransformResultAssembly:
         mock_batch.id = "batch-456"
         mock_batch.status = "completed"
         mock_batch.output_file_id = "output-789"
+        mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
         # Results in random order
@@ -1091,6 +1094,7 @@ class TestAzureBatchLLMTransformResultAssembly:
         mock_batch.id = "batch-456"
         mock_batch.status = "completed"
         mock_batch.output_file_id = "output-789"
+        mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
         output_lines = [
@@ -1176,6 +1180,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         mock_batch.id = "azure-batch-789"
         mock_batch.status = "completed"
         mock_batch.output_file_id = "output-file-999"
+        mock_batch.error_file_id = None  # No error file for fully successful batch
 
         # Mock output file content (JSONL)
         output_jsonl = """{"custom_id": "row-0-abc", "response": {"body": {"choices": [{"message": {"content": "Analysis: Greeting"}}], "usage": {"total_tokens": 10}}}}
@@ -1263,6 +1268,7 @@ class TestAzureBatchLLMTransformAuditRecording:
 
         mock_batch = MagicMock()
         mock_batch.output_file_id = "output-file-999"
+        mock_batch.error_file_id = None  # No separate error file
 
         # One success, one error
         output_jsonl = """{"custom_id": "row-0-abc", "response": {"body": {"choices": [{"message": {"content": "OK"}}]}}}
@@ -1411,6 +1417,7 @@ class TestAzureBatchLLMTransformMissingResults:
         mock_batch.id = "batch-999"
         mock_batch.status = "completed"
         mock_batch.output_file_id = "file-output"
+        mock_batch.error_file_id = None
 
         mock_file_content = Mock()
         # Only return result for row-0, NOT row-1 (simulating missing result)
@@ -1507,6 +1514,7 @@ class TestAzureBatchLLMTransformMissingResults:
         mock_batch.id = "batch-888"
         mock_batch.status = "completed"
         mock_batch.output_file_id = "file-output"
+        mock_batch.error_file_id = None
 
         mock_file_content = Mock()
         mock_file_content.text = json.dumps(

@@ -244,6 +244,7 @@ TransformErrorCategory = Literal[
     "file_download_failed",
     "all_output_lines_malformed",
     "all_rows_failed",
+    "all_rows_invalid_copies",
     "result_not_found",
     "query_failed",
     "rate_limited",

@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.errors import RowErrorEntry
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -139,8 +140,9 @@ class BatchReplicate(BaseTransform):
             )
 
         output_rows: list[dict[str, Any]] = []
+        row_errors: list[RowErrorEntry] = []
 
-        for row in rows:
+        for idx, row in enumerate(rows):
             # Get copies count - field is optional, type must be correct if present
             if self._copies_field not in row:
                 # Field missing - use default (valid scenario)
@@ -156,12 +158,17 @@ class BatchReplicate(BaseTransform):
                         f"This indicates an upstream validation bug - check source schema or prior transforms."
                     )
 
-                # Validate value is positive
+                # Value-level validation: copies must be >= 1
+                # Tier 2 operation safety - type is correct but value is unsafe
+                # Wrap and skip rather than crashing the entire batch
                 if raw_copies < 1:
-                    raise ValueError(
-                        f"Field '{self._copies_field}' must be >= 1, got {raw_copies}. "
-                        f"This indicates invalid data - check source validation."
+                    row_errors.append(
+                        RowErrorEntry(
+                            row_index=idx,
+                            reason=f"{self._copies_field}={raw_copies} (must be >= 1)",
+                        )
                     )
+                    continue
 
                 copies = raw_copies
 
@@ -172,6 +179,15 @@ class BatchReplicate(BaseTransform):
                 if self._include_copy_index:
                     output["copy_index"] = copy_idx
                 output_rows.append(output)
+
+        # If ALL rows had invalid copies values, return error
+        if not output_rows and row_errors:
+            return TransformResult.error(
+                {
+                    "reason": "all_rows_invalid_copies",
+                    "row_errors": row_errors,
+                }
+            )
 
         # Create OBSERVED contract from first output row
         # Multi-row transforms must provide contracts for token expansion (processor.py:1826)

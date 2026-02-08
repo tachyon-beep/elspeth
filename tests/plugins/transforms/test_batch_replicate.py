@@ -162,8 +162,8 @@ class TestBatchReplicateTypeEnforcement:
         with pytest.raises(TypeError, match="must be int, got NoneType"):
             transform.process(rows, ctx)
 
-    def test_zero_copies_raises_value_error(self, ctx: PluginContext) -> None:
-        """Zero copies value raises ValueError."""
+    def test_zero_copies_returns_error_result(self, ctx: PluginContext) -> None:
+        """Zero copies value returns error result (Tier 2 operation safety)."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -175,11 +175,14 @@ class TestBatchReplicateTypeEnforcement:
 
         rows = [make_pipeline_row({"id": 1, "copies": 0})]
 
-        with pytest.raises(ValueError, match="must be >= 1"):
-            transform.process(rows, ctx)
+        result = transform.process(rows, ctx)
+        assert result.status == "error"
+        assert result.reason["reason"] == "all_rows_invalid_copies"
+        assert result.reason["row_errors"][0]["row_index"] == 0
+        assert "0" in result.reason["row_errors"][0]["reason"]  # value captured in reason string
 
-    def test_negative_copies_raises_value_error(self, ctx: PluginContext) -> None:
-        """Negative copies value raises ValueError."""
+    def test_negative_copies_returns_error_result(self, ctx: PluginContext) -> None:
+        """Negative copies value returns error result (Tier 2 operation safety)."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -191,8 +194,32 @@ class TestBatchReplicateTypeEnforcement:
 
         rows = [make_pipeline_row({"id": 1, "copies": -1})]
 
-        with pytest.raises(ValueError, match="must be >= 1"):
-            transform.process(rows, ctx)
+        result = transform.process(rows, ctx)
+        assert result.status == "error"
+        assert result.reason["reason"] == "all_rows_invalid_copies"
+        assert result.reason["row_errors"][0]["row_index"] == 0
+        assert "-1" in result.reason["row_errors"][0]["reason"]  # value captured in reason string
+
+    def test_negative_copies_skipped_with_valid_rows(self, ctx: PluginContext) -> None:
+        """Rows with negative copies are skipped; valid rows still processed."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+            }
+        )
+
+        rows = [
+            make_pipeline_row({"id": 1, "copies": -1}),
+            make_pipeline_row({"id": 2, "copies": 2}),
+        ]
+
+        result = transform.process(rows, ctx)
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2  # 2 copies of row 2, row 1 skipped
 
     def test_error_message_indicates_upstream_bug(self, ctx: PluginContext) -> None:
         """Error message explicitly indicates upstream validation bug."""

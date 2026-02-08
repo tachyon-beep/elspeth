@@ -524,7 +524,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             "messages": messages,
             "temperature": self._temperature,
         }
-        if self._max_tokens:
+        if self._max_tokens is not None:
             request_body["max_tokens"] = self._max_tokens
 
         # 3. Get HTTP client (cached per state_id for call_index uniqueness)
