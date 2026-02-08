@@ -194,11 +194,15 @@ class TestInjectionRejectionProperties:
     )
     @settings(max_examples=50)
     def test_arbitrary_row_attributes_rejected(self, attr: str) -> None:
-        """Property: Arbitrary attribute access on row is rejected (only .get allowed)."""
+        """Property: Arbitrary attribute access on row is rejected (only .get allowed).
+
+        Note: Python keywords (True, False, None, etc.) cause syntax errors
+        when used as attributes, so we accept both error types.
+        """
         assume(attr != "get")
 
         expr = f"row.{attr}"
-        with pytest.raises(ExpressionSecurityError):
+        with pytest.raises((ExpressionSecurityError, ExpressionSyntaxError)):
             ExpressionParser(expr)
 
     @given(
