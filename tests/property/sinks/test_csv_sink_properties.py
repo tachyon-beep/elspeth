@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
-from tests.property.settings import SLOW_SETTINGS
+from tests.strategies.settings import SLOW_SETTINGS
 
 # =============================================================================
 # Strategies

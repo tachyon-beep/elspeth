@@ -31,7 +31,8 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from tests.property.conftest import id_strings, row_data
+from tests.strategies.ids import id_strings
+from tests.strategies.json import row_data
 
 # =============================================================================
 # Helper Functions

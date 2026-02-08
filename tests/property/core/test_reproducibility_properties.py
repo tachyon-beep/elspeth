@@ -8,13 +8,13 @@ Grade Hierarchy Properties:
 - Grade ordering is meaningful (higher = more reproducible)
 
 Determinism Classification Properties:
-- DETERMINISTIC, SEEDED → FULL_REPRODUCIBLE
-- IO_READ, IO_WRITE, EXTERNAL_CALL, NON_DETERMINISTIC → REPLAY_REPRODUCIBLE
+- DETERMINISTIC, SEEDED -> FULL_REPRODUCIBLE
+- IO_READ, IO_WRITE, EXTERNAL_CALL, NON_DETERMINISTIC -> REPLAY_REPRODUCIBLE
 
 Degradation Properties:
-- REPLAY_REPRODUCIBLE → ATTRIBUTABLE_ONLY (after purge)
-- FULL_REPRODUCIBLE → unchanged
-- ATTRIBUTABLE_ONLY → unchanged
+- REPLAY_REPRODUCIBLE -> ATTRIBUTABLE_ONLY (after purge)
+- FULL_REPRODUCIBLE -> unchanged
+- ATTRIBUTABLE_ONLY -> unchanged
 
 Enum Integrity Properties:
 - Exactly 3 grades exist
@@ -24,8 +24,8 @@ Enum Integrity Properties:
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import UTC, datetime
+from itertools import count
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -85,10 +85,13 @@ def lists_with_non_reproducible(draw: st.DrawFn) -> list[Determinism]:
 # Helpers for DB-backed tests
 # =============================================================================
 
+_REFERENCE_TIME = datetime(2025, 1, 1, tzinfo=UTC)
+_RUN_COUNTER = count()
+
 
 def _create_run(db: LandscapeDB) -> str:
-    run_id = f"run-{uuid.uuid4().hex[:12]}"
-    now = datetime.now(UTC)
+    run_id = f"run-{next(_RUN_COUNTER):06d}"
+    now = _REFERENCE_TIME
     with db.connection() as conn:
         conn.execute(
             runs_table.insert().values(
@@ -104,7 +107,7 @@ def _create_run(db: LandscapeDB) -> str:
 
 
 def _insert_nodes(db: LandscapeDB, run_id: str, determinisms: list[Determinism]) -> None:
-    now = datetime.now(UTC)
+    now = _REFERENCE_TIME
     with db.connection() as conn:
         for idx, det in enumerate(determinisms):
             node_id = f"node_{idx}"
@@ -181,11 +184,11 @@ class TestReproducibilityGradeEnumProperties:
 
 
 class TestDeterminismClassificationProperties:
-    """Property tests for determinism → grade classification logic.
+    """Property tests for determinism -> grade classification logic.
 
     The classification used by compute_grade():
-    - {DETERMINISTIC, SEEDED} → FULL_REPRODUCIBLE
-    - {IO_READ, IO_WRITE, EXTERNAL_CALL, NON_DETERMINISTIC} → REPLAY_REPRODUCIBLE
+    - {DETERMINISTIC, SEEDED} -> FULL_REPRODUCIBLE
+    - {IO_READ, IO_WRITE, EXTERNAL_CALL, NON_DETERMINISTIC} -> REPLAY_REPRODUCIBLE
     """
 
     @given(determinisms=reproducible_lists)
@@ -234,7 +237,7 @@ class TestGradeHierarchyProperties:
     """Property tests for grade ordering and hierarchy."""
 
     def test_grade_ordering_is_meaningful(self) -> None:
-        """Property: Grades have a meaningful ordering (more → less reproducible).
+        """Property: Grades have a meaningful ordering (more -> less reproducible).
 
         FULL_REPRODUCIBLE > REPLAY_REPRODUCIBLE > ATTRIBUTABLE_ONLY
         """
@@ -275,9 +278,9 @@ class TestGradeDegradationProperties:
     """Property tests for grade degradation after purge.
 
     The degradation rules from update_grade_after_purge():
-    - REPLAY_REPRODUCIBLE → ATTRIBUTABLE_ONLY
-    - FULL_REPRODUCIBLE → unchanged
-    - ATTRIBUTABLE_ONLY → unchanged
+    - REPLAY_REPRODUCIBLE -> ATTRIBUTABLE_ONLY
+    - FULL_REPRODUCIBLE -> unchanged
+    - ATTRIBUTABLE_ONLY -> unchanged
     """
 
     @given(grade=all_grades)

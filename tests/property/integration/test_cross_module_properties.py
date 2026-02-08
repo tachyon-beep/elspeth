@@ -21,7 +21,8 @@ from hypothesis import assume, given, settings
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.plugins.sources.field_normalization import normalize_field_name
-from tests.property.conftest import messy_headers, row_data
+from tests.strategies.external import messy_headers
+from tests.strategies.json import row_data
 
 
 class TestFieldNormalizationCanonicalHashProperties:
@@ -49,7 +50,7 @@ class TestFieldNormalizationCanonicalHashProperties:
     @given(raw=messy_headers)
     @settings(max_examples=200)
     def test_normalization_canonical_idempotence(self, raw: str) -> None:
-        """Property: Normalize → hash == normalize → normalize → hash.
+        """Property: Normalize -> hash == normalize -> normalize -> hash.
 
         If normalization is idempotent (which it is), the hash should be
         identical whether we normalize once or twice.
@@ -146,7 +147,7 @@ class TestEndToEndAuditPipelineProperties:
     def test_full_pipeline_determinism(self, data: dict[str, Any]) -> None:
         """Property: Full audit pipeline is deterministic.
 
-        Data → canonical JSON → hash → store → retrieve
+        Data -> canonical JSON -> hash -> store -> retrieve
         must produce byte-identical content.
 
         Note: We verify BYTE identity, not Python object round-trip,

@@ -1,5 +1,5 @@
 # tests/property/audit/test_fork_coalesce_flow.py
-"""Property-based tests for the complete fork→coalesce→continue flow.
+"""Property-based tests for the complete fork->coalesce->continue flow.
 
 FORK-COALESCE INVARIANTS:
 1. Every forked row produces exactly 1 FORKED outcome (parent token)
@@ -8,7 +8,7 @@ FORK-COALESCE INVARIANTS:
 4. The merged token continues and reaches a terminal state (COMPLETED)
 5. Token accounting: no tokens lost, no tokens duplicated
 
-This tests the FULL fork→coalesce→continue path, not just fork-to-sinks.
+This tests the FULL fork->coalesce->continue path, not just fork-to-sinks.
 """
 
 from __future__ import annotations
@@ -28,8 +28,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row
-from tests.conftest import (
-    MockPayloadStore,
+from tests.fixtures.base_classes import (
     _TestSchema,
     _TestSinkBase,
     _TestSourceBase,
@@ -37,6 +36,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.fixtures.stores import MockPayloadStore
 
 if TYPE_CHECKING:
     pass
@@ -226,12 +226,12 @@ row_for_coalesce = st.fixed_dictionaries(
 
 
 class TestForkCoalesceFlow:
-    """Property tests for the complete fork→coalesce→continue flow."""
+    """Property tests for the complete fork->coalesce->continue flow."""
 
     @given(n_rows=st.integers(min_value=1, max_value=15))
     @settings(max_examples=30, deadline=None)
     def test_fork_coalesce_token_accounting(self, n_rows: int) -> None:
-        """Property: Token accounting is correct after fork→coalesce.
+        """Property: Token accounting is correct after fork->coalesce.
 
         For a 2-branch fork with coalesce:
         - N source rows enter
@@ -326,7 +326,7 @@ class TestForkCoalesceFlow:
 
         # Verify sink received correct number of results
         assert len(sink.results) == n_rows, (
-            f"Expected {n_rows} results in sink, got {len(sink.results)}. Each row should produce exactly one output after fork→coalesce."
+            f"Expected {n_rows} results in sink, got {len(sink.results)}. Each row should produce exactly one output after fork->coalesce."
         )
 
     @given(n_rows=st.integers(min_value=1, max_value=10))
@@ -461,7 +461,7 @@ class TestForkCoalesceFlow:
 
         for i, result in enumerate(sink.results):
             assert "enriched" in result, (
-                f"Result {i} missing 'enriched' field. Transform enrichment was lost during fork→coalesce. Got: {result}"
+                f"Result {i} missing 'enriched' field. Transform enrichment was lost during fork->coalesce. Got: {result}"
             )
             assert result["enriched"] is True, f"Result {i} has wrong 'enriched' value: {result['enriched']}"
 
@@ -529,7 +529,7 @@ class TestForkCoalesceEdgeCases:
         assert len(sink.results) == 0
 
     def test_single_row_fork_coalesce(self) -> None:
-        """Single row through fork→coalesce should work correctly."""
+        """Single row through fork->coalesce should work correctly."""
         db = LandscapeDB.in_memory()
         payload_store = MockPayloadStore()
 

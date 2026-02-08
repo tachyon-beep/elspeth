@@ -1,14 +1,10 @@
-"""Shared fixtures for integration tests.
+# tests/integration/conftest.py
+"""Integration test configuration.
 
-Fixture Scoping Strategy
-========================
-- landscape_db: Module-scoped for performance (schema creation is expensive)
-- recorder: Function-scoped (lightweight wrapper, uses shared db)
-
-Integration tests should use unique run_ids to avoid data pollution.
-The shared database contains data from all tests in the module, but each
-test's queries should filter by its own run_id.
+Function-scoped databases for full isolation per test.
 """
+
+from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -16,8 +12,18 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.plugins.manager import PluginManager
+from tests.fixtures.stores import MockPayloadStore
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Auto-apply integration marker to all tests in this directory."""
+    for item in items:
+        if "/integration/" in str(item.fspath):
+            item.add_marker(pytest.mark.integration)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -35,52 +41,39 @@ def keyvault_url(request: pytest.FixtureRequest) -> str:
     """Get Key Vault URL from command line or environment."""
     url = request.config.getoption("--keyvault-url") or os.environ.get("TEST_KEYVAULT_URL")
     if not url:
-        pytest.skip(
-            "Key Vault URL not configured. Pass --keyvault-url or set TEST_KEYVAULT_URL. "
-            "Note: ELSPETH_KEYVAULT_URL is no longer used for fingerprint keys."
-        )
+        pytest.skip("Key Vault URL not configured.")
     return url
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
+def payload_store() -> PayloadStore:
+    """In-memory PayloadStore for integration tests."""
+    return MockPayloadStore()
+
+
+@pytest.fixture
 def landscape_db() -> LandscapeDB:
-    """Create a module-scoped in-memory landscape database.
-
-    Module scope avoids repeated schema creation (15+ tables, indexes)
-    which takes ~5-10ms per instantiation. With many integration tests,
-    this saves significant test runtime.
-
-    Tests should use unique run_ids to isolate their data.
-    """
+    """Function-scoped in-memory LandscapeDB — fresh per test."""
     return LandscapeDB.in_memory()
 
 
 @pytest.fixture
 def recorder(landscape_db: LandscapeDB) -> LandscapeRecorder:
-    """Create a LandscapeRecorder with the shared test database.
-
-    Function-scoped because the recorder is a lightweight wrapper.
-    Uses the module-scoped landscape_db for actual storage.
-    """
+    """Function-scoped LandscapeRecorder."""
     return LandscapeRecorder(landscape_db)
 
 
-# Resume/Checkpoint test fixtures (shared by resume test files)
+@pytest.fixture
+def plugin_manager() -> PluginManager:
+    """Standard plugin manager with builtin plugins registered."""
+    manager = PluginManager()
+    manager.register_builtin_plugins()
+    return manager
 
 
 @pytest.fixture
 def resume_test_env(tmp_path: Path) -> dict[str, Any]:
-    """Set up complete test environment for resume/checkpoint tests.
-
-    Provides:
-    - db: LandscapeDB (file-based for resume tests)
-    - payload_store: FilesystemPayloadStore
-    - checkpoint_manager: CheckpointManager
-    - recovery_manager: RecoveryManager
-    - checkpoint_config: RuntimeCheckpointConfig
-    - recorder: LandscapeRecorder
-    - tmp_path: Path
-    """
+    """Complete test environment for resume/checkpoint tests."""
     from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
     from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
     from elspeth.core.config import CheckpointSettings

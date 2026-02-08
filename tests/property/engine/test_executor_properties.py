@@ -26,13 +26,8 @@ from hypothesis import strategies as st
 from elspeth.contracts import PipelineRow, RoutingAction, TransformErrorReason, TransformResult
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import ConfigGateReason, PluginGateReason
-from tests.property.conftest import (
-    branch_names,
-    dict_keys,
-    json_primitives,
-    multiple_branches,
-    row_data,
-)
+from tests.strategies.ids import branch_names, multiple_branches
+from tests.strategies.json import dict_keys, json_primitives, row_data
 
 # =============================================================================
 # Strategies for RoutingAction and RoutingKind

@@ -20,7 +20,7 @@ from hypothesis import strategies as st
 from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
-from tests.property.conftest import valid_delays, valid_jitter, valid_max_attempts
+from tests.strategies.config import valid_delays, valid_jitter, valid_max_attempts
 
 
 class TestRuntimeRetryConfigValidationProperties:

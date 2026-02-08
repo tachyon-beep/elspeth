@@ -31,18 +31,17 @@ from elspeth.core.config import CoalesceSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from tests.conftest import (
-    MockPayloadStore,
+from tests.fixtures.base_classes import (
     as_sink,
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_production_graph
-from tests.property.conftest import (
+from tests.fixtures.plugins import (
     CollectSink,
     ListSource,
     PassTransform,
 )
+from tests.fixtures.stores import MockPayloadStore
 
 # =============================================================================
 # Audit Verification Helpers
@@ -179,6 +178,35 @@ def count_fork_groups_with_unexpected_children(db: LandscapeDB, run_id: str, exp
 row_for_fork = st.fixed_dictionaries(
     {"value": st.integers(min_value=0, max_value=1000)},
 )
+
+
+# =============================================================================
+# Helper: Build production graph from PipelineConfig
+# =============================================================================
+
+
+def _build_production_graph(config: PipelineConfig, default_sink: str | None = None) -> ExecutionGraph:
+    """Build graph using production code path (from_plugin_instances).
+
+    Replacement for v1 build_production_graph, inlined to avoid v1 imports.
+    """
+    if default_sink is None:
+        if "default" in config.sinks:
+            default_sink = "default"
+        elif config.sinks:
+            default_sink = next(iter(config.sinks))
+        else:
+            default_sink = ""
+
+    return ExecutionGraph.from_plugin_instances(
+        source=config.source,
+        transforms=list(config.transforms),
+        sinks=config.sinks,
+        aggregations={},
+        gates=list(config.gates),
+        default_sink=default_sink,
+        coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
+    )
 
 
 # =============================================================================
@@ -409,7 +437,7 @@ class TestForkJoinRuntimeBalance:
         )
 
         # Settings needed for fork execution
-        settings = ElspethSettings(
+        settings_obj = ElspethSettings(
             source={"plugin": "test"},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
             default_sink="sink_a",
@@ -417,7 +445,7 @@ class TestForkJoinRuntimeBalance:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+        run = orchestrator.run(config, graph=graph, settings=settings_obj, payload_store=payload_store)
 
         # Verify fork audit integrity
         missing_parents = count_fork_children_missing_parents(db, run.run_id)
@@ -488,7 +516,7 @@ class TestForkJoinEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         stats = get_fork_group_stats(db, run.run_id)
         assert stats["total_fork_groups"] == 0
@@ -529,7 +557,7 @@ class TestForkJoinEdgeCases:
 
         from elspeth.core.config import ElspethSettings
 
-        settings = ElspethSettings(
+        settings_obj = ElspethSettings(
             source={"plugin": "test"},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
             default_sink="sink_a",
@@ -537,7 +565,7 @@ class TestForkJoinEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+        run = orchestrator.run(config, graph=graph, settings=settings_obj, payload_store=payload_store)
 
         # No rows means no forks
         stats = get_fork_group_stats(db, run.run_id)
@@ -602,7 +630,7 @@ class TestForkRecoveryInvariant:
             default_sink="sink_a",
         )
 
-        settings = ElspethSettings(
+        settings_obj = ElspethSettings(
             source={"plugin": "test"},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
             default_sink="sink_a",
@@ -610,7 +638,7 @@ class TestForkRecoveryInvariant:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+        run = orchestrator.run(config, graph=graph, settings=settings_obj, payload_store=payload_store)
 
         # Pipeline completed successfully - all rows processed
         # Now simulate partial failure by deleting ONE child outcome per row

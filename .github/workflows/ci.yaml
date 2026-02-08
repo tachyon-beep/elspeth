@@ -171,8 +171,7 @@ jobs:
             --cov-report=term-missing \
             --cov-fail-under=80 \
             -v \
-            -m "not slow and not stress and not performance" \
-            --ignore=tests/examples/test_llm_examples.py
+            -m "not slow and not stress and not performance"
 
       - name: Run tests without coverage
         if: ${{ !matrix.coverage }}
@@ -180,8 +179,7 @@ jobs:
           source .venv/bin/activate
           pytest tests/ \
             -v \
-            -m "not slow and not stress and not performance" \
-            --ignore=tests/examples/test_llm_examples.py
+            -m "not slow and not stress and not performance"
 
       - name: Upload coverage report
         if: matrix.coverage && always()

@@ -44,10 +44,8 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from tests.property.conftest import (
-    multiple_branches,
-    row_data,
-)
+from tests.strategies.ids import multiple_branches
+from tests.strategies.json import row_data
 
 # =============================================================================
 # Model Types for State Machine
@@ -332,6 +330,78 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
         return multiple(*child_ids)  # Return each child ID as separate bundle entry
 
     # -------------------------------------------------------------------------
+    # Rules: Token Coalescing (Gap 2: fork→coalesce lifecycle)
+    # -------------------------------------------------------------------------
+
+    @rule(target=active_tokens, token_id=active_tokens)
+    def coalesce_forked_siblings(self, token_id: str) -> Any:
+        """Coalesce all children of a fork group.
+
+        Finds the fork group containing the given token_id and coalesces
+        all siblings if they are all non-terminal (eligible for merge).
+        Returns the merged token as a new active token.
+
+        This exercises the full fork→process children→coalesce lifecycle
+        that the state machine previously couldn't reach.
+        """
+        model = self.model_tokens[token_id]
+
+        # Token must be a fork child (has fork_group_id) and non-terminal
+        if model.fork_group_id is None:
+            return multiple()
+        if model.state in TERMINAL_STATES:
+            return multiple()
+
+        # Find the parent that was forked
+        parent_token_id = model.parent_token_id
+        if parent_token_id is None:
+            return multiple()
+
+        parent_model = self.model_tokens.get(parent_token_id)
+        if parent_model is None or parent_model.state != TokenState.FORKED:
+            return multiple()
+
+        # Get all sibling token_ids from the parent's children list
+        sibling_ids = parent_model.children
+        if len(sibling_ids) < 2:
+            return multiple()  # Need at least 2 to coalesce
+
+        # All siblings must be non-terminal for coalesce to proceed
+        for sib_id in sibling_ids:
+            sib_model = self.model_tokens.get(sib_id)
+            if sib_model is None or sib_model.state in TERMINAL_STATES:
+                return multiple()
+
+        self.step_counter += 1
+
+        # Coalesce in database
+        merged = self.recorder.coalesce_tokens(
+            parent_token_ids=sibling_ids,
+            row_id=model.row_id,
+            step_in_pipeline=self.step_counter,
+        )
+
+        # Record COALESCED outcome for each sibling (requires join_group_id per contract)
+        for sib_id in sibling_ids:
+            self.recorder.record_token_outcome(
+                run_id=self.run.run_id,
+                token_id=sib_id,
+                outcome=RowOutcome.COALESCED,
+                join_group_id=merged.join_group_id,
+            )
+            self.model_tokens[sib_id].state = TokenState.COALESCED
+
+        # Create model entry for merged token
+        self.model_tokens[merged.token_id] = ModelToken(
+            token_id=merged.token_id,
+            row_id=model.row_id,
+            state=TokenState.CREATED,
+            parent_token_id=None,  # Merged token has multiple parents (tracked in DB)
+        )
+
+        return merged.token_id
+
+    # -------------------------------------------------------------------------
     # Rules: Token Terminal States
     # -------------------------------------------------------------------------
 
@@ -437,6 +507,7 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
         """Invariant: Tokens in terminal states have outcomes recorded.
 
         Note: FORKED outcome is recorded by fork_token() atomically.
+        COALESCED outcome is recorded by coalesce_forked_siblings() explicitly.
         """
         with self.db.connection() as conn:
             for token_id, model in self.model_tokens.items():
@@ -457,6 +528,36 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
 
                     assert result is not None, f"Forked parent {token_id} has no FORKED outcome"
                     assert result[0] == RowOutcome.FORKED.value, f"Wrong outcome for forked token: {result[0]}"
+
+                elif model.state == TokenState.COALESCED:
+                    # COALESCED tokens have outcome recorded by coalesce rule
+                    result = conn.execute(
+                        text("SELECT outcome FROM token_outcomes WHERE token_id = :token_id"),
+                        {"token_id": token_id},
+                    ).fetchone()
+
+                    assert result is not None, f"Coalesced token {token_id} has no COALESCED outcome"
+                    assert result[0] == RowOutcome.COALESCED.value, f"Wrong outcome for coalesced token: {result[0]}"
+
+    @invariant()
+    def coalesce_merged_tokens_have_parent_links(self) -> None:
+        """Invariant: Merged tokens from coalesce have correct parent links in DB.
+
+        When siblings are coalesced, the merged token must have a token_parents
+        entry for each sibling that was consumed.
+        """
+        with self.db.connection() as conn:
+            for token_id, _model in self.model_tokens.items():
+                # Find tokens with join_group_id (they were created by coalesce)
+                result = conn.execute(
+                    text("SELECT join_group_id FROM tokens WHERE token_id = :token_id"),
+                    {"token_id": token_id},
+                ).fetchone()
+
+                if result is not None and result[0] is not None:
+                    # This is a merged token - verify it has parent links
+                    parent_ids = get_token_parent_ids(self.db, token_id)
+                    assert len(parent_ids) >= 2, f"Merged token {token_id} should have at least 2 parents, got {len(parent_ids)}"
 
     @invariant()
     def model_count_matches_database(self) -> None:

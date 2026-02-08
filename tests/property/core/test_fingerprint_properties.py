@@ -287,7 +287,7 @@ class TestFingerprintUnicodeProperties:
 
         Real-world edge case: some systems use emoji in tokens.
         """
-        secret = "api-key-🔑-secret-🔒"
+        secret = "api-key-\U0001f511-secret-\U0001f512"
         fp = secret_fingerprint(secret, key=key)
 
         assert len(fp) == 64
@@ -297,7 +297,7 @@ class TestFingerprintUnicodeProperties:
     @settings(max_examples=20)
     def test_cjk_secrets_work(self, key: bytes) -> None:
         """Property: CJK characters in secrets produce valid fingerprints."""
-        secret = "密码-パスワード-비밀번호"
+        secret = "\u5bc6\u7801-\u30d1\u30b9\u30ef\u30fc\u30c9-\ube44\ubc00\ubc88\ud638"
         fp = secret_fingerprint(secret, key=key)
 
         assert len(fp) == 64

@@ -27,7 +27,7 @@ from elspeth.core.canonical import (
     canonical_json,
     stable_hash,
 )
-from tests.property.conftest import (
+from tests.strategies.json import (
     MAX_SAFE_INT,
     MIN_SAFE_INT,
     dict_keys,

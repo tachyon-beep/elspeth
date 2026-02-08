@@ -34,22 +34,22 @@ from hypothesis import strategies as st
 from sqlalchemy import text
 
 from elspeth.contracts.enums import RowOutcome
+from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from tests.conftest import (
-    MockPayloadStore,
+from tests.fixtures.base_classes import (
     as_sink,
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_production_graph
-from tests.property.conftest import (
-    MAX_SAFE_INT,
+from tests.fixtures.plugins import (
     CollectSink,
     ConditionalErrorTransform,
     ListSource,
     PassTransform,
 )
+from tests.fixtures.stores import MockPayloadStore
+from tests.strategies.json import MAX_SAFE_INT
 
 if TYPE_CHECKING:
     pass
@@ -128,6 +128,35 @@ def get_all_token_outcomes(db: LandscapeDB, run_id: str) -> list[tuple[str, str,
 
 
 # =============================================================================
+# Helper: Build production graph from PipelineConfig
+# =============================================================================
+
+
+def _build_production_graph(config: PipelineConfig, default_sink: str | None = None) -> ExecutionGraph:
+    """Build graph using production code path (from_plugin_instances).
+
+    Replacement for v1 build_production_graph, inlined to avoid v1 imports.
+    """
+    if default_sink is None:
+        if "default" in config.sinks:
+            default_sink = "default"
+        elif config.sinks:
+            default_sink = next(iter(config.sinks))
+        else:
+            default_sink = ""
+
+    return ExecutionGraph.from_plugin_instances(
+        source=config.source,
+        transforms=list(config.transforms),
+        sinks=config.sinks,
+        aggregations={},
+        gates=list(config.gates),
+        default_sink=default_sink,
+        coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
+    )
+
+
+# =============================================================================
 # Hypothesis Strategies
 # =============================================================================
 
@@ -181,7 +210,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # THE INVARIANT: No tokens should be missing terminal outcomes
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -219,7 +248,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Count expected outcomes
         expected_errors = sum(1 for r in rows if r.get("fail"))
@@ -254,7 +283,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Get all outcomes and verify they're valid enum values
         outcomes = get_all_token_outcomes(db, run.run_id)
@@ -290,7 +319,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # No rows means no tokens
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -318,7 +347,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == n
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -341,7 +370,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == len(rows)
         missing = count_tokens_missing_terminal(db, run.run_id)

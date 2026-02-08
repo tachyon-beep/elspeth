@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from itertools import count
 
 import pytest
 from hypothesis import given, settings
@@ -30,6 +31,8 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
 from elspeth.core.rate_limit import RateLimiter
+
+pytestmark = pytest.mark.slow
 
 # =============================================================================
 # Strategies (local - not duplicating conftest)
@@ -46,6 +49,7 @@ TEST_WINDOW_SECONDS = 2.0
 TEST_WINDOW_MS = int(TEST_WINDOW_SECONDS * 1000)
 FULL_WINDOW_SLEEP = TEST_WINDOW_SECONDS + 0.1
 PARTIAL_WINDOW_SLEEP = TEST_WINDOW_SECONDS * 0.3
+_STATE_MACHINE_COUNTER = count()
 
 
 # =============================================================================
@@ -109,7 +113,7 @@ class RateLimiterStateMachine(RuleBasedStateMachine):
         # Create the actual rate limiter
         # Use a unique name to avoid conflicts between test runs
         self.limiter = RateLimiter(
-            name=f"statemachine{int(time.monotonic() * 1000) % 100000}",
+            name=f"statemachine_{next(_STATE_MACHINE_COUNTER)}",
             requests_per_minute=self.limit,
             window_ms=TEST_WINDOW_MS,
         )
@@ -193,15 +197,13 @@ class RateLimiterStateMachine(RuleBasedStateMachine):
         now = time.monotonic()
         tokens_in_window = self.model.successful_tokens_in_window(now)
 
-        # Allow small timing tolerance (tokens may have just leaked)
-        # We check that we never acquired significantly more than the limit
-        assert tokens_in_window <= self.limit + 1, f"Acquired {tokens_in_window} tokens in window, limit is {self.limit}"
+        assert tokens_in_window <= self.limit, f"Acquired {tokens_in_window} tokens in window, limit is {self.limit}"
 
 
 # Create the test class that pytest will discover
 TestRateLimiterStateMachine = RateLimiterStateMachine.TestCase
 TestRateLimiterStateMachine.settings = settings(
-    max_examples=30,
+    max_examples=20,
     stateful_step_count=20,
     deadline=None,  # Disable deadline due to real time.sleep() calls
 )

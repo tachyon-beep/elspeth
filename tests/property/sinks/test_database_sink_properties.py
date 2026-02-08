@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, text
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.plugins.sinks.database_sink import DatabaseSink
-from tests.property.settings import SLOW_SETTINGS
+from tests.strategies.settings import SLOW_SETTINGS
 
 # =============================================================================
 # Strategies

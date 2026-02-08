@@ -230,7 +230,6 @@ extend-immutable-calls = ["typer.Option", "typer.Argument"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["T20"]  # Allow print in tests
-"tests_v2/**/*.py" = ["T20"]  # Allow print in tests (v2 suite)
 "scripts/**/*.py" = ["T20"]  # Allow print in CLI scripts
 "alembic/**/*.py" = ["E402"]  # Alembic env.py has imports after config setup
 "vulture_whitelist.py" = ["B018", "F821"]  # Vulture whitelist uses bare names
@@ -351,7 +350,7 @@ paths_to_mutate = [
     "src/elspeth/engine/tokens.py",
 ]
 # Test runner - include engine tests, use short traceback for debugging
-runner = "python -m pytest tests/core/ tests/engine/ tests/property/ --tb=short"
+runner = "python -m pytest tests/unit/core/ tests/unit/engine/ tests/property/ --tb=short"
 # Tests directory
 tests_dir = "tests/"
 # Disable backup files - we use git

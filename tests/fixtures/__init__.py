@@ -1,13 +1,8 @@
 # tests/fixtures/__init__.py
-"""Shared pytest fixtures for ELSPETH tests.
+"""Shared test infrastructure (importable, not conftest-based).
 
-Available fixtures:
-- chaosllm_server: ChaosLLM fake LLM server for testing
+Import fixtures and helpers explicitly:
+    from tests.fixtures.plugins import ListSource, CollectSink
+    from tests.fixtures.factories import make_row, make_success
+    from tests.fixtures.base_classes import _TestSourceBase
 """
-
-from tests.fixtures.chaosllm import ChaosLLMFixture, chaosllm_server
-
-__all__ = [
-    "ChaosLLMFixture",
-    "chaosllm_server",
-]

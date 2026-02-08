@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.json_sink import JSONSink
-from tests.property.settings import SLOW_SETTINGS
+from tests.strategies.settings import SLOW_SETTINGS
 
 # =============================================================================
 # Strategies

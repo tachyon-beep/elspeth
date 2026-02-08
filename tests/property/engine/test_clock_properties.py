@@ -212,9 +212,9 @@ class TestSystemClockProperties:
 
         assert t > 0
 
-    @given(st.data())
+    @given(_run=st.integers())
     @settings(max_examples=50)
-    def test_sequential_calls_monotonic(self, data: st.DataObject) -> None:
+    def test_sequential_calls_monotonic(self, _run: int) -> None:
         """Property: Sequential calls never decrease.
 
         This is the core monotonic clock invariant - time never
