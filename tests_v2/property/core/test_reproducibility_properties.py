@@ -24,8 +24,8 @@ Enum Integrity Properties:
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import UTC, datetime
+from itertools import count
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -85,10 +85,13 @@ def lists_with_non_reproducible(draw: st.DrawFn) -> list[Determinism]:
 # Helpers for DB-backed tests
 # =============================================================================
 
+_REFERENCE_TIME = datetime(2025, 1, 1, tzinfo=UTC)
+_RUN_COUNTER = count()
+
 
 def _create_run(db: LandscapeDB) -> str:
-    run_id = f"run-{uuid.uuid4().hex[:12]}"
-    now = datetime.now(UTC)
+    run_id = f"run-{next(_RUN_COUNTER):06d}"
+    now = _REFERENCE_TIME
     with db.connection() as conn:
         conn.execute(
             runs_table.insert().values(
@@ -104,7 +107,7 @@ def _create_run(db: LandscapeDB) -> str:
 
 
 def _insert_nodes(db: LandscapeDB, run_id: str, determinisms: list[Determinism]) -> None:
-    now = datetime.now(UTC)
+    now = _REFERENCE_TIME
     with db.connection() as conn:
         for idx, det in enumerate(determinisms):
             node_id = f"node_{idx}"

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import queue as queue_module
+import warnings
 from collections.abc import Iterator
 from typing import Any
 
@@ -110,8 +111,9 @@ def _auto_close_telemetry_managers() -> Iterator[None]:
         yield
     finally:
         TelemetryManager.__init__ = original_init  # type: ignore[method-assign]
+        cleanup_errors: list[str] = []
 
-        for manager, original_queue in created_managers:
+        for manager_index, (manager, original_queue) in enumerate(created_managers):
             try:
                 manager._shutdown_event.set()
 
@@ -131,5 +133,18 @@ def _auto_close_telemetry_managers() -> Iterator[None]:
 
                 if manager._export_thread.is_alive():
                     manager._export_thread.join(timeout=1.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                cleanup_errors.append(
+                    f"manager[{manager_index}] {type(exc).__name__}: {exc}"
+                )
+
+        if cleanup_errors:
+            preview = "\n".join(cleanup_errors[:5])
+            if len(cleanup_errors) > 5:
+                preview += f"\n... and {len(cleanup_errors) - 5} more"
+            warnings.warn(
+                "TelemetryManager cleanup encountered errors.\n"
+                f"{preview}",
+                RuntimeWarning,
+                stacklevel=1,
+            )

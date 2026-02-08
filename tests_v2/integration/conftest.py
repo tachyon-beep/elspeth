@@ -12,9 +12,11 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.manager import PluginManager
+from tests_v2.fixtures.stores import MockPayloadStore
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -43,6 +45,12 @@ def keyvault_url(request: pytest.FixtureRequest) -> str:
     if not url:
         pytest.skip("Key Vault URL not configured.")
     return url
+
+
+@pytest.fixture
+def payload_store() -> PayloadStore:
+    """In-memory PayloadStore for integration tests."""
+    return MockPayloadStore()
 
 
 @pytest.fixture

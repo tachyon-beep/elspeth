@@ -26,8 +26,8 @@ operation correctly accounts for all refs.
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
+from itertools import count
 from unittest.mock import MagicMock
 
 from hypothesis import assume, given, settings
@@ -60,6 +60,10 @@ row_counts = st.integers(min_value=1, max_value=10)
 
 
 SOURCE_NODE_ID = "source_node"
+_REFERENCE_TIME = datetime(2025, 1, 1, tzinfo=UTC)
+_RUN_COUNTER = count()
+_ROW_COUNTER = count()
+_REF_COUNTER = count()
 
 
 def _create_completed_run(
@@ -67,8 +71,8 @@ def _create_completed_run(
     completed_at: datetime,
 ) -> str:
     """Create a completed run with a source node in the database."""
-    run_id = f"run-{uuid.uuid4().hex[:12]}"
-    now = datetime.now(UTC)
+    run_id = f"run-{next(_RUN_COUNTER):06d}"
+    now = _REFERENCE_TIME
     config = {"node_id": SOURCE_NODE_ID}
     with db.connection() as conn:
         conn.execute(
@@ -110,8 +114,8 @@ def _insert_rows_with_refs(
     refs = []
     with db.connection() as conn:
         for i in range(num_rows):
-            row_id = f"row-{uuid.uuid4().hex[:12]}"
-            ref = f"sha256-{uuid.uuid4().hex}"
+            row_id = f"row-{next(_ROW_COUNTER):06d}"
+            ref = f"sha256-{next(_REF_COUNTER):064x}"
             refs.append(ref)
             conn.execute(
                 rows_table.insert().values(
@@ -121,7 +125,7 @@ def _insert_rows_with_refs(
                     row_index=i,
                     source_data_ref=ref,
                     source_data_hash=stable_hash({"row": i}),
-                    created_at=datetime.now(UTC),
+                    created_at=_REFERENCE_TIME,
                 )
             )
     return refs
@@ -160,7 +164,7 @@ class TestRetentionAgeMonotonicityProperties:
 
         with LandscapeDB.in_memory() as db:
             # Create a run that completed 20 days ago
-            completed_at = datetime.now(UTC) - timedelta(days=20)
+            completed_at = _REFERENCE_TIME - timedelta(days=20)
             run_id = _create_completed_run(db, completed_at)
             _insert_rows_with_refs(db, run_id, num_rows)
 
@@ -184,7 +188,7 @@ class TestRetentionAgeMonotonicityProperties:
         never have expired refs.
         """
         with LandscapeDB.in_memory() as db:
-            completed_at = datetime.now(UTC) - timedelta(days=1)
+            completed_at = _REFERENCE_TIME - timedelta(days=1)
             run_id = _create_completed_run(db, completed_at)
             _insert_rows_with_refs(db, run_id, num_rows)
 
@@ -205,7 +209,7 @@ class TestRetentionAgeMonotonicityProperties:
         """
         with LandscapeDB.in_memory() as db:
             # Run completed 1 second ago
-            completed_at = datetime.now(UTC) - timedelta(seconds=1)
+            completed_at = _REFERENCE_TIME - timedelta(seconds=1)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)
 
@@ -251,14 +255,14 @@ class TestCutoffMonotonicityProperties:
         """
         with LandscapeDB.in_memory() as db:
             # Create a run completed 15 days ago
-            completed_at = datetime.now(UTC) - timedelta(days=15)
+            completed_at = _REFERENCE_TIME - timedelta(days=15)
             run_id = _create_completed_run(db, completed_at)
             _insert_rows_with_refs(db, run_id, num_rows)
 
             mock_store = MagicMock()
             manager = PurgeManager(db, mock_store)
 
-            now = datetime.now(UTC)
+            now = _REFERENCE_TIME
             as_of_early = now + timedelta(days=days_offset_early)
             as_of_late = now + timedelta(days=days_offset_late)
 
@@ -324,7 +328,7 @@ class TestPurgeResultInvariantProperties:
         mock_store.exists.return_value = False
 
         with LandscapeDB.in_memory() as db:
-            completed_at = datetime.now(UTC) - timedelta(days=30)
+            completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)
 
@@ -346,7 +350,7 @@ class TestPurgeResultInvariantProperties:
         mock_store.exists.return_value = False
 
         with LandscapeDB.in_memory() as db:
-            completed_at = datetime.now(UTC) - timedelta(days=30)
+            completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)
 
@@ -369,7 +373,7 @@ class TestPurgeResultInvariantProperties:
         mock_store.delete.return_value = True
 
         with LandscapeDB.in_memory() as db:
-            completed_at = datetime.now(UTC) - timedelta(days=30)
+            completed_at = _REFERENCE_TIME - timedelta(days=30)
             run_id = _create_completed_run(db, completed_at)
             refs = _insert_rows_with_refs(db, run_id, num_rows)
 

@@ -11,12 +11,15 @@ use make_graph_linear/make_graph_fork from fixtures/factories.py instead.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from tests_v2.fixtures.plugins import CollectSink, ListSource
+
+if TYPE_CHECKING:
+    from elspeth.engine.orchestrator import PipelineConfig
 
 
 @dataclass
@@ -125,3 +128,55 @@ def build_aggregation_pipeline(
         default_sink=sink_name,
     )
     return source, aggregations, sinks, graph
+
+
+def build_production_graph(
+    config: PipelineConfig,
+    default_sink: str | None = None,
+) -> ExecutionGraph:
+    """Build graph from PipelineConfig using production code path.
+
+    Replaces tests/engine/orchestrator_test_helpers.build_production_graph.
+    Uses ExecutionGraph.from_plugin_instances() — the real assembly path.
+    """
+    from elspeth.core.config import AggregationSettings
+    from elspeth.plugins.protocols import TransformProtocol
+
+    from tests_v2.fixtures.base_classes import _TestTransformBase
+
+    if default_sink is None:
+        if "default" in config.sinks:
+            default_sink = "default"
+        elif config.sinks:
+            default_sink = next(iter(config.sinks))
+        else:
+            default_sink = ""
+
+    row_transforms: list[TransformProtocol] = []
+    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]] = {}
+
+    for transform in config.transforms:
+        if isinstance(transform, TransformProtocol):
+            row_transforms.append(transform)
+
+    for agg_name, agg_settings in config.aggregation_settings.items():
+
+        class _AggTransform(_TestTransformBase):
+            name = agg_settings.plugin
+
+            def process(self, row: dict[str, Any], ctx: Any) -> Any:
+                from elspeth.plugins.results import TransformResult
+
+                return TransformResult.success(row, success_reason={"action": "test"})
+
+        aggregations[agg_name] = (_AggTransform(), agg_settings)  # type: ignore[assignment]
+
+    return ExecutionGraph.from_plugin_instances(
+        source=config.source,
+        transforms=row_transforms,
+        sinks=config.sinks,
+        aggregations=aggregations,
+        gates=list(config.gates),
+        default_sink=default_sink,
+        coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
+    )

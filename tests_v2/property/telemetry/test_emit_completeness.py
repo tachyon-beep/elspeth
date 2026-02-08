@@ -52,8 +52,9 @@ from elspeth.telemetry.manager import TelemetryManager
 # Strategies for generating telemetry events
 # =============================================================================
 
+_REFERENCE_TIMESTAMP = datetime(2025, 1, 1, tzinfo=UTC)
 run_ids = st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N")))
-timestamps = st.just(datetime.now(tz=UTC))
+timestamps = st.just(_REFERENCE_TIMESTAMP)
 
 # Lifecycle events (always emitted at any granularity)
 lifecycle_events = st.one_of(
@@ -410,7 +411,7 @@ class TestUnknownEventForwardCompatibility:
             custom_field: str = "test"
 
         event = FutureEvent(
-            timestamp=datetime.now(tz=UTC),
+            timestamp=_REFERENCE_TIMESTAMP,
             run_id="test_run",
             custom_field="value",
         )

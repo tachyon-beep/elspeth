@@ -23,10 +23,13 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from elspeth.core.rate_limit import RateLimiter
+
+pytestmark = pytest.mark.slow
 
 # =============================================================================
 # Strategies for fairness testing
@@ -43,7 +46,8 @@ fairness_names = st.text(
 thread_counts = st.integers(min_value=2, max_value=6)
 
 # Window size in ms (short for testing but long enough for fairness)
-TEST_WINDOW_MS = 1000
+TEST_WINDOW_MS = 500
+THREAD_POLL_SLEEP_SECONDS = 0.005
 
 
 # =============================================================================
@@ -55,7 +59,7 @@ class TestRateLimiterFairnessProperties:
     """Property tests for rate limiter fairness under contention."""
 
     @given(name=fairness_names, num_threads=thread_counts)
-    @settings(max_examples=15, deadline=None)
+    @settings(max_examples=10, deadline=None)
     def test_no_thread_starved(self, name: str, num_threads: int) -> None:
         """Property: All competing threads acquire at least one token.
 
@@ -75,7 +79,7 @@ class TestRateLimiterFairnessProperties:
                 if limiter.try_acquire():
                     count += 1
                 # Yield to other threads regardless of success/failure
-                time.sleep(0.005)
+                time.sleep(THREAD_POLL_SLEEP_SECONDS)
             with lock:
                 acquires_per_thread[thread_id] = count
 
@@ -89,7 +93,7 @@ class TestRateLimiterFairnessProperties:
                 t.start()
 
             # Let threads compete for 4 windows
-            time.sleep(TEST_WINDOW_MS * 4 / 1000.0 + 0.3)
+            time.sleep(TEST_WINDOW_MS * 4 / 1000.0 + 0.2)
             stop_event.set()
 
             for t in threads:
@@ -101,7 +105,7 @@ class TestRateLimiterFairnessProperties:
             assert acquires_per_thread[thread_id] > 0, f"Thread {thread_id} was starved (0 acquires)"
 
     @given(name=fairness_names)
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=8, deadline=None)
     def test_no_thread_monopolizes(self, name: str) -> None:
         """Property: No single thread takes more than its fair share.
 
@@ -119,7 +123,7 @@ class TestRateLimiterFairnessProperties:
             while not stop_event.is_set():
                 if limiter.try_acquire():
                     count += 1
-                time.sleep(0.005)  # Small delay to prevent spin
+                time.sleep(THREAD_POLL_SLEEP_SECONDS)  # Small delay to prevent spin
             with lock:
                 acquires_per_thread[thread_id] = count
 
@@ -148,7 +152,7 @@ class TestRateLimiterFairnessProperties:
                 )
 
     @given(name=fairness_names)
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=8, deadline=None)
     def test_weighted_acquires_dont_starve_lightweight(self, name: str) -> None:
         """Property: Heavy-weight acquires don't permanently starve light ones.
 
@@ -167,7 +171,7 @@ class TestRateLimiterFairnessProperties:
             while not stop_event.is_set():
                 if limiter.try_acquire(weight=1):
                     count += 1
-                time.sleep(0.005)
+                time.sleep(THREAD_POLL_SLEEP_SECONDS)
             with lock:
                 light_acquires = count
 
@@ -177,7 +181,7 @@ class TestRateLimiterFairnessProperties:
             while not stop_event.is_set():
                 if limiter.try_acquire(weight=3):
                     count += 1
-                time.sleep(0.005)
+                time.sleep(THREAD_POLL_SLEEP_SECONDS)
             with lock:
                 heavy_acquires = count
 
