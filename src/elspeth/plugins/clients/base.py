@@ -7,10 +7,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from elspeth.contracts.events import ExternalCallCompleted
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import NoOpLimiter
     from elspeth.core.rate_limit.limiter import RateLimiter
-    from elspeth.telemetry.events import ExternalCallCompleted
 
 # Type alias for telemetry emit callback.
 # When telemetry is disabled, orchestrator provides a no-op function.

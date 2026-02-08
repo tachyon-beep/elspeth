@@ -231,7 +231,16 @@ class LandscapeExporter:
             }
 
         # Operations (source loads, sink writes)
-        for operation in self._recorder.get_operations_for_run(run_id):
+        all_operations = self._recorder.get_operations_for_run(run_id)
+
+        # Batch query: Pre-load all operation-parented calls (N+1 fix)
+        all_op_calls = self._recorder.get_all_operation_calls_for_run(run_id)
+        op_calls_by_operation: dict[str, list[Any]] = defaultdict(list)
+        for call in all_op_calls:
+            if call.operation_id:
+                op_calls_by_operation[call.operation_id].append(call)
+
+        for operation in all_operations:
             yield {
                 "record_type": "operation",
                 "run_id": run_id,
@@ -248,8 +257,8 @@ class LandscapeExporter:
                 "output_data_ref": operation.output_data_ref,
             }
 
-            # External calls for this operation
-            for call in self._recorder.get_operation_calls(operation.operation_id):
+            # External calls for this operation (from pre-loaded dict)
+            for call in op_calls_by_operation.get(operation.operation_id, []):
                 yield {
                     "record_type": "call",
                     "run_id": run_id,
@@ -466,7 +475,15 @@ class LandscapeExporter:
                         }
 
         # Batches
-        for batch in self._recorder.get_batches(run_id):
+        all_batches = self._recorder.get_batches(run_id)
+
+        # Batch query: Pre-load all batch members (N+1 fix)
+        all_batch_members = self._recorder.get_all_batch_members_for_run(run_id)
+        members_by_batch: dict[str, list[Any]] = defaultdict(list)
+        for member in all_batch_members:
+            members_by_batch[member.batch_id].append(member)
+
+        for batch in all_batches:
             yield {
                 "record_type": "batch",
                 "run_id": run_id,
@@ -480,8 +497,8 @@ class LandscapeExporter:
                 "completed_at": (batch.completed_at.isoformat() if batch.completed_at else None),
             }
 
-            # Batch members
-            for member in self._recorder.get_batch_members(batch.batch_id):
+            # Batch members (from pre-loaded dict)
+            for member in members_by_batch.get(batch.batch_id, []):
                 yield {
                     "record_type": "batch_member",
                     "run_id": run_id,

@@ -45,7 +45,12 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.enums import NodeStateStatus, RoutingMode
+from elspeth.contracts.errors import (
+    ExecutionError,
+    OrchestrationInvariantError,
+    SourceQuarantineReason,
+)
 from elspeth.contracts.events import (
     PhaseAction,
     PhaseCompleted,
@@ -55,6 +60,7 @@ from elspeth.contracts.events import (
     RunCompletionStatus,
     RunSummary,
 )
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -99,7 +105,6 @@ from elspeth.engine.orchestrator.validation import (
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 if TYPE_CHECKING:
@@ -558,15 +563,11 @@ class Orchestrator:
             )
 
             # Record secret resolutions in audit trail (deferred from pre-run loading)
-            # This records which secrets were loaded from where, with fingerprints (not values)
+            # Resolutions already contain pre-computed fingerprints (no plaintext values)
             if secret_resolutions:
-                from elspeth.core.security.fingerprint import get_fingerprint_key
-
-                fingerprint_key = get_fingerprint_key()
                 recorder.record_secret_resolutions(
                     run_id=run.run_id,
                     resolutions=secret_resolutions,
-                    fingerprint_key=fingerprint_key,
                 )
 
             # Emit telemetry AFTER Landscape succeeds - Landscape is the legal record
@@ -1220,6 +1221,50 @@ class Orchestrator:
                                 source_node_id=source_id,
                                 row_index=row_index,
                                 source_row=source_item,
+                            )
+
+                            # Record source node_state (step_index=0) for quarantine audit lineage.
+                            # Status is FAILED because the source validation rejected this row.
+                            quarantine_data = source_item.row if isinstance(source_item.row, dict) else {"_raw": source_item.row}
+                            quarantine_error_msg = source_item.quarantine_error or "unknown_validation_error"
+                            source_state = recorder.begin_node_state(
+                                token_id=quarantine_token.token_id,
+                                node_id=source_id,
+                                run_id=run_id,
+                                step_index=0,
+                                input_data=quarantine_data,
+                            )
+                            recorder.complete_node_state(
+                                state_id=source_state.state_id,
+                                status=NodeStateStatus.FAILED,
+                                duration_ms=0,
+                                error=ExecutionError(
+                                    exception=quarantine_error_msg,
+                                    type="ValidationError",
+                                ),
+                            )
+
+                            # Record DIVERT routing_event for the quarantine edge.
+                            # The __quarantine__ edge MUST exist — DAG creates it when
+                            # on_validation_failure != "discard" (dag.py:798-806).
+                            quarantine_edge_key = (source_id, "__quarantine__")
+                            try:
+                                quarantine_edge_id = edge_map[quarantine_edge_key]
+                            except KeyError:
+                                raise OrchestrationInvariantError(
+                                    f"Quarantine row reached orchestrator but no __quarantine__ "
+                                    f"DIVERT edge exists in DAG for source '{source_id}'. "
+                                    f"This is a DAG construction bug — "
+                                    f"on_validation_failure should have created a DIVERT edge "
+                                    f"in from_plugin_instances()."
+                                ) from None
+                            recorder.record_routing_event(
+                                state_id=source_state.state_id,
+                                edge_id=quarantine_edge_id,
+                                mode=RoutingMode.DIVERT,
+                                reason=SourceQuarantineReason(
+                                    quarantine_error=quarantine_error_msg,
+                                ),
                             )
 
                             # Emit RowCreated telemetry AFTER Landscape recording succeeds

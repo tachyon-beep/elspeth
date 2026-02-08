@@ -76,10 +76,7 @@ class PluginGateReason(TypedDict):
     comparison: NotRequired[str]
 
 
-# Discriminated union - field presence distinguishes variants:
-# - ConfigGateReason has "condition" and "result"
-# - PluginGateReason has "rule" and "matched_value"
-RoutingReason = ConfigGateReason | PluginGateReason
+# RoutingReason union is defined after TransformErrorReason (below line ~410)
 
 
 # Literal type for common transform actions (extensible - str also accepted)
@@ -250,6 +247,8 @@ TransformErrorCategory = Literal[
     "result_not_found",
     "query_failed",
     "rate_limited",
+    # Content extraction errors (Tier 3 boundary - external HTML/text parsing)
+    "content_extraction_failed",
     # Content filtering
     "blocked_content",
     "content_filtered",
@@ -259,6 +258,10 @@ TransformErrorCategory = Literal[
     # Contract violations (schema validation)
     "contract_violation",
     "multiple_contract_violations",
+    # Numeric/computation errors
+    "float_overflow",  # Arithmetic overflow producing inf (e.g., sum of large floats)
+    # Executor lifecycle
+    "shutdown_requested",  # Worker stopped mid-retry due to executor shutdown
     # Generic (for tests and edge cases)
     "test_error",
     "property_test_error",
@@ -358,6 +361,7 @@ class TransformErrorReason(TypedDict):
     field: NotRequired[str]
     error_type: NotRequired[str]
     message: NotRequired[str]
+    url: NotRequired[str]
 
     # Multi-query/template context
     query: NotRequired[str]
@@ -396,16 +400,43 @@ class TransformErrorReason(TypedDict):
     # Content filtering context
     matched_pattern: NotRequired[str]
     match_context: NotRequired[str]
+    match_position: NotRequired[int]  # Start offset of match in field value
+    match_length: NotRequired[int]  # Length of matched substring
+    field_length: NotRequired[int]  # Total length of scanned field value
     categories: NotRequired[list[str] | dict[str, dict[str, Any]]]  # List of names OR detailed severity/threshold map
     attacks: NotRequired[dict[str, bool]]  # Prompt shield attack flags (user_prompt_attack, document_attack)
 
     # Batch processing context
     batch_id: NotRequired[str]
+    batch_size: NotRequired[int]  # Total rows in batch
+    valid_count: NotRequired[int]  # Rows that passed validation within batch
     queries_completed: NotRequired[int]
     row_errors: NotRequired[list[RowErrorEntry]]
     output_file_id: NotRequired[str]  # Batch output file reference
     malformed_count: NotRequired[int]  # Count of malformed batch lines
     errors: NotRequired[list[str | ErrorDetail]]  # Error messages or structured errors
+
+
+class SourceQuarantineReason(TypedDict):
+    """Reason for source quarantine routing.
+
+    Used when source validation fails and the row is routed to a quarantine sink
+    via a DIVERT edge. The quarantine_error field distinguishes this variant from
+    gate and transform reasons.
+
+    Required field:
+        quarantine_error: Description of the validation failure that caused quarantine
+    """
+
+    quarantine_error: str
+
+
+# Discriminated union - field presence distinguishes variants:
+# - ConfigGateReason has "condition" and "result"
+# - PluginGateReason has "rule" and "matched_value"
+# - TransformErrorReason has "reason" (error category string)
+# - SourceQuarantineReason has "quarantine_error"
+RoutingReason = ConfigGateReason | PluginGateReason | TransformErrorReason | SourceQuarantineReason
 
 
 # =============================================================================

@@ -8,20 +8,12 @@ their input and output contracts. This module bridges PluginSchema
 from __future__ import annotations
 
 from types import UnionType
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Union, cast, get_args, get_origin
 
 from elspeth.contracts.data import PluginSchema
 from elspeth.contracts.errors import ContractViolation
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
-# Map Python types to contract types
-_TYPE_MAP: dict[type, type] = {
-    int: int,
-    str: str,
-    float: float,
-    bool: bool,
-    type(None): type(None),
-}
+from elspeth.contracts.type_normalization import ALLOWED_CONTRACT_TYPES
 
 
 def _is_union_type(t: Any) -> bool:
@@ -48,15 +40,15 @@ def _get_python_type(annotation: Any) -> type:
         args = get_args(annotation)
         for arg in args:
             if arg is not type(None):
-                # Return mapped type, or 'object' for unknown types (allows 'any')
-                if arg in _TYPE_MAP:
-                    return _TYPE_MAP[arg]
+                # Return type if in allowed set, or 'object' for unknown types
+                if arg in ALLOWED_CONTRACT_TYPES:
+                    return cast(type, arg)
                 return object
         return type(None)
 
-    # Simple type - return mapped type, or 'object' for unknown types
-    if annotation in _TYPE_MAP:
-        return _TYPE_MAP[annotation]
+    # Simple type - return if in allowed set, or 'object' for unknown types
+    if annotation in ALLOWED_CONTRACT_TYPES:
+        return cast(type, annotation)
     return object
 
 
@@ -119,7 +111,7 @@ def create_output_contract_from_schema(
         )
 
     return SchemaContract(
-        mode=mode,  # type: ignore[arg-type]
+        mode=mode,  # type: ignore[arg-type]  # mode is a valid SchemaMode literal; narrowing from str to Literal not expressible here
         fields=tuple(fields),
         locked=True,  # Transform schemas are static
     )

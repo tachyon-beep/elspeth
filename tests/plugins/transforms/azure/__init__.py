@@ -1,1 +1,0 @@
-"""Azure transform plugin tests."""

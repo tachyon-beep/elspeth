@@ -62,9 +62,9 @@ sample_status_values = st.sampled_from(list(SampleStatus))
 class TestGenerateIdProperties:
     """Property tests for generate_id() function."""
 
-    @given(st.data())
+    @given(_run=st.integers())
     @settings(max_examples=100)
-    def test_generates_32_char_hex_string(self, data: st.DataObject) -> None:
+    def test_generates_32_char_hex_string(self, _run: int) -> None:
         """Property: generate_id() produces 32-character hex strings."""
         id_ = generate_id()
 
@@ -72,9 +72,9 @@ class TestGenerateIdProperties:
         assert len(id_) == 32
         assert all(c in "0123456789abcdef" for c in id_)
 
-    @given(st.data())
+    @given(_run=st.integers())
     @settings(max_examples=100)
-    def test_generates_lowercase_hex(self, data: st.DataObject) -> None:
+    def test_generates_lowercase_hex(self, _run: int) -> None:
         """Property: generate_id() produces lowercase hex (no uppercase)."""
         id_ = generate_id()
 
@@ -105,9 +105,9 @@ class TestGenerateIdProperties:
         parsed = uuid.UUID(id_)
         assert parsed.version == 4  # UUID version 4
 
-    @given(st.data())
+    @given(_run=st.integers())
     @settings(max_examples=50)
-    def test_no_hyphens_or_braces(self, data: st.DataObject) -> None:
+    def test_no_hyphens_or_braces(self, _run: int) -> None:
         """Property: Output is bare hex (no UUID formatting characters)."""
         id_ = generate_id()
 
@@ -223,9 +223,9 @@ class TestNowProperties:
         # Naive datetimes have tzinfo=None
         assert ts.tzinfo is not None
 
-    @given(st.data())
+    @given(_run=st.integers())
     @settings(max_examples=50)
-    def test_sequential_calls_are_close(self, data: st.DataObject) -> None:
+    def test_sequential_calls_are_close(self, _run: int) -> None:
         """Property: Sequential calls happen close in time."""
         ts1 = now()
         ts2 = now()

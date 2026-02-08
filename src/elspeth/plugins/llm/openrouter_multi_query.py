@@ -24,12 +24,12 @@ from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_multi_query_guaranteed_fields
 from elspeth.plugins.llm.multi_query import (
     CaseStudyConfig,
@@ -460,7 +460,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         The Langfuse client is stored for use in _record_langfuse_trace().
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
 
             cfg = self._tracing_config
             if not isinstance(cfg, LangfuseTracingConfig):
@@ -560,60 +560,6 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
             logger = structlog.get_logger(__name__)
             logger.warning("Failed to record Langfuse trace", error=str(e))
-
-    def _record_langfuse_trace_for_error(
-        self,
-        token_id: str,
-        query_prefix: str,
-        prompt: str,
-        error_message: str,
-        latency_ms: float | None,
-    ) -> None:
-        """Record failed LLM call to Langfuse with ERROR level.
-
-        Called when an LLM call fails (rate limit, HTTP error, etc.) to ensure
-        failed attempts are visible in Langfuse for debugging and correlation.
-
-        Args:
-            token_id: Token ID for correlation
-            query_prefix: Query identifier (e.g., "cs1_diag")
-            prompt: The prompt that was sent (or attempted)
-            error_message: Error description
-            latency_ms: Time elapsed before failure in milliseconds
-        """
-        if not self._tracing_active or self._langfuse_client is None:
-            return
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            return
-
-        try:
-            with (
-                self._langfuse_client.start_as_current_observation(
-                    as_type="span",
-                    name=f"elspeth.{self.name}",
-                    metadata={"token_id": token_id, "plugin": self.name, "query": query_prefix},
-                ),
-                self._langfuse_client.start_as_current_observation(
-                    as_type="generation",
-                    name="llm_call",
-                    model=self._model,
-                    input=[{"role": "user", "content": prompt}],
-                ) as generation,
-            ):
-                update_kwargs: dict[str, Any] = {
-                    "level": "ERROR",
-                    "status_message": error_message,
-                }
-
-                if latency_ms is not None:
-                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
-
-                generation.update(**update_kwargs)
-        except Exception as e:
-            import structlog
-
-            logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse error trace", error=str(e), query=query_prefix)
 
     def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
         """Get or create HTTP client for a state_id.
@@ -942,8 +888,13 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Build fields_added from output_mapping suffixes for this query
         fields_added = [f"{spec.output_prefix}_{field_config.suffix}" for field_config in self._output_mapping.values()]
+        observed = SchemaContract(
+            mode="OBSERVED",
+            fields=tuple(FieldContract(k, k, object, False, "inferred") for k in output),
+            locked=True,
+        )
         return TransformResult.success(
-            output,
+            PipelineRow(output, observed),
             success_reason={"action": "enriched", "fields_added": fields_added},
         )
 
@@ -1039,21 +990,28 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 latency_ms=latency_ms,
             )
 
-            # Propagate contract on success
+            # Wrap output in PipelineRow with propagated contract
             if result.status == "success" and result.row is not None:
-                # Convert PipelineRow to dict for contract propagation
-                output_row = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
-                result.contract = propagate_contract(
+                output_row = result.row.to_dict()
+                output_contract = propagate_contract(
                     input_contract=input_contract,
                     output_row=output_row,
-                    transform_adds_fields=True,  # Multi-query transforms add multiple output fields
+                    transform_adds_fields=True,
+                )
+                assert result.success_reason is not None, "success status guarantees success_reason"
+                return TransformResult.success(
+                    PipelineRow(output_row, output_contract),
+                    success_reason=result.success_reason,
+                    context_after=result.context_after,
                 )
 
             return result
         finally:
             # Clean up cached clients for this state_id
             with self._http_clients_lock:
-                self._http_clients.pop(ctx.state_id, None)
+                client = self._http_clients.pop(ctx.state_id, None)
+            if client is not None:
+                client.close()
 
     def _process_single_row_internal(
         self,
@@ -1122,8 +1080,13 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         all_fields_added = [
             f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
         ]
+        observed = SchemaContract(
+            mode="OBSERVED",
+            fields=tuple(FieldContract(k, k, object, False, "inferred") for k in output),
+            locked=True,
+        )
         return TransformResult.success(
-            output,
+            PipelineRow(output, observed),
             success_reason={"action": "enriched", "fields_added": all_fields_added},
             context_after=pool_context,
         )
@@ -1253,6 +1216,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         self._recorder = None
         with self._http_clients_lock:
+            for client in self._http_clients.values():
+                client.close()
             self._http_clients.clear()
         self._langfuse_client = None
 

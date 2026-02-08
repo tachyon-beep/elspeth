@@ -25,7 +25,7 @@ from elspeth.plugins.sources.field_normalization import (
     normalize_field_name,
     resolve_field_names,
 )
-from tests.property.conftest import messy_headers, normalizable_headers
+from tests.strategies.external import messy_headers, normalizable_headers
 
 if TYPE_CHECKING:
     pass

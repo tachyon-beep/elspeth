@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, TransformErrorCategory, TransformErrorReason, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_multi_query_guaranteed_fields
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfig,
@@ -214,6 +214,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._llm_clients: dict[str, AuditedLLMClient] = {}
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
+        self._underlying_client_lock = Lock()
 
         # Tier 2: Plugin-internal tracing
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
@@ -265,16 +266,21 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             self._setup_tracing()
 
     def _get_underlying_client(self) -> AzureOpenAI:
-        """Get or create the underlying Azure OpenAI client."""
-        if self._underlying_client is None:
-            from openai import AzureOpenAI
+        """Get or create the underlying Azure OpenAI client.
 
-            self._underlying_client = AzureOpenAI(
-                azure_endpoint=self._azure_endpoint,
-                api_key=self._azure_api_key,
-                api_version=self._azure_api_version,
-            )
-        return self._underlying_client
+        Thread-safe: protected by _underlying_client_lock to prevent
+        duplicate client creation from concurrent worker threads.
+        """
+        with self._underlying_client_lock:
+            if self._underlying_client is None:
+                from openai import AzureOpenAI
+
+                self._underlying_client = AzureOpenAI(
+                    azure_endpoint=self._azure_endpoint,
+                    api_key=self._azure_api_key,
+                    api_version=self._azure_api_version,
+                )
+            return self._underlying_client
 
     def _get_llm_client(self, state_id: str) -> AuditedLLMClient:
         """Get or create LLM client for a state_id."""
@@ -574,8 +580,13 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Build fields_added from output_mapping suffixes for this query
         fields_added = [f"{spec.output_prefix}_{field_config.suffix}" for field_config in self._output_mapping.values()]
+        observed = SchemaContract(
+            mode="OBSERVED",
+            fields=tuple(FieldContract(k, k, object, False, "inferred") for k in output),
+            locked=True,
+        )
         return TransformResult.success(
-            output,
+            PipelineRow(output, observed),
             success_reason={"action": "enriched", "fields_added": fields_added},
         )
 
@@ -653,14 +664,19 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         try:
             result = self._process_single_row_internal(row_data, ctx.state_id, token_id)
-            # Propagate contract on success
+            # Wrap output in PipelineRow with propagated contract
             if result.status == "success" and result.row is not None:
-                # Convert PipelineRow to dict for contract propagation
-                output_row = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
-                result.contract = propagate_contract(
+                output_row = result.row.to_dict()
+                output_contract = propagate_contract(
                     input_contract=input_contract,
                     output_row=output_row,
-                    transform_adds_fields=True,  # Multi-query transforms add multiple output fields
+                    transform_adds_fields=True,
+                )
+                assert result.success_reason is not None, "success status guarantees success_reason"
+                return TransformResult.success(
+                    PipelineRow(output_row, output_contract),
+                    success_reason=result.success_reason,
+                    context_after=result.context_after,
                 )
             return result
         finally:
@@ -735,8 +751,13 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         all_fields_added = [
             f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
         ]
+        observed = SchemaContract(
+            mode="OBSERVED",
+            fields=tuple(FieldContract(k, k, object, False, "inferred") for k in output),
+            locked=True,
+        )
         return TransformResult.success(
-            output,
+            PipelineRow(output, observed),
             success_reason={"action": "enriched", "fields_added": all_fields_added},
             context_after=pool_context,
         )
@@ -922,7 +943,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
     def _setup_langfuse_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
         """Initialize Langfuse tracing (v3 API)."""
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
 
             if not isinstance(tracing_config, LangfuseTracingConfig):
                 return

@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import Field, model_validator
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -203,6 +203,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         self._llm_clients_lock = Lock()
         # Cache underlying Azure clients to avoid recreating them
         self._underlying_client: AzureOpenAI | None = None
+        self._underlying_client_lock = Lock()
 
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
@@ -330,7 +331,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         The Langfuse client is stored for use in _record_langfuse_trace().
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
 
             if not isinstance(tracing_config, LangfuseTracingConfig):
                 return
@@ -507,9 +508,8 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             return TransformResult.success(
-                output,
+                PipelineRow(output, output_contract),
                 success_reason={"action": "enriched", "fields_added": [self._response_field]},
-                contract=output_contract,
             )
         finally:
             # Clean up cached client for this state_id to prevent unbounded growth
@@ -519,18 +519,20 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client.
 
-        The underlying client is stateless and can be shared across all calls.
+        Thread-safe: protected by _underlying_client_lock to prevent
+        duplicate client creation from concurrent worker threads.
         """
-        if self._underlying_client is None:
-            # Import here to avoid hard dependency on openai package
-            from openai import AzureOpenAI
+        with self._underlying_client_lock:
+            if self._underlying_client is None:
+                # Import here to avoid hard dependency on openai package
+                from openai import AzureOpenAI
 
-            self._underlying_client = AzureOpenAI(
-                azure_endpoint=self._azure_endpoint,
-                api_key=self._azure_api_key,
-                api_version=self._azure_api_version,
-            )
-        return self._underlying_client
+                self._underlying_client = AzureOpenAI(
+                    azure_endpoint=self._azure_endpoint,
+                    api_key=self._azure_api_key,
+                    api_version=self._azure_api_version,
+                )
+            return self._underlying_client
 
     def _get_llm_client(self, state_id: str) -> AuditedLLMClient:
         """Get or create LLM client for a state_id.
@@ -588,7 +590,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         # Clear cached LLM clients
         with self._llm_clients_lock:
             self._llm_clients.clear()
-        self._underlying_client = None
+            self._underlying_client = None
         self._langfuse_client = None
 
     def _flush_tracing(self) -> None:
@@ -747,7 +749,9 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
 
     Returns True on success, False on failure.
     """
-    from azure.monitor.opentelemetry import configure_azure_monitor  # type: ignore[import-not-found,import-untyped,attr-defined]
+    from azure.monitor.opentelemetry import (
+        configure_azure_monitor,  # type: ignore[import-not-found,import-untyped,attr-defined]  # optional dep: azure-monitor-opentelemetry
+    )
 
     if not isinstance(config, AzureAITracingConfig):
         return False

@@ -31,7 +31,8 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from tests.property.conftest import id_strings, row_data
+from tests.strategies.ids import id_strings
+from tests.strategies.json import row_data
 
 # =============================================================================
 # Helper Functions
@@ -421,17 +422,34 @@ class TestTransformResultJsonSerializationProperties:
         rows: list[dict[str, Any]],
         success_reason: dict[str, Any],
     ) -> None:
-        """Property: TransformResult.success_multi() JSON round-trip preserves rows."""
+        """Property: TransformResult.success_multi() JSON round-trip preserves rows.
+
+        All rows share a single contract instance (required by success_multi).
+        """
+        from elspeth.testing import make_contract
+
+        all_keys: dict[str, type] = {}
+        for r in rows:
+            all_keys.update(dict.fromkeys(r, object))
+        contract = make_contract(fields=all_keys) if all_keys else make_contract()
+
+        pipeline_rows = [PipelineRow(r, contract) for r in rows]
         result = TransformResult.success_multi(
-            cast(list[dict[str, Any] | PipelineRow], rows),
+            pipeline_rows,
             success_reason=cast(TransformSuccessReason, success_reason),
         )
 
-        serialized = json.dumps(asdict(result))
+        # Serialize: convert PipelineRows to dicts before JSON encoding
+        result_dict = asdict(result)
+        result_dict["rows"] = [r.to_dict() for r in result.rows] if result.rows else None
+        serialized = json.dumps(result_dict)
         parsed = json.loads(serialized)
 
         assert parsed["status"] == "success"
-        assert parsed["rows"] == rows
+        assert parsed["rows"] is not None
+        assert len(parsed["rows"]) == len(rows)
+        for orig, parsed_row in zip(rows, parsed["rows"], strict=True):
+            assert parsed_row == orig
         assert parsed["row"] is None
         assert parsed["success_reason"] == success_reason
 

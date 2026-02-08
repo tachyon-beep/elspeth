@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, Any
 from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import PoolConfig
@@ -364,9 +364,8 @@ class BaseLLMTransform(BaseTransform):
         )
 
         return TransformResult.success(
-            output,
+            PipelineRow(output, output_contract),
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
-            contract=output_contract,
         )
 
     def close(self) -> None:

@@ -24,10 +24,10 @@ import httpx
 from pydantic import Field
 
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -233,7 +233,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         The Langfuse client is stored for use in _record_langfuse_trace().
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
 
             cfg = self._tracing_config
             if not isinstance(cfg, LangfuseTracingConfig):
@@ -377,12 +377,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            # Propagate success_reason AND contract from batch result
-            # Contract is critical for downstream transforms to access LLM-added fields
+            # result.rows[0] is already PipelineRow from _process_batch
             return TransformResult.success(
                 result.rows[0],
                 success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
-                contract=result.contract,
             )
         elif result.status == "error":
             return result
@@ -452,7 +450,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Assemble output rows in original order
         # Every row gets an output (success or with error markers) - no rows are dropped
-        output_rows: list[dict[str, Any] | PipelineRow] = []
+        output_rows: list[dict[str, Any]] = []
 
         for idx in range(len(rows)):
             if idx not in results:
@@ -504,10 +502,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         else:
             output_contract = None
 
+        assert output_contract is not None, "output_rows is non-empty so contract was built"
         return TransformResult.success_multi(
-            output_rows,
+            [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
-            contract=output_contract,
         )
 
     def _process_single_row(

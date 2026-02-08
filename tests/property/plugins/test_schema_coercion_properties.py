@@ -11,7 +11,7 @@ Key Properties:
 - Type preservation: coerced values maintain their Python type
 
 Per CLAUDE.md Three-Tier Trust Model:
-- Sources (Tier 3 → Tier 2): May coerce "42" → 42
+- Sources (Tier 3 -> Tier 2): May coerce "42" -> 42
 - Transforms/Sinks: Expect already-coerced data (no re-coercion needed)
 """
 
@@ -24,7 +24,7 @@ from pydantic import ValidationError
 
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
-from tests.property.conftest import json_primitives, row_data
+from tests.strategies.json import json_primitives, row_data
 
 # =============================================================================
 # Strategies for generating coercible values
@@ -62,7 +62,7 @@ class TestCoercionIdempotence:
     @given(str_value=str_integers)
     @settings(max_examples=100)
     def test_string_to_int_coercion_is_idempotent(self, str_value: str) -> None:
-        """Property: Coercing str→int, then validating again, produces same int.
+        """Property: Coercing str->int, then validating again, produces same int.
 
         This verifies that once "42" becomes 42, passing 42 through coercion
         again yields 42 (not some other transformation).
@@ -77,11 +77,11 @@ class TestCoercionIdempotence:
         # Create schema with coercion enabled (like sources)
         Schema = create_schema_from_config(schema_config, "TestSchema", allow_coercion=True)
 
-        # First coercion: str → int
+        # First coercion: str -> int
         first_result = Schema.model_validate({"value": str_value})
         first_value = first_result.to_row()["value"]
 
-        # Second coercion: int → int (should be unchanged)
+        # Second coercion: int -> int (should be unchanged)
         second_result = Schema.model_validate({"value": first_value})
         second_value = second_result.to_row()["value"]
 
@@ -92,7 +92,7 @@ class TestCoercionIdempotence:
     @given(str_value=str_floats)
     @settings(max_examples=100)
     def test_string_to_float_coercion_is_idempotent(self, str_value: str) -> None:
-        """Property: Coercing str→float, then validating again, produces same float."""
+        """Property: Coercing str->float, then validating again, produces same float."""
         schema_config = SchemaConfig.from_dict(
             {
                 "mode": "fixed",
@@ -102,11 +102,11 @@ class TestCoercionIdempotence:
 
         Schema = create_schema_from_config(schema_config, "TestSchema", allow_coercion=True)
 
-        # First coercion: str → float
+        # First coercion: str -> float
         first_result = Schema.model_validate({"value": str_value})
         first_value = first_result.to_row()["value"]
 
-        # Second coercion: float → float (should be unchanged)
+        # Second coercion: float -> float (should be unchanged)
         second_result = Schema.model_validate({"value": first_value})
         second_value = second_result.to_row()["value"]
 
@@ -116,7 +116,7 @@ class TestCoercionIdempotence:
     @given(str_value=str_bools)
     @settings(max_examples=50)
     def test_string_to_bool_coercion_is_idempotent(self, str_value: str) -> None:
-        """Property: Coercing str→bool, then validating again, produces same bool."""
+        """Property: Coercing str->bool, then validating again, produces same bool."""
         schema_config = SchemaConfig.from_dict(
             {
                 "mode": "fixed",
@@ -126,11 +126,11 @@ class TestCoercionIdempotence:
 
         Schema = create_schema_from_config(schema_config, "TestSchema", allow_coercion=True)
 
-        # First coercion: str → bool
+        # First coercion: str -> bool
         first_result = Schema.model_validate({"value": str_value})
         first_value = first_result.to_row()["value"]
 
-        # Second coercion: bool → bool (should be unchanged)
+        # Second coercion: bool -> bool (should be unchanged)
         second_result = Schema.model_validate({"value": first_value})
         second_value = second_result.to_row()["value"]
 
@@ -221,12 +221,12 @@ class TestNativeTypePassthrough:
 
 
 class TestIntToFloatWidening:
-    """Property tests for int→float widening (always allowed)."""
+    """Property tests for int->float widening (always allowed)."""
 
     @given(value=native_ints)
     @settings(max_examples=100)
     def test_int_to_float_widening_is_idempotent(self, value: int) -> None:
-        """Property: int→float widening produces stable float.
+        """Property: int->float widening produces stable float.
 
         Even with coercion disabled, int can widen to float (numeric promotion).
         This should be idempotent: once widened, re-validation is unchanged.
@@ -240,11 +240,11 @@ class TestIntToFloatWidening:
 
         Schema = create_schema_from_config(schema_config, "TestSchema", allow_coercion=False)
 
-        # First pass: int → float
+        # First pass: int -> float
         first_result = Schema.model_validate({"value": value})
         first_value = first_result.to_row()["value"]
 
-        # Second pass: float → float
+        # Second pass: float -> float
         second_result = Schema.model_validate({"value": first_value})
         second_value = second_result.to_row()["value"]
 

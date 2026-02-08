@@ -8,7 +8,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from pyrate_limiter import (  # type: ignore[attr-defined]
+from pyrate_limiter import (  # type: ignore[attr-defined]  # pyrate-limiter has incomplete type stubs
     BucketFullException,
     Duration,
     InMemoryBucket,

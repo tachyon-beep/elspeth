@@ -1,377 +1,365 @@
-# ELSPETH Code Quality Assessment
+# Architecture Quality Assessment
 
-This document provides an objective quality assessment across multiple dimensions.
-
----
-
-## Quality Dimensions Summary
-
-| Dimension | Score | Status |
-|-----------|-------|--------|
-| **Maintainability** | A | Excellent |
-| **Testability** | A+ | Exceptional |
-| **Type Safety** | A | Excellent |
-| **Documentation** | A- | Very Good |
-| **Error Handling** | A | Excellent |
-| **Security** | A | Excellent |
-| **Performance** | B+ | Good |
-| **Complexity** | B | Acceptable |
-
-**Overall Grade: A-**
+**Source:** `docs/arch-analysis-2026-02-02-1114/`, `docs/code_analysis/_repair_manifest.md`
+**Assessed:** 2026-02-08
+**Assessor:** architecture-critic (RC2.4-bug-sprint validation)
+**Branch:** RC2.4-bug-sprint (66 commits ahead of main)
+**Codebase:** 66,060 LOC source, 216,710 LOC tests (3.3:1 ratio)
+**Previous Assessment:** 2026-02-02 (overridden — findings contradicted by repair manifest)
 
 ---
 
-## 1. Maintainability Assessment
+## Executive Summary
 
-### Strengths
+The ELSPETH codebase is **architecturally sound** with a well-executed audit backbone, clean contract system, and consistent trust model enforcement. The RC2.4-bug-sprint branch has resolved all 6 Critical/P0 and all 18 P1 issues identified in the 2026-02-06 deep code analysis. However, **1 active regression exists** in the current branch (`executors.py:398` — `.to_dict()` called on a plain dict), and **~20 P2 technical debt items remain unaddressed**. The previous quality assessment (grade: A-) was inaccurate — it was written from archaeologist documentation before the deep code analysis discovered significant security and data integrity issues. The corrected assessment follows.
 
-1. **Clear Module Boundaries**
-   - Contracts package as leaf module
-   - Clean separation of concerns
-   - Protocol-based interfaces
+**Overall Grade: B+** (was A- — corrected downward for remaining technical debt, active regression, and complexity burden)
 
-2. **Consistent Patterns**
-   - Settings→Runtime configuration everywhere
-   - Repository pattern for DB access
-   - Factory methods for object construction
-
-3. **No Legacy Code Policy**
-   - No backwards compatibility shims
-   - No deprecated code retention
-   - Clean evolution path
-
-### Concerns
-
-1. **Large Files**
-   | File | Lines | Concern |
-   |------|-------|---------|
-   | `orchestrator.py` | ~3100 | Multiple responsibilities |
-   | `recorder.py` | ~2700 | Many methods |
-   | `cli.py` | ~2150 | Could split commands |
-   | `processor.py` | ~1918 | Complex state |
-   | `executors.py` | ~1903 | Three executor types |
-
-2. **Cognitive Load in Aggregation**
-   - Multiple state machines (buffer, trigger, flush)
-   - PASSTHROUGH vs TRANSFORM output modes
-   - Temporal decoupling for audit
-
-### Recommendation
-
-Consider extracting modules from files exceeding 1500 lines. The `orchestrator.py` could separate into:
-- `orchestrator/lifecycle.py` - Run management
-- `orchestrator/validation.py` - Pre-run validation
-- `orchestrator/source_handling.py` - Source iteration
+**Critical Issues:** 0 (all 6 P0 fixed)
+**High Issues:** 1 (active regression from bug sprint)
+**Medium Issues:** ~20 (P2 technical debt)
+**Low Issues:** ~15 (P3 improvements)
 
 ---
 
-## 2. Testability Assessment
+## Subsystem Assessments
 
-### Strengths
+### 1. Engine Subsystem
 
-1. **Exceptional Test Ratio**
-   - ~187K lines of tests vs ~58K production
-   - 3.2:1 test-to-production ratio
+**Quality Score:** 3.5 / 5
+**Critical Issues:** 0
+**High Issues:** 1
 
-2. **Test Categories**
-   ```
-   tests/
-   ├── unit/           # Isolated component tests
-   ├── integration/    # Subsystem interaction
-   ├── engine/         # Engine-specific tests
-   ├── core/           # Core subsystem tests
-   ├── plugins/        # Plugin tests
-   ├── contracts/      # Protocol compliance
-   ├── property/       # Hypothesis-based
-   ├── system/         # End-to-end
-   ├── cli/            # CLI tests
-   ├── tui/            # TUI tests
-   └── telemetry/      # Telemetry tests
-   ```
+**Findings:**
 
-3. **Testing Infrastructure**
-   - ChaosLLM for LLM fault injection
-   - MockClock for deterministic timeouts
-   - Mutation gap tests for coverage validation
-   - Property testing with Hypothesis
+1. **Active Regression: `.to_dict()` on plain dict** — High
+   - **Evidence:** `src/elspeth/engine/executors.py:398` — `output_data_with_pipe.to_dict()` crashes when a transform returns a plain `dict` instead of `PipelineRow`. Test `test_on_error_discard_passes_validation` fails with `AttributeError: 'dict' object has no attribute 'to_dict'`.
+   - **Impact:** Any transform returning a plain dict (instead of PipelineRow) causes a crash in the audit recording path. This is a regression from the RC2.4-bug-sprint changes to `TransformResult`.
+   - **Recommendation:** Add `isinstance` dispatch: `output_data_with_pipe.to_dict() if isinstance(output_data_with_pipe, PipelineRow) else output_data_with_pipe`.
 
-4. **Test Path Integrity**
-   - Production factories required in integration tests
-   - No manual graph construction bypass
+2. **Processor work queue duplication (~4 near-identical loops)** — Medium
+   - **Evidence:** `src/elspeth/engine/processor.py` lines 381-437, 1309-1387, 1389-1459, 1461-1511 — four near-identical work queue processing loops.
+   - **Impact:** Maintenance burden. A bug fix in one loop may not be applied to the others.
+   - **Recommendation:** Extract a parameterized loop function accepting a processing callback.
 
-### Quality Indicators
+3. **Orchestrator run/resume code duplication (~800 lines)** — Medium
+   - **Evidence:** `src/elspeth/engine/orchestrator/core.py` — `run()` and `resume()` paths share ~800 lines of finalization logic.
+   - **Impact:** The `rows_succeeded` increment was missed in the resume path due to this duplication.
+   - **Recommendation:** Extract shared finalization logic.
 
-- Mutation testing configured (mutmut)
-- Property testing for canonical JSON edge cases
-- Contract tests for all plugin protocols
-- Extensive fixture library
+4. **Large file sizes** — Medium
+   - **Evidence:** `executors.py` (2,231), `orchestrator/core.py` (2,064), `processor.py` (2,054). All exceed the 1500-line complexity threshold.
+   - **Impact:** Cognitive load. Each file manages multiple concerns.
+   - **Recommendation:** Extract orchestrator lifecycle phases into separate modules.
+
+**Strengths:**
+- Work-queue DAG traversal prevents stack overflow on deep DAGs (evidence: `processor.py` dequeue pattern)
+- Token identity system (row_id/token_id/parent_token_id) provides complete fork/join lineage
+- Three-tier trust model correctly implemented in exception handling (Tier 1 crashes, Tier 2 wraps, Tier 3 validates)
 
 ---
 
-## 3. Type Safety Assessment
+### 2. Landscape Subsystem
 
-### Strengths
+**Quality Score:** 4 / 5
+**Critical Issues:** 0
+**High Issues:** 0
 
-1. **Pydantic Validation**
-   - All settings classes frozen
-   - Extra fields forbidden
-   - Field validators for complex logic
+**Findings:**
 
-2. **Runtime Protocols**
-   - `RuntimeRetryProtocol`, `RuntimeTelemetryProtocol`, etc.
-   - Structural typing (duck typing with static checking)
-   - mypy verification
+1. **Recorder god class (3,233 lines, 80+ methods)** — Medium
+   - **Evidence:** `src/elspeth/core/landscape/recorder.py` — single class handles rows, node states, calls, batches, operations, routing, outcomes, checkpoints, and lineage.
+   - **Impact:** Difficult to test individual recording concerns in isolation.
+   - **Recommendation:** Extract cohesive method groups (e.g., `BatchRecording`, `RoutingRecording`) as mix-in classes or delegate objects.
 
-3. **NewType Aliases**
-   - `NodeID`, `SinkName`, `CoalesceName`, etc.
-   - Prevents accidental parameter swaps
+2. **N+1 query patterns** — Medium
+   - **Evidence:** `lineage.py` (routing events per node state), `exporter.py` (batch members), `recovery.py` (unprocessed rows). Queries inside loops instead of batch IN clauses.
+   - **Impact:** Performance degrades linearly with pipeline size. Acceptable for small runs, problematic for 10K+ row runs.
+   - **Recommendation:** Batch-fetch with IN clauses or use SQLAlchemy subqueries.
 
-4. **Discriminated Unions**
-   - `NodeStateOpen | NodeStateCompleted | NodeStateFailed`
-   - Literal types for status discrimination
+3. **JSONDecodeError on Tier 1 data now properly crashes** — Fixed
+   - **Evidence:** Commit `32832d38` — `explain_row()` no longer catches JSONDecodeError silently.
 
-### Configuration
-
-```toml
-# pyproject.toml mypy settings
-strict = true
-disallow_untyped_defs = true
-warn_return_any = true
-```
+**Strengths:**
+- Composite PK pattern (`node_id, run_id`) correctly documented and enforced
+- Repository pattern with Tier 1 validation (string→enum conversion crashes on unknown values)
+- JSONL journaling as backup stream provides defense-in-depth
+- Atomic file writes now used throughout (json_sink, payload_store)
 
 ---
 
-## 4. Documentation Assessment
+### 3. Contracts Subsystem
 
-### Strengths
+**Quality Score:** 4.5 / 5
+**Critical Issues:** 0
+**High Issues:** 0
 
-1. **CLAUDE.md (10K+ words)**
-   - Comprehensive architecture guide
-   - Three-tier trust model
-   - Anti-patterns documented
-   - Code examples
+**Findings:**
 
-2. **ADRs**
-   - Architecture Decision Records present
-   - Template for new decisions
-   - Linked from CLAUDE.md
+1. **Four near-identical type mapping dicts** — Low
+   - **Evidence:** `contract_records.py` (TYPE_MAP), `schema_contract.py` (VALID_FIELD_TYPES), `type_normalization.py` (ALLOWED_CONTRACT_TYPES), `transform_contract.py` (_TYPE_MAP).
+   - **Impact:** Type maps can drift. Adding `datetime` to one but not others causes inconsistency.
+   - **Recommendation:** Consolidate into a single canonical type registry.
 
-3. **Runbooks**
-   - `database-maintenance.md`
-   - `resume-failed-run.md`
-   - Index for navigation
+2. **SchemaContract version_hash truncated to 64 bits** — Low
+   - **Evidence:** `schema_contract.py` — SHA-256 truncated to 16 hex chars.
+   - **Impact:** Birthday attack threshold at 2^32. Acceptable for schema versioning (not security-critical), but unnecessarily weak.
+   - **Recommendation:** Extend to 32 hex chars (128 bits).
 
-4. **Inline Documentation**
-   - Docstrings on public APIs
-   - Type hints throughout
-   - Comments for complex logic
-
-### Gaps
-
-1. **API Reference** - No generated docs (pdoc/sphinx)
-2. **Plugin Development Guide** - Limited plugin authoring docs
-3. **Troubleshooting Guide** - Scattered across runbooks
+**Strengths:**
+- Leaf module with zero outbound dependencies — architectural discipline
+- Protocol-based verification prevents Settings→Runtime field orphaning
+- Frozen dataclasses for immutable audit records (correct for Tier 1 integrity)
+- Discriminated unions for NodeState variants with Literal type tags
 
 ---
 
-## 5. Error Handling Assessment
+### 4. Security Posture
 
-### Strengths
+**Quality Score:** 4 / 5
+**Critical Issues:** 0 (all P0 security issues fixed)
+**High Issues:** 0
 
-1. **Three-Tier Trust Model**
-   | Tier | Handling |
-   |------|----------|
-   | Tier 1 | Crash on anomaly |
-   | Tier 2 | Wrap operations on values |
-   | Tier 3 | Validate at boundary |
+**Findings (Resolved):**
 
-2. **Exception Hierarchy**
-   - `AuditIntegrityError` - Audit violations
-   - `FrameworkBugError` - ELSPETH bugs
-   - `PluginContractViolation` - Plugin errors
-   - `OrchestrationInvariantError` - Run-time invariants
+1. **DNS rebinding TOCTOU** — Fixed. `SSRFSafeRequest` pins resolved IP; HTTP client uses pinned IP.
+2. **Content Safety fails open** — Fixed. Unknown categories raise `ValueError`; all expected categories validated.
+3. **Prompt Shield fails open** — Fixed. Strict boolean validation on `attackDetected` fields.
+4. **Unsandboxed Jinja2** — Fixed. `SandboxedEnvironment` used in blob_sink and ChaosLLM. (Note: `response_generator.py:414` has stale return type annotation `jinja2.Environment` but actual instantiation at line 416 is `SandboxedEnvironment`.)
+5. **NaN/Infinity in float validation** — Fixed. `math.isfinite()` check in `_validate_float_field()`.
 
-3. **Error Routing**
-   - Transform errors → configurable sink
-   - Validation errors → quarantine
-   - External call errors → wrapped results
+**Remaining concerns:**
 
-### Pattern Compliance
+6. **Template file path traversal** — Low
+   - **Evidence:** `core/config.py:1407-1438` — `_expand_config_templates` does not prevent `../../../etc/passwd`.
+   - **Impact:** Low. Config is system-owned. But defense-in-depth says add containment.
 
-```python
-# CORRECT - Tier 2: Wrap operations on row values
-try:
-    result = row["numerator"] / row["denominator"]
-except ZeroDivisionError:
-    return TransformResult.error({"reason": "division_by_zero"})
+7. **ChaosLLM admin endpoints lack authentication** — Low
+   - **Evidence:** `testing/chaosllm/server.py` — `/admin/config`, `/admin/reset` have no auth.
+   - **Impact:** Low. Test tool, not production. But should be documented.
 
-# WRONG - Never hide bugs
-try:
-    batch_avg = self._total / self._batch_count  # Our bug if 0
-except ZeroDivisionError:
-    batch_avg = 0  # NO! Hides initialization bug
-```
+**Strengths:**
+- HMAC-SHA256 secret fingerprinting (never stores raw secrets)
+- AST-based expression parser (no `eval()`, whitelist operators only)
+- SQLAlchemy parameterized queries throughout (no SQL injection surface)
+- Path traversal defense in payload store with timing-safe comparison
+- `extra="forbid"` on all 29 Pydantic Settings models (typos caught)
 
 ---
 
-## 6. Security Assessment
+### 5. Plugin System
 
-### Strengths
+**Quality Score:** 3.5 / 5
+**Critical Issues:** 0
+**High Issues:** 0
 
-1. **Secret Fingerprinting**
-   - HMAC-SHA256 fingerprints instead of raw secrets
-   - Azure Key Vault integration
-   - Environment variable precedence
+**Findings:**
 
-2. **Path Traversal Defense**
-   - Hash format validation
-   - Path containment checks
-   - Timing-safe comparison
+1. **LLM plugin duplication (~3,500 lines across 6 files)** — Medium
+   - **Evidence:** Azure vs OpenRouter variants share ~50% code: config classes, JSON schema builders, response parsers, Langfuse tracing, error classification.
+   - **Impact:** Bug fixes must be applied to both variants. The P0-05 NoneType crash existed in OpenRouter but not Azure because the null check was only added to one variant initially.
+   - **Recommendation:** Extract shared multi-query logic into base utilities. This is the single largest source of duplication in the codebase.
 
-3. **Expression Parser Security**
-   - AST-based evaluation (no eval)
-   - Whitelist operators only
-   - No lambda/comprehension
+2. **HTTP client per-request creation** — Medium
+   - **Evidence:** `clients/http.py:304,519`, `openrouter.py:663` — new `httpx.Client` per request.
+   - **Impact:** No connection pooling, no TCP reuse. Performance penalty on high-throughput pipelines.
+   - **Recommendation:** Use a session-scoped client with connection pooling.
 
-4. **SQL Injection Prevention**
-   - SQLAlchemy parameterized queries
-   - No raw SQL interpolation
-   - MCP server SELECT-only
+3. **Race condition in Azure LLM client creation** — Medium
+   - **Evidence:** `azure.py:519-533` — `_get_underlying_client()` not protected by same lock as `_get_llm_client()`.
+   - **Impact:** Under concurrent access (thread pool), multiple clients could be created. Waste of resources but not data corruption.
 
-### Security Controls
-
-| Control | Implementation |
-|---------|----------------|
-| Credential Handling | HMAC fingerprinting |
-| Input Validation | Pydantic + Tier 3 boundary |
-| Eval Prevention | AST parser, no eval |
-| SQL Safety | Parameterized queries |
-| Path Safety | Containment validation |
+**Strengths:**
+- All plugins are system-owned with protocol-based interfaces
+- Batch-aware transforms properly use `BatchTransformMixin`
+- Content-filtered LLM responses now handled correctly (null check before `.strip()`)
+- Output key collision validation shared between Azure and OpenRouter multi-query
 
 ---
 
-## 7. Performance Assessment
+### 6. Telemetry Subsystem
 
-### Strengths
+**Quality Score:** 4 / 5
+**Critical Issues:** 0
+**High Issues:** 0
 
-1. **Batch Operations**
-   - Sink batch writes
-   - LLM batch API support
-   - Connection pooling
+**Findings:**
 
-2. **Concurrency**
-   - Pooled LLM transforms
-   - FIFO output ordering
-   - Backpressure management
+1. **BoundedBuffer dead code** — Low
+   - **Evidence:** `telemetry/buffer.py` — defined but never imported.
+   - **Impact:** No legacy code policy violation. Delete.
 
-3. **Rate Limiting**
-   - AIMD backoff
-   - Per-service limits
-   - SQLite persistence option
+2. **Telemetry filtering fail-open** — Low
+   - **Evidence:** `telemetry/filtering.py` — unknown event types pass through unconditionally.
+   - **Impact:** Unexpected events reach exporters without filtering.
 
-### Concerns
-
-1. **Sequential Row Processing**
-   - Orchestrator processes rows sequentially
-   - Within-row concurrency only
-
-2. **Telemetry Overhead**
-   - Background thread required
-   - Queue management cost
-
-3. **Large Payload Handling**
-   - All rows in memory during processing
-   - Payload store filesystem-based
+**Strengths:**
+- Telemetry emitted AFTER Landscape recording (correct ordering)
+- Individual exporter failures isolated (one bad exporter doesn't break others)
+- Aggregate logging every 100 failures prevents warning fatigue
+- Datadog env var pollution fixed (save/restore pattern)
 
 ---
 
-## 8. Complexity Assessment
+### 7. CLI and TUI
 
-### Metrics
+**Quality Score:** 3 / 5
+**Critical Issues:** 0
+**High Issues:** 0
 
-| Subsystem | Complexity | Justification |
-|-----------|------------|---------------|
-| Engine | High | Fork/join, aggregation state machines |
-| Landscape | Medium | Many tables, composite PKs |
-| Plugins | Low | Clean protocols, simple implementations |
-| Telemetry | Medium | Async export, granularity filtering |
-| CLI | Medium | Many commands, event formatting |
+**Findings:**
 
-### Complexity Hotspots
+1. **Event formatter duplication removed** — Fixed (partially)
+   - **Evidence:** Dead `_execute_pipeline` (311 lines) removed in commit `96a57c37`.
+   - **Remaining:** Some formatter duplication may persist. CLI went from 2,417→1,882 lines.
 
-1. **processor.py: _process_batch_aggregation_node**
-   - Buffer state, trigger evaluation, flush logic
-   - PASSTHROUGH vs TRANSFORM output modes
-   - Checkpoint restoration
+2. **TUI lineage tree assumes linear topology** — Low
+   - **Evidence:** `tui/widgets/lineage_tree.py` — renders transforms as linear chain even for DAG pipelines.
+   - **Impact:** Fork/join pipelines display incorrectly in TUI.
 
-2. **dag.py: from_plugin_instances**
-   - Complex graph construction
-   - Gate routing wiring
-   - Coalesce step alignment
-
-3. **coalesce_executor.py: _should_merge**
-   - Policy-based merge decisions
-   - Timeout evaluation
-   - Late arrival detection
+3. **TUI drops gate/aggregation/coalesce nodes** — Low
+   - **Evidence:** `tui/screens/explain_screen.py` — only SOURCE, TRANSFORM, SINK displayed.
+   - **Impact:** Non-standard node types invisible in lineage explorer.
 
 ---
 
-## Quality Metrics Summary
+### 8. MCP Server
 
-### Code Quality Indicators
+**Quality Score:** 4 / 5
+**Critical Issues:** 0
+**High Issues:** 0
 
-| Indicator | Status | Evidence |
-|-----------|--------|----------|
-| Type Coverage | 100% | mypy strict mode |
-| Lint Compliance | High | ruff configured |
-| Test Ratio | 3.2:1 | Excellent coverage |
-| Documentation | Comprehensive | CLAUDE.md, ADRs |
-| Error Handling | Tier-based | Consistent patterns |
-| Security | Strong | Multiple controls |
+**Findings:**
 
-### Technical Debt Assessment
+1. **SQL keyword blocklist false positives** — Medium
+   - **Evidence:** `mcp/server.py:619-627` — substring check blocks queries with column names like `created_at` (contains "CREATE").
+   - **Impact:** Legitimate analysis queries rejected.
+   - **Recommendation:** Use word-boundary-aware regex.
 
-| Category | Items | Priority |
-|----------|-------|----------|
-| Large Files | 5 files > 1500 LOC | Medium |
-| Aggregation Complexity | State machine clarity | Medium |
-| Composite PK Documentation | Query patterns | Low |
-| API Documentation | Generated docs | Low |
+**Strengths:**
+- Read-only by design (SELECT only)
+- Claude-optimized tool descriptions for investigation workflows
+- Comprehensive toolset (diagnose, failure context, lineage, performance)
 
 ---
 
-## Recommendations
+## Cross-Cutting Concerns
 
-### High Priority
+### Security — Strong (after P0 fixes)
 
-1. **Add CI check for file size** - Flag files > 1500 lines
-2. **Document composite PK patterns** - SQL query guide
-3. **Generate API documentation** - pdoc or sphinx
+All Critical security issues resolved:
+- SSRF/DNS rebinding: IP pinning at validation
+- Content safety: fail-closed on unknown categories
+- Prompt shield: strict boolean validation
+- Jinja2: sandboxed everywhere
+- NaN/Infinity: rejected at validation boundary
+- Secrets: HMAC fingerprints only, plaintext cleared after use
+- Config: `extra="forbid"` on all Settings models
 
-### Medium Priority
+Remaining low-severity items: template path traversal, ChaosLLM admin auth.
 
-1. **Extract orchestrator modules** - Split 3100-line file
-2. **Refactor aggregation state** - Explicit state machine
-3. **Add troubleshooting guide** - Consolidated diagnostics
+### Performance — Adequate, with known bottlenecks
 
-### Low Priority
+Known bottlenecks:
+1. N+1 queries in lineage/export paths
+2. Per-request HTTP client creation in OpenRouter plugins
+3. Sequential row processing in orchestrator (within-row concurrency only)
+4. CSV sink O(N^2) content hashing in append mode
 
-1. **Plugin development guide** - How to write plugins
-2. **Performance benchmarks** - Baseline metrics
-3. **Architecture video** - Onboarding aid
+These are acceptable for current pipeline sizes but will become problems at scale.
+
+### Maintainability — Good, with concentrated debt
+
+The codebase is well-structured with clear module boundaries. Technical debt concentrates in:
+1. **LLM plugin duplication** (~3,500 lines, highest ROI refactor target)
+2. **Engine file sizes** (3 files > 2000 lines)
+3. **Orchestrator run/resume duplication** (~800 lines)
+4. **Processor work queue duplication** (~4 loops)
+
+None of these block release. All are "fix when touched" candidates.
+
+### Trust Model Compliance — Excellent
+
+Evidence-based validation:
+- **Tier 1 (Our Data):** Crashes on anomaly. JSONDecodeError in recorder now crashes. Direct dict access on checkpoint data (no `.get()` with defaults). `AuditIntegrityError` raised on Landscape corruption.
+- **Tier 2 (Pipeline Data):** Operations wrapped with row-scoped error handling. `ZeroDivisionError`, `ValueError` from row operations caught and converted to `TransformResult.error()`.
+- **Tier 3 (External Data):** Validated at boundary. LLM responses parsed and type-checked immediately. SSRF validation pins resolved IP. Content safety validates all expected categories.
+
+Zero defensive programming violations found in engine/core code. Remaining `hasattr`/`getattr` instances are legitimate protocol detection (batch transform polymorphism).
+
+---
+
+## Priority Recommendations
+
+### Immediate (before merge to main)
+
+1. **Fix active regression: `executors.py:398`** — High
+   - `output_data_with_pipe.to_dict()` crashes on plain dict
+   - 1 test failing, blocks merge
+   - Effort: S
+
+### Before Release
+
+2. **Validate all 3,485 passing tests cover the bug-sprint changes** — High
+   - 66 commits, many touching engine internals
+   - Effort: S (run test coverage report)
+
+### Post-Release Technical Debt
+
+3. **Extract shared LLM plugin logic** — Medium
+   - ~3,500 lines of duplication across 6 files
+   - Highest ROI refactor (prevents future variant drift bugs)
+   - Effort: L
+
+4. **Batch N+1 queries in Landscape layer** — Medium
+   - lineage.py, exporter.py, recovery.py, mcp/server.py
+   - Effort: M
+
+5. **Split engine files > 2000 lines** — Medium
+   - executors.py, orchestrator/core.py, processor.py
+   - Effort: L
+
+6. **Consolidate type mapping dicts** — Low
+   - 4 near-identical dicts across contracts/
+   - Effort: S
+
+7. **Fix MCP SQL keyword blocklist** — Low
+   - Substring → word-boundary regex
+   - Effort: S
+
+---
+
+## Limitations
+
+- **Not assessed:** Runtime performance under load (no benchmark suite exists)
+- **Not assessed:** Alembic migration chain integrity
+- **Not assessed:** Plugin contract completeness against all supported LLM providers
+- **Confidence gap:** Thread safety of PooledExecutor (AIMD stats accumulation, shutdown flag synchronization) — flagged as P2-06 but not deep-dived
+- **Confidence gap:** Coalesce executor union merge overwrite semantics — field collision behavior may surprise users
+
+---
+
+## Comparison with Previous Assessment
+
+| Dimension | Previous (2026-02-02) | Current (2026-02-08) | Change |
+|-----------|----------------------|---------------------|--------|
+| Security | A | A (after P0 fixes) | Corrected: was falsely A before P0 discovery |
+| Maintainability | A | B+ | Corrected: file sizes and duplication understated |
+| Testability | A+ | A+ | Confirmed: 3.3:1 test ratio, property testing |
+| Type Safety | A | A | Confirmed: mypy strict, protocols, NewType |
+| Error Handling | A | A (after P0/P1 fixes) | Corrected: fail-open patterns were present |
+| Performance | B+ | B | Corrected: N+1 queries, per-request clients |
+| Complexity | B | B | Confirmed: engine hotspots remain |
+| **Overall** | **A-** | **B+** | **Corrected downward** |
+
+The previous assessment was performed from archaeologist documentation alone, before the 153-file deep code analysis discovered the P0 security vulnerabilities and data integrity issues. Those issues have since been fixed, but the remaining P2 debt and active regression prevent an A- grade.
 
 ---
 
 ## Conclusion
 
-ELSPETH demonstrates **high code quality** across all dimensions. The codebase reflects mature engineering practices with:
+ELSPETH's architecture is well-designed for its stated mission of auditable SDA pipelines. The Three-Tier Trust Model is correctly implemented across the codebase. The RC2.4-bug-sprint has successfully remediated all Critical and High-priority issues from the deep code analysis. The remaining technical debt is concentrated (not distributed) and does not block release.
 
-- Exceptional testability (3.2:1 test ratio)
-- Strong type safety (mypy strict, protocols)
-- Comprehensive documentation (CLAUDE.md)
-- Rigorous error handling (three-tier trust)
-- Security-conscious design (fingerprinting, AST parsing)
+**The 1 active regression (`executors.py:398`) must be fixed before merge.** After that, the codebase is release-ready with tracked P2/P3 debt for post-release cleanup.
 
-The primary improvement areas relate to **complexity management** (large files, aggregation state) rather than fundamental architectural issues.
-
-**Quality Grade: A-** (Production Ready)
+**Quality Grade: B+** (Production Ready after regression fix)

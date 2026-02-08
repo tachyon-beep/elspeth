@@ -76,7 +76,7 @@ dev = [
     "hypothesis>=6.98,<7",  # Property-based testing
     "mypy>=1.19,<2",  # Static type checking
     "ruff==0.15.0",  # Linting and formatting
-    "pre-commit>=3.6,<4",  # Git hooks
+    "pre-commit>=4.0,<5",  # Git hooks
     # Type stubs
     "pandas-stubs>=2.2,<3",  # Pandas type hints
     "types-networkx>=3.2,<4",  # NetworkX type hints
@@ -149,7 +149,7 @@ all = [
     "hypothesis>=6.98,<7",
     "mypy>=1.19,<2",
     "ruff==0.15.0",
-    "pre-commit>=3.6,<4",
+    "pre-commit>=4.0,<5",
     "pandas-stubs>=2.2,<3",
     "types-networkx>=3.2,<4",
     "types-PyYAML>=6.0,<7",
@@ -350,7 +350,7 @@ paths_to_mutate = [
     "src/elspeth/engine/tokens.py",
 ]
 # Test runner - include engine tests, use short traceback for debugging
-runner = "python -m pytest tests/core/ tests/engine/ tests/property/ --tb=short"
+runner = "python -m pytest tests/unit/core/ tests/unit/engine/ tests/property/ --tb=short"
 # Tests directory
 tests_dir = "tests/"
 # Disable backup files - we use git

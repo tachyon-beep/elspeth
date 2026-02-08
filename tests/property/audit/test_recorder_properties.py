@@ -35,7 +35,7 @@ from elspeth.contracts import (
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from tests.property.conftest import row_data
+from tests.strategies.json import row_data
 
 # =============================================================================
 # Hypothesis Strategies

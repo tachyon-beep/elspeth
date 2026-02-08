@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 import networkx as nx
 from networkx import MultiDiGraph
 
-from elspeth.contracts import EdgeInfo, RoutingMode, check_compatibility
+from elspeth.contracts import EdgeInfo, RoutingMode, check_compatibility, error_edge_label
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import (
     AggregationName,
@@ -39,6 +39,17 @@ class GraphValidationError(Exception):
     pass
 
 
+# Config stored on graph nodes varies by node type:
+# - Source/Transform/Sink: raw plugin config dict (arbitrary keys per plugin)
+# - Gate: {schema, routes, condition, fork_to?}
+# - Aggregation: {schema, trigger, output_mode, options}
+# - Coalesce: {branches, policy, merge, timeout_seconds?, quorum_count?, select_branch?}
+# Only "schema" is accessed cross-type. Other keys are opaque to the graph layer.
+# dict[str, Any] is intentional: plugin configs are validated by each plugin's
+# Pydantic model, not by the graph. The graph only hashes them for node IDs.
+type NodeConfig = dict[str, Any]
+
+
 @dataclass
 class NodeInfo:
     """Information about a node in the execution graph.
@@ -58,7 +69,7 @@ class NodeInfo:
     node_id: NodeID
     node_type: str  # source, transform, gate, aggregation, coalesce, sink
     plugin_name: str
-    config: dict[str, Any] = field(default_factory=dict)
+    config: NodeConfig = field(default_factory=dict)
     input_schema: type[PluginSchema] | None = None  # Immutable after graph construction
     output_schema: type[PluginSchema] | None = None  # Immutable after graph construction
     # Schema configs for contract validation (guaranteed/required fields)
@@ -132,7 +143,7 @@ class ExecutionGraph:
         *,
         node_type: str,
         plugin_name: str,
-        config: dict[str, Any] | None = None,
+        config: NodeConfig | None = None,
         input_schema: type[PluginSchema] | None = None,
         output_schema: type[PluginSchema] | None = None,
         input_schema_config: SchemaConfig | None = None,
@@ -144,7 +155,7 @@ class ExecutionGraph:
             node_id: Unique node identifier
             node_type: One of: source, transform, gate, aggregation, coalesce, sink
             plugin_name: Plugin identifier
-            config: Node configuration
+            config: Node configuration (see NodeConfig type alias for per-node-type structure)
             input_schema: Input schema Pydantic type (None for dynamic or N/A like sources)
             output_schema: Output schema Pydantic type (None for dynamic or N/A like sinks)
             input_schema_config: Input schema config for contract validation
@@ -387,7 +398,7 @@ class ExecutionGraph:
 
         graph = cls()
 
-        def node_id(prefix: str, name: str, config: dict[str, Any], sequence: int | None = None) -> NodeID:
+        def node_id(prefix: str, name: str, config: NodeConfig, sequence: int | None = None) -> NodeID:
             """Generate deterministic node ID based on plugin type and config.
 
             Node IDs must be deterministic for checkpoint/resume compatibility.
@@ -418,7 +429,7 @@ class ExecutionGraph:
             return NodeID(f"{prefix}_{name}_{config_hash}")
 
         # Add source - extract schema from instance
-        source_config = source.config  # type: ignore[attr-defined]
+        source_config = source.config
         source_id = node_id("source", source.name, source_config)
         graph.add_node(
             source_id,
@@ -431,7 +442,7 @@ class ExecutionGraph:
         # Add sinks
         sink_ids: dict[SinkName, NodeID] = {}
         for sink_name, sink in sinks.items():
-            sink_config = sink.config  # type: ignore[attr-defined]
+            sink_config = sink.config
             sid = node_id("sink", sink_name, sink_config)
             sink_ids[SinkName(sink_name)] = sid
             graph.add_node(
@@ -452,7 +463,7 @@ class ExecutionGraph:
         prev_node_id = source_id
 
         for i, transform in enumerate(transforms):
-            transform_config = transform.config  # type: ignore[attr-defined]
+            transform_config = transform.config
             is_gate = isinstance(transform, GateProtocol)
             # Include sequence to prevent ID collisions when configs are identical
             tid = node_id("transform", transform.name, transform_config, sequence=i)
@@ -527,7 +538,7 @@ class ExecutionGraph:
         # Build aggregations - dual schemas
         aggregation_ids: dict[AggregationName, NodeID] = {}
         for agg_name, (transform, agg_config) in aggregations.items():
-            transform_config = transform.config  # type: ignore[attr-defined]
+            transform_config = transform.config
             agg_node_config = {
                 "trigger": agg_config.trigger.model_dump(),
                 "output_mode": agg_config.output_mode,
@@ -618,7 +629,7 @@ class ExecutionGraph:
             for coalesce_config in coalesce_settings:
                 # Coalesce merges - no schema transformation
                 # Note: Pydantic validates min_length=2 for branches field
-                config_dict: dict[str, Any] = {
+                config_dict: NodeConfig = {
                     "branches": list(coalesce_config.branches),
                     "policy": coalesce_config.policy,
                     "merge": coalesce_config.merge,
@@ -802,12 +813,12 @@ class ExecutionGraph:
         for i, transform in enumerate(transforms):
             if isinstance(transform, GateProtocol):
                 continue
-            on_error = transform._on_error
+            on_error = transform.on_error
             if on_error is not None and on_error != "discard" and SinkName(on_error) in sink_ids:
                 graph.add_edge(
                     transform_ids[i],
                     sink_ids[SinkName(on_error)],
-                    label=f"__error_{i}__",
+                    label=error_edge_label(i),
                     mode=RoutingMode.DIVERT,
                 )
 

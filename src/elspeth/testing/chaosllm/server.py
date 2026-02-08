@@ -278,9 +278,13 @@ class ChaosLLMServer:
         model = body.get("model", "gpt-4")
         messages = body.get("messages", [])
 
-        # Extract override headers
-        mode_override = request.headers.get("X-Fake-Response-Mode")
-        template_override = request.headers.get("X-Fake-Template")
+        # Extract override headers (only if config allows)
+        if self._response_generator._config.allow_header_overrides:
+            mode_override = request.headers.get("X-Fake-Response-Mode")
+            template_override = request.headers.get("X-Fake-Template")
+        else:
+            mode_override = None
+            template_override = None
 
         # Check for error injection
         decision = self._error_injector.decide()

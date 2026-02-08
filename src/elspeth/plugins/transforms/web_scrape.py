@@ -22,6 +22,7 @@ from pydantic import Field
 
 from elspeth.contracts import Determinism
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.security.web import (
     NetworkError as SSRFNetworkError,
@@ -34,7 +35,6 @@ from elspeth.core.security.web import (
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.web_scrape_errors import (
@@ -187,12 +187,22 @@ class WebScrapeTransform(BaseTransform):
                 }
             )
 
-        # Extract content
-        content = extract_content(
-            response.text,
-            format=self._format,
-            strip_elements=self._strip_elements,
-        )
+        # Extract content — response.text is Tier 3 (external data), validate at boundary
+        try:
+            content = extract_content(
+                response.text,
+                format=self._format,
+                strip_elements=self._strip_elements,
+            )
+        except Exception as e:
+            return TransformResult.error(
+                {
+                    "reason": "content_extraction_failed",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "url": safe_request.original_url,
+                }
+            )
 
         # Compute fingerprint
         fingerprint = compute_fingerprint(content, mode=self._fingerprint_mode)
@@ -223,12 +233,11 @@ class WebScrapeTransform(BaseTransform):
         )
 
         return TransformResult.success(
-            output,
+            PipelineRow(output, output_contract),
             success_reason={
                 "action": "enriched",
                 "fields_added": [self._content_field, self._fingerprint_field],
             },
-            contract=output_contract,
         )
 
     def _fetch_url(self, safe_request: SSRFSafeRequest, ctx: PluginContext) -> httpx.Response:
@@ -305,6 +314,8 @@ class WebScrapeTransform(BaseTransform):
             raise NetworkError(f"DNS resolution failed during redirect: {safe_request.original_url}: {e}") from e
         except httpx.TooManyRedirects as e:
             raise InvalidURLError(f"Too many redirects: {safe_request.original_url}: {e}") from e
+        finally:
+            client.close()
 
     def close(self) -> None:
         """Release resources."""

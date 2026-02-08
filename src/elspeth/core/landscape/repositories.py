@@ -9,6 +9,8 @@ Per Data Manifesto: The audit database is OUR data. Bad data = crash.
 
 from typing import Any
 
+from sqlalchemy.engine import Row as SARow
+
 from elspeth.contracts.audit import (
     Artifact,
     Batch,
@@ -50,7 +52,7 @@ class RunRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> Run:
+    def load(self, row: SARow[Any]) -> Run:
         """Load Run from database row.
 
         Converts string fields to enums. Crashes on invalid data.
@@ -79,7 +81,7 @@ class NodeRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> Node:
+    def load(self, row: SARow[Any]) -> Node:
         """Load Node from database row.
 
         Converts node_type and determinism strings to enums.
@@ -115,7 +117,7 @@ class EdgeRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> Edge:
+    def load(self, row: SARow[Any]) -> Edge:
         """Load Edge from database row.
 
         Converts default_mode string to RoutingMode enum.
@@ -137,7 +139,7 @@ class RowRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> Row:
+    def load(self, row: SARow[Any]) -> Row:
         """Load Row from database row.
 
         No enum conversion needed - all fields are primitives.
@@ -159,7 +161,7 @@ class TokenRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> Token:
+    def load(self, row: SARow[Any]) -> Token:
         """Load Token from database row.
 
         No enum conversion needed - all fields are primitives.
@@ -182,7 +184,7 @@ class TokenParentRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> TokenParent:
+    def load(self, row: SARow[Any]) -> TokenParent:
         """Load TokenParent from database row."""
         return TokenParent(
             token_id=row.token_id,
@@ -197,7 +199,7 @@ class CallRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> Call:
+    def load(self, row: SARow[Any]) -> Call:
         """Load Call from database row.
 
         Handles both state-parented calls (transform processing) and
@@ -226,7 +228,7 @@ class RoutingEventRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> RoutingEvent:
+    def load(self, row: SARow[Any]) -> RoutingEvent:
         """Load RoutingEvent from database row."""
         return RoutingEvent(
             event_id=row.event_id,
@@ -247,7 +249,7 @@ class BatchRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> Batch:
+    def load(self, row: SARow[Any]) -> Batch:
         """Load Batch from database row."""
         return Batch(
             batch_id=row.batch_id,
@@ -280,7 +282,7 @@ class NodeStateRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> NodeState:
+    def load(self, row: SARow[Any]) -> NodeState:
         """Load NodeState from database row.
 
         Converts status string to enum and returns the appropriate
@@ -418,7 +420,7 @@ class ValidationErrorRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> ValidationErrorRecord:
+    def load(self, row: SARow[Any]) -> ValidationErrorRecord:
         """Load ValidationErrorRecord from database row.
 
         Args:
@@ -450,7 +452,7 @@ class TransformErrorRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> TransformErrorRecord:
+    def load(self, row: SARow[Any]) -> TransformErrorRecord:
         """Load TransformErrorRecord from database row.
 
         Args:
@@ -481,7 +483,7 @@ class TokenOutcomeRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> TokenOutcome:
+    def load(self, row: SARow[Any]) -> TokenOutcome:
         """Load TokenOutcome from database row.
 
         Converts outcome string to RowOutcome enum.
@@ -530,7 +532,7 @@ class ArtifactRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> Artifact:
+    def load(self, row: SARow[Any]) -> Artifact:
         """Load Artifact from database row.
 
         Args:
@@ -563,7 +565,7 @@ class BatchMemberRepository:
     def __init__(self, session: Any) -> None:
         self.session = session
 
-    def load(self, row: Any) -> BatchMember:
+    def load(self, row: SARow[Any]) -> BatchMember:
         """Load BatchMember from database row.
 
         Args:

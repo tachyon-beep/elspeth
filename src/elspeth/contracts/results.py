@@ -21,25 +21,13 @@ if TYPE_CHECKING:
     from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
-from elspeth.contracts.errors import TransformErrorReason, TransformSuccessReason
+from elspeth.contracts.errors import (
+    PluginContractViolation,
+    TransformErrorReason,
+    TransformSuccessReason,
+)
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.routing import RoutingAction
-
-
-def _extract_dict_from_row(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-    """Extract dict from PipelineRow or pass through dict.
-
-    This is a legitimate boundary operation when creating a new PipelineRow
-    with a different contract.
-    """
-    if TYPE_CHECKING:
-        from elspeth.contracts.schema_contract import PipelineRow as PR
-    else:
-        from elspeth.contracts.schema_contract import PipelineRow as PR
-
-    if isinstance(row, PR):
-        return dict(row._data)
-    return row
 
 
 @dataclass
@@ -115,10 +103,10 @@ class TransformResult:
     """
 
     status: Literal["success", "error"]
-    row: dict[str, Any] | PipelineRow | None
+    row: PipelineRow | None
     reason: TransformErrorReason | None
     retryable: bool = False
-    rows: list[dict[str, Any] | PipelineRow] | None = None
+    rows: list[PipelineRow] | None = None
 
     # Success metadata - REQUIRED for success results, None for error results
     # Invariant: status="success" implies success_reason is not None
@@ -134,18 +122,19 @@ class TransformResult:
     # P3-2026-02-02: Enables pool metadata to flow to context_after_json
     context_after: dict[str, Any] | None = field(default=None, repr=False)
 
-    # Schema contract for output (optional)
-    # P3-2026-02-03: Enables TransformResult to carry output contract reference
-    # for downstream processing via to_pipeline_row()/to_pipeline_rows()
-    contract: SchemaContract | None = field(default=None, repr=False)
-
     def __post_init__(self) -> None:
-        """Validate invariants - success results MUST have success_reason."""
+        """Validate invariants - success results MUST have success_reason and output data."""
         if self.status == "success" and self.success_reason is None:
             raise ValueError(
                 "TransformResult with status='success' MUST provide success_reason. "
                 "Use TransformResult.success(row, success_reason={'action': '...'}) "
                 "to create success results. Missing success_reason is a plugin bug."
+            )
+        if self.status == "success" and self.row is None and self.rows is None:
+            raise ValueError(
+                "TransformResult with status='success' MUST have output data (row or rows). "
+                "Use TransformResult.success(row, ...) or TransformResult.success_multi(rows, ...) "
+                "to create success results. Missing output data is a plugin bug."
             )
 
     @property
@@ -158,73 +147,31 @@ class TransformResult:
         """True if this result has any output data (row or rows)."""
         return self.row is not None or self.rows is not None
 
-    def to_pipeline_row(self) -> PipelineRow:
-        """Convert single-row success result to PipelineRow.
-
-        Returns:
-            PipelineRow wrapping row data with contract
-
-        Raises:
-            ValueError: If result is error, multi-row, or has no contract
-        """
-        from elspeth.contracts.schema_contract import PipelineRow
-
-        if self.status == "error":
-            raise ValueError("Cannot convert error result to PipelineRow")
-        if self.is_multi_row:
-            raise ValueError("Cannot convert multi-row result to single PipelineRow. Use to_pipeline_rows() instead.")
-        if self.contract is None:
-            raise ValueError("TransformResult has no contract - cannot create PipelineRow")
-        # Single-row success result - row is guaranteed to be non-None
-        return PipelineRow(self.row, self.contract)  # type: ignore[arg-type]
-
-    def to_pipeline_rows(self) -> list[PipelineRow]:
-        """Convert multi-row success result to list of PipelineRows.
-
-        Returns:
-            List of PipelineRow instances, one per output row
-
-        Raises:
-            ValueError: If result is error, single-row, or has no contract
-        """
-        from elspeth.contracts.schema_contract import PipelineRow
-
-        if self.status == "error":
-            raise ValueError("Cannot convert error result to PipelineRows")
-        if not self.is_multi_row:
-            raise ValueError("Cannot convert single-row result to multiple PipelineRows. Use to_pipeline_row() instead.")
-        if self.contract is None:
-            raise ValueError("TransformResult has no contract - cannot create PipelineRows")
-        # Multi-row success result - rows is guaranteed to be non-None
-        return [PipelineRow(_extract_dict_from_row(row), self.contract) for row in self.rows]  # type: ignore[union-attr]
-
     @classmethod
     def success(
         cls,
-        row: dict[str, Any] | PipelineRow,
+        row: PipelineRow,
         *,
         success_reason: TransformSuccessReason,
         context_after: dict[str, Any] | None = None,
-        contract: SchemaContract | None = None,
     ) -> TransformResult:
         """Create successful result with single output row.
 
         Args:
-            row: The transformed row data
+            row: The transformed row data as a PipelineRow wrapping
+                 the output dict with its schema contract.
             success_reason: REQUIRED metadata about what the transform did.
                            Must include at least 'action' field.
                            See TransformSuccessReason for available fields.
             context_after: Optional operational metadata for audit trail
                           (e.g., pool stats, ordering info).
-            contract: Optional schema contract for the output row.
-                     Enables conversion to PipelineRow via to_pipeline_row().
 
         Returns:
             TransformResult with status="success" and the provided row.
 
         Example:
             return TransformResult.success(
-                row,
+                PipelineRow(output_dict, contract),
                 success_reason={"action": "processed", "fields_modified": ["amount"]}
             )
         """
@@ -235,29 +182,25 @@ class TransformResult:
             rows=None,
             success_reason=success_reason,
             context_after=context_after,
-            contract=contract,
         )
 
     @classmethod
     def success_multi(
         cls,
-        rows: list[dict[str, Any] | PipelineRow],
+        rows: list[PipelineRow],
         *,
         success_reason: TransformSuccessReason,
         context_after: dict[str, Any] | None = None,
-        contract: SchemaContract | None = None,
     ) -> TransformResult:
         """Create successful result with multiple output rows.
 
         Args:
-            rows: List of output rows (must not be empty)
+            rows: List of PipelineRow instances (must not be empty).
             success_reason: REQUIRED metadata about what the transform did.
                            Must include at least 'action' field.
                            See TransformSuccessReason for available fields.
             context_after: Optional operational metadata for audit trail
                           (e.g., pool stats, ordering info).
-            contract: Optional schema contract for the output rows.
-                     Enables conversion to PipelineRows via to_pipeline_rows().
 
         Returns:
             TransformResult with status="success", row=None, rows=rows
@@ -267,12 +210,27 @@ class TransformResult:
 
         Example:
             return TransformResult.success_multi(
-                rows,
+                [PipelineRow(r, contract) for r in output_rows],
                 success_reason={"action": "split", "fields_added": ["row_index"]}
             )
         """
         if not rows:
             raise ValueError("success_multi requires at least one row")
+        # All rows must share the same contract identity. Mixed contracts
+        # would silently mislabel child tokens, corrupting downstream
+        # contract-based validation. Transforms are system-owned code,
+        # so mixed contracts = plugin bug.
+        first_contract = rows[0].contract
+        for i in range(1, len(rows)):
+            if rows[i].contract is not first_contract:
+                raise PluginContractViolation(
+                    f"success_multi() received rows with inconsistent contracts: "
+                    f"row 0 has {first_contract.mode if first_contract else None} contract "
+                    f"with {len(first_contract.fields) if first_contract else 0} fields, "
+                    f"but row {i} has {rows[i].contract.mode if rows[i].contract else None} contract "
+                    f"with {len(rows[i].contract.fields) if rows[i].contract else 0} fields. "
+                    f"All rows in a multi-row result must share the same contract instance."
+                )
         return cls(
             status="success",
             row=None,
@@ -280,7 +238,6 @@ class TransformResult:
             rows=rows,
             success_reason=success_reason,
             context_after=context_after,
-            contract=contract,
         )
 
     @classmethod
@@ -312,7 +269,6 @@ class TransformResult:
             retryable=retryable,
             rows=None,
             context_after=context_after,
-            contract=None,  # Error results don't carry contracts
         )
 
 

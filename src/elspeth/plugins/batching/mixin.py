@@ -30,8 +30,8 @@ if TYPE_CHECKING:
 
     from elspeth.contracts import ExceptionResult, TransformResult
     from elspeth.contracts.identity import TokenInfo
+    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.schema_contract import PipelineRow
-    from elspeth.plugins.context import PluginContext
 
 
 class BatchTransformMixin:

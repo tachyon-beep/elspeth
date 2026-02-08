@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import operator
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -45,42 +46,50 @@ class ExpressionEvaluationError(Exception):
     """
 
 
-# Allowed comparison operators
-_COMPARISON_OPS: dict[type[ast.cmpop], Any] = {
-    ast.Eq: operator.eq,
-    ast.NotEq: operator.ne,
-    ast.Lt: operator.lt,
-    ast.LtE: operator.le,
-    ast.Gt: operator.gt,
-    ast.GtE: operator.ge,
-    ast.Is: operator.is_,
-    ast.IsNot: operator.is_not,
-    ast.In: lambda a, b: a in b,
-    ast.NotIn: lambda a, b: a not in b,
-}
+# Allowed comparison operators (immutable to prevent runtime tampering)
+_COMPARISON_OPS: MappingProxyType[type[ast.cmpop], Any] = MappingProxyType(
+    {
+        ast.Eq: operator.eq,
+        ast.NotEq: operator.ne,
+        ast.Lt: operator.lt,
+        ast.LtE: operator.le,
+        ast.Gt: operator.gt,
+        ast.GtE: operator.ge,
+        ast.Is: operator.is_,
+        ast.IsNot: operator.is_not,
+        ast.In: lambda a, b: a in b,
+        ast.NotIn: lambda a, b: a not in b,
+    }
+)
 
-# Allowed binary operators
-_BINARY_OPS: dict[type[ast.operator], Any] = {
-    ast.Add: operator.add,
-    ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
-    ast.Div: operator.truediv,
-    ast.FloorDiv: operator.floordiv,
-    ast.Mod: operator.mod,
-}
+# Allowed binary operators (immutable to prevent runtime tampering)
+_BINARY_OPS: MappingProxyType[type[ast.operator], Any] = MappingProxyType(
+    {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+    }
+)
 
-# Allowed unary operators
-_UNARY_OPS: dict[type[ast.unaryop], Any] = {
-    ast.Not: operator.not_,
-    ast.USub: operator.neg,
-    ast.UAdd: operator.pos,
-}
+# Allowed unary operators (immutable to prevent runtime tampering)
+_UNARY_OPS: MappingProxyType[type[ast.unaryop], Any] = MappingProxyType(
+    {
+        ast.Not: operator.not_,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+)
 
-# Allowed boolean operators
-_BOOL_OPS: dict[type[ast.boolop], str] = {
-    ast.And: "and",
-    ast.Or: "or",
-}
+# Allowed boolean operators (immutable to prevent runtime tampering)
+_BOOL_OPS: MappingProxyType[type[ast.boolop], str] = MappingProxyType(
+    {
+        ast.And: "and",
+        ast.Or: "or",
+    }
+)
 
 
 class _ExpressionValidator(ast.NodeVisitor):

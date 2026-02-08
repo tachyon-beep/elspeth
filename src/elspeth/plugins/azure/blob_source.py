@@ -20,11 +20,11 @@ import pandas as pd
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.identifiers import validate_field_names
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import DataPluginConfig
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
 

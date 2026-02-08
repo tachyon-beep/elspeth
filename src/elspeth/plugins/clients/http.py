@@ -20,13 +20,13 @@ import httpx
 import structlog
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.core.canonical import stable_hash
 from elspeth.core.security.web import (
     SSRFSafeRequest,
     validate_url_for_ssrf,
 )
 from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallback
-from elspeth.telemetry.events import ExternalCallCompleted
 
 logger = structlog.get_logger(__name__)
 
@@ -140,6 +140,14 @@ class AuditedHTTPClient(AuditedClientBase):
         self._timeout = timeout
         self._base_url = base_url
         self._default_headers = headers or {}
+        # Shared httpx.Client for connection pooling and TCP reuse.
+        # httpx.Client is thread-safe; the internal pool handles concurrency.
+        # Per-request timeouts override the default via timeout= kwarg.
+        # follow_redirects=False: SSRF-safe methods manage redirects manually.
+        self._client = httpx.Client(
+            timeout=self._timeout,
+            follow_redirects=False,
+        )
 
     # Headers that may contain secrets - fingerprinted in audit trail
     _SENSITIVE_REQUEST_HEADERS = frozenset({"authorization", "x-api-key", "api-key", "x-auth-token", "proxy-authorization"})
@@ -260,6 +268,10 @@ class AuditedHTTPClient(AuditedClientBase):
         # netloc = [userinfo@]host[:port], hostname = just the host
         return parsed.hostname or "unknown"
 
+    def close(self) -> None:
+        """Close the underlying httpx client and release connections."""
+        self._client.close()
+
     def post(
         self,
         url: str,
@@ -310,12 +322,12 @@ class AuditedHTTPClient(AuditedClientBase):
         start = time.perf_counter()
 
         try:
-            with httpx.Client(timeout=effective_timeout) as client:
-                response = client.post(
-                    full_url,
-                    json=json,
-                    headers=merged_headers,
-                )
+            response = self._client.post(
+                full_url,
+                json=json,
+                headers=merged_headers,
+                timeout=effective_timeout,
+            )
 
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -344,7 +356,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     response_body = {
                         "_json_parse_failed": True,
                         "_error": error,
-                        "_raw_text": response.text,
+                        "_raw_text": response.text[:10_000],
                     }
                 else:
                     response_body = parsed
@@ -525,12 +537,12 @@ class AuditedHTTPClient(AuditedClientBase):
         start = time.perf_counter()
 
         try:
-            with httpx.Client(timeout=effective_timeout) as client:
-                response = client.get(
-                    full_url,
-                    params=params,
-                    headers=merged_headers,
-                )
+            response = self._client.get(
+                full_url,
+                params=params,
+                headers=merged_headers,
+                timeout=effective_timeout,
+            )
 
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -559,7 +571,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     response_body = {
                         "_json_parse_failed": True,
                         "_error": error,
-                        "_raw_text": response.text,
+                        "_raw_text": response.text[:10_000],
                     }
                 else:
                     response_body = parsed
@@ -746,19 +758,31 @@ class AuditedHTTPClient(AuditedClientBase):
         start = time.perf_counter()
 
         try:
+            # Ephemeral client for SSRF-safe requests: connection_url uses the
+            # resolved IP (e.g. https://1.2.3.4:443/path), so all hostnames sharing
+            # an IP would map to the same pool key. A shared client would reuse a
+            # TLS connection established for hostname-A when requesting hostname-B,
+            # silently skipping SNI negotiation and certificate verification.
             with httpx.Client(
                 timeout=effective_timeout,
                 follow_redirects=False,
-            ) as client:
-                response = client.get(
+            ) as ssrf_client:
+                response = ssrf_client.get(
                     connection_url,
                     headers=merged_headers,
                     extensions=extensions if extensions else None,
                 )
 
             # Handle redirects with SSRF validation at each hop
+            redirect_count = 0
             if follow_redirects:
-                response = self._follow_redirects_safe(response, max_redirects, effective_timeout, merged_headers)
+                response, redirect_count = self._follow_redirects_safe(
+                    response,
+                    max_redirects,
+                    effective_timeout,
+                    merged_headers,
+                    original_url=request.original_url,
+                )
 
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -780,7 +804,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     response_body = {
                         "_json_parse_failed": True,
                         "_error": error,
-                        "_raw_text": response.text,
+                        "_raw_text": response.text[:10_000],
                     }
                 else:
                     response_body = parsed
@@ -800,6 +824,8 @@ class AuditedHTTPClient(AuditedClientBase):
                 "body_size": len(response.content),
                 "body": response_body,
             }
+            if redirect_count > 0:
+                response_data["redirect_count"] = redirect_count
 
             error_data: dict[str, Any] | None = None
             if not is_success:
@@ -902,7 +928,8 @@ class AuditedHTTPClient(AuditedClientBase):
         max_redirects: int,
         timeout: float,
         original_headers: dict[str, str],
-    ) -> httpx.Response:
+        original_url: str,
+    ) -> tuple[httpx.Response, int]:
         """Follow HTTP redirects with SSRF validation at each hop.
 
         Each redirect target is independently resolved and validated against
@@ -914,26 +941,42 @@ class AuditedHTTPClient(AuditedClientBase):
             max_redirects: Maximum number of redirect hops
             timeout: Request timeout for each hop
             original_headers: Headers from original request (minus Host, which is set per-hop)
+            original_url: Hostname-based URL for resolving relative redirects.
+                response.url is IP-based (from connection_url rewrite), so relative
+                Location headers must resolve against the original hostname URL to
+                preserve correct Host headers and TLS SNI.
 
         Returns:
-            Final non-redirect response
+            Tuple of (final non-redirect response, number of redirects followed)
 
         Raises:
             SSRFBlockedError: If any redirect target resolves to a blocked IP
             httpx.TooManyRedirects: If redirect chain exceeds max_redirects
         """
         redirects_followed = 0
+        # Track the logical hostname URL for resolving relative redirects.
+        # response.url is IP-based (from connection_url), so relative Location
+        # headers would resolve against the IP instead of the hostname.
+        hostname_url = httpx.URL(original_url)
 
         while response.is_redirect and redirects_followed < max_redirects:
             location = response.headers.get("location")
             if not location:
                 break
 
-            # Resolve relative URLs against the current URL
-            redirect_url = str(response.url.join(location))
+            # Capture the URL we're redirecting FROM (before updating hostname_url)
+            redirect_from = str(hostname_url)
+
+            # Resolve relative URLs against the hostname URL, NOT response.url
+            redirect_url = str(hostname_url.join(location))
 
             # CRITICAL: Validate the redirect target for SSRF
             redirect_request = validate_url_for_ssrf(redirect_url)
+
+            # Update hostname_url to the redirect target for the next iteration.
+            # If this was an absolute redirect to a different host, hostname_url
+            # now tracks that new host.
+            hostname_url = httpx.URL(redirect_url)
 
             # Build headers for this hop (Host header for virtual hosting)
             hop_headers = {k: v for k, v in original_headers.items() if k.lower() != "host"}
@@ -944,14 +987,49 @@ class AuditedHTTPClient(AuditedClientBase):
             if redirect_request.scheme == "https":
                 extensions["sni_hostname"] = redirect_request.sni_hostname
 
-            with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-                response = client.get(
+            hop_start = time.perf_counter()
+
+            # Ephemeral client per redirect hop: same TLS/SNI isolation rationale
+            # as the initial SSRF-safe request — IP-based connection_url would
+            # cause the pool to reuse connections across different hostnames.
+            with httpx.Client(
+                timeout=timeout,
+                follow_redirects=False,
+            ) as hop_client:
+                response = hop_client.get(
                     redirect_request.connection_url,
                     headers=hop_headers,
                     extensions=extensions if extensions else None,
                 )
 
+            hop_latency_ms = (time.perf_counter() - hop_start) * 1000
             redirects_followed += 1
+
+            # Record this redirect hop in the audit trail.
+            # Each hop is a real network call — it may hit a different server.
+            hop_call_index = self._next_call_index()
+            hop_request_data = {
+                "method": "GET",
+                "url": redirect_url,
+                "resolved_ip": redirect_request.resolved_ip,
+                "hop_number": redirects_followed,
+                "redirect_from": redirect_from,
+                "headers": self._filter_request_headers(hop_headers),
+            }
+            hop_response_data = {
+                "status_code": response.status_code,
+                "headers": self._filter_response_headers(dict(response.headers)),
+            }
+
+            self._recorder.record_call(
+                state_id=self._state_id,
+                call_index=hop_call_index,
+                call_type=CallType.HTTP_REDIRECT,
+                status=CallStatus.SUCCESS if response.status_code < 400 else CallStatus.ERROR,
+                request_data=hop_request_data,
+                response_data=hop_response_data,
+                latency_ms=hop_latency_ms,
+            )
 
         if response.is_redirect and redirects_followed >= max_redirects:
             raise httpx.TooManyRedirects(
@@ -959,4 +1037,4 @@ class AuditedHTTPClient(AuditedClientBase):
                 request=response.request,
             )
 
-        return response
+        return response, redirects_followed

@@ -18,9 +18,9 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.contracts.header_modes import HeaderMode, resolve_headers
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import SinkPathConfig
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 

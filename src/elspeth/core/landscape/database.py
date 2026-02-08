@@ -124,7 +124,7 @@ class LandscapeDB:
 
         @event.listens_for(engine, "connect")
         def set_sqlite_pragma(dbapi_connection: object, connection_record: object) -> None:
-            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]  # SQLAlchemy event passes DBAPI connection (has .cursor()) typed as object
             # Enable WAL mode for better concurrency
             cursor.execute("PRAGMA journal_mode=WAL")
             # Enable foreign key enforcement
@@ -153,12 +153,19 @@ class LandscapeDB:
         from sqlalchemy import inspect
 
         inspector = inspect(self.engine)
+        existing_tables = set(inspector.get_table_names())
+        expected_tables = set(metadata.tables.keys())
+        present_landscape_tables = existing_tables & expected_tables
+
+        # If this looks like an existing Landscape database, all known tables must exist.
+        # For brand-new DB files (no Landscape tables yet), creation happens in create_all().
+        missing_tables = sorted(expected_tables - existing_tables) if present_landscape_tables else []
 
         missing_columns: list[tuple[str, str]] = []
 
         for table_name, column_name in _REQUIRED_COLUMNS:
             # Check if table exists
-            if table_name not in inspector.get_table_names():
+            if table_name not in existing_tables:
                 # Table will be created by create_all, skip
                 continue
 
@@ -172,7 +179,7 @@ class LandscapeDB:
 
         for table_name, column_name, referenced_table in _REQUIRED_FOREIGN_KEYS:
             # Check if table exists
-            if table_name not in inspector.get_table_names():
+            if table_name not in existing_tables:
                 # Table will be created by create_all, skip
                 continue
 
@@ -185,8 +192,12 @@ class LandscapeDB:
                 missing_fks.append((table_name, column_name, referenced_table))
 
         # Raise errors for missing columns or FKs
-        if missing_columns or missing_fks:
+        if missing_tables or missing_columns or missing_fks:
             error_parts = []
+
+            if missing_tables:
+                missing_tables_str = ", ".join(missing_tables)
+                error_parts.append(f"Missing tables: {missing_tables_str}")
 
             if missing_columns:
                 missing_str = ", ".join(f"{t}.{c}" for t, c in missing_columns)

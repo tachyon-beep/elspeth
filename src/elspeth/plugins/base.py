@@ -30,7 +30,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
-from elspeth.plugins.context import PluginContext
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
     GateResult,
     TransformResult,
@@ -90,6 +90,11 @@ class BaseTransform(ABC):
     # Transforms extending TransformDataConfig override this from config.
     # None means: transform doesn't return errors, OR errors are bugs.
     _on_error: str | None = None
+
+    @property
+    def on_error(self) -> str | None:
+        """Error routing destination for this transform."""
+        return self._on_error
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.

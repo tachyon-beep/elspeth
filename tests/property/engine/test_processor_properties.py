@@ -39,24 +39,61 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.engine.processor import MAX_WORK_QUEUE_ITERATIONS
-from tests.conftest import (
-    MockPayloadStore,
-    as_sink,
-    as_source,
-    as_transform,
-)
-from tests.engine.orchestrator_test_helpers import build_production_graph
-from tests.property.conftest import (
-    MAX_SAFE_INT,
-    CollectSink,
-    ConditionalErrorTransform,
-    ListSource,
-    PassTransform,
-)
+from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.plugins import CollectSink, ConditionalErrorTransform, ListSource, PassTransform
+from tests.fixtures.stores import MockPayloadStore
+from tests.strategies.json import MAX_SAFE_INT
 
 # =============================================================================
 # Audit Verification Helpers
 # =============================================================================
+
+
+def _build_production_graph(config: PipelineConfig, default_sink: str | None = None) -> ExecutionGraph:
+    """Build graph using production code path (from_plugin_instances).
+
+    Adapter that mirrors the v1 build_production_graph but uses v2 fixtures.
+    """
+    from elspeth.core.config import AggregationSettings
+    from elspeth.plugins.protocols import TransformProtocol
+
+    if default_sink is None:
+        if "default" in config.sinks:
+            default_sink = "default"
+        elif config.sinks:
+            default_sink = next(iter(config.sinks))
+        else:
+            default_sink = ""
+
+    row_transforms: list[TransformProtocol] = []
+    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]] = {}
+
+    for transform in config.transforms:
+        if isinstance(transform, TransformProtocol):
+            row_transforms.append(transform)
+
+    for agg_name, agg_settings in config.aggregation_settings.items():
+        from tests.fixtures.base_classes import _TestTransformBase
+
+        class _AggTransform(_TestTransformBase):
+            name = agg_settings.plugin
+
+            def process(self, row: dict[str, Any], ctx: Any) -> Any:
+                from elspeth.plugins.results import TransformResult
+
+                return TransformResult.success(row, success_reason={"action": "test"})
+
+        aggregations[agg_name] = (_AggTransform(), agg_settings)  # type: ignore[assignment]
+
+    return ExecutionGraph.from_plugin_instances(
+        source=config.source,
+        transforms=row_transforms,
+        sinks=config.sinks,
+        aggregations=aggregations,
+        gates=list(config.gates),
+        default_sink=default_sink,
+        coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
+    )
 
 
 def count_tokens_missing_terminal(db: LandscapeDB, run_id: str) -> int:
@@ -100,14 +137,17 @@ def get_transform_execution_order(db: LandscapeDB, run_id: str, token_id: str) -
     """Get the step order in which transforms were executed for a token.
 
     Returns list of step numbers (step_index) in execution order.
+    Filters to transform node_states only (excludes source node_states).
     """
     with db.connection() as conn:
         results = conn.execute(
             text("""
                 SELECT ns.step_index
                 FROM node_states ns
+                JOIN nodes n ON ns.node_id = n.node_id AND ns.run_id = n.run_id
                 WHERE ns.run_id = :run_id
                   AND ns.token_id = :token_id
+                  AND n.node_type = 'transform'
                 ORDER BY ns.started_at, ns.step_index
             """),
             {"run_id": run_id, "token_id": token_id},
@@ -193,7 +233,7 @@ class TestWorkQueueConservation:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             # All rows must appear in sink
             assert len(sink.results) == num_rows, f"Work lost! Input: {num_rows} rows, Output: {len(sink.results)} rows"
@@ -224,7 +264,7 @@ class TestWorkQueueConservation:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             assert len(sink.results) == num_rows, (
                 f"Row count changed through {num_transforms} transforms: {num_rows} -> {len(sink.results)}"
@@ -255,7 +295,7 @@ class TestWorkQueueConservation:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             # Count expected outcomes
             expected_errors = sum(1 for r in rows if r["fail"])
@@ -316,7 +356,7 @@ class TestWorkQueueConservation:
                 default_sink="sink_a",
             )
 
-            settings = ElspethSettings(
+            elspeth_settings = ElspethSettings(
                 source={"plugin": "test"},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
                 default_sink="sink_a",
@@ -324,7 +364,7 @@ class TestWorkQueueConservation:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+            run = orchestrator.run(config, graph=graph, settings=elspeth_settings, payload_store=payload_store)
 
             # Each sink should receive all rows (fork duplicates)
             assert len(sink_a.results) == num_rows, f"sink_a: expected {num_rows}, got {len(sink_a.results)}"
@@ -370,7 +410,7 @@ class TestOrderCorrectnessProperties:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             # Get the token
             with db.connection() as conn:
@@ -427,7 +467,7 @@ class TestOrderCorrectnessProperties:
             )
 
             orchestrator = Orchestrator(db)
-            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             # Results should be in same order as source
             result_sequences = [r["sequence"] for r in sink.results]
@@ -454,7 +494,7 @@ class TestOrderCorrectnessProperties:
             )
 
             orchestrator = Orchestrator(db)
-            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             result_orders = [r["order"] for r in sink.results]
             expected_orders = list(range(num_rows))
@@ -514,7 +554,7 @@ class TestIterationGuardProperties:
 
             orchestrator = Orchestrator(db)
             # Should complete without RuntimeError from iteration guard
-            _run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            _run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             assert len(sink.results) == num_rows
 
@@ -558,7 +598,7 @@ class TestIterationGuardProperties:
                 default_sink="sink_a",
             )
 
-            settings = ElspethSettings(
+            elspeth_settings = ElspethSettings(
                 source={"plugin": "test"},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
                 default_sink="sink_a",
@@ -567,7 +607,7 @@ class TestIterationGuardProperties:
 
             orchestrator = Orchestrator(db)
             # Should complete without RuntimeError
-            _run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+            _run = orchestrator.run(config, graph=graph, settings=elspeth_settings, payload_store=payload_store)
 
             assert len(sink_a.results) == num_rows
             assert len(sink_b.results) == num_rows
@@ -603,7 +643,7 @@ class TestTokenIdentityProperties:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             # Count unique tokens
             unique_count = count_unique_tokens(db, run.run_id)
@@ -652,7 +692,7 @@ class TestTokenIdentityProperties:
                 default_sink="sink_a",
             )
 
-            settings = ElspethSettings(
+            elspeth_settings = ElspethSettings(
                 source={"plugin": "test"},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
                 default_sink="sink_a",
@@ -660,7 +700,7 @@ class TestTokenIdentityProperties:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+            run = orchestrator.run(config, graph=graph, settings=elspeth_settings, payload_store=payload_store)
 
             # Get all token IDs
             with db.connection() as conn:
@@ -706,7 +746,7 @@ class TestTokenIdentityProperties:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             # Verify row_ids exist and are consistent
             with db.connection() as conn:
@@ -747,7 +787,7 @@ class TestWorkQueueEdgeCases:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             # No results
             assert len(sink.results) == 0
@@ -777,7 +817,7 @@ class TestWorkQueueEdgeCases:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             assert len(sink.results) == 1
             missing = count_tokens_missing_terminal(db, run.run_id)
@@ -803,7 +843,7 @@ class TestWorkQueueEdgeCases:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+            run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
             # No successful results
             assert len(sink.results) == 0
@@ -873,7 +913,7 @@ class TestWorkQueueEdgeCases:
                 default_sink="default",
             )
 
-            settings = ElspethSettings(
+            elspeth_settings = ElspethSettings(
                 source={"plugin": "test"},
                 sinks={"default": {"plugin": "test"}},
                 default_sink="default",
@@ -882,7 +922,7 @@ class TestWorkQueueEdgeCases:
             )
 
             orchestrator = Orchestrator(db)
-            run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+            run = orchestrator.run(config, graph=graph, settings=elspeth_settings, payload_store=payload_store)
 
             # Coalesced tokens should reach sink - one per input row
             assert len(sink.results) == num_rows, f"Expected {num_rows} results after coalesce, got {len(sink.results)}"

@@ -258,14 +258,14 @@ class TestRateLimitRegistryProperties:
     def test_same_service_returns_same_limiter(self, service_name: str) -> None:
         """Property: get_limiter() returns same instance for same service."""
         # Create mock settings
-        settings = MagicMock()
-        settings.enabled = True
-        settings.persistence_path = None
+        mock_settings = MagicMock()
+        mock_settings.enabled = True
+        mock_settings.persistence_path = None
         service_config = MagicMock()
         service_config.requests_per_minute = 100
-        settings.get_service_config.return_value = service_config
+        mock_settings.get_service_config.return_value = service_config
 
-        registry = RateLimitRegistry(settings)
+        registry = RateLimitRegistry(mock_settings)
         try:
             limiter1 = registry.get_limiter(service_name)
             limiter2 = registry.get_limiter(service_name)
@@ -278,14 +278,14 @@ class TestRateLimitRegistryProperties:
     @settings(max_examples=20)
     def test_different_services_different_limiters(self, services: list[str]) -> None:
         """Property: Different services get different limiter instances."""
-        settings = MagicMock()
-        settings.enabled = True
-        settings.persistence_path = None
+        mock_settings = MagicMock()
+        mock_settings.enabled = True
+        mock_settings.persistence_path = None
         service_config = MagicMock()
         service_config.requests_per_minute = 100
-        settings.get_service_config.return_value = service_config
+        mock_settings.get_service_config.return_value = service_config
 
-        registry = RateLimitRegistry(settings)
+        registry = RateLimitRegistry(mock_settings)
         try:
             limiters = [registry.get_limiter(svc) for svc in services]
 
@@ -298,24 +298,24 @@ class TestRateLimitRegistryProperties:
     @settings(max_examples=20)
     def test_disabled_returns_noop(self, service_name: str) -> None:
         """Property: Disabled registry returns NoOpLimiter."""
-        settings = MagicMock()
-        settings.enabled = False
+        mock_settings = MagicMock()
+        mock_settings.enabled = False
 
-        registry = RateLimitRegistry(settings)
+        registry = RateLimitRegistry(mock_settings)
         limiter = registry.get_limiter(service_name)
 
         assert isinstance(limiter, NoOpLimiter)
 
     def test_reset_clears_all_limiters(self) -> None:
         """Property: reset_all() clears all cached limiters."""
-        settings = MagicMock()
-        settings.enabled = True
-        settings.persistence_path = None
+        mock_settings = MagicMock()
+        mock_settings.enabled = True
+        mock_settings.persistence_path = None
         service_config = MagicMock()
         service_config.requests_per_minute = 100
-        settings.get_service_config.return_value = service_config
+        mock_settings.get_service_config.return_value = service_config
 
-        registry = RateLimitRegistry(settings)
+        registry = RateLimitRegistry(mock_settings)
         try:
             # Get some limiters
             limiter1 = registry.get_limiter("service_a")
@@ -368,14 +368,14 @@ class TestRateLimiterThreadSafetyProperties:
     @settings(max_examples=10)
     def test_registry_concurrent_get_limiter(self, services: list[str]) -> None:
         """Property: Concurrent get_limiter() calls are thread-safe."""
-        settings = MagicMock()
-        settings.enabled = True
-        settings.persistence_path = None
+        mock_settings = MagicMock()
+        mock_settings.enabled = True
+        mock_settings.persistence_path = None
         service_config = MagicMock()
         service_config.requests_per_minute = 100
-        settings.get_service_config.return_value = service_config
+        mock_settings.get_service_config.return_value = service_config
 
-        registry = RateLimitRegistry(settings)
+        registry = RateLimitRegistry(mock_settings)
         results: dict[str, list[object]] = {svc: [] for svc in services}
         lock = threading.Lock()
 

@@ -10,7 +10,6 @@ replace the Landscape audit trail:
 
 Components:
 - events: Telemetry-specific event dataclasses (base TelemetryEvent in contracts)
-- buffer: BoundedBuffer for event batching with overflow tracking
 - filtering: should_emit() for granularity-based event filtering
 - manager: TelemetryManager for coordinating event emission
 - protocols: ExporterProtocol for implementing exporters
@@ -32,8 +31,6 @@ Usage:
         FieldResolutionApplied,
         RowCreated,
         ExternalCallCompleted,
-        # Buffer
-        BoundedBuffer,
         # Manager
         TelemetryManager,
         should_emit,
@@ -46,9 +43,7 @@ Usage:
     )
 """
 
-from elspeth.telemetry.buffer import BoundedBuffer
-from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.events import (
+from elspeth.contracts.events import (
     ExternalCallCompleted,
     FieldResolutionApplied,
     PhaseChanged,
@@ -56,6 +51,7 @@ from elspeth.telemetry.events import (
     RunFinished,
     RunStarted,
 )
+from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters import ConsoleExporter
 from elspeth.telemetry.factory import create_telemetry_manager
 from elspeth.telemetry.filtering import should_emit
@@ -63,7 +59,6 @@ from elspeth.telemetry.manager import TelemetryManager
 from elspeth.telemetry.protocols import ExporterProtocol
 
 __all__ = [
-    "BoundedBuffer",
     "ConsoleExporter",
     "ExporterProtocol",
     "ExternalCallCompleted",

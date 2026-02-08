@@ -138,36 +138,6 @@ class PluginConfigValidator:
                 return self._extract_errors(e.__cause__)
             raise  # Re-raise if not a wrapped validation error
 
-    def validate_gate_config(
-        self,
-        gate_type: str,
-        config: dict[str, Any],
-    ) -> list[ValidationError]:
-        """Validate gate plugin configuration.
-
-        Args:
-            gate_type: Plugin type name (e.g., "threshold")
-            config: Plugin configuration dict
-
-        Returns:
-            List of validation errors (empty if valid)
-        """
-        # Get config model for gate type
-        config_model = self._get_gate_config_model(gate_type)
-
-        # Validate using Pydantic
-        try:
-            config_model.from_dict(config)
-            return []  # Valid
-        except PydanticValidationError as e:
-            return self._extract_errors(e)
-        except Exception as e:
-            # from_dict wraps ValidationError in PluginConfigError
-            # Extract the original Pydantic error from the exception chain
-            if e.__cause__ and isinstance(e.__cause__, PydanticValidationError):
-                return self._extract_errors(e.__cause__)
-            raise  # Re-raise if not a wrapped validation error
-
     def validate_sink_config(
         self,
         sink_type: str,
@@ -291,17 +261,20 @@ class PluginConfigValidator:
             from elspeth.plugins.llm.openrouter import OpenRouterConfig
 
             return OpenRouterConfig
+        elif transform_type == "openrouter_batch_llm":
+            from elspeth.plugins.llm.openrouter_batch import OpenRouterBatchConfig
+
+            return OpenRouterBatchConfig
+        elif transform_type == "openrouter_multi_query_llm":
+            from elspeth.plugins.llm.openrouter_multi_query import OpenRouterMultiQueryConfig
+
+            return OpenRouterMultiQueryConfig
+        elif transform_type == "web_scrape":
+            from elspeth.plugins.transforms.web_scrape import WebScrapeConfig
+
+            return WebScrapeConfig
         else:
             raise ValueError(f"Unknown transform type: {transform_type}")
-
-    def _get_gate_config_model(self, gate_type: str) -> type["PluginConfig"]:
-        """Get Pydantic config model for gate type.
-
-        Returns:
-            Config model class for the gate type
-        """
-        # No gate plugins exist yet in codebase
-        raise ValueError(f"Unknown gate type: {gate_type}")
 
     def _get_sink_config_model(self, sink_type: str) -> type["PluginConfig"]:
         """Get Pydantic config model for sink type.

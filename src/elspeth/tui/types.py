@@ -10,7 +10,7 @@ Error and artifact display types follow the Tier 1 trust model:
 - Display code accesses fields directly (crash on missing = bug)
 """
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Required, TypedDict
 
 
 class NodeInfo(TypedDict):
@@ -79,9 +79,9 @@ class NodeStateInfo(TypedDict, total=False):
     """
 
     # Required - always present from node registration
-    node_id: str
-    plugin_name: str
-    node_type: str
+    node_id: Required[str]
+    plugin_name: Required[str]
+    node_type: Required[str]
 
     # Optional - present after execution
     state_id: str
@@ -103,41 +103,41 @@ class NodeStateInfo(TypedDict, total=False):
 # After validation, fields are accessed directly (no .get()).
 
 
-class ExecutionErrorDisplay(TypedDict):
+class ExecutionErrorDisplay(TypedDict, total=False):
     """Parsed ExecutionError for display.
 
     From contracts.errors.ExecutionError - used by executors for exceptions.
-    Fields are REQUIRED after validation.
+    exception and type fields are REQUIRED after validation.
     """
 
-    exception: str  # Exception message
-    type: str  # Exception class name (e.g., "ValueError")
-    traceback: NotRequired[str]  # Optional full traceback
-    phase: NotRequired[str]  # Optional phase (e.g., "flush")
+    exception: Required[str]  # Exception message (REQUIRED)
+    type: Required[str]  # Exception class name (e.g., "ValueError") (REQUIRED)
+    traceback: str  # Optional full traceback
+    phase: str  # Optional phase (e.g., "flush")
 
 
-class TransformErrorDisplay(TypedDict):
+class TransformErrorDisplay(TypedDict, total=False):
     """Parsed TransformErrorReason for display.
 
     From contracts.errors.TransformErrorReason - used by transforms.
     The 'reason' field is REQUIRED and identifies the error category.
     """
 
-    reason: str  # Error category (e.g., "api_error", "missing_field")
-    error: NotRequired[str]  # Exception message or description
-    message: NotRequired[str]  # Human-readable error message
-    error_type: NotRequired[str]  # Sub-category
-    field: NotRequired[str]  # Field name for field-related errors
+    reason: Required[str]  # Error category (e.g., "api_error", "missing_field") (REQUIRED)
+    error: str  # Exception message or description
+    message: str  # Human-readable error message
+    error_type: str  # Sub-category
+    field: str  # Field name for field-related errors
 
 
-class ArtifactDisplay(TypedDict):
+class ArtifactDisplay(TypedDict, total=False):
     """Parsed Artifact for display.
 
     From contracts.audit.Artifact - produced by sinks.
-    Required fields match the dataclass contract.
+    All fields are required and match the dataclass contract.
     """
 
-    artifact_id: str
-    path_or_uri: str
-    content_hash: str
-    size_bytes: int
+    artifact_id: Required[str]
+    path_or_uri: Required[str]
+    content_hash: Required[str]
+    size_bytes: Required[int]

@@ -32,7 +32,7 @@ FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 TYPE_MAP: dict[str, type] = {
     "str": str,
     "int": int,
-    "float": FiniteFloat,  # type: ignore[dict-item]
+    "float": FiniteFloat,  # type: ignore[dict-item]  # FiniteFloat is a constrained float subtype; dict expects exact `type` but it duck-types correctly
     "bool": bool,
     "any": Any,
 }

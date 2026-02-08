@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from datetime import UTC, datetime
@@ -723,10 +724,11 @@ class ChaosLLMAnalyzer:
         if not sql_normalized.startswith("SELECT"):
             raise ValueError("Only SELECT queries are allowed")
 
-        # Reject dangerous keywords
+        # Reject dangerous keywords (word-boundary match to avoid false positives
+        # like created_at matching CREATE, updated_at matching UPDATE)
         dangerous = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE"]
         for keyword in dangerous:
-            if keyword in sql_normalized:
+            if re.search(rf"\b{keyword}\b", sql_normalized):
                 raise ValueError(f"Query contains forbidden keyword: {keyword}")
 
         # Auto-add LIMIT if not present
@@ -807,7 +809,7 @@ def create_server(database_path: str) -> Server:
     server = Server("chaosllm-analysis")
     analyzer = ChaosLLMAnalyzer(database_path)
 
-    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]
+    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def list_tools() -> list[Tool]:
         """List available analysis tools."""
         return [
@@ -923,7 +925,7 @@ def create_server(database_path: str) -> Server:
             ),
         ]
 
-    @server.call_tool()  # type: ignore[misc, untyped-decorator]
+    @server.call_tool()  # type: ignore[misc, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle tool calls."""
         try:

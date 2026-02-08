@@ -29,6 +29,10 @@ from elspeth.core.landscape.schema import (
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
 
+# SQLite's SQLITE_MAX_VARIABLE_NUMBER defaults to 999. We chunk IN clauses
+# at 500 to leave headroom for other query parameters in the same statement.
+_METADATA_CHUNK_SIZE = 500
+
 __all__ = [
     "RecoveryManager",
     "ResumeCheck",  # Re-exported from contracts for convenience
@@ -204,50 +208,58 @@ class RecoveryManager:
 
         result: list[tuple[str, int, dict[str, Any]]] = []
 
+        # Batch query: Fetch row metadata in chunks to respect SQLite bind limit.
+        row_metadata: dict[str, tuple[int, str | None]] = {}
         with self._db.engine.connect() as conn:
-            for row_id in row_ids:
-                # Get row metadata
-                row_result = conn.execute(
-                    select(rows_table.c.row_index, rows_table.c.source_data_ref).where(rows_table.c.row_id == row_id)
-                ).fetchone()
+            for i in range(0, len(row_ids), _METADATA_CHUNK_SIZE):
+                chunk = row_ids[i : i + _METADATA_CHUNK_SIZE]
+                rows_result = conn.execute(
+                    select(
+                        rows_table.c.row_id,
+                        rows_table.c.row_index,
+                        rows_table.c.source_data_ref,
+                    ).where(rows_table.c.row_id.in_(chunk))
+                ).fetchall()
+                for r in rows_result:
+                    row_metadata[r.row_id] = (r.row_index, r.source_data_ref)
 
-                if row_result is None:
-                    raise ValueError(f"Row {row_id} not found in database")
+        for row_id in row_ids:
+            if row_id not in row_metadata:
+                raise ValueError(f"Row {row_id} not found in database")
 
-                row_index = row_result.row_index
-                source_data_ref = row_result.source_data_ref
+            row_index, source_data_ref = row_metadata[row_id]
 
-                if source_data_ref is None:
-                    raise ValueError(f"Row {row_id} has no source_data_ref - cannot resume without payload")
+            if source_data_ref is None:
+                raise ValueError(f"Row {row_id} has no source_data_ref - cannot resume without payload")
 
-                # Retrieve from payload store
-                try:
-                    payload_bytes = payload_store.retrieve(source_data_ref)
-                    degraded_data = json.loads(payload_bytes.decode("utf-8"))
-                except KeyError:
-                    raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from None
+            # Retrieve from payload store
+            try:
+                payload_bytes = payload_store.retrieve(source_data_ref)
+                degraded_data = json.loads(payload_bytes.decode("utf-8"))
+            except KeyError:
+                raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from None
 
-                # TYPE FIDELITY RESTORATION:
-                # Re-validate through source schema to restore types.
-                # This is critical for datetime, Decimal, and other coerced types
-                # that canonical_json normalizes to strings.
-                # Schema is now REQUIRED - no fallback to degraded types.
-                validated = source_schema_class.model_validate(degraded_data)
-                row_data = validated.to_row()
+            # TYPE FIDELITY RESTORATION:
+            # Re-validate through source schema to restore types.
+            # This is critical for datetime, Decimal, and other coerced types
+            # that canonical_json normalizes to strings.
+            # Schema is now REQUIRED - no fallback to degraded types.
+            validated = source_schema_class.model_validate(degraded_data)
+            row_data = validated.to_row()
 
-                # DEFENSE-IN-DEPTH: Detect silent data loss from empty schemas
-                # If source data has fields but restored data is empty, the schema is losing data.
-                # This catches bugs like NullSourceSchema (no fields) being used for resume.
-                if degraded_data and not row_data:
-                    raise ValueError(
-                        f"Resume failed for row {row_id}: Schema validation returned empty data "
-                        f"but source had {len(degraded_data)} fields. "
-                        f"Schema class '{source_schema_class.__name__}' appears to have no fields defined. "
-                        f"Cannot resume - this would silently discard all row data. "
-                        f"The source plugin's schema must declare fields matching the stored row structure."
-                    )
+            # DEFENSE-IN-DEPTH: Detect silent data loss from empty schemas
+            # If source data has fields but restored data is empty, the schema is losing data.
+            # This catches bugs like NullSourceSchema (no fields) being used for resume.
+            if degraded_data and not row_data:
+                raise ValueError(
+                    f"Resume failed for row {row_id}: Schema validation returned empty data "
+                    f"but source had {len(degraded_data)} fields. "
+                    f"Schema class '{source_schema_class.__name__}' appears to have no fields defined. "
+                    f"Cannot resume - this would silently discard all row data. "
+                    f"The source plugin's schema must declare fields matching the stored row structure."
+                )
 
-                result.append((row_id, row_index, row_data))
+            result.append((row_id, row_index, row_data))
 
         return result
 
@@ -289,11 +301,9 @@ class RecoveryManager:
                     continue
                 # Extract row_id from each buffered token
                 # Format: {"node_id": {"tokens": [{"row_id": "...", ...}, ...]}}
-                tokens = node_state.get("tokens", [])
-                for token in tokens:
-                    row_id = token.get("row_id")
-                    if row_id:
-                        buffered_row_ids.add(row_id)
+                # Tier 1: checkpoint data is ours — crash on corruption, don't mask with defaults
+                for token in node_state["tokens"]:
+                    buffered_row_ids.add(token["row_id"])
 
         with self._db.engine.connect() as conn:
             # CORRECT SEMANTICS FOR FORK/AGGREGATION/COALESCE RECOVERY:

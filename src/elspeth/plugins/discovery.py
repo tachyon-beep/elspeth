@@ -200,11 +200,11 @@ def discover_all_plugins() -> dict[str, list[type]]:
 
             for cls in discovered:
                 # NOTE: cls.name is guaranteed to exist by _discover_in_file validation
-                cls_name: str = cls.name  # type: ignore[attr-defined]
+                cls_name: str = cls.name  # type: ignore[attr-defined]  # cls is a BaseSource/BaseTransform/BaseSink subclass; .name validated by _discover_in_file
 
                 # Duplicate plugin names are bugs - crash immediately to surface collision
                 if cls_name in seen_names:
-                    existing_cls = next(c for c in all_discovered if c.name == cls_name)  # type: ignore[attr-defined]
+                    existing_cls = next(c for c in all_discovered if c.name == cls_name)  # type: ignore[attr-defined]  # same: plugin subclass with .name
                     raise ValueError(
                         f"Duplicate {plugin_type} plugin name '{cls_name}': "
                         f"found in both {existing_cls.__module__} and {cls.__module__}. "

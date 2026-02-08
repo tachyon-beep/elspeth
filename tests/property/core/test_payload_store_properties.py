@@ -20,7 +20,7 @@ import pytest
 from hypothesis import given, settings
 
 from elspeth.core.payload_store import FilesystemPayloadStore
-from tests.property.conftest import binary_content, nonempty_binary, small_binary
+from tests.strategies.binary import binary_content, nonempty_binary, small_binary
 
 
 class TestStoreRetrieveProperties:

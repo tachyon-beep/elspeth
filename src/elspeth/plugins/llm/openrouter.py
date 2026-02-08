@@ -15,13 +15,13 @@ import httpx
 from pydantic import Field
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult, propagate_contract
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.clients.llm import NetworkError, RateLimitError, ServerError
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -281,7 +281,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         The Langfuse client is stored for use in _record_langfuse_trace().
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
 
             cfg = self._tracing_config
             if not isinstance(cfg, LangfuseTracingConfig):
@@ -524,7 +524,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             "messages": messages,
             "temperature": self._temperature,
         }
-        if self._max_tokens:
+        if self._max_tokens is not None:
             request_body["max_tokens"] = self._max_tokens
 
         # 3. Get HTTP client (cached per state_id for call_index uniqueness)
@@ -661,14 +661,15 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             return TransformResult.success(
-                output,
+                PipelineRow(output, output_contract),
                 success_reason={"action": "enriched", "fields_added": [self._response_field]},
-                contract=output_contract,
             )
         finally:
             # Clean up cached client for this state_id to prevent unbounded growth
             with self._http_clients_lock:
-                self._http_clients.pop(ctx.state_id, None)
+                client = self._http_clients.pop(ctx.state_id, None)
+            if client is not None:
+                client.close()
 
     def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
         """Get or create HTTP client for a state_id.
@@ -709,8 +710,10 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             self.shutdown_batch_processing()
 
         self._recorder = None
-        # Clear cached HTTP clients
+        # Close and clear cached HTTP clients
         with self._http_clients_lock:
+            for client in self._http_clients.values():
+                client.close()
             self._http_clients.clear()
         self._langfuse_client = None
 

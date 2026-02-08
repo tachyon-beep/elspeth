@@ -21,7 +21,6 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
-    from elspeth.contracts.enums import RoutingMode
     from elspeth.contracts.events import TelemetryEvent
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.engine.clock import Clock
@@ -29,8 +28,9 @@ if TYPE_CHECKING:
     from elspeth.engine.executors import GateOutcome
     from elspeth.telemetry import TelemetryManager
 
-from elspeth.contracts.enums import OutputMode, RoutingKind, TriggerType
+from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError, TransformErrorReason
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
@@ -44,22 +44,7 @@ from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, TransformProtocol
-
-
-def _extract_dict(row: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-    """Extract dict from PipelineRow or pass through dict.
-
-    This is a legitimate boundary operation when we need to create a NEW
-    PipelineRow with a different contract. We're not hiding bugs - we're
-    converting between representations at a known boundary.
-    """
-    if isinstance(row, PipelineRow):
-        # Extract immutable dict from PipelineRow
-        return dict(row._data)
-    return row
-
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
@@ -167,8 +152,23 @@ class RowProcessor:
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
         self._clock = clock if clock is not None else DEFAULT_CLOCK
 
+        # Build error edge map: transform node_id -> DIVERT edge_id.
+        # Scans edge_map for __error_N__ labels (created by dag.py for transforms
+        # with on_error pointing to a real sink, not "discard").
+        _edge_map = edge_map or {}
+        error_edge_ids: dict[NodeID, str] = {}
+        for (node_id, label), edge_id in _edge_map.items():
+            if label.startswith("__error_") and label.endswith("__"):
+                error_edge_ids[node_id] = edge_id
+        self._error_edge_ids = error_edge_ids
+
         self._token_manager = TokenManager(recorder, payload_store=payload_store)
-        self._transform_executor = TransformExecutor(recorder, span_factory, max_workers=max_workers)
+        self._transform_executor = TransformExecutor(
+            recorder,
+            span_factory,
+            max_workers=max_workers,
+            error_edge_ids=error_edge_ids,
+        )
         self._gate_executor = GateExecutor(recorder, span_factory, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(
             recorder, span_factory, run_id, aggregation_settings=aggregation_settings, clock=self._clock
@@ -378,64 +378,6 @@ class RowProcessor:
         """
         return self._aggregation_executor.get_checkpoint_state()
 
-    def process_token_from_step(
-        self,
-        token: TokenInfo,
-        transforms: list[Any],
-        ctx: PluginContext,
-        start_step: int,
-    ) -> list[RowResult]:
-        """Process a token starting from a specific pipeline step.
-
-        Used for continuing processing after timeout-triggered aggregation flushes.
-        The token will be processed through remaining transforms starting at start_step.
-
-        Args:
-            token: The token to process
-            transforms: List of transforms in the pipeline
-            ctx: Plugin context
-            start_step: The step index to start processing from
-
-        Returns:
-            List of RowResults from processing
-        """
-        work_queue: deque[_WorkItem] = deque(
-            [
-                _WorkItem(
-                    token=token,
-                    start_step=start_step,
-                )
-            ]
-        )
-        results: list[RowResult] = []
-        iterations = 0
-
-        with self._spans.row_span(token.row_id, token.token_id):
-            while work_queue:
-                iterations += 1
-                if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
-
-                item = work_queue.popleft()
-                result, child_items = self._process_single_token(
-                    token=item.token,
-                    transforms=transforms,
-                    ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
-                    coalesce_name=item.coalesce_name,
-                )
-
-                if result is not None:
-                    if isinstance(result, list):
-                        results.extend(result)
-                    else:
-                        results.append(result)
-
-                work_queue.extend(child_items)
-
-        return results
-
     def flush_aggregation_timeout(
         self,
         node_id: NodeID,
@@ -631,15 +573,8 @@ class RowProcessor:
                     f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
                 )
 
-            # Contract validation for passthrough mode
-            if result.contract is None:
-                raise ValueError(
-                    f"Passthrough aggregation {transform.name} produced multi-row output but returned no contract. "
-                    f"Schema-changing aggregations must update contracts. This is a plugin bug."
-                )
-
-            # Convert output rows (plain dicts) to PipelineRow objects using contract
-            pipeline_rows = [PipelineRow(_extract_dict(row), result.contract) for row in result.rows]
+            # Transforms return PipelineRow objects in result.rows — use directly
+            pipeline_rows = list(result.rows)
 
             for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                 # Update token with enriched data, preserving all lineage metadata
@@ -652,7 +587,6 @@ class RowProcessor:
                 if more_transforms or needs_coalesce:
                     # Queue for remaining transforms with coalesce metadata
                     # NOTE: start_step is set to current 0-indexed position.
-                    # Orchestrator adds +1 when calling process_token_from_step.
                     child_items.append(
                         _WorkItem(
                             token=updated_token,
@@ -709,18 +643,13 @@ class RowProcessor:
             # Create new tokens via expand_token using first buffered token as parent
             # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
             if buffered_tokens:
-                # B1: No fallback - schema-changing transforms MUST provide contract
-                # Per CLAUDE.md Three-Tier Trust Model: transforms are system code, bugs should crash
-                if result.contract is None:
-                    raise ValueError(
-                        f"Batch transform {transform.name} produced multi-row output but returned no contract. "
-                        f"Schema-changing transforms must update contracts. This is a plugin bug."
-                    )
+                # Extract contract from first output row (all rows share same contract)
+                output_contract = output_rows[0].contract
 
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
-                    expanded_rows=[_extract_dict(row) for row in output_rows],
-                    output_contract=result.contract,
+                    expanded_rows=[row.to_dict() for row in output_rows],
+                    output_contract=output_contract,
                     step_in_pipeline=audit_step,
                     run_id=self._run_id,
                     record_parent_outcome=False,
@@ -735,7 +664,6 @@ class RowProcessor:
                 if more_transforms or needs_coalesce:
                     # Queue expanded tokens for remaining transforms with coalesce metadata
                     # NOTE: start_step is set to current 0-indexed position.
-                    # Orchestrator adds +1 when calling process_token_from_step.
                     for token in expanded_tokens:
                         child_items.append(
                             _WorkItem(
@@ -956,15 +884,8 @@ class RowProcessor:
                         f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
                     )
 
-                # P1: Passthrough aggregations must provide contracts to enable PipelineRow conversion
-                if result.contract is None:
-                    raise ValueError(
-                        f"Batch transform {transform.name} produced multi-row output but returned no contract. "
-                        f"Schema-changing transforms must update contracts. This is a plugin bug."
-                    )
-
-                # Convert output rows (plain dicts) to PipelineRow objects using contract
-                pipeline_rows = [PipelineRow(_extract_dict(row), result.contract) for row in result.rows]
+                # Transforms return PipelineRow objects in result.rows — use directly
+                pipeline_rows = list(result.rows)
 
                 # Build COMPLETED results for all buffered tokens with enriched data
                 # Check if there are more transforms after this one
@@ -1050,17 +971,13 @@ class RowProcessor:
                 # This establishes audit trail linkage
                 # NOTE: Don't record EXPANDED - triggering token gets CONSUMED_IN_BATCH below
 
-                # B1: No fallback - aggregations producing multi-row output MUST provide contract
-                if result.contract is None:
-                    raise ValueError(
-                        f"Aggregation {settings.name} produced multi-row output but returned no contract. "
-                        f"Schema-changing aggregations must update contracts. This is a plugin bug."
-                    )
+                # Extract contract from first output row (all rows share same contract)
+                output_contract = output_rows[0].contract
 
                 expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=current_token,
-                    expanded_rows=[_extract_dict(row) for row in output_rows],
-                    output_contract=result.contract,
+                    expanded_rows=[row.to_dict() for row in output_rows],
+                    output_contract=output_contract,
                     step_in_pipeline=step,
                     run_id=self._run_id,
                     record_parent_outcome=False,
@@ -1224,7 +1141,7 @@ class RowProcessor:
                     #
                     # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
                     # for audit trail completeness (same as TransformExecutor error handling)
-                    on_error = transform._on_error
+                    on_error = transform.on_error
                     if on_error is None:
                         raise RuntimeError(
                             f"Transform '{transform.name}' raised retryable LLMClientError but has no "
@@ -1241,6 +1158,25 @@ class RowProcessor:
                         destination=on_error,
                     )
 
+                    # Record DIVERT routing_event using ctx.state_id (set by executor
+                    # at executors.py:247 before the exception propagated).
+                    if on_error != "discard":
+                        try:
+                            error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
+                        except KeyError:
+                            raise OrchestrationInvariantError(
+                                f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
+                            ) from e
+                        assert ctx.state_id is not None, (
+                            f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
+                        )
+                        self._recorder.record_routing_event(
+                            state_id=ctx.state_id,
+                            edge_id=error_edge_id,
+                            mode=RoutingMode.DIVERT,
+                            reason=error_details,
+                        )
+
                     return (
                         TransformResult.error(error_details, retryable=True),
                         token,
@@ -1253,7 +1189,7 @@ class RowProcessor:
                 #
                 # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
                 # for audit trail completeness (same as TransformExecutor error handling)
-                on_error = transform._on_error
+                on_error = transform.on_error
                 if on_error is None:
                     raise RuntimeError(
                         f"Transform '{transform.name}' raised retryable {type(e).__name__} but has no "
@@ -1269,6 +1205,25 @@ class RowProcessor:
                     error_details=transient_error,
                     destination=on_error,
                 )
+
+                # Record DIVERT routing_event using ctx.state_id (set by executor
+                # at executors.py:247 before the exception propagated).
+                if on_error != "discard":
+                    try:
+                        error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
+                    except KeyError:
+                        raise OrchestrationInvariantError(
+                            f"Transform '{transform.node_id}' has on_error={on_error!r} but no DIVERT edge registered."
+                        ) from e
+                    assert ctx.state_id is not None, (
+                        f"ctx.state_id must be set by TransformExecutor before exception propagated (transform={transform.node_id})"
+                    )
+                    self._recorder.record_routing_event(
+                        state_id=ctx.state_id,
+                        edge_id=error_edge_id,
+                        mode=RoutingMode.DIVERT,
+                        reason=transient_error,
+                    )
 
                 return (
                     TransformResult.error(transient_error, retryable=True),
@@ -1342,49 +1297,35 @@ class RowProcessor:
             source_row=source_row,
         )
 
-        # Initialize work queue with initial token starting at step 0
-        work_queue: deque[_WorkItem] = deque(
-            [
-                _WorkItem(
-                    token=token,
-                    start_step=0,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                )
-            ]
+        # Record source node_state (step_index=0) for audit lineage.
+        # Source "processing" already happened in the plugin iterator — we record
+        # the result immediately as COMPLETED with duration_ms=0.
+        # Valid SourceRows always have dict data (SourceRow.valid() takes dict[str, Any]).
+        source_input: dict[str, Any] = source_row.row
+        source_state = self._recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=self._source_node_id,
+            run_id=self._run_id,
+            step_index=0,
+            input_data=source_input,
         )
-        results: list[RowResult] = []
-        iterations = 0
+        self._recorder.complete_node_state(
+            state_id=source_state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data=source_input,
+            duration_ms=0,
+        )
 
-        with self._spans.row_span(token.row_id, token.token_id):
-            while work_queue:
-                iterations += 1
-                if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
-
-                item = work_queue.popleft()
-                result, child_items = self._process_single_token(
-                    token=item.token,
-                    transforms=transforms,
-                    ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
-                    coalesce_name=item.coalesce_name,
-                )
-                # Result can be:
-                # - None for held coalesce tokens
-                # - Single RowResult for most operations
-                # - List of RowResults for passthrough aggregation mode
-                if result is not None:
-                    if isinstance(result, list):
-                        results.extend(result)
-                    else:
-                        results.append(result)
-
-                # Add any child tokens to the queue
-                work_queue.extend(child_items)
-
-        return results
+        return self._drain_work_queue(
+            _WorkItem(
+                token=token,
+                start_step=0,
+                coalesce_at_step=coalesce_at_step,
+                coalesce_name=coalesce_name,
+            ),
+            transforms,
+            ctx,
+        )
 
     def process_existing_row(
         self,
@@ -1419,44 +1360,34 @@ class RowProcessor:
             row_data=row_data,
         )
 
-        # Initialize work queue with token starting at step 0
-        work_queue: deque[_WorkItem] = deque(
-            [
-                _WorkItem(
-                    token=token,
-                    start_step=0,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                )
-            ]
+        # Record source node_state (step_index=0) for resumed token lineage.
+        # The row already exists from the original run, but this new token
+        # needs its own source state for complete audit lineage.
+        resumed_input = row_data.to_dict()
+        source_state = self._recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=self._source_node_id,
+            run_id=self._run_id,
+            step_index=0,
+            input_data=resumed_input,
         )
-        results: list[RowResult] = []
-        iterations = 0
+        self._recorder.complete_node_state(
+            state_id=source_state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data=resumed_input,
+            duration_ms=0,
+        )
 
-        with self._spans.row_span(token.row_id, token.token_id):
-            while work_queue:
-                iterations += 1
-                if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
-
-                item = work_queue.popleft()
-                result, child_items = self._process_single_token(
-                    token=item.token,
-                    transforms=transforms,
-                    ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
-                    coalesce_name=item.coalesce_name,
-                )
-                if result is not None:
-                    if isinstance(result, list):
-                        results.extend(result)
-                    else:
-                        results.append(result)
-
-                work_queue.extend(child_items)
-
-        return results
+        return self._drain_work_queue(
+            _WorkItem(
+                token=token,
+                start_step=0,
+                coalesce_at_step=coalesce_at_step,
+                coalesce_name=coalesce_name,
+            ),
+            transforms,
+            ctx,
+        )
 
     def process_token(
         self,
@@ -1472,43 +1403,16 @@ class RowProcessor:
 
         Used for mid-pipeline coalesce merges that must continue processing.
         """
-        work_queue: deque[_WorkItem] = deque(
-            [
-                _WorkItem(
-                    token=token,
-                    start_step=start_step,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                )
-            ]
+        return self._drain_work_queue(
+            _WorkItem(
+                token=token,
+                start_step=start_step,
+                coalesce_at_step=coalesce_at_step,
+                coalesce_name=coalesce_name,
+            ),
+            transforms,
+            ctx,
         )
-        results: list[RowResult] = []
-        iterations = 0
-
-        with self._spans.row_span(token.row_id, token.token_id):
-            while work_queue:
-                iterations += 1
-                if iterations > MAX_WORK_QUEUE_ITERATIONS:
-                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
-
-                item = work_queue.popleft()
-                result, child_items = self._process_single_token(
-                    token=item.token,
-                    transforms=transforms,
-                    ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
-                    coalesce_name=item.coalesce_name,
-                )
-                if result is not None:
-                    if isinstance(result, list):
-                        results.extend(result)
-                    else:
-                        results.append(result)
-
-                work_queue.extend(child_items)
-
-        return results
 
     def _maybe_coalesce_token(
         self,
@@ -1586,6 +1490,136 @@ class RowProcessor:
             )
 
         return True, None
+
+    def _notify_coalesce_of_lost_branch(
+        self,
+        current_token: TokenInfo,
+        reason: str,
+        child_items: list[_WorkItem],
+        total_steps: int,
+    ) -> list[RowResult]:
+        """Notify the coalesce executor that a forked branch was diverted.
+
+        Called when a forked token exits the pipeline early (error-routed,
+        quarantined, or failed). The coalesce executor re-evaluates merge
+        conditions and may trigger an immediate merge or failure for held
+        sibling tokens.
+
+        Args:
+            current_token: The forked token being diverted
+            reason: Machine-readable reason for the diversion
+            child_items: Mutable work queue — merged tokens are appended here
+            total_steps: Total number of transform steps in pipeline
+
+        Returns:
+            List of RowResults for sibling tokens that failed as a consequence
+            of the branch loss, or a COALESCED RowResult if the merge triggered
+            at a terminal coalesce step. Empty if no consequences yet.
+        """
+        if self._coalesce_executor is None or current_token.branch_name is None:
+            return []
+
+        coalesce_name = self._branch_to_coalesce.get(BranchName(current_token.branch_name))
+        if coalesce_name is None:
+            return []
+
+        coalesce_step = self._coalesce_step_map[coalesce_name]
+        outcome = self._coalesce_executor.notify_branch_lost(
+            coalesce_name=coalesce_name,
+            row_id=current_token.row_id,
+            lost_branch=current_token.branch_name,
+            reason=reason,
+            step_in_pipeline=coalesce_step,
+        )
+
+        if outcome is None:
+            return []
+
+        if outcome.merged_token is not None:
+            if coalesce_step >= total_steps:
+                # Terminal coalesce — no downstream transforms.
+                # Do NOT emit TokenCompleted here: the merged token still
+                # needs to flow through the sink write for durable recording.
+                # Telemetry is emitted later by accumulate_row_outcomes.
+                return [
+                    RowResult(
+                        token=outcome.merged_token,
+                        final_data=outcome.merged_token.row_data,
+                        outcome=RowOutcome.COALESCED,
+                    ),
+                ]
+            # Non-terminal — resume merged token at coalesce step
+            child_items.append(
+                _WorkItem(
+                    token=outcome.merged_token,
+                    start_step=coalesce_step,
+                )
+            )
+            return []
+
+        if outcome.failure_reason:
+            # Merge failed — build RowResults for held sibling tokens.
+            # DB outcomes are already recorded by the executor (outcomes_recorded=True).
+            # These RowResults propagate to the orchestrator for counter accounting.
+            sibling_results: list[RowResult] = []
+            for consumed_token in outcome.consumed_tokens:
+                self._emit_token_completed(consumed_token, RowOutcome.FAILED)
+                sibling_results.append(
+                    RowResult(
+                        token=consumed_token,
+                        final_data=consumed_token.row_data,
+                        outcome=RowOutcome.FAILED,
+                        error=FailureInfo(
+                            exception_type="CoalesceFailure",
+                            message=outcome.failure_reason,
+                        ),
+                    )
+                )
+            return sibling_results
+
+        return []
+
+    def _drain_work_queue(
+        self,
+        initial_item: _WorkItem,
+        transforms: list[Any],
+        ctx: PluginContext,
+    ) -> list[RowResult]:
+        """Drain the work queue, processing tokens until empty.
+
+        Implements breadth-first DAG traversal. Each _process_single_token call
+        may produce child work items (from forks, expansions, etc.) which are
+        appended to the queue.
+        """
+        work_queue: deque[_WorkItem] = deque([initial_item])
+        results: list[RowResult] = []
+        iterations = 0
+
+        with self._spans.row_span(initial_item.token.row_id, initial_item.token.token_id):
+            while work_queue:
+                iterations += 1
+                if iterations > MAX_WORK_QUEUE_ITERATIONS:
+                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
+
+                item = work_queue.popleft()
+                result, child_items = self._process_single_token(
+                    token=item.token,
+                    transforms=transforms,
+                    ctx=ctx,
+                    start_step=item.start_step,
+                    coalesce_at_step=item.coalesce_at_step,
+                    coalesce_name=item.coalesce_name,
+                )
+
+                if result is not None:
+                    if isinstance(result, list):
+                        results.extend(result)
+                    else:
+                        results.append(result)
+
+                work_queue.extend(child_items)
+
+        return results
 
     def _process_single_token(
         self,
@@ -1762,15 +1796,22 @@ class RowProcessor:
                     )
                     # Emit TokenCompleted telemetry AFTER Landscape recording
                     self._emit_token_completed(current_token, RowOutcome.FAILED)
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.FAILED,
-                            error=FailureInfo.from_max_retries_exceeded(e),
-                        ),
+                    # Notify coalesce if this is a forked branch
+                    sibling_results = self._notify_coalesce_of_lost_branch(
+                        current_token,
+                        f"max_retries_exceeded:{e}",
                         child_items,
+                        total_steps,
                     )
+                    current_result = RowResult(
+                        token=current_token,
+                        final_data=current_token.row_data,
+                        outcome=RowOutcome.FAILED,
+                        error=FailureInfo.from_max_retries_exceeded(e),
+                    )
+                    if sibling_results:
+                        return ([current_result, *sibling_results], child_items)
+                    return (current_result, child_items)
 
                 if transform_result.status == "error":
                     # Determine outcome based on error routing
@@ -1786,27 +1827,42 @@ class RowProcessor:
                         )
                         # Emit TokenCompleted telemetry AFTER Landscape recording
                         self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
-                        return (
-                            RowResult(
-                                token=current_token,
-                                final_data=current_token.row_data,
-                                outcome=RowOutcome.QUARANTINED,
-                            ),
+                        # Notify coalesce if this is a forked branch
+                        sibling_results = self._notify_coalesce_of_lost_branch(
+                            current_token,
+                            f"quarantined:{error_detail}",
                             child_items,
+                            total_steps,
                         )
+                        current_result = RowResult(
+                            token=current_token,
+                            final_data=current_token.row_data,
+                            outcome=RowOutcome.QUARANTINED,
+                        )
+                        if sibling_results:
+                            return ([current_result, *sibling_results], child_items)
+                        return (current_result, child_items)
                     else:
                         # Routed to error sink
                         # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
                         # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                        return (
-                            RowResult(
-                                token=current_token,
-                                final_data=current_token.row_data,
-                                outcome=RowOutcome.ROUTED,
-                                sink_name=error_sink,
-                            ),
+                        # Notify coalesce if this is a forked branch
+                        error_detail = str(transform_result.reason) if transform_result.reason else "unknown_error"
+                        sibling_results = self._notify_coalesce_of_lost_branch(
+                            current_token,
+                            f"error_routed:{error_detail}",
                             child_items,
+                            total_steps,
                         )
+                        current_result = RowResult(
+                            token=current_token,
+                            final_data=current_token.row_data,
+                            outcome=RowOutcome.ROUTED,
+                            sink_name=error_sink,
+                        )
+                        if sibling_results:
+                            return ([current_result, *sibling_results], child_items)
+                        return (current_result, child_items)
 
                 # Handle multi-row output (deaggregation)
                 # NOTE: This is ONLY for non-aggregation transforms. Aggregation
@@ -1824,22 +1880,14 @@ class RowProcessor:
                     # Deaggregation: create child tokens for each output row
                     # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
 
-                    # B1: No fallback - transforms producing multi-row output MUST provide contract
-                    # Per CLAUDE.md: Transforms are system code (Tier 1), bugs should crash immediately
-                    if transform_result.contract is None:
-                        raise ValueError(
-                            f"Transform {transform.name} produced multi-row output but returned no contract. "
-                            f"Schema-changing transforms must update contracts. This is a plugin bug."
-                        )
-
                     # is_multi_row check above guarantees rows is not None
                     assert transform_result.rows is not None, "is_multi_row guarantees rows is not None"
-                    # Convert any PipelineRow instances to dicts for TokenManager
-                    expanded_rows = [dict(r._data) if isinstance(r, PipelineRow) else r for r in transform_result.rows]
+                    # Contract consistency is enforced by TransformResult.success_multi()
+                    output_contract = transform_result.rows[0].contract
                     child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,
-                        expanded_rows=expanded_rows,
-                        output_contract=transform_result.contract,
+                        expanded_rows=[r.to_dict() for r in transform_result.rows],
+                        output_contract=output_contract,
                         step_in_pipeline=step,
                         run_id=self._run_id,
                     )

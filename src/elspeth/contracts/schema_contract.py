@@ -14,7 +14,6 @@ import hashlib
 import types
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, Literal
 
 from elspeth.contracts.errors import (
@@ -24,20 +23,10 @@ from elspeth.contracts.errors import (
     MissingFieldViolation,
     TypeMismatchViolation,
 )
-from elspeth.contracts.type_normalization import normalize_type_for_contract
-
-# Types that can be serialized in checkpoint and restored in from_checkpoint()
-# Must match type_map in SchemaContract.from_checkpoint()
-VALID_FIELD_TYPES: frozenset[type] = frozenset(
-    {
-        int,
-        str,
-        float,
-        bool,
-        type(None),
-        datetime,
-        object,  # 'any' type for fields that accept any value
-    }
+from elspeth.contracts.type_normalization import (
+    ALLOWED_CONTRACT_TYPES,
+    CONTRACT_TYPE_MAP,
+    normalize_type_for_contract,
 )
 
 
@@ -66,12 +55,12 @@ class FieldContract:
         """Validate python_type is checkpoint-serializable.
 
         Raises:
-            TypeError: If python_type is not in VALID_FIELD_TYPES
+            TypeError: If python_type is not in ALLOWED_CONTRACT_TYPES
         """
-        if self.python_type not in VALID_FIELD_TYPES:
+        if self.python_type not in ALLOWED_CONTRACT_TYPES:
             raise TypeError(
                 f"Invalid python_type '{self.python_type.__name__}' for FieldContract. "
-                f"Valid types: {', '.join(sorted(t.__name__ for t in VALID_FIELD_TYPES))}."
+                f"Valid types: {', '.join(sorted(t.__name__ for t in ALLOWED_CONTRACT_TYPES))}."
             )
 
 
@@ -277,7 +266,7 @@ class SchemaContract:
         """Deterministic hash of contract for checkpoint references.
 
         Uses canonical JSON of ALL serialized state for reproducibility.
-        The hash is truncated to 16 hex characters (64 bits).
+        The hash is truncated to 32 hex characters (128 bits).
 
         IMPORTANT: This hash MUST include ALL fields written by to_checkpoint_format().
         Per CLAUDE.md Tier 1: integrity checks must detect any mutation of serialized state.
@@ -289,7 +278,7 @@ class SchemaContract:
         - fields: All field definitions including 'source' (declared vs inferred)
 
         Returns:
-            16-character hex hash string
+            32-character hex hash string
         """
         from elspeth.core.canonical import canonical_json
 
@@ -310,7 +299,7 @@ class SchemaContract:
                 "fields": field_defs,
             }
         )
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
+        return hashlib.sha256(content.encode()).hexdigest()[:32]
 
     def to_checkpoint_format(self) -> dict[str, Any]:
         """Full contract serialization for checkpoint storage.
@@ -352,23 +341,11 @@ class SchemaContract:
             KeyError: If checkpoint has unknown python_type
             ValueError: If restored hash doesn't match stored hash
         """
-        # Explicit type map - NO FALLBACK (Tier 1: crash on corruption)
-        # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
-        type_map: dict[str, type] = {
-            "int": int,
-            "str": str,
-            "float": float,
-            "bool": bool,
-            "NoneType": type(None),
-            "datetime": datetime,
-            "object": object,  # For 'any' type fields that accept any value
-        }
-
         fields = tuple(
             FieldContract(
                 normalized_name=f["normalized_name"],
                 original_name=f["original_name"],
-                python_type=type_map[f["python_type"]],  # KeyError on unknown = correct!
+                python_type=CONTRACT_TYPE_MAP[f["python_type"]],  # KeyError on unknown = correct! (Tier 1)
                 required=f["required"],
                 source=f["source"],
             )

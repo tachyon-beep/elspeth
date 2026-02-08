@@ -4,6 +4,15 @@
 # least one Python file is staged, but then check the entire scope.
 # Hooks are CHECK-ONLY — they do NOT auto-fix or modify files.
 repos:
+  - repo: local
+    hooks:
+      - id: beads-export
+        name: beads-export
+        entry: bd hook pre-commit
+        language: system
+        pass_filenames: false
+        always_run: true
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:

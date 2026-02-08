@@ -19,16 +19,17 @@ Therefore, JSONExplode inherits from DataPluginConfig (NOT TransformDataConfig)
 and has no on_error configuration.
 """
 
+import copy
 from typing import Any
 
 from pydantic import Field
 
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import DataPluginConfig
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -162,19 +163,21 @@ class JSONExplode(BaseTransform):
             )
 
             return TransformResult.success(
-                output,
+                PipelineRow(output, output_contract),
                 success_reason={
                     "action": "transformed",
                     "fields_added": fields_added,
                     "fields_removed": [self._array_field],
                 },
-                contract=output_contract,
             )
 
         # Explode array into multiple rows
-        output_rows: list[dict[str, Any] | PipelineRow] = []
+        # Deep copy base for each row to prevent cross-row mutation via shared
+        # nested references (e.g., downstream mutating row["metadata"]["key"]
+        # would corrupt sibling rows if they shared the same dict object).
+        output_rows: list[dict[str, Any]] = []
         for i, item in enumerate(array_value):
-            output = base.copy()
+            output = copy.deepcopy(base)
             output[self._output_field] = item
             if self._include_index:
                 output["item_index"] = i
@@ -197,22 +200,18 @@ class JSONExplode(BaseTransform):
                     )
 
         # Update contract using first output row (all rows have same schema)
-        # output_rows only contains dicts (never PipelineRow), but typed as union for success_multi
-        from typing import cast
-
         output_contract = narrow_contract_to_output(
             input_contract=row.contract,
-            output_row=cast(dict[str, Any], output_rows[0]),
+            output_row=output_rows[0],
         )
 
         return TransformResult.success_multi(
-            output_rows,
+            [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={
                 "action": "transformed",
                 "fields_added": fields_added,
                 "fields_removed": [self._array_field],
             },
-            contract=output_contract,
         )
 
     def close(self) -> None:

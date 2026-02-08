@@ -15,21 +15,23 @@ Requires Azure OpenAI Batch API (GA as of Azure API version 2024-10-21).
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import time
 import uuid
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Any
 
 from pydantic import Field
 
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
@@ -195,6 +197,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Azure OpenAI client (lazy init)
         self._client: Any = None
+        self._client_lock = Lock()
 
         # Tier 2: Plugin-internal tracing (Langfuse only for batch API)
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
@@ -252,7 +255,7 @@ class AzureBatchLLMTransform(BaseTransform):
         not per-row (since rows are processed by Azure infrastructure).
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]  # optional dep, no stubs
 
             cfg = self._tracing_config
             if not isinstance(cfg, LangfuseTracingConfig):
@@ -340,18 +343,22 @@ class AzureBatchLLMTransform(BaseTransform):
     def _get_client(self) -> Any:
         """Lazy-initialize Azure OpenAI client.
 
+        Thread-safe: protected by _client_lock to prevent duplicate
+        client creation if future pooling adds concurrency.
+
         Returns:
             openai.AzureOpenAI client instance
         """
-        if self._client is None:
-            from openai import AzureOpenAI
+        with self._client_lock:
+            if self._client is None:
+                from openai import AzureOpenAI
 
-            self._client = AzureOpenAI(
-                azure_endpoint=self._endpoint,
-                api_key=self._api_key,
-                api_version=self._api_version,
-            )
-        return self._client
+                self._client = AzureOpenAI(
+                    azure_endpoint=self._endpoint,
+                    api_key=self._api_key,
+                    api_version=self._api_version,
+                )
+            return self._client
 
     def process(
         self,
@@ -400,17 +407,16 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            # Propagate success_reason AND contract from batch result
-            # Contract is critical for downstream transforms to access LLM-added fields
+            # result.rows[0] is already PipelineRow from _process_batch
             return TransformResult.success(
                 result.rows[0],
                 success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
-                contract=result.contract,
             )
         elif result.status == "error":
             return result
         else:
             # Empty rows from empty batch - shouldn't happen for single row
+            # row is already PipelineRow (the input)
             return TransformResult.success(
                 row,
                 success_reason={"action": "passthrough"},
@@ -477,7 +483,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 "AzureBatchLLMTransform requires checkpoint API on PluginContext. "
                 "Ensure engine provides get_checkpoint/update_checkpoint/clear_checkpoint methods."
             )
-        return ctx.get_checkpoint()  # type: ignore[no-any-return]
+        return ctx.get_checkpoint()  # type: ignore[no-any-return]  # checkpoint returns dict[str, Any] | None, guarded by hasattr above
 
     def _update_checkpoint(self, ctx: PluginContext, data: dict[str, Any]) -> None:
         """Update checkpoint state.
@@ -590,12 +596,15 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Upload JSONL file (with audit recording)
         file_bytes = io.BytesIO(jsonl_content.encode("utf-8"))
+        jsonl_bytes = jsonl_content.encode("utf-8")
+        jsonl_hash = hashlib.sha256(jsonl_bytes).hexdigest()
         upload_request = {
             "operation": "files.create",
             "filename": "batch_input.jsonl",
             "purpose": "batch",
-            "content": jsonl_content,  # BUG-AZURE-01 FIX: Include actual JSONL content
-            "content_size": len(jsonl_content),
+            "content_sha256": jsonl_hash,
+            "content_size": len(jsonl_bytes),
+            "row_count": len(requests),
         }
         start = time.perf_counter()
         try:
@@ -731,6 +740,7 @@ class AzureBatchLLMTransform(BaseTransform):
                     "batch_id": batch.id,
                     "status": batch.status,
                     "output_file_id": getattr(batch, "output_file_id", None),
+                    "error_file_id": getattr(batch, "error_file_id", None),
                 },
                 latency_ms=(time.perf_counter() - start) * 1000,
                 provider="azure",
@@ -908,14 +918,16 @@ class AzureBatchLLMTransform(BaseTransform):
         start = time.perf_counter()
         try:
             output_content = client.files.content(output_file_id)
+            output_text = output_content.text
+            output_hash = hashlib.sha256(output_text.encode("utf-8")).hexdigest()
             ctx.record_call(
                 call_type=CallType.HTTP,
                 status=CallStatus.SUCCESS,
                 request_data=download_request,
                 response_data={
                     "file_id": output_file_id,
-                    "content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
-                    "content_length": len(output_content.text),
+                    "content_sha256": output_hash,
+                    "content_length": len(output_text),
                 },
                 latency_ms=(time.perf_counter() - start) * 1000,
                 provider="azure",
@@ -941,11 +953,60 @@ class AzureBatchLLMTransform(BaseTransform):
                 retryable=True,  # Transient failure - retry download
             )
 
+        # Download error file if present (partial batch failures)
+        # Azure Batch API puts per-request errors in a separate error_file_id
+        # Tier 3 boundary: SDK must expose this attribute — None = no errors,
+        # missing attribute = SDK version mismatch (crash, don't silently skip)
+        if not hasattr(batch, "error_file_id"):
+            raise RuntimeError(
+                f"Azure batch object missing 'error_file_id' attribute. "
+                f"Ensure Azure OpenAI SDK version >= 1.14.0 supports batch error files. "
+                f"batch_id={batch.id}"
+            )
+        error_file_id = batch.error_file_id
+        if error_file_id is not None:
+            error_download_request = {
+                "operation": "files.content",
+                "file_id": error_file_id,
+                "file_type": "error",
+            }
+            start = time.perf_counter()
+            try:
+                error_content = client.files.content(error_file_id)
+                error_text = error_content.text
+                error_hash = hashlib.sha256(error_text.encode("utf-8")).hexdigest()
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_data=error_download_request,
+                    response_data={
+                        "file_id": error_file_id,
+                        "content_sha256": error_hash,
+                        "content_length": len(error_text),
+                    },
+                    latency_ms=(time.perf_counter() - start) * 1000,
+                    provider="azure",
+                )
+            except Exception as e:
+                # Error file download failed - log but don't fail the batch
+                # The output file was already downloaded successfully
+                ctx.record_call(
+                    call_type=CallType.HTTP,
+                    status=CallStatus.ERROR,
+                    request_data=error_download_request,
+                    response_data={"error": str(e), "error_type": type(e).__name__},
+                    latency_ms=(time.perf_counter() - start) * 1000,
+                    provider="azure",
+                )
+                error_text = None
+        else:
+            error_text = None
+
         # Parse JSONL results (EXTERNAL DATA - wrap parsing)
         results_by_id: dict[str, dict[str, Any]] = {}
         malformed_lines: list[str] = []
 
-        for line_num, line in enumerate(output_content.text.strip().split("\n"), start=1):
+        for line_num, line in enumerate(output_text.strip().split("\n"), start=1):
             if not line:
                 continue
 
@@ -993,6 +1054,36 @@ class AzureBatchLLMTransform(BaseTransform):
             # Now validated - store as Tier 2 data
             results_by_id[custom_id] = result
 
+        # Parse error file if downloaded (EXTERNAL DATA - same validation as output)
+        if error_text is not None:
+            for line_num, line in enumerate(error_text.strip().split("\n"), start=1):
+                if not line:
+                    continue
+
+                try:
+                    error_result = json.loads(line)
+                except json.JSONDecodeError:
+                    malformed_lines.append(f"Error file line {line_num}: JSON parse error")
+                    continue
+
+                custom_id = error_result.get("custom_id")
+                if custom_id is None:
+                    malformed_lines.append(f"Error file line {line_num}: Missing 'custom_id'")
+                    continue
+
+                if custom_id not in row_mapping:
+                    malformed_lines.append(f"Error file line {line_num}: Unknown 'custom_id': {custom_id}")
+                    continue
+
+                # Don't overwrite successful results from output file
+                if custom_id not in results_by_id:
+                    # Normalize to standard error format for downstream handling
+                    error_body = error_result.get("error", error_result.get("response", {}).get("body", {}))
+                    results_by_id[custom_id] = {
+                        "custom_id": custom_id,
+                        "error": error_body,
+                    }
+
         # If ALL lines are malformed, fail the entire batch
         if not results_by_id and malformed_lines:
             self._clear_checkpoint(ctx)
@@ -1005,7 +1096,7 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         # Assemble output rows in original order
-        output_rows: list[dict[str, Any] | PipelineRow] = []
+        output_rows: list[dict[str, Any]] = []
         row_errors: list[RowErrorEntry] = []
 
         # Track which rows had template errors (excluded from batch)
@@ -1211,10 +1302,10 @@ class AzureBatchLLMTransform(BaseTransform):
         else:
             output_contract = None
 
+        assert output_contract is not None, "output_rows is non-empty so contract was built"
         return TransformResult.success_multi(
-            output_rows,
+            [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
-            contract=output_contract,
         )
 
     @property
@@ -1222,11 +1313,12 @@ class AzureBatchLLMTransform(BaseTransform):
         """Azure configuration for executor (if needed).
 
         Returns:
-            Dict containing endpoint, api_key, api_version, and provider
+            Dict containing endpoint, api_version, and provider.
+            API key is intentionally excluded to prevent accidental exposure
+            in checkpoints, logs, or audit records.
         """
         return {
             "endpoint": self._endpoint,
-            "api_key": self._api_key,
             "api_version": self._api_version,
             "provider": "azure_batch",
         }

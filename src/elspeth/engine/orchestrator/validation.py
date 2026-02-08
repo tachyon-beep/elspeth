@@ -118,8 +118,7 @@ def validate_transform_error_sinks(
         if not isinstance(transform, TransformProtocol):
             continue
 
-        # Access _on_error directly - defined in TransformProtocol
-        on_error = transform._on_error
+        on_error = transform.on_error
 
         if on_error is None:
             # No error routing configured - that's fine

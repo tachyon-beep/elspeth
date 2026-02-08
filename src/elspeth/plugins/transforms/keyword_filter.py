@@ -6,10 +6,10 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -165,22 +165,22 @@ class KeywordFilter(BaseTransform):
             for pattern_str, compiled_pattern in self._compiled_patterns:
                 match = compiled_pattern.search(value)
                 if match:
-                    context = self._extract_context(value, match)
                     return TransformResult.error(
                         {
                             "reason": "blocked_content",
                             "field": field_name,
                             "matched_pattern": pattern_str,
-                            "match_context": context,
+                            "match_position": match.start(),
+                            "match_length": match.end() - match.start(),
+                            "field_length": len(value),
                         },
                         retryable=False,
                     )
 
         # No matches - pass through unchanged
         return TransformResult.success(
-            row_dict,
+            PipelineRow(row_dict, row.contract),
             success_reason={"action": "filtered"},
-            contract=row.contract,
         )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
@@ -192,26 +192,6 @@ class KeywordFilter(BaseTransform):
             return [self._fields]
         else:
             return self._fields
-
-    def _extract_context(
-        self,
-        text: str,
-        match: re.Match[str],
-        context_chars: int = 40,
-    ) -> str:
-        """Extract surrounding context around a match."""
-        start = max(0, match.start() - context_chars)
-        end = min(len(text), match.end() + context_chars)
-
-        context = text[start:end]
-
-        # Add ellipsis markers if truncated
-        if start > 0:
-            context = "..." + context
-        if end < len(text):
-            context = context + "..."
-
-        return context
 
     def close(self) -> None:
         """Release resources."""

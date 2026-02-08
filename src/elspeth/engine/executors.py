@@ -37,6 +37,7 @@ from elspeth.contracts.enums import (
     TriggerType,
 )
 from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -46,7 +47,6 @@ from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import (
     BatchTransformProtocol,
     GateProtocol,
@@ -138,6 +138,7 @@ class TransformExecutor:
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
         max_workers: int | None = None,
+        error_edge_ids: dict[NodeID, str] | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -145,10 +146,14 @@ class TransformExecutor:
             recorder: Landscape recorder for audit trail
             span_factory: Span factory for tracing
             max_workers: Maximum concurrent workers (None = no limit)
+            error_edge_ids: Map of transform node_id -> DIVERT edge_id for error routing.
+                           Built by the processor from the edge_map using error_edge_label().
+                           Only populated for transforms with on_error pointing to a real sink.
         """
         self._recorder = recorder
         self._spans = span_factory
         self._max_workers = max_workers
+        self._error_edge_ids = error_edge_ids or {}
 
     def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
         """Get or create shared batch adapter for transform.
@@ -167,7 +172,7 @@ class TransformExecutor:
 
         if not hasattr(transform, "_executor_batch_adapter"):
             adapter = SharedBatchAdapter()
-            transform._executor_batch_adapter = adapter  # type: ignore[attr-defined]
+            transform._executor_batch_adapter = adapter  # type: ignore[attr-defined]  # dynamic attr on BatchTransformProtocol instances
 
             # Connect output (one-time setup)
             # Use _pool_size stored by LLM transforms, default to 30
@@ -175,10 +180,10 @@ class TransformExecutor:
             max_pending = getattr(transform, "_pool_size", 30)
             if self._max_workers is not None:
                 max_pending = min(max_pending, self._max_workers)
-            transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]
-            transform._batch_initialized = True  # type: ignore[attr-defined]
+            transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]  # BatchTransformProtocol method
+            transform._batch_initialized = True  # type: ignore[attr-defined]  # dynamic attr on BatchTransformProtocol instances
 
-        return transform._executor_batch_adapter  # type: ignore[attr-defined, return-value, no-any-return]
+        return transform._executor_batch_adapter  # type: ignore[attr-defined, return-value, no-any-return]  # dynamic attr set above
 
     def execute_transform(
         self,
@@ -283,7 +288,7 @@ class TransformExecutor:
                     ctx.token = token
 
                     # Submit work - this returns immediately
-                    transform.accept(token.row_data, ctx)  # type: ignore[attr-defined]
+                    transform.accept(token.row_data, ctx)  # type: ignore[attr-defined]  # BatchTransformProtocol method
 
                     # Block until THIS row's result arrives.
                     #
@@ -334,7 +339,7 @@ class TransformExecutor:
                 # 4. Original worker may still complete, but result is discarded
                 if isinstance(e, TimeoutError) and has_accept:
                     # has_accept guarantees transform has evict_submission (batch protocol)
-                    evict_fn = transform.evict_submission  # type: ignore[attr-defined]
+                    evict_fn = transform.evict_submission  # type: ignore[attr-defined]  # BatchTransformProtocol method
                     if not callable(evict_fn):
                         raise TypeError(
                             f"Transform '{transform.name}' evict_submission must be callable, got {type(evict_fn).__name__}"
@@ -375,24 +380,14 @@ class TransformExecutor:
             if not result.has_output_data:
                 raise RuntimeError(f"Transform '{transform.name}' returned success but has no output data")
 
-            # For single-row: output_data is the row
-            # For multi-row: output_data is the rows list (engine handles expansion)
-            output_data_with_pipe: dict[str, Any] | PipelineRow | list[dict[str, Any] | PipelineRow]
-            if result.row is not None:
-                output_data_with_pipe = result.row
-            else:
-                # has_output_data check above guarantees rows is not None when row is None
-                assert result.rows is not None, "has_output_data guarantees rows when row is None"
-                output_data_with_pipe = result.rows
-
             # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
-            def _to_dict(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-                return dict(r._data) if isinstance(r, PipelineRow) else r
-
-            if isinstance(output_data_with_pipe, list):
-                output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict(r) for r in output_data_with_pipe]
+            # Transforms return PipelineRow — extract underlying dicts for storage
+            output_data: dict[str, Any] | list[dict[str, Any]]
+            if result.row is not None:
+                output_data = result.row.to_dict()
             else:
-                output_data = _to_dict(output_data_with_pipe)
+                assert result.rows is not None, "has_output_data guarantees rows when row is None"
+                output_data = [r.to_dict() for r in result.rows]
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -411,10 +406,9 @@ class TransformExecutor:
 
                 # Compute evolved contract: input contract + fields added by transform
                 input_contract = token.row_data.contract
-                row_dict = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
                 evolved_contract = propagate_contract(
                     input_contract=input_contract,
-                    output_row=row_dict,
+                    output_row=result.row.to_dict(),
                     transform_adds_fields=True,
                 )
 
@@ -428,33 +422,15 @@ class TransformExecutor:
             # Update token with new PipelineRow, preserving all lineage metadata
             # For multi-row results, keep original row_data (engine will expand tokens later)
             if result.row is not None:
-                # Single-row result: create new PipelineRow from result dict + contract
-                # Contract fallback chain:
-                # 1. result.contract (if transform provides it)
-                # 2. transform.output_schema (create contract from schema)
-                #    All transforms have output_schema per protocol, so this always succeeds
-                if result.contract is not None:
-                    output_contract = result.contract
-                else:
-                    # Create contract from transform's output_schema
-                    # transform.output_schema is always non-None per TransformProtocol
-                    from elspeth.contracts.transform_contract import create_output_contract_from_schema
-
-                    output_contract = create_output_contract_from_schema(transform.output_schema)
-
-                # Extract dict if result.row is already a PipelineRow (boundary operation)
-                row_dict = result.row.to_dict() if isinstance(result.row, PipelineRow) else result.row
-                new_row = PipelineRow(row_dict, output_contract)
-
-                # B2 fix: Log PipelineRow creation for observability
+                # Single-row result: transforms return PipelineRow with correct contract
                 slog.debug(
                     "pipeline_row_created",
                     token_id=token.token_id,
                     transform=transform.name,
-                    contract_mode=output_contract.mode,
+                    contract_mode=result.row.contract.mode,
                 )
 
-                updated_token = token.with_updated_data(new_row)
+                updated_token = token.with_updated_data(result.row)
             else:
                 # Multi-row result: keep original row_data (engine will expand tokens later)
                 updated_token = token.with_updated_data(token.row_data)
@@ -469,8 +445,8 @@ class TransformExecutor:
                 context_after=result.context_after,
             )
 
-            # Handle error routing - _on_error is part of TransformProtocol
-            on_error = transform._on_error
+            # Handle error routing - on_error is part of TransformProtocol
+            on_error = transform.on_error
 
             if on_error is None:
                 raise RuntimeError(
@@ -500,12 +476,24 @@ class TransformExecutor:
                 destination=on_error,
             )
 
-            # Route to sink if not discarding
+            # Record DIVERT routing_event for audit trail (AUD-002).
+            # This follows the same pattern as GateExecutor._record_routing():
+            # the routing_event is recorded inside the executor where state_id
+            # is in scope, co-located with the node_state lifecycle.
             if on_error != "discard":
-                ctx.route_to_sink(
-                    sink_name=on_error,
-                    row=input_dict,  # Use extracted dict for sink routing
-                    metadata={"transform_error": result.reason},
+                try:
+                    error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
+                except KeyError:
+                    raise OrchestrationInvariantError(
+                        f"Transform '{transform.node_id}' has on_error={on_error!r} but no "
+                        f"DIVERT edge registered. DAG construction should have created an "
+                        f"__error_N__ edge in from_plugin_instances()."
+                    ) from None
+                self._recorder.record_routing_event(
+                    state_id=state.state_id,
+                    edge_id=error_edge_id,
+                    mode=RoutingMode.DIVERT,
+                    reason=result.reason,
                 )
 
             updated_token = token
@@ -1415,11 +1403,12 @@ class AggregationExecutor:
 
         # Step 5: Complete node state
         if result.status == "success":
-            output_data_with_pipe: dict[str, Any] | PipelineRow | list[dict[str, Any] | PipelineRow]
+            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
+            output_data: dict[str, Any] | list[dict[str, Any]]
             if result.row is not None:
-                output_data_with_pipe = result.row
+                output_data = result.row.to_dict()
             elif result.rows is not None:
-                output_data_with_pipe = result.rows
+                output_data = [r.to_dict() for r in result.rows]
             else:
                 # Contract violation: success status requires output data
                 raise RuntimeError(
@@ -1428,15 +1417,6 @@ class AggregationExecutor:
                     f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
                     f"This is a plugin bug."
                 )
-
-            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
-            def _to_dict_agg(r: dict[str, Any] | PipelineRow) -> dict[str, Any]:
-                return dict(r._data) if isinstance(r, PipelineRow) else r
-
-            if isinstance(output_data_with_pipe, list):
-                output_data: dict[str, Any] | list[dict[str, Any]] = [_to_dict_agg(r) for r in output_data_with_pipe]
-            else:
-                output_data = _to_dict_agg(output_data_with_pipe)
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -1588,7 +1568,7 @@ class AggregationExecutor:
             # Store full TokenInfo as dicts (not just IDs)
             # Include all lineage fields to preserve fork/join/expand metadata
             #
-            # PipelineRow Migration (v2.0):
+            # PipelineRow Migration (v2.0), hash-width bump (v2.1):
             # - row_data is stored as dict via to_dict() for JSON serialization
             # - contract is stored once per node (not per token) for efficiency
             # - contract_version links tokens to their contract for restoration
@@ -1623,7 +1603,8 @@ class AggregationExecutor:
         # v1.0: Initial format with elapsed_age_seconds
         # v1.1: Added count_fire_offset/condition_fire_offset for trigger ordering (P2-2026-02-01)
         # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
-        state["_version"] = "2.0"
+        # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
+        state["_version"] = "2.1"
 
         # Size validation (on serialized checkpoint)
         # Use checkpoint_dumps to handle datetime (P1-2026-02-05 fix)
@@ -1655,7 +1636,7 @@ class AggregationExecutor:
         Args:
             state: Checkpoint state with format:
                 {
-                    "_version": "2.0",
+                    "_version": "2.1",
                     "node_id": {
                         "tokens": [{"token_id", "row_id", "branch_name", "row_data", ...}],
                         "batch_id": str,
@@ -1671,7 +1652,8 @@ class AggregationExecutor:
         # Validate checkpoint version (Bug #12 fix)
         # v1.1: Pre-PipelineRow migration format
         # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
-        CHECKPOINT_VERSION = "2.0"
+        # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
+        CHECKPOINT_VERSION = "2.1"
         version = state.get("_version")
 
         if version != CHECKPOINT_VERSION:
@@ -1710,12 +1692,12 @@ class AggregationExecutor:
             if not isinstance(tokens_data, list):
                 raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
 
-            # Restore contract from checkpoint (v2.0: stored once per node)
+            # Restore contract from checkpoint (v2.1: stored once per node)
             # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
             if "contract" not in node_state:
                 raise ValueError(
                     f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
-                    f"v2.0 format requires contract for PipelineRow restoration."
+                    f"v2.1 format requires contract for PipelineRow restoration."
                 )
             restored_contract = SchemaContract.from_checkpoint(node_state["contract"])
 
@@ -1723,7 +1705,7 @@ class AggregationExecutor:
             reconstructed_tokens = []
             for t in tokens_data:
                 # Validate required fields (crash on missing - per CLAUDE.md)
-                # All these fields are required in checkpoint format v2.0 (values can be None)
+                # All these fields are required in checkpoint format v2.1 (values can be None)
                 required_fields = {
                     "token_id",
                     "row_id",
@@ -1738,7 +1720,7 @@ class AggregationExecutor:
                 if missing:
                     raise ValueError(
                         f"Checkpoint token missing required fields: {missing}. "
-                        f"Required in v2.0 format: {required_fields}. Found: {set(t.keys())}"
+                        f"Required in v2.1 format: {required_fields}. Found: {set(t.keys())}"
                     )
 
                 # Validate contract_version matches restored contract
@@ -1755,7 +1737,7 @@ class AggregationExecutor:
 
                 # Reconstruct TokenInfo from checkpoint data
                 # NOTE: These fields CAN be None (valid state for unforked tokens), but they
-                # are ALWAYS present in checkpoint format v2.0 - use direct access to detect
+                # are ALWAYS present in checkpoint format v2.1 - use direct access to detect
                 # corruption/missing fields. The difference between "field is None" and
                 # "field is missing" matters: the former is valid, the latter is corruption.
                 reconstructed_tokens.append(
@@ -1799,7 +1781,7 @@ class AggregationExecutor:
             # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
             # The old approach called record_accept() which set fire times to current time,
             # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
-            # NOTE: All fields are required in checkpoint format v2.0 - no backwards compat
+            # NOTE: All fields are required in checkpoint format v2.1 - no backwards compat
             elapsed_seconds = node_state["elapsed_age_seconds"]
             count_fire_offset = node_state["count_fire_offset"]
             condition_fire_offset = node_state["condition_fire_offset"]

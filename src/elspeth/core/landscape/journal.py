@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, NotRequired, TypedDict, cast
 
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
@@ -18,6 +18,34 @@ from elspeth.core.payload_store import FilesystemPayloadStore
 logger = logging.getLogger(__name__)
 
 _BUFFER_KEY = "landscape_journal_buffer"
+
+
+class PayloadInfo(TypedDict):
+    """Payload enrichment data for calls table inserts."""
+
+    request_ref: str | None
+    request_payload: str | None
+    response_ref: str | None
+    response_payload: str | None
+    request_payload_error: NotRequired[str]
+    response_payload_error: NotRequired[str]
+
+
+class JournalRecord(TypedDict):
+    """A journal record capturing a SQL write operation and its parameters."""
+
+    timestamp: str
+    statement: str
+    parameters: object
+    executemany: bool
+    # Payload enrichment (when include_payloads is enabled)
+    payloads: NotRequired[list[PayloadInfo]]
+    request_ref: NotRequired[str | None]
+    request_payload: NotRequired[str | None]
+    response_ref: NotRequired[str | None]
+    response_payload: NotRequired[str | None]
+    request_payload_error: NotRequired[str]
+    response_payload_error: NotRequired[str]
 
 
 class LandscapeJournal:
@@ -45,6 +73,8 @@ class LandscapeJournal:
             self._payload_store = FilesystemPayloadStore(Path(payload_base_path))
         self._lock = Lock()
         self._disabled = False
+        self._consecutive_failures = 0
+        self._total_dropped = 0
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -68,7 +98,7 @@ class LandscapeJournal:
         if not self._is_write_statement(statement):
             return
 
-        record = {
+        record: JournalRecord = {
             "timestamp": now().isoformat(),
             "statement": statement,
             "parameters": self._normalize_parameters(parameters),
@@ -102,20 +132,58 @@ class LandscapeJournal:
         if _BUFFER_KEY in conn.info:
             conn.info[_BUFFER_KEY].clear()
 
-    def _append_records(self, records: list[dict[str, Any]]) -> None:
+    # After this many consecutive failures, disable until next success
+    _MAX_CONSECUTIVE_FAILURES = 5
+
+    def _append_records(self, records: list[JournalRecord]) -> None:
         payload = "\n".join(self._serialize_record(record) for record in records) + "\n"
         with self._lock:
+            if self._disabled:
+                # Periodically attempt recovery instead of staying silent forever
+                self._total_dropped += len(records)
+                if self._total_dropped % 100 == 0:
+                    logger.warning(
+                        "Landscape journal still disabled after %d consecutive failures, %d records dropped",
+                        self._consecutive_failures,
+                        self._total_dropped,
+                    )
+                    # Attempt recovery
+                    self._disabled = False
+                else:
+                    return
+
             try:
                 with self._path.open("a", encoding="utf-8") as handle:
                     handle.write(payload)
+                if self._consecutive_failures > 0:
+                    logger.info(
+                        "Landscape journal recovered after %d consecutive failures (%d records were dropped)",
+                        self._consecutive_failures,
+                        self._total_dropped,
+                    )
+                self._consecutive_failures = 0
             except Exception as exc:
-                logger.error("Landscape journal write failed: %s", exc)
+                self._consecutive_failures += 1
+                self._total_dropped += len(records)
+                logger.error(
+                    "Landscape journal write failed (attempt %d/%d): %s",
+                    self._consecutive_failures,
+                    self._MAX_CONSECUTIVE_FAILURES,
+                    exc,
+                )
                 if self._fail_on_error:
                     raise
-                self._disabled = True
+                if self._consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        "Landscape journal disabled after %d consecutive failures. "
+                        "Will retry every 100 dropped records. %d records dropped so far.",
+                        self._consecutive_failures,
+                        self._total_dropped,
+                    )
+                    self._disabled = True
 
     @staticmethod
-    def _serialize_record(record: dict[str, Any]) -> str:
+    def _serialize_record(record: JournalRecord) -> str:
         safe = serialize_datetime(record)
         return json.dumps(safe, default=str)
 
@@ -134,29 +202,36 @@ class LandscapeJournal:
         sql = statement.lstrip().upper()
         return sql.startswith("INSERT") or sql.startswith("UPDATE") or sql.startswith("DELETE") or sql.startswith("REPLACE")
 
-    def _enrich_with_payloads(self, record: dict[str, Any], statement: str, parameters: Any, executemany: bool) -> None:
+    def _enrich_with_payloads(self, record: JournalRecord, statement: str, parameters: Any, executemany: bool) -> None:
         table, columns = self._parse_insert_statement(statement)
         if table != "calls" or columns is None or self._payload_store is None:
             return
 
         if executemany:
-            payloads: list[dict[str, Any]] = []
+            enrichments: list[PayloadInfo] = []
             for param_set in parameters:
-                payloads.append(self._payloads_for_params(columns, param_set))
-            record["payloads"] = payloads
+                enrichments.append(self._payloads_for_params(columns, param_set))
+            record["payloads"] = enrichments
         else:
             payload_dict = self._payloads_for_params(columns, parameters)
-            record.update(payload_dict)
+            record["request_ref"] = payload_dict["request_ref"]
+            record["request_payload"] = payload_dict["request_payload"]
+            record["response_ref"] = payload_dict["response_ref"]
+            record["response_payload"] = payload_dict["response_payload"]
+            if "request_payload_error" in payload_dict:
+                record["request_payload_error"] = payload_dict["request_payload_error"]
+            if "response_payload_error" in payload_dict:
+                record["response_payload_error"] = payload_dict["response_payload_error"]
 
-    def _payloads_for_params(self, columns: list[str], params: Any) -> dict[str, Any]:
+    def _payloads_for_params(self, columns: list[str], params: Any) -> PayloadInfo:
         values = self._columns_to_values(columns, params)
-        request_ref = values["request_ref"]
-        response_ref = values["response_ref"]
+        request_ref = cast("str | None", values["request_ref"])
+        response_ref = cast("str | None", values["response_ref"])
 
         request_payload, request_error = self._load_payload(request_ref)
         response_payload, response_error = self._load_payload(response_ref)
 
-        payloads: dict[str, Any] = {
+        result: PayloadInfo = {
             "request_ref": request_ref,
             "request_payload": request_payload,
             "response_ref": response_ref,
@@ -164,11 +239,11 @@ class LandscapeJournal:
         }
 
         if request_error is not None:
-            payloads["request_payload_error"] = request_error
+            result["request_payload_error"] = request_error
         if response_error is not None:
-            payloads["response_payload_error"] = response_error
+            result["response_payload_error"] = response_error
 
-        return payloads
+        return result
 
     def _load_payload(self, ref: str | None) -> tuple[str | None, str | None]:
         if ref is None:
@@ -209,7 +284,7 @@ class LandscapeJournal:
         return table, columns
 
     @staticmethod
-    def _columns_to_values(columns: list[str], params: Any) -> dict[str, Any]:
+    def _columns_to_values(columns: list[str], params: Any) -> dict[str, object]:
         if isinstance(params, dict):
             return {col: params[col] for col in columns}
         return dict(zip(columns, params, strict=True))

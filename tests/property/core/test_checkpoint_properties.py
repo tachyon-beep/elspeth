@@ -38,7 +38,7 @@ from elspeth.core.checkpoint import CheckpointCompatibilityValidator, Checkpoint
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table, tokens_table
-from tests.property.conftest import json_primitives, json_values
+from tests.strategies.json import json_primitives, json_values
 
 # =============================================================================
 # Strategies for checkpoint testing
@@ -109,9 +109,9 @@ def setup_checkpoint_prerequisites(
     """Set up all prerequisites for checkpoint creation.
 
     Checkpoints have multiple foreign key constraints:
-    - run_id → runs
-    - token_id → tokens → rows → nodes
-    - (node_id, run_id) → nodes
+    - run_id -> runs
+    - token_id -> tokens -> rows -> nodes
+    - (node_id, run_id) -> nodes
 
     This helper creates the minimum required records.
     """

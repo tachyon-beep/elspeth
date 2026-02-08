@@ -29,7 +29,7 @@ from elspeth.plugins.llm.validation import (
     ValidationSuccess,
     validate_json_object_response,
 )
-from tests.property.conftest import json_primitives
+from tests.strategies.json import json_primitives
 
 # =============================================================================
 # Strategies for generating LLM-like responses

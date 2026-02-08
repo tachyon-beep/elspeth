@@ -1,1 +1,0 @@
-"""Sink plugin tests."""

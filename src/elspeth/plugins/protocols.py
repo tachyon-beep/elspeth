@@ -21,9 +21,9 @@ from elspeth.contracts import Determinism
 
 if TYPE_CHECKING:
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
-    from elspeth.plugins.context import PluginContext
     from elspeth.plugins.results import GateResult, TransformResult
 
 
@@ -203,7 +203,8 @@ class TransformProtocol(Protocol):
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig set this from config.
     # None means: transform doesn't return errors, OR errors are bugs.
-    _on_error: str | None
+    @property
+    def on_error(self) -> str | None: ...
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
@@ -302,7 +303,8 @@ class BatchTransformProtocol(Protocol):
     creates_tokens: bool
 
     # Error routing configuration (WP-11.99b)
-    _on_error: str | None
+    @property
+    def on_error(self) -> str | None: ...
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""

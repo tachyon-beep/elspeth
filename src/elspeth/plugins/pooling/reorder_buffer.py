@@ -143,16 +143,21 @@ class ReorderBuffer[T]:
                     break
 
                 # Entry is complete and all previous are emitted
+                # Narrow Optional types: is_complete guarantees these are set
+                assert entry.complete_timestamp is not None
+                assert entry.complete_index is not None
+                assert entry.result is not None
+
                 # Calculate buffer wait time (time between completion and emission)
-                buffer_wait_ms = (now - entry.complete_timestamp) * 1000  # type: ignore[operator]
+                buffer_wait_ms = (now - entry.complete_timestamp) * 1000
 
                 ready.append(
                     BufferEntry(
                         submit_index=entry.submit_index,
-                        complete_index=entry.complete_index,  # type: ignore[arg-type]
-                        result=entry.result,  # type: ignore[arg-type]
+                        complete_index=entry.complete_index,
+                        result=entry.result,
                         submit_timestamp=entry.submit_timestamp,
-                        complete_timestamp=entry.complete_timestamp,  # type: ignore[arg-type]
+                        complete_timestamp=entry.complete_timestamp,
                         buffer_wait_ms=buffer_wait_ms,
                     )
                 )

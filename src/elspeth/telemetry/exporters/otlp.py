@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
+from dataclasses import fields as dc_fields
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -60,9 +61,10 @@ def _derive_span_id(event: TelemetryEvent) -> int:
     # Build a unique identifier from event-specific fields
     id_parts = [type(event).__name__, str(event.timestamp.timestamp())]
 
-    # Include identifying fields if present
+    # Include identifying fields if present on this event subtype
+    event_field_names = {f.name for f in dc_fields(event)}
     for field_name in ("token_id", "state_id", "row_id", "node_id"):
-        if hasattr(event, field_name):
+        if field_name in event_field_names:
             value = getattr(event, field_name)
             if value is not None:
                 id_parts.append(str(value))
@@ -365,7 +367,7 @@ class OTLPExporter:
 try:
     from opentelemetry.sdk.trace import ReadableSpan as _ReadableSpanBase
 except ImportError:
-    _ReadableSpanBase = object  # type: ignore[misc,assignment]
+    _ReadableSpanBase = object  # type: ignore[misc,assignment]  # fallback when opentelemetry is not installed
 
 
 class _SyntheticReadableSpan(_ReadableSpanBase):

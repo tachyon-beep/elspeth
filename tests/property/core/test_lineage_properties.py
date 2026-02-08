@@ -33,7 +33,7 @@ import pytest
 from hypothesis import given, settings
 
 from elspeth.core.landscape.lineage import LineageResult, explain
-from tests.property.conftest import id_strings, sink_names
+from tests.strategies.ids import id_strings, sink_names
 
 # =============================================================================
 # explain() Input Validation Property Tests
@@ -115,7 +115,7 @@ class TestExplainInputValidationProperties:
 
 
 class TestExplainRowResolutionProperties:
-    """Property tests for row_id → token_id resolution logic."""
+    """Property tests for row_id -> token_id resolution logic."""
 
     @given(run_id=id_strings, row_id=id_strings)
     @settings(max_examples=50)

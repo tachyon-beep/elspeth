@@ -16,7 +16,9 @@ Usage:
 import argparse
 import json
 import logging
+import re
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -24,16 +26,41 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from elspeth.contracts.enums import CallStatus
+from elspeth.contracts.enums import CallStatus, RoutingMode
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.formatters import dataclass_to_dict, serialize_datetime
 from elspeth.core.landscape.lineage import explain
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.mcp.types import (
+    CallDetail,
+    ContractViolationsReport,
+    DAGStructureReport,
+    DiagnosticReport,
+    ErrorAnalysisReport,
+    ErrorResult,
+    ErrorsReport,
+    ExplainTokenResult,
+    FailureContextReport,
+    FieldExplanation,
+    FieldNotFoundError,
+    LLMUsageReport,
+    NodeDetail,
+    NodeStateRecord,
+    OperationCallRecord,
+    OperationRecord,
+    OutcomeAnalysisReport,
+    PerformanceReport,
+    RecentActivityReport,
+    RowRecord,
+    RunContractReport,
+    RunDetail,
+    RunRecord,
+    RunSummaryReport,
+    SchemaDescription,
+    TokenRecord,
+)
 
 logger = logging.getLogger(__name__)
-
-# JSON-serializable result type
-JsonResult = dict[str, Any] | list[dict[str, Any]]
 
 
 # Use shared implementations from landscape.formatters
@@ -57,7 +84,7 @@ class LandscapeAnalyzer:
         """Close database connection."""
         self._db.close()
 
-    def list_runs(self, limit: int = 50, status: str | None = None) -> list[dict[str, Any]]:
+    def list_runs(self, limit: int = 50, status: str | None = None) -> list[RunRecord]:
         """List pipeline runs.
 
         Args:
@@ -98,7 +125,7 @@ class LandscapeAnalyzer:
             for row in rows
         ]
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
+    def get_run(self, run_id: str) -> RunDetail | None:
         """Get details of a specific run.
 
         Args:
@@ -110,9 +137,9 @@ class LandscapeAnalyzer:
         run = self._recorder.get_run(run_id)
         if run is None:
             return None
-        return cast(dict[str, Any], _dataclass_to_dict(run))
+        return cast(RunDetail, _dataclass_to_dict(run))
 
-    def get_run_summary(self, run_id: str) -> dict[str, Any]:
+    def get_run_summary(self, run_id: str) -> RunSummaryReport | ErrorResult:
         """Get summary statistics for a run.
 
         Args:
@@ -241,11 +268,11 @@ class LandscapeAnalyzer:
                 "transform": transform_error_count,
                 "total": validation_error_count + transform_error_count,
             },
-            "outcome_distribution": outcome_distribution,
+            "outcome_distribution": outcome_distribution,  # type: ignore[typeddict-item]  # SA Row attr types
             "avg_state_duration_ms": round(avg_duration, 2) if avg_duration else None,
         }
 
-    def list_rows(self, run_id: str, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    def list_rows(self, run_id: str, limit: int = 100, offset: int = 0) -> list[RowRecord]:
         """List source rows for a run.
 
         Args:
@@ -277,7 +304,7 @@ class LandscapeAnalyzer:
             for row in rows
         ]
 
-    def list_nodes(self, run_id: str) -> list[dict[str, Any]]:
+    def list_nodes(self, run_id: str) -> list[NodeDetail]:
         """List all nodes (plugin instances) for a run.
 
         Args:
@@ -289,7 +316,7 @@ class LandscapeAnalyzer:
         nodes = self._recorder.get_nodes(run_id)
         return [_dataclass_to_dict(node) for node in nodes]
 
-    def list_tokens(self, run_id: str, row_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list_tokens(self, run_id: str, row_id: str | None = None, limit: int = 100) -> list[TokenRecord]:
         """List tokens for a run or specific row.
 
         Args:
@@ -337,7 +364,7 @@ class LandscapeAnalyzer:
         operation_type: str | None = None,
         status: str | None = None,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> list[OperationRecord]:
         """List source/sink operations for a run.
 
         Operations are the source/sink equivalent of node_states. They track
@@ -410,7 +437,7 @@ class LandscapeAnalyzer:
             for row in rows
         ]
 
-    def get_operation_calls(self, operation_id: str) -> list[dict[str, Any]]:
+    def get_operation_calls(self, operation_id: str) -> list[OperationCallRecord]:
         """Get external calls for a source/sink operation.
 
         Unlike get_calls() which takes a state_id for transform calls, this
@@ -451,7 +478,7 @@ class LandscapeAnalyzer:
         token_id: str | None = None,
         row_id: str | None = None,
         sink: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> ExplainTokenResult | ErrorResult:
         """Get complete lineage for a token or row.
 
         Args:
@@ -466,14 +493,37 @@ class LandscapeAnalyzer:
         result = explain(self._recorder, run_id, token_id=token_id, row_id=row_id, sink=sink)
         if result is None:
             return {"error": "Token or row not found, or no terminal tokens exist yet"}
-        return cast(dict[str, Any], _dataclass_to_dict(result))
+        result_dict = cast(ExplainTokenResult, _dataclass_to_dict(result))
+
+        # Annotate routing_events with flow_type convenience field
+        for event in result_dict.get("routing_events", []):
+            event["flow_type"] = "divert" if event.get("mode") == "divert" else "normal"
+
+        # Build divert_summary from routing events
+        divert_events = [e for e in result_dict.get("routing_events", []) if e.get("mode") == "divert"]
+
+        if divert_events:
+            divert_event = divert_events[-1]  # Last divert event is the terminal one
+            edge = self._recorder.get_edge(divert_event["edge_id"])
+            result_dict["divert_summary"] = {
+                "diverted": True,
+                "divert_type": "quarantine" if "__quarantine__" in edge.label else "error",
+                "from_node": edge.from_node_id,
+                "to_sink": edge.to_node_id,
+                "edge_label": edge.label,
+                "reason_hash": divert_event.get("reason_hash"),
+            }
+        else:
+            result_dict["divert_summary"] = None
+
+        return result_dict
 
     def get_errors(
         self,
         run_id: str,
         error_type: str = "all",
         limit: int = 100,
-    ) -> dict[str, Any]:
+    ) -> ErrorsReport:
         """Get validation and/or transform errors for a run.
 
         Args:
@@ -488,7 +538,7 @@ class LandscapeAnalyzer:
 
         from elspeth.core.landscape.schema import transform_errors_table, validation_errors_table
 
-        result: dict[str, Any] = {"run_id": run_id}
+        result: ErrorsReport = {"run_id": run_id}  # type: ignore[typeddict-item]  # incrementally populated below
 
         with self._db.connection() as conn:
             if error_type in ("all", "validation"):
@@ -539,7 +589,7 @@ class LandscapeAnalyzer:
         node_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeStateRecord]:
         """Get node states (processing records) for a run.
 
         Args:
@@ -590,7 +640,7 @@ class LandscapeAnalyzer:
             for row in rows
         ]
 
-    def get_calls(self, state_id: str) -> list[dict[str, Any]]:
+    def get_calls(self, state_id: str) -> list[CallDetail]:
         """Get external calls for a node state.
 
         Args:
@@ -620,10 +670,11 @@ class LandscapeAnalyzer:
         if not sql_normalized.startswith("SELECT"):
             raise ValueError("Only SELECT queries are allowed")
 
-        # Reject dangerous keywords even in SELECT
+        # Reject dangerous keywords even in SELECT (word-boundary match to avoid
+        # false positives like created_at matching CREATE, updated_at matching UPDATE)
         dangerous = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "GRANT", "REVOKE"]
         for keyword in dangerous:
-            if keyword in sql_normalized:
+            if re.search(rf"\b{keyword}\b", sql_normalized):
                 raise ValueError(f"Query contains forbidden keyword: {keyword}")
 
         from sqlalchemy import text
@@ -635,7 +686,7 @@ class LandscapeAnalyzer:
 
         return [dict(zip(columns, [_serialize_datetime(v) for v in row], strict=False)) for row in rows]
 
-    def get_dag_structure(self, run_id: str) -> dict[str, Any]:
+    def get_dag_structure(self, run_id: str) -> DAGStructureReport | ErrorResult:
         """Get the DAG structure for a run as a structured object.
 
         Returns nodes, edges, and a mermaid diagram for visualization.
@@ -669,6 +720,7 @@ class LandscapeAnalyzer:
                 "to": e.to_node_id,
                 "label": e.label,
                 "mode": e.default_mode.value,
+                "flow_type": "divert" if e.default_mode == RoutingMode.DIVERT else "normal",
             }
             for e in edges
         ]
@@ -679,19 +731,24 @@ class LandscapeAnalyzer:
             label = f"{n.plugin_name}[{n.node_type.value}]"
             lines.append(f'    {n.node_id[:8]}["{label}"]')
         for e in edges:
-            arrow = "-->" if e.label == "continue" else f"-->|{e.label}|"
+            if e.default_mode == RoutingMode.DIVERT:
+                arrow = f"-.->|{e.label}|"
+            elif e.label == "continue":
+                arrow = "-->"
+            else:
+                arrow = f"-->|{e.label}|"
             lines.append(f"    {e.from_node_id[:8]} {arrow} {e.to_node_id[:8]}")
 
         return {
             "run_id": run_id,
-            "nodes": node_list,
-            "edges": edge_list,
+            "nodes": node_list,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "edges": edge_list,  # type: ignore[typeddict-item]  # functional TypedDict with "from" keyword
             "node_count": len(nodes),
             "edge_count": len(edges),
             "mermaid": "\n".join(lines),
         }
 
-    def get_performance_report(self, run_id: str) -> dict[str, Any]:
+    def get_performance_report(self, run_id: str) -> PerformanceReport | ErrorResult:
         """Get performance analysis for a run.
 
         Identifies slow nodes, outliers, and processing bottlenecks.
@@ -777,12 +834,12 @@ class LandscapeAnalyzer:
             "run_id": run_id,
             "total_processing_time_ms": total_time_ms,
             "node_count": len(node_performance),
-            "bottlenecks": bottlenecks,
-            "high_variance_nodes": high_variance,
-            "node_performance": node_performance,
+            "bottlenecks": bottlenecks,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "high_variance_nodes": high_variance,  # type: ignore[typeddict-item]
+            "node_performance": node_performance,  # type: ignore[typeddict-item]
         }
 
-    def get_error_analysis(self, run_id: str) -> dict[str, Any]:
+    def get_error_analysis(self, run_id: str) -> ErrorAnalysisReport | ErrorResult:
         """Analyze errors for a run, grouping by type and identifying patterns.
 
         Args:
@@ -859,19 +916,19 @@ class LandscapeAnalyzer:
 
         return {
             "run_id": run_id,
-            "validation_errors": {
+            "validation_errors": {  # type: ignore[typeddict-item]  # structurally correct nested dict literals
                 "total": sum(r["count"] for r in validation_summary),
-                "by_source": validation_summary,
+                "by_source": validation_summary,  # type: ignore[typeddict-item]
                 "sample_data": [json.loads(r[0]) if r[0] else None for r in sample_val],
             },
-            "transform_errors": {
-                "total": sum(r["count"] for r in transform_summary),
-                "by_transform": transform_summary,
+            "transform_errors": {  # type: ignore[typeddict-item]  # structurally correct nested dict literals
+                "total": sum(r["count"] for r in transform_summary),  # type: ignore[misc]  # SA Row attr types
+                "by_transform": transform_summary,  # type: ignore[typeddict-item]
                 "sample_details": [json.loads(r[0]) if r[0] else None for r in sample_trans],
             },
         }
 
-    def get_llm_usage_report(self, run_id: str) -> dict[str, Any]:
+    def get_llm_usage_report(self, run_id: str) -> LLMUsageReport | ErrorResult:
         """Get LLM usage statistics for a run.
 
         Analyzes external calls that were LLM API calls.
@@ -983,7 +1040,7 @@ class LandscapeAnalyzer:
                     "total_latency_ms": 0,
                 }
             stats = llm_by_plugin[plugin]
-            call_count: int = row.count  # type: ignore[assignment]
+            call_count: int = row.count  # type: ignore[assignment]  # SA Row attribute from COUNT() aggregate; typed as Any
             stats["total_calls"] += call_count
             if row.status == CallStatus.SUCCESS.value:
                 stats["successful"] += call_count
@@ -1001,16 +1058,16 @@ class LandscapeAnalyzer:
 
         return {
             "run_id": run_id,
-            "call_types": call_type_summary,
+            "call_types": call_type_summary,  # type: ignore[typeddict-item]  # SA Row attr types
             "llm_summary": {
                 "total_calls": total_llm_calls,
                 "total_latency_ms": total_llm_latency,
                 "avg_latency_ms": round(total_llm_latency / total_llm_calls, 2) if total_llm_calls > 0 else None,
             },
-            "by_plugin": llm_by_plugin,
+            "by_plugin": llm_by_plugin,  # type: ignore[typeddict-item]  # incrementally-built dict
         }
 
-    def describe_schema(self) -> dict[str, Any]:
+    def describe_schema(self) -> SchemaDescription:
         """Describe the database schema for ad-hoc query exploration.
 
         Returns:
@@ -1053,12 +1110,12 @@ class LandscapeAnalyzer:
             }
 
         return {
-            "tables": tables,
+            "tables": tables,  # type: ignore[typeddict-item]  # nested dict literals from SA inspector
             "table_count": len(tables),
             "hint": "Use the 'query' tool with SELECT statements to explore data",
         }
 
-    def get_outcome_analysis(self, run_id: str) -> dict[str, Any]:
+    def get_outcome_analysis(self, run_id: str) -> OutcomeAnalysisReport | ErrorResult:
         """Analyze token outcomes for a run.
 
         Shows terminal state distribution, fork/join patterns, and sink routing.
@@ -1142,13 +1199,13 @@ class LandscapeAnalyzer:
                 "fork_operations": fork_count,
                 "join_operations": join_count,
             },
-            "outcome_distribution": outcomes,
-            "sink_distribution": sinks,
+            "outcome_distribution": outcomes,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "sink_distribution": sinks,  # type: ignore[typeddict-item]  # SA Row attr types
         }
 
     # === Emergency Diagnostic Tools (for when everything is on fire) ===
 
-    def diagnose(self) -> dict[str, Any]:
+    def diagnose(self) -> DiagnosticReport:
         """Emergency diagnostic: What's broken right now?
 
         Scans for failed runs, high error rates, stuck runs, and recent problems.
@@ -1317,8 +1374,8 @@ class LandscapeAnalyzer:
 
         return {
             "status": "CRITICAL" if any(p["severity"] == "CRITICAL" for p in problems) else "OK" if not problems else "WARNING",
-            "problems": problems,
-            "recent_runs": recent_summary,
+            "problems": problems,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "recent_runs": recent_summary,  # type: ignore[typeddict-item]
             "recommendations": recommendations,
             "next_steps": [
                 "Use list_runs() to see all runs with their status",
@@ -1328,7 +1385,7 @@ class LandscapeAnalyzer:
             ],
         }
 
-    def get_failure_context(self, run_id: str, limit: int = 10) -> dict[str, Any]:
+    def get_failure_context(self, run_id: str, limit: int = 10) -> FailureContextReport | ErrorResult:
         """Get comprehensive context about failures in a run.
 
         Use this when investigating why a run failed. Returns failed node states,
@@ -1451,9 +1508,9 @@ class LandscapeAnalyzer:
         return {
             "run_id": run_id,
             "run_status": run.status.value,
-            "failed_node_states": failed_state_list,
-            "transform_errors": transform_error_list,
-            "validation_errors": validation_error_list,
+            "failed_node_states": failed_state_list,  # type: ignore[typeddict-item]  # structurally correct dict literals
+            "transform_errors": transform_error_list,  # type: ignore[typeddict-item]
+            "validation_errors": validation_error_list,  # type: ignore[typeddict-item]
             "patterns": {
                 "plugins_failing": plugins_with_failures,
                 "has_retries": has_retries,
@@ -1468,7 +1525,7 @@ class LandscapeAnalyzer:
             ],
         }
 
-    def get_recent_activity(self, minutes: int = 60) -> dict[str, Any]:
+    def get_recent_activity(self, minutes: int = 60) -> RecentActivityReport:
         """Get recent pipeline activity timeline.
 
         Use this to understand what happened recently when investigating issues.
@@ -1504,35 +1561,45 @@ class LandscapeAnalyzer:
                 .order_by(runs_table.c.started_at.desc())
             ).fetchall()
 
-            # Get processing stats for each run
-            run_stats = []
-            for run in recent_runs:
-                row_count = (
-                    conn.execute(select(func.count()).select_from(rows_table).where(rows_table.c.run_id == run.run_id)).scalar() or 0
-                )
+            if not recent_runs:
+                run_stats: list[dict[str, Any]] = []
+            else:
+                # Collect run IDs for batch queries
+                run_ids = [run.run_id for run in recent_runs]
 
-                state_count = (
-                    conn.execute(
-                        select(func.count()).select_from(node_states_table).where(node_states_table.c.run_id == run.run_id)
-                    ).scalar()
-                    or 0
-                )
+                # Batch query: Get row counts grouped by run_id (N+1 fix)
+                row_counts_result = conn.execute(
+                    select(rows_table.c.run_id, func.count().label("cnt"))
+                    .where(rows_table.c.run_id.in_(run_ids))
+                    .group_by(rows_table.c.run_id)
+                ).fetchall()
+                row_counts: dict[str, int] = {r.run_id: r.cnt for r in row_counts_result}
 
-                duration = None
-                if run.started_at and run.completed_at:
-                    duration = (run.completed_at - run.started_at).total_seconds()
+                # Batch query: Get state counts grouped by run_id (N+1 fix)
+                state_counts_result = conn.execute(
+                    select(node_states_table.c.run_id, func.count().label("cnt"))
+                    .where(node_states_table.c.run_id.in_(run_ids))
+                    .group_by(node_states_table.c.run_id)
+                ).fetchall()
+                state_counts: dict[str, int] = {r.run_id: r.cnt for r in state_counts_result}
 
-                run_stats.append(
-                    {
-                        "run_id": run.run_id[:12] + "...",
-                        "full_run_id": run.run_id,
-                        "status": run.status,
-                        "started": run.started_at.isoformat() if run.started_at else None,
-                        "duration_seconds": duration,
-                        "rows_processed": row_count,
-                        "node_executions": state_count,
-                    }
-                )
+                run_stats = []
+                for run in recent_runs:
+                    duration = None
+                    if run.started_at and run.completed_at:
+                        duration = (run.completed_at - run.started_at).total_seconds()
+
+                    run_stats.append(
+                        {
+                            "run_id": run.run_id[:12] + "...",
+                            "full_run_id": run.run_id,
+                            "status": run.status,
+                            "started": run.started_at.isoformat() if run.started_at else None,
+                            "duration_seconds": duration,
+                            "rows_processed": row_counts.get(run.run_id, 0),
+                            "node_executions": state_counts.get(run.run_id, 0),
+                        }
+                    )
 
         status_counts: dict[str, int] = {}
         for r in run_stats:
@@ -1542,12 +1609,12 @@ class LandscapeAnalyzer:
             "time_window_minutes": minutes,
             "total_runs": len(run_stats),
             "status_summary": status_counts,
-            "runs": run_stats,
+            "runs": run_stats,  # type: ignore[typeddict-item]  # structurally correct dict literals
         }
 
     # === Schema Contract Tools (Phase 5: Unified Schema Contracts) ===
 
-    def get_run_contract(self, run_id: str) -> dict[str, Any]:
+    def get_run_contract(self, run_id: str) -> RunContractReport | ErrorResult:
         """Get schema contract for a run.
 
         Shows the source schema contract with field resolution:
@@ -1585,12 +1652,12 @@ class LandscapeAnalyzer:
             "run_id": run_id,
             "mode": contract.mode,
             "locked": contract.locked,
-            "fields": fields,
+            "fields": fields,  # type: ignore[typeddict-item]  # structurally correct dict literals
             "field_count": len(fields),
             "version_hash": contract.version_hash(),
         }
 
-    def explain_field(self, run_id: str, field_name: str) -> dict[str, Any]:
+    def explain_field(self, run_id: str, field_name: str) -> FieldExplanation | ErrorResult | FieldNotFoundError:
         """Trace a field's provenance through the pipeline.
 
         Shows how a field was:
@@ -1637,7 +1704,7 @@ class LandscapeAnalyzer:
             "contract_mode": contract.mode,
         }
 
-    def list_contract_violations(self, run_id: str, limit: int = 100) -> dict[str, Any]:
+    def list_contract_violations(self, run_id: str, limit: int = 100) -> ContractViolationsReport | ErrorResult:
         """List contract violations for a run.
 
         Shows validation errors with contract details:
@@ -1710,9 +1777,154 @@ class LandscapeAnalyzer:
         return {
             "run_id": run_id,
             "total_violations": total_count,
-            "violations": violations,
+            "violations": violations,  # type: ignore[typeddict-item]  # structurally correct dict literals
             "limit": limit,
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MCP Argument Validation (Tier 3 boundary)
+#
+# The MCP SDK delivers tool arguments as dict[str, Any]. This is a Tier 3
+# (external) trust boundary — the MCP client can send any JSON. We validate
+# types immediately rather than letting bad types travel through to SQLAlchemy
+# or analyzer methods.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True, slots=True)
+class _ArgSpec:
+    """Declarative schema for one MCP tool's arguments."""
+
+    required_str: tuple[str, ...] = ()
+    optional_str: tuple[str, ...] = ()  # defaults to None
+    optional_str_defaults: tuple[tuple[str, str], ...] = ()  # (name, default)
+    optional_int: tuple[tuple[str, int], ...] = ()  # (name, default)
+    optional_dict: tuple[str, ...] = ()  # defaults to None
+
+
+_TOOL_ARGS: dict[str, _ArgSpec] = {
+    # --- Core Query Tools ---
+    "list_runs": _ArgSpec(
+        optional_int=(("limit", 50),),
+        optional_str=("status",),
+    ),
+    "get_run": _ArgSpec(required_str=("run_id",)),
+    "get_run_summary": _ArgSpec(required_str=("run_id",)),
+    "list_nodes": _ArgSpec(required_str=("run_id",)),
+    "list_rows": _ArgSpec(
+        required_str=("run_id",),
+        optional_int=(("limit", 100), ("offset", 0)),
+    ),
+    "list_tokens": _ArgSpec(
+        required_str=("run_id",),
+        optional_str=("row_id",),
+        optional_int=(("limit", 100),),
+    ),
+    "list_operations": _ArgSpec(
+        required_str=("run_id",),
+        optional_str=("operation_type", "status"),
+        optional_int=(("limit", 100),),
+    ),
+    "get_operation_calls": _ArgSpec(required_str=("operation_id",)),
+    "explain_token": _ArgSpec(
+        required_str=("run_id",),
+        optional_str=("token_id", "row_id", "sink"),
+    ),
+    "get_errors": _ArgSpec(
+        required_str=("run_id",),
+        optional_str_defaults=(("error_type", "all"),),
+        optional_int=(("limit", 100),),
+    ),
+    "get_node_states": _ArgSpec(
+        required_str=("run_id",),
+        optional_str=("node_id", "status"),
+        optional_int=(("limit", 100),),
+    ),
+    "get_calls": _ArgSpec(required_str=("state_id",)),
+    "query": _ArgSpec(
+        required_str=("sql",),
+        optional_dict=("params",),
+    ),
+    # --- Precomputed Analysis Tools ---
+    "get_dag_structure": _ArgSpec(required_str=("run_id",)),
+    "get_performance_report": _ArgSpec(required_str=("run_id",)),
+    "get_error_analysis": _ArgSpec(required_str=("run_id",)),
+    "get_llm_usage_report": _ArgSpec(required_str=("run_id",)),
+    "describe_schema": _ArgSpec(),
+    "get_outcome_analysis": _ArgSpec(required_str=("run_id",)),
+    # --- Emergency Diagnostic Tools ---
+    "diagnose": _ArgSpec(),
+    "get_failure_context": _ArgSpec(
+        required_str=("run_id",),
+        optional_int=(("limit", 10),),
+    ),
+    "get_recent_activity": _ArgSpec(
+        optional_int=(("minutes", 60),),
+    ),
+    # --- Schema Contract Tools ---
+    "get_run_contract": _ArgSpec(required_str=("run_id",)),
+    "explain_field": _ArgSpec(required_str=("run_id", "field_name")),
+    "list_contract_violations": _ArgSpec(
+        required_str=("run_id",),
+        optional_int=(("limit", 100),),
+    ),
+}
+
+
+def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Validate MCP tool arguments at the Tier 3 boundary.
+
+    Checks required fields exist, validates types (str, int, dict), and
+    applies defaults for optional fields. Returns a new dict with only
+    the declared fields, preventing unexpected keys from leaking through.
+
+    Raises:
+        ValueError: Missing required field or unknown tool.
+        TypeError: Field has wrong type.
+    """
+    spec = _TOOL_ARGS.get(name)
+    if spec is None:
+        raise ValueError(f"Unknown tool: {name}")
+
+    validated: dict[str, Any] = {}
+
+    for fname in spec.required_str:
+        if fname not in arguments:
+            raise ValueError(f"'{name}' requires '{fname}'")
+        val = arguments[fname]
+        if not isinstance(val, str):
+            raise TypeError(f"'{name}': '{fname}' must be string, got {type(val).__name__}")
+        validated[fname] = val
+
+    for fname in spec.optional_str:
+        val = arguments.get(fname)
+        if val is not None and not isinstance(val, str):
+            raise TypeError(f"'{name}': '{fname}' must be string or null, got {type(val).__name__}")
+        validated[fname] = val
+
+    for fname, str_default in spec.optional_str_defaults:
+        val = arguments.get(fname, str_default)
+        if not isinstance(val, str):
+            raise TypeError(f"'{name}': '{fname}' must be string, got {type(val).__name__}")
+        validated[fname] = val
+
+    for fname, int_default in spec.optional_int:
+        val = arguments.get(fname, int_default)
+        # JSON has no int/float distinction — accept both, convert to int
+        if isinstance(val, float) and val == int(val):
+            val = int(val)
+        if not isinstance(val, int) or isinstance(val, bool):
+            raise TypeError(f"'{name}': '{fname}' must be integer, got {type(val).__name__}")
+        validated[fname] = val
+
+    for fname in spec.optional_dict:
+        val = arguments.get(fname)
+        if val is not None and not isinstance(val, dict):
+            raise TypeError(f"'{name}': '{fname}' must be object or null, got {type(val).__name__}")
+        validated[fname] = val
+
+    return validated
 
 
 def create_server(database_url: str) -> Server:
@@ -1727,7 +1939,7 @@ def create_server(database_url: str) -> Server:
     server = Server("elspeth-landscape")
     analyzer = LandscapeAnalyzer(database_url)
 
-    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]
+    @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def list_tools() -> list[Tool]:
         """List available analysis tools."""
         return [
@@ -2044,109 +2256,119 @@ def create_server(database_url: str) -> Server:
             ),
         ]
 
-    @server.call_tool()  # type: ignore[misc, untyped-decorator]
+    @server.call_tool()  # type: ignore[misc, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-        """Handle tool calls."""
+        """Handle tool calls.
+
+        Arguments are validated at the Tier 3 boundary before dispatch.
+        ``_validate_tool_args`` checks required fields, types, and defaults.
+        """
         try:
+            # Validate arguments at the Tier 3 boundary — immediately,
+            # before any of the external data travels into analyzer methods.
+            args = _validate_tool_args(name, arguments)
+
             result: Any
             if name == "list_runs":
                 result = analyzer.list_runs(
-                    limit=arguments.get("limit", 50),
-                    status=arguments.get("status"),
+                    limit=args["limit"],
+                    status=args["status"],
                 )
             elif name == "get_run":
-                result = analyzer.get_run(arguments["run_id"])
+                result = analyzer.get_run(args["run_id"])
             elif name == "get_run_summary":
-                result = analyzer.get_run_summary(arguments["run_id"])
+                result = analyzer.get_run_summary(args["run_id"])
             elif name == "list_nodes":
-                result = analyzer.list_nodes(arguments["run_id"])
+                result = analyzer.list_nodes(args["run_id"])
             elif name == "list_rows":
                 result = analyzer.list_rows(
-                    run_id=arguments["run_id"],
-                    limit=arguments.get("limit", 100),
-                    offset=arguments.get("offset", 0),
+                    run_id=args["run_id"],
+                    limit=args["limit"],
+                    offset=args["offset"],
                 )
             elif name == "list_tokens":
                 result = analyzer.list_tokens(
-                    run_id=arguments["run_id"],
-                    row_id=arguments.get("row_id"),
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    row_id=args["row_id"],
+                    limit=args["limit"],
                 )
             elif name == "list_operations":
                 result = analyzer.list_operations(
-                    run_id=arguments["run_id"],
-                    operation_type=arguments.get("operation_type"),
-                    status=arguments.get("status"),
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    operation_type=args["operation_type"],
+                    status=args["status"],
+                    limit=args["limit"],
                 )
             elif name == "get_operation_calls":
-                result = analyzer.get_operation_calls(arguments["operation_id"])
+                result = analyzer.get_operation_calls(args["operation_id"])
             elif name == "explain_token":
                 result = analyzer.explain_token(
-                    run_id=arguments["run_id"],
-                    token_id=arguments.get("token_id"),
-                    row_id=arguments.get("row_id"),
-                    sink=arguments.get("sink"),
+                    run_id=args["run_id"],
+                    token_id=args["token_id"],
+                    row_id=args["row_id"],
+                    sink=args["sink"],
                 )
             elif name == "get_errors":
                 result = analyzer.get_errors(
-                    run_id=arguments["run_id"],
-                    error_type=arguments.get("error_type", "all"),
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    error_type=args["error_type"],
+                    limit=args["limit"],
                 )
             elif name == "get_node_states":
                 result = analyzer.get_node_states(
-                    run_id=arguments["run_id"],
-                    node_id=arguments.get("node_id"),
-                    status=arguments.get("status"),
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    node_id=args["node_id"],
+                    status=args["status"],
+                    limit=args["limit"],
                 )
             elif name == "get_calls":
-                result = analyzer.get_calls(arguments["state_id"])
+                result = analyzer.get_calls(args["state_id"])
             elif name == "query":
                 result = analyzer.query(
-                    sql=arguments["sql"],
-                    params=arguments.get("params"),
+                    sql=args["sql"],
+                    params=args["params"],
                 )
             # === Precomputed Analysis Tools ===
             elif name == "get_dag_structure":
-                result = analyzer.get_dag_structure(arguments["run_id"])
+                result = analyzer.get_dag_structure(args["run_id"])
             elif name == "get_performance_report":
-                result = analyzer.get_performance_report(arguments["run_id"])
+                result = analyzer.get_performance_report(args["run_id"])
             elif name == "get_error_analysis":
-                result = analyzer.get_error_analysis(arguments["run_id"])
+                result = analyzer.get_error_analysis(args["run_id"])
             elif name == "get_llm_usage_report":
-                result = analyzer.get_llm_usage_report(arguments["run_id"])
+                result = analyzer.get_llm_usage_report(args["run_id"])
             elif name == "describe_schema":
                 result = analyzer.describe_schema()
             elif name == "get_outcome_analysis":
-                result = analyzer.get_outcome_analysis(arguments["run_id"])
+                result = analyzer.get_outcome_analysis(args["run_id"])
             # === Emergency Diagnostic Tools ===
             elif name == "diagnose":
                 result = analyzer.diagnose()
             elif name == "get_failure_context":
                 result = analyzer.get_failure_context(
-                    run_id=arguments["run_id"],
-                    limit=arguments.get("limit", 10),
+                    run_id=args["run_id"],
+                    limit=args["limit"],
                 )
             elif name == "get_recent_activity":
                 result = analyzer.get_recent_activity(
-                    minutes=arguments.get("minutes", 60),
+                    minutes=args["minutes"],
                 )
             # === Schema Contract Tools ===
             elif name == "get_run_contract":
-                result = analyzer.get_run_contract(arguments["run_id"])
+                result = analyzer.get_run_contract(args["run_id"])
             elif name == "explain_field":
                 result = analyzer.explain_field(
-                    run_id=arguments["run_id"],
-                    field_name=arguments["field_name"],
+                    run_id=args["run_id"],
+                    field_name=args["field_name"],
                 )
             elif name == "list_contract_violations":
                 result = analyzer.list_contract_violations(
-                    run_id=arguments["run_id"],
-                    limit=arguments.get("limit", 100),
+                    run_id=args["run_id"],
+                    limit=args["limit"],
                 )
             else:
+                # _validate_tool_args already raises for unknown tools,
+                # but keep this branch for defense-in-depth.
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
             return [TextContent(type="text", text=json.dumps(result, indent=2))]

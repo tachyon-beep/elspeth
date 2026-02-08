@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from threading import Lock, Semaphore
+from threading import Event, Lock, Semaphore
 from typing import Any
 
 from elspeth.contracts import TransformErrorReason, TransformResult
@@ -122,7 +122,7 @@ class PooledExecutor:
         self._max_concurrent: int = 0
         self._dispatch_delay_at_completion_ms: float = 0.0
 
-        self._shutdown = False
+        self._shutdown_event = Event()
 
     @property
     def pool_size(self) -> int:
@@ -146,6 +146,7 @@ class PooledExecutor:
         with self._stats_lock:
             self._max_concurrent = 0
             self._dispatch_delay_at_completion_ms = 0.0
+        self._throttle.reset_stats()
 
     def _capture_completion_stats(self) -> None:
         """Capture statistics at batch completion."""
@@ -163,7 +164,7 @@ class PooledExecutor:
         Args:
             wait: If True, wait for pending requests to complete
         """
-        self._shutdown = True
+        self._shutdown_event.set()
         self._thread_pool.shutdown(wait=wait)
 
     def get_stats(self) -> dict[str, Any]:
@@ -307,21 +308,22 @@ class PooledExecutor:
         """Wait until we're allowed to dispatch, ensuring global pacing.
 
         Enforces min_dispatch_delay_ms between consecutive dispatches across
-        ALL workers. This prevents burst traffic that can overwhelm APIs.
+        ALL workers. This prevents burst-hammering the API when many workers
+        are ready simultaneously.
 
-        NOTE: This gate only enforces min_dispatch_delay_ms, NOT AIMD delay.
-        AIMD backoff is per-worker retry behavior applied in _execute_single()
-        after capacity errors. Separating these concerns ensures:
-        - Initial dispatches are evenly spaced (global pacing)
-        - Failing workers back off personally (AIMD backoff)
-        - Healthy workers continue at normal pace during pressure
+        NOTE: This gate intentionally uses only the static min_dispatch_delay_ms,
+        NOT the AIMD delay. Congestion backoff is enforced per-worker in the
+        retry sleep (_execute_single). Feeding AIMD into the gate would
+        double-penalize workers (once in retry sleep, again at the gate) and
+        serialize all retries behind a single bottleneck, violating
+        max_capacity_retry_seconds guarantees.
 
         The lock is only held during check-and-update, not during sleep,
         allowing other workers to make progress.
         """
         delay_ms = self._config.min_dispatch_delay_ms
         if delay_ms <= 0:
-            return  # No pacing configured
+            return  # No pacing needed
 
         delay_s = delay_ms / 1000
         total_wait_ms = 0.0
@@ -346,6 +348,10 @@ class PooledExecutor:
                 # Calculate remaining wait time
                 remaining_s = delay_s - time_since_last
                 remaining_ms = remaining_s * 1000
+
+            # Bail out if shutdown was requested (don't block at gate indefinitely)
+            if self._shutdown_event.is_set():
+                break
 
             # Sleep OUTSIDE the lock to allow other workers to check
             time.sleep(remaining_s)
@@ -445,6 +451,16 @@ class PooledExecutor:
                         return (
                             buffer_idx,
                             TransformResult.error(error_data, retryable=False),
+                        )
+
+                    # Bail out if shutdown was requested
+                    if self._shutdown_event.is_set():
+                        return (
+                            buffer_idx,
+                            TransformResult.error(
+                                {"reason": "shutdown_requested", "error": str(e)},
+                                retryable=False,
+                            ),
                         )
 
                     # Trigger throttle backoff

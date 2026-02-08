@@ -120,10 +120,9 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
         db: LandscapeDB instance
         run_id: Run ID to potentially degrade
     """
-    # Use single connection for transactional safety (read-modify-write)
-    query = select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id)
-
     with db.connection() as conn:
+        # Tier 1 validation: verify audit data integrity before mutation
+        query = select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id)
         result = conn.execute(query)
         row = result.fetchone()
 
@@ -132,23 +131,23 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
 
         current_grade = row[0]
 
-        # Tier 1 (Landscape) validation - crash on corrupt audit data
         # Per Data Manifesto: "Bad data in the audit trail = crash immediately"
         if current_grade is None:
             raise ValueError(f"NULL reproducibility_grade for run {run_id} - audit data corruption")
 
         try:
-            grade_enum = ReproducibilityGrade(current_grade)
+            ReproducibilityGrade(current_grade)
         except ValueError:
             raise ValueError(
                 f"Invalid reproducibility_grade '{current_grade}' for run {run_id} - "
                 f"expected one of {[g.value for g in ReproducibilityGrade]}"
             ) from None
 
-        # Only REPLAY_REPRODUCIBLE needs to degrade
-        if grade_enum == ReproducibilityGrade.REPLAY_REPRODUCIBLE:
-            conn.execute(
-                runs_table.update()
-                .where(runs_table.c.run_id == run_id)
-                .values(reproducibility_grade=ReproducibilityGrade.ATTRIBUTABLE_ONLY.value)
-            )
+        # Atomic conditional update — no read-modify-write race.
+        # The WHERE clause acts as a compare-and-swap: only degrades if still REPLAY_REPRODUCIBLE.
+        conn.execute(
+            runs_table.update()
+            .where(runs_table.c.run_id == run_id)
+            .where(runs_table.c.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value)
+            .values(reproducibility_grade=ReproducibilityGrade.ATTRIBUTABLE_ONLY.value)
+        )

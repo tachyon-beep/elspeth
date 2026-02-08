@@ -34,7 +34,7 @@ from elspeth.contracts import TokenInfo
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
 from elspeth.engine.coalesce_executor import CoalesceExecutor
-from tests.property.conftest import row_data
+from tests.strategies.json import row_data
 
 # =============================================================================
 # Strategies for generating coalesce configurations
@@ -151,13 +151,13 @@ class TestRequireAllPolicyProperties:
     def test_require_all_holds_until_all_arrive(self, branches: list[str]) -> None:
         """Property: require_all holds tokens until ALL branches arrive."""
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
 
@@ -193,13 +193,13 @@ class TestRequireAllPolicyProperties:
         assume(missing_count < len(branches))
 
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
         arriving_branches = branches[:-missing_count]
@@ -234,13 +234,13 @@ class TestFirstPolicyProperties:
         first_branch_idx = first_branch_idx % len(branches)
 
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="first",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         # Send just one token
         token = make_token(
@@ -270,14 +270,14 @@ class TestQuorumPolicyProperties:
 
         branches = [f"branch_{i}" for i in range(branch_count)]
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="quorum",
             quorum_count=quorum_count,
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
 
@@ -317,14 +317,14 @@ class TestQuorumPolicyProperties:
 
         branches = [f"branch_{i}" for i in range(branch_count)]
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="quorum",
             quorum_count=quorum_count,
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
 
@@ -359,14 +359,14 @@ class TestBestEffortPolicyProperties:
 
         clock = MockClock(start=0.0)
         executor = make_mock_executor(clock=clock)
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="best_effort",
             merge="union",
             timeout_seconds=10.0,
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
 
@@ -406,13 +406,13 @@ class TestLateArrivalProperties:
     def test_late_arrival_returns_failure(self, branches: list[str]) -> None:
         """Property: After merge completes, late arrivals return failure."""
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
 
@@ -445,13 +445,13 @@ class TestLateArrivalProperties:
         """Property: Multiple late arrivals all consistently fail."""
         branches = ["branch_a", "branch_b"]
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
 
@@ -493,13 +493,13 @@ class TestMemoryBoundedProperties:
         executor._max_completed_keys = 100
 
         branches = ["branch_a", "branch_b"]
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         # Complete more merges than max_completed_keys
         for row_num in range(150):
@@ -522,13 +522,13 @@ class TestMemoryBoundedProperties:
         executor._max_completed_keys = 10
 
         branches = ["branch_a", "branch_b"]
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         # Complete 20 merges
         for row_num in range(20):
@@ -570,13 +570,13 @@ class TestMergeDataProperties:
         """Property: union merge contains fields from all branches."""
         executor = make_mock_executor()
         branches = ["branch_a", "branch_b"]
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         # Send both tokens
         token_a = make_token("t-a", "row-001", "branch_a", data_a)
@@ -602,13 +602,13 @@ class TestMergeDataProperties:
         """Property: nested merge creates branch-keyed hierarchy."""
         executor = make_mock_executor()
         branches = ["branch_a", "branch_b"]
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="nested",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         token_a = make_token("t-a", "row-001", "branch_a", data_a)
         token_b = make_token("t-b", "row-001", "branch_b", data_b)
@@ -631,14 +631,14 @@ class TestMergeDataProperties:
         """Property: select merge takes only the selected branch's data."""
         executor = make_mock_executor()
         branches = ["selected_branch", "other_branch"]
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="select",
             select_branch="selected_branch",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         token_selected = make_token("t-sel", "row-001", "selected_branch", data_selected)
         token_other = make_token("t-oth", "row-001", "other_branch", data_other)
@@ -667,13 +667,13 @@ class TestTokenConservationProperties:
     def test_consumed_tokens_equals_arrived_tokens(self, branches: list[str]) -> None:
         """Property: consumed_tokens count matches number of arrived tokens."""
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
         sent_tokens = []
@@ -711,13 +711,13 @@ class TestCoalesceMetadataProperties:
     def test_metadata_contains_policy_and_strategy(self, branches: list[str]) -> None:
         """Property: coalesce metadata includes policy and merge strategy."""
         executor = make_mock_executor()
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="nested",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
         for i, branch in enumerate(branches):
@@ -737,13 +737,13 @@ class TestCoalesceMetadataProperties:
         """Property: arrival_order metadata is sorted chronologically."""
         clock = MockClock(start=0.0)
         executor = make_mock_executor(clock=clock)
-        settings = CoalesceSettings(
+        coalesce_settings = CoalesceSettings(
             name="test_coalesce",
             branches=branches,
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id="node-001")
 
         row_id = "row-001"
 

@@ -116,6 +116,18 @@ class ResponseConfig(BaseModel):
         default="random",
         description="Response generation mode",
     )
+    allow_header_overrides: bool = Field(
+        default=True,
+        description=(
+            "Allow X-Fake-Response-Mode and X-Fake-Template headers to override "
+            "response generation. Set to false to ignore per-request overrides."
+        ),
+    )
+    max_template_length: int = Field(
+        default=10_000,
+        gt=0,
+        description="Maximum length for template strings (config or header override)",
+    )
     random: RandomResponseConfig = Field(
         default_factory=RandomResponseConfig,
         description="Settings for random mode",

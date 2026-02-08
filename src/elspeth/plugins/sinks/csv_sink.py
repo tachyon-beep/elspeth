@@ -21,9 +21,9 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.contracts.header_modes import HeaderMode, resolve_headers
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import SinkPathConfig
-from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 
@@ -213,6 +213,8 @@ class CSVSink(BaseSink):
         self._file: IO[str] | None = None
         self._writer: csv.DictWriter[str] | None = None
         self._fieldnames: Sequence[str] | None = None
+        # Incremental hasher — avoids O(N²) full-file re-reads in append mode
+        self._hasher: hashlib._Hash | None = None
 
     def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
         """Write a batch of rows to the CSV file.
@@ -260,14 +262,24 @@ class CSVSink(BaseSink):
         writer = self._writer
         if file is None or writer is None:
             raise RuntimeError("CSVSink writer not initialized - this is a bug")
+        if self._hasher is None:
+            raise RuntimeError("CSVSink hasher not initialized - this is a bug")
+
+        # Track file size before writing for incremental hashing
+        pre_write_size = self._path.stat().st_size
+
         for row in rows:
             writer.writerow(row)
 
         # Flush to ensure content is on disk for hashing
         file.flush()
 
-        # Compute content hash from file
-        content_hash = self._compute_file_hash()
+        # Incremental hash: only read newly written bytes (O(batch) not O(file))
+        with open(self._path, "rb") as bf:
+            bf.seek(pre_write_size)
+            for chunk in iter(lambda: bf.read(8192), b""):
+                self._hasher.update(chunk)
+        content_hash = self._hasher.hexdigest()
         size_bytes = self._path.stat().st_size
 
         return ArtifactDescriptor.for_file(
@@ -343,6 +355,11 @@ class CSVSink(BaseSink):
                     delimiter=self._delimiter,
                 )
                 # No header write - already exists
+                # Initialize hasher with existing file content
+                self._hasher = hashlib.sha256()
+                with open(self._path, "rb") as bf:
+                    for chunk in iter(lambda: bf.read(8192), b""):
+                        self._hasher.update(chunk)
                 return
 
         # Write mode OR append to non-existent/empty file
@@ -370,6 +387,13 @@ class CSVSink(BaseSink):
         else:
             # No display mapping - use standard writeheader()
             self._writer.writeheader()
+
+        # Initialize hasher with header bytes
+        self._file.flush()
+        self._hasher = hashlib.sha256()
+        with open(self._path, "rb") as bf:
+            for chunk in iter(lambda: bf.read(8192), b""):
+                self._hasher.update(chunk)
 
     def _get_field_names_and_display(self, row: dict[str, Any]) -> tuple[list[str], list[str]]:
         """Get data field names and display names for CSV output.
@@ -569,14 +593,6 @@ class CSVSink(BaseSink):
 
         # Build reverse mapping: final (normalized) -> original
         self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
-
-    def _compute_file_hash(self) -> str:
-        """Compute SHA-256 hash of the file contents."""
-        sha256 = hashlib.sha256()
-        with open(self._path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                sha256.update(chunk)
-        return sha256.hexdigest()
 
     def flush(self) -> None:
         """Flush buffered data to disk with fsync for durability.

@@ -59,6 +59,7 @@ class _PendingCoalesce:
     arrival_times: dict[str, float]  # branch_name -> monotonic time
     first_arrival: float  # For timeout calculation
     pending_state_ids: dict[str, str]  # branch_name -> state_id (for completing pending states)
+    lost_branches: dict[str, str] = field(default_factory=dict)  # branch_name -> loss reason
 
 
 class CoalesceExecutor:
@@ -122,6 +123,8 @@ class CoalesceExecutor:
         # Maximum completed keys to retain (prevents OOM in long-running pipelines)
         # Late arrivals after eviction create new pending entries (timeout/flush correctly)
         self._max_completed_keys: int = 10000
+        # Temporary storage for union merge collision info (consumed by _execute_merge)
+        self._last_union_collisions: dict[str, list[str]] = {}
 
     def register_coalesce(
         self,
@@ -306,8 +309,78 @@ class CoalesceExecutor:
             return arrived_count >= settings.quorum_count
 
         # settings.policy == "best_effort":
-        # Only merge on timeout (checked elsewhere) or if all arrived
-        return arrived_count == expected_count
+        # Merge on timeout (checked elsewhere) or when all branches accounted for.
+        # Lost branches count as "accounted for" — they won't arrive but we know about them.
+        accounted_count = arrived_count + len(pending.lost_branches)
+        return accounted_count >= expected_count
+
+    def _fail_pending(
+        self,
+        settings: CoalesceSettings,
+        key: tuple[str, str],
+        step_in_pipeline: int,
+        failure_reason: str,
+    ) -> CoalesceOutcome:
+        """Fail all arrived tokens in a pending coalesce and clean up.
+
+        Shared helper used by check_timeouts(), flush_pending(), and
+        _evaluate_after_loss() to avoid duplicating failure recording logic.
+
+        Args:
+            settings: Coalesce settings for metadata
+            key: (coalesce_name, row_id) tuple
+            step_in_pipeline: Step index for audit
+            failure_reason: Machine-readable failure reason string
+
+        Returns:
+            CoalesceOutcome with failure_reason set and outcomes_recorded=True
+        """
+        coalesce_name = key[0]
+        pending = self._pending[key]
+        consumed_tokens = list(pending.arrived.values())
+        error_hash = hashlib.sha256(failure_reason.encode()).hexdigest()[:16]
+        now = self._clock.monotonic()
+
+        # Complete pending node states with failure
+        for branch_name, token in pending.arrived.items():
+            state_id = pending.pending_state_ids[branch_name]
+            self._recorder.complete_node_state(
+                state_id=state_id,
+                status=NodeStateStatus.FAILED,
+                error={"failure_reason": failure_reason},
+                duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
+            )
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.FAILED,
+                error_hash=error_hash,
+            )
+
+        del self._pending[key]
+        self._mark_completed(key)
+
+        # Build metadata with policy-specific fields
+        metadata: dict[str, Any] = {
+            "policy": settings.policy,
+            "expected_branches": settings.branches,
+            "branches_arrived": list(pending.arrived.keys()),
+        }
+        if pending.lost_branches:
+            metadata["branches_lost"] = pending.lost_branches
+        if settings.quorum_count is not None:
+            metadata["quorum_required"] = settings.quorum_count
+        if settings.timeout_seconds is not None:
+            metadata["timeout_seconds"] = settings.timeout_seconds
+
+        return CoalesceOutcome(
+            held=False,
+            failure_reason=failure_reason,
+            consumed_tokens=consumed_tokens,
+            coalesce_metadata=metadata,
+            coalesce_name=coalesce_name,
+            outcomes_recorded=True,
+        )
 
     def _execute_merge(
         self,
@@ -486,11 +559,12 @@ class CoalesceExecutor:
 
         # Build audit metadata BEFORE completing node states (Bug l4h fix)
         # This allows us to include it in context_after for each consumed token
-        coalesce_metadata = {
+        coalesce_metadata: dict[str, Any] = {
             "policy": settings.policy,
             "merge_strategy": settings.merge,
             "expected_branches": settings.branches,
             "branches_arrived": list(pending.arrived.keys()),
+            "branches_lost": pending.lost_branches if pending.lost_branches else {},
             "arrival_order": [
                 {
                     "branch": branch,
@@ -500,6 +574,11 @@ class CoalesceExecutor:
             ],
             "wait_duration_ms": (now - pending.first_arrival) * 1000,
         }
+
+        # Include union merge collision info in audit trail if present
+        if self._last_union_collisions:
+            coalesce_metadata["union_field_collisions"] = self._last_union_collisions
+            self._last_union_collisions = {}
 
         # Complete pending node states for consumed tokens
         # (These states were created as "pending" when tokens were held in accept())
@@ -554,12 +633,31 @@ class CoalesceExecutor:
         Note: row_data is PipelineRow, so we use to_dict() to get raw dict.
         """
         if settings.merge == "union":
-            # Combine all fields (later branches override earlier)
+            # Combine all fields from all branches.
+            # On name collision, the last branch in settings.branches wins.
+            # Collisions are recorded in the audit trail (coalesce_metadata)
+            # so that overwritten values are never silently lost.
             merged: dict[str, Any] = {}
+            field_origins: dict[str, str] = {}  # field -> branch that set it
+            collisions: dict[str, list[str]] = {}  # field -> [branch1, branch2, ...]
             for branch_name in settings.branches:
                 if branch_name in arrived:
-                    # PipelineRow requires to_dict() for dict operations
-                    merged.update(arrived[branch_name].row_data.to_dict())
+                    branch_data = arrived[branch_name].row_data.to_dict()
+                    for field in branch_data:
+                        if field in field_origins:
+                            if field not in collisions:
+                                collisions[field] = [field_origins[field]]
+                            collisions[field].append(branch_name)
+                        field_origins[field] = branch_name
+                    merged.update(branch_data)
+            if collisions:
+                slog.warning(
+                    "union_merge_field_collisions",
+                    collisions=dict(collisions),
+                    winner_branch={f: branches[-1] for f, branches in collisions.items()},
+                )
+            # Stash collisions for audit metadata (read by _execute_merge)
+            self._last_union_collisions = collisions
             return merged
 
         elif settings.merge == "nested":
@@ -657,43 +755,12 @@ class CoalesceExecutor:
                     results.append(outcome)
                 else:
                     # Quorum not met at timeout - record failure
-                    # (Bug 6tb fix: mirrors flush_pending() failure handling)
-                    consumed_tokens = list(pending.arrived.values())
-                    error_msg = "quorum_not_met_at_timeout"
-                    error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
-                    failure_time = self._clock.monotonic()
-
-                    # Complete pending node states with failure
-                    for branch_name, token in pending.arrived.items():
-                        state_id = pending.pending_state_ids[branch_name]
-                        self._recorder.complete_node_state(
-                            state_id=state_id,
-                            status=NodeStateStatus.FAILED,
-                            error={"failure_reason": "quorum_not_met_at_timeout"},
-                            duration_ms=(failure_time - pending.arrival_times[branch_name]) * 1000,
-                        )
-                        self._recorder.record_token_outcome(
-                            run_id=self._run_id,
-                            token_id=token.token_id,
-                            outcome=RowOutcome.FAILED,
-                            error_hash=error_hash,
-                        )
-
-                    del self._pending[key]
-                    self._mark_completed(key)
                     results.append(
-                        CoalesceOutcome(
-                            held=False,
+                        self._fail_pending(
+                            settings,
+                            key,
+                            step_in_pipeline,
                             failure_reason="quorum_not_met_at_timeout",
-                            consumed_tokens=consumed_tokens,
-                            coalesce_metadata={
-                                "policy": settings.policy,
-                                "quorum_required": settings.quorum_count,
-                                "branches_arrived": list(pending.arrived.keys()),
-                                "timeout_seconds": settings.timeout_seconds,
-                            },
-                            coalesce_name=coalesce_name,
-                            outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
                         )
                     )
 
@@ -701,42 +768,12 @@ class CoalesceExecutor:
             # (Bug P1-2026-01-30 fix: require_all was missing from check_timeouts)
             elif settings.policy == "require_all":
                 # require_all never does partial merge - timeout is always a failure
-                consumed_tokens = list(pending.arrived.values())
-                error_msg = "incomplete_branches"
-                error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
-                failure_time = self._clock.monotonic()
-
-                # Complete pending node states with failure
-                for branch_name, token in pending.arrived.items():
-                    state_id = pending.pending_state_ids[branch_name]
-                    self._recorder.complete_node_state(
-                        state_id=state_id,
-                        status=NodeStateStatus.FAILED,
-                        error={"failure_reason": "incomplete_branches"},
-                        duration_ms=(failure_time - pending.arrival_times[branch_name]) * 1000,
-                    )
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=token.token_id,
-                        outcome=RowOutcome.FAILED,
-                        error_hash=error_hash,
-                    )
-
-                del self._pending[key]
-                self._mark_completed(key)
                 results.append(
-                    CoalesceOutcome(
-                        held=False,
+                    self._fail_pending(
+                        settings,
+                        key,
+                        step_in_pipeline,
                         failure_reason="incomplete_branches",
-                        consumed_tokens=consumed_tokens,
-                        coalesce_metadata={
-                            "policy": settings.policy,
-                            "expected_branches": settings.branches,
-                            "branches_arrived": list(pending.arrived.keys()),
-                            "timeout_seconds": settings.timeout_seconds,
-                        },
-                        coalesce_name=coalesce_name,
-                        outcomes_recorded=True,
                     )
                 )
 
@@ -770,7 +807,7 @@ class CoalesceExecutor:
             step_in_pipeline = step_map[coalesce_name]
 
             if settings.policy == "best_effort":
-                # Always merge whatever arrived
+                # Merge whatever arrived (or fail if nothing arrived)
                 if len(pending.arrived) > 0:
                     outcome = self._execute_merge(
                         settings=settings,
@@ -781,6 +818,16 @@ class CoalesceExecutor:
                         coalesce_name=coalesce_name,
                     )
                     results.append(outcome)
+                elif pending.lost_branches:
+                    # All branches lost — no data to merge
+                    results.append(
+                        self._fail_pending(
+                            settings,
+                            key,
+                            step_in_pipeline,
+                            failure_reason="all_branches_lost",
+                        )
+                    )
 
             elif settings.policy == "quorum":
                 if settings.quorum_count is None:
@@ -799,103 +846,23 @@ class CoalesceExecutor:
                     results.append(outcome)
                 else:
                     # Quorum not met - record failure
-                    # MUST capture tokens before deleting pending state
-                    consumed_tokens = list(pending.arrived.values())
-
-                    # Compute error hash for failure reason
-                    error_msg = "quorum_not_met"
-                    error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
-
-                    # Compute wait duration
-                    now = self._clock.monotonic()
-
-                    # Complete pending node states for consumed tokens (audit trail)
-                    # (These states were created as "pending" when tokens were held in accept())
-                    for branch_name, token in pending.arrived.items():
-                        # Get the pending state_id that was created when token was held
-                        state_id = pending.pending_state_ids[branch_name]
-
-                        # Complete it now with failure status
-                        self._recorder.complete_node_state(
-                            state_id=state_id,
-                            status=NodeStateStatus.FAILED,
-                            error={"failure_reason": "quorum_not_met"},
-                            duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
-                        )
-
-                        # Record terminal token outcome (FAILED)
-                        self._recorder.record_token_outcome(
-                            run_id=self._run_id,
-                            token_id=token.token_id,
-                            outcome=RowOutcome.FAILED,
-                            error_hash=error_hash,
-                        )
-
-                    del self._pending[key]
-                    self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
                     results.append(
-                        CoalesceOutcome(
-                            held=False,
+                        self._fail_pending(
+                            settings,
+                            key,
+                            step_in_pipeline,
                             failure_reason="quorum_not_met",
-                            consumed_tokens=consumed_tokens,
-                            coalesce_metadata={
-                                "policy": settings.policy,
-                                "quorum_required": settings.quorum_count,
-                                "branches_arrived": list(pending.arrived.keys()),
-                            },
-                            coalesce_name=coalesce_name,
-                            outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
                         )
                     )
 
             elif settings.policy == "require_all":
                 # require_all never does partial merge
-                # MUST capture tokens before deleting pending state
-                consumed_tokens = list(pending.arrived.values())
-
-                # Compute error hash for failure reason
-                error_msg = "incomplete_branches"
-                error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
-
-                # Compute wait duration
-                now = self._clock.monotonic()
-
-                # Complete pending node states for consumed tokens (audit trail)
-                # (These states were created as "pending" when tokens were held in accept())
-                for branch_name, token in pending.arrived.items():
-                    # Get the pending state_id that was created when token was held
-                    state_id = pending.pending_state_ids[branch_name]
-
-                    # Complete it now with failure status
-                    self._recorder.complete_node_state(
-                        state_id=state_id,
-                        status=NodeStateStatus.FAILED,
-                        error={"failure_reason": "incomplete_branches"},
-                        duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
-                    )
-
-                    # Record terminal token outcome (FAILED)
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=token.token_id,
-                        outcome=RowOutcome.FAILED,
-                        error_hash=error_hash,
-                    )
-
-                del self._pending[key]
-                self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
                 results.append(
-                    CoalesceOutcome(
-                        held=False,
+                    self._fail_pending(
+                        settings,
+                        key,
+                        step_in_pipeline,
                         failure_reason="incomplete_branches",
-                        consumed_tokens=consumed_tokens,
-                        coalesce_metadata={
-                            "policy": settings.policy,
-                            "expected_branches": settings.branches,
-                            "branches_arrived": list(pending.arrived.keys()),
-                        },
-                        coalesce_name=coalesce_name,
-                        outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
                     )
                 )
 
@@ -914,3 +881,148 @@ class CoalesceExecutor:
         self._completed_keys.clear()
 
         return results
+
+    def notify_branch_lost(
+        self,
+        coalesce_name: str,
+        row_id: str,
+        lost_branch: str,
+        reason: str,
+        step_in_pipeline: int,
+    ) -> CoalesceOutcome | None:
+        """Notify that a branch was error-routed and will never arrive.
+
+        Called by the processor when a forked token is diverted to an error sink
+        before reaching this coalesce point. Adjusts the expected branch count
+        and re-evaluates merge conditions.
+
+        Threading: CoalesceExecutor is single-threaded — called from the
+        processor's synchronous work queue loop. The processor processes one
+        work item at a time, so there is no concurrency within a single row's
+        fork/coalesce lifecycle.
+
+        Args:
+            coalesce_name: Name of the coalesce configuration
+            row_id: Source row ID (correlates forked tokens)
+            lost_branch: Name of the branch that was error-routed
+            reason: Machine-readable reason for the loss
+            step_in_pipeline: Step index of the coalesce point
+
+        Returns:
+            CoalesceOutcome if merge/failure triggered, None if still waiting.
+        """
+        if coalesce_name not in self._settings:
+            raise ValueError(f"Coalesce '{coalesce_name}' not registered")
+
+        key = (coalesce_name, row_id)
+
+        # Already completed (race with normal merge) — ignore
+        if key in self._completed_keys:
+            return None
+
+        settings = self._settings[coalesce_name]
+
+        # Validate branch is expected
+        if lost_branch not in settings.branches:
+            raise ValueError(f"Lost branch '{lost_branch}' not in expected branches for coalesce '{coalesce_name}': {settings.branches}")
+
+        # No pending entry yet — branch lost before ANY branch arrived.
+        # Create a minimal pending entry with the loss recorded.
+        if key not in self._pending:
+            self._pending[key] = _PendingCoalesce(
+                arrived={},
+                arrival_times={},
+                first_arrival=self._clock.monotonic(),
+                pending_state_ids={},
+                lost_branches={lost_branch: reason},
+            )
+            return self._evaluate_after_loss(settings, key, step_in_pipeline)
+
+        pending = self._pending[key]
+
+        # Validate branch hasn't already arrived (would be a processor bug)
+        if lost_branch in pending.arrived:
+            raise ValueError(
+                f"Branch '{lost_branch}' already arrived at coalesce '{coalesce_name}' "
+                f"but was reported as lost. This indicates a bug in the processor — "
+                f"a token cannot both arrive and be error-routed."
+            )
+
+        # Record the loss and re-evaluate
+        pending.lost_branches[lost_branch] = reason
+        return self._evaluate_after_loss(settings, key, step_in_pipeline)
+
+    def _evaluate_after_loss(
+        self,
+        settings: CoalesceSettings,
+        key: tuple[str, str],
+        step_in_pipeline: int,
+    ) -> CoalesceOutcome | None:
+        """Re-evaluate merge conditions after a branch loss notification.
+
+        Policy-specific consequences:
+        - require_all: ANY lost branch = immediate failure
+        - quorum: fail if quorum is now impossible, merge if already met
+        - best_effort: merge immediately if all branches accounted for
+        - first: no action (should have merged on first arrival)
+
+        Args:
+            settings: Coalesce settings for the affected point
+            key: (coalesce_name, row_id) tuple
+            step_in_pipeline: Step index of the coalesce point
+
+        Returns:
+            CoalesceOutcome if merge/failure triggered, None if still waiting.
+        """
+        pending = self._pending[key]
+        arrived_count = len(pending.arrived)
+        total_branches = len(settings.branches)
+        lost_count = len(pending.lost_branches)
+
+        if settings.policy == "require_all":
+            # require_all: ANY lost branch = immediate failure
+            return self._fail_pending(
+                settings,
+                key,
+                step_in_pipeline,
+                failure_reason=f"branch_lost:{','.join(sorted(pending.lost_branches.keys()))}",
+            )
+
+        elif settings.policy == "quorum":
+            if settings.quorum_count is None:
+                raise RuntimeError(
+                    f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
+                )
+            # Check if quorum is now impossible
+            max_possible = total_branches - lost_count
+            if max_possible < settings.quorum_count:
+                return self._fail_pending(
+                    settings,
+                    key,
+                    step_in_pipeline,
+                    failure_reason=f"quorum_impossible:need={settings.quorum_count},max_possible={max_possible}",
+                )
+            # Check if arrived count already meets quorum
+            if arrived_count >= settings.quorum_count:
+                node_id = self._node_ids[settings.name]
+                return self._execute_merge(settings, node_id, pending, step_in_pipeline, key, settings.name)
+            return None  # Still waiting
+
+        elif settings.policy == "best_effort":
+            # All branches accounted for (arrived + lost)?
+            if arrived_count + lost_count >= total_branches:
+                if arrived_count > 0:
+                    node_id = self._node_ids[settings.name]
+                    return self._execute_merge(settings, node_id, pending, step_in_pipeline, key, settings.name)
+                return self._fail_pending(
+                    settings,
+                    key,
+                    step_in_pipeline,
+                    failure_reason="all_branches_lost",
+                )
+            return None  # Still waiting for remaining branches
+
+        # settings.policy == "first":
+        # first: should already have merged on first arrival
+        # If no arrivals yet, nothing to merge
+        return None

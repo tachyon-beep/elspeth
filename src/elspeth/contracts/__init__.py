@@ -116,6 +116,7 @@ from elspeth.contracts.enums import (
     RunStatus,
     TelemetryGranularity,
     TriggerType,
+    error_edge_label,
 )
 from elspeth.contracts.errors import (
     BatchPendingError,
@@ -134,6 +135,7 @@ from elspeth.contracts.errors import (
     QueryFailureDetail,
     RoutingReason,
     RowErrorEntry,
+    SourceQuarantineReason,
     TemplateErrorEntry,
     TransformActionCategory,
     TransformErrorCategory,
@@ -144,13 +146,19 @@ from elspeth.contracts.errors import (
     violations_to_error_reason,
 )
 from elspeth.contracts.events import (
+    ExternalCallCompleted,
+    FieldResolutionApplied,
     GateEvaluated,
     PhaseAction,
+    PhaseChanged,
     PhaseCompleted,
     PhaseError,
     PhaseStarted,
     PipelinePhase,
+    RowCreated,
     RunCompletionStatus,
+    RunFinished,
+    RunStarted,
     RunSummary,
     TelemetryEvent,
     TokenCompleted,
@@ -163,6 +171,11 @@ from elspeth.contracts.header_modes import (
 )
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.payload_store import IntegrityError, PayloadStore
+from elspeth.contracts.plugin_context import (
+    PluginContext,
+    TransformErrorToken,
+    ValidationErrorToken,
+)
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     ExceptionResult,
@@ -220,6 +233,7 @@ __all__ = [  # Grouped by category for readability
     "QueryFailureDetail",
     "RoutingReason",
     "RowErrorEntry",
+    "SourceQuarantineReason",
     "TemplateErrorEntry",
     "TransformActionCategory",
     "TransformErrorCategory",
@@ -291,6 +305,7 @@ __all__ = [  # Grouped by category for readability
     "RunStatus",
     "TelemetryGranularity",
     "TriggerType",
+    "error_edge_label",
     # identity
     "TokenInfo",
     # checkpoint
@@ -327,14 +342,24 @@ __all__ = [  # Grouped by category for readability
     # payload_store
     "IntegrityError",
     "PayloadStore",
+    # plugin_context
+    "PluginContext",
+    "TransformErrorToken",
+    "ValidationErrorToken",
     # events
+    "ExternalCallCompleted",
+    "FieldResolutionApplied",
     "GateEvaluated",
     "PhaseAction",
+    "PhaseChanged",
     "PhaseCompleted",
     "PhaseError",
     "PhaseStarted",
     "PipelinePhase",
+    "RowCreated",
     "RunCompletionStatus",
+    "RunFinished",
+    "RunStarted",
     "RunSummary",
     "TelemetryEvent",
     "TokenCompleted",
