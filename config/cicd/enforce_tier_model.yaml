@@ -1352,6 +1352,11 @@ allow_hits:
   reason: User YAML config boundary - http_config is parsed from pipeline settings
   safety: Defaults to 30s timeout - safe fallback for optional config field
   expires: '2026-05-02'
+- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=f36e99f2308c0272
+  owner: architecture
+  reason: Tier 3 boundary - response.text is external data, extract_content() can fail unpredictably
+  safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL
+  expires: '2026-05-02'
 - key: contracts/checkpoint.py:R5:ResumePoint:__post_init__:fp=06723188787bab6d
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions

@@ -187,12 +187,22 @@ class WebScrapeTransform(BaseTransform):
                 }
             )
 
-        # Extract content
-        content = extract_content(
-            response.text,
-            format=self._format,
-            strip_elements=self._strip_elements,
-        )
+        # Extract content — response.text is Tier 3 (external data), validate at boundary
+        try:
+            content = extract_content(
+                response.text,
+                format=self._format,
+                strip_elements=self._strip_elements,
+            )
+        except Exception as e:
+            return TransformResult.error(
+                {
+                    "reason": "content_extraction_failed",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "url": safe_request.original_url,
+                }
+            )
 
         # Compute fingerprint
         fingerprint = compute_fingerprint(content, mode=self._fingerprint_mode)

@@ -606,3 +606,111 @@ def test_web_scrape_malformed_html_graceful_degradation(mock_ctx):
     assert "Paragraph without closing tag" in result.row["page_content"]
     assert "Nested paragraph" in result.row["page_content"]
     assert result.row["fetch_status"] == 200
+
+
+@respx.mock
+def test_web_scrape_extract_content_exception_returns_error(mock_ctx):
+    """When extract_content() raises, process() returns TransformResult.error() instead of crashing.
+
+    This is the Tier 3 boundary protection: response.text is external data and parsing it
+    can fail in ways we can't predict. The pipeline must quarantine the row, not crash.
+    """
+    respx.get(f"https://{_TEST_IP}:443/bad").mock(return_value=httpx.Response(200, text="<html>valid</html>"))
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing parse error",
+            },
+        }
+    )
+
+    # Simulate extract_content() raising an unexpected exception
+    with (
+        patch("socket.getaddrinfo", _mock_getaddrinfo()),
+        patch(
+            "elspeth.plugins.transforms.web_scrape.extract_content",
+            side_effect=RuntimeError("html2text internal error"),
+        ),
+    ):
+        result = transform.process(make_pipeline_row({"url": "https://example.com/bad"}), mock_ctx)
+
+    assert result.status == "error"
+    assert result.reason["reason"] == "content_extraction_failed"
+    assert "html2text internal error" in result.reason["error"]
+    assert result.reason["error_type"] == "RuntimeError"
+    assert result.reason["url"] == "https://example.com/bad"
+
+
+@respx.mock
+def test_web_scrape_binary_response_does_not_crash(mock_ctx):
+    """Binary content in response.text should be handled gracefully.
+
+    When a server returns binary data (image, PDF) with a text content-type,
+    httpx will attempt UTF-8 decoding. If extraction fails on the result,
+    we should get an error result, not a pipeline crash.
+    """
+    # Binary data that httpx will lossy-decode to replacement characters
+    binary_content = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + b"\xff\xfe" * 100
+    respx.get(f"https://{_TEST_IP}:443/binary").mock(
+        return_value=httpx.Response(200, content=binary_content, headers={"content-type": "text/html"})
+    )
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing binary response",
+            },
+        }
+    )
+
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(make_pipeline_row({"url": "https://example.com/binary"}), mock_ctx)
+
+    # Should either succeed (BeautifulSoup is very forgiving) or return error — never crash
+    assert result.status in ("success", "error")
+
+
+@respx.mock
+def test_web_scrape_unicode_decode_error_returns_error(mock_ctx):
+    """UnicodeDecodeError during extraction returns error result."""
+    respx.get(f"https://{_TEST_IP}:443/encoding").mock(return_value=httpx.Response(200, text="<html>ok</html>"))
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "markdown",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing encoding error",
+            },
+        }
+    )
+
+    with (
+        patch("socket.getaddrinfo", _mock_getaddrinfo()),
+        patch(
+            "elspeth.plugins.transforms.web_scrape.extract_content",
+            side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        ),
+    ):
+        result = transform.process(make_pipeline_row({"url": "https://example.com/encoding"}), mock_ctx)
+
+    assert result.status == "error"
+    assert result.reason["reason"] == "content_extraction_failed"
+    assert result.reason["error_type"] == "UnicodeDecodeError"

@@ -247,6 +247,8 @@ TransformErrorCategory = Literal[
     "result_not_found",
     "query_failed",
     "rate_limited",
+    # Content extraction errors (Tier 3 boundary - external HTML/text parsing)
+    "content_extraction_failed",
     # Content filtering
     "blocked_content",
     "content_filtered",
@@ -359,6 +361,7 @@ class TransformErrorReason(TypedDict):
     field: NotRequired[str]
     error_type: NotRequired[str]
     message: NotRequired[str]
+    url: NotRequired[str]
 
     # Multi-query/template context
     query: NotRequired[str]
