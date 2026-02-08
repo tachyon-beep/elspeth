@@ -979,3 +979,41 @@ class TestAzureLLMTransformConcurrency:
         transform.close()
 
         assert transform._recorder is None
+
+
+class TestAzureClientThreadSafety:
+    """Thread-safety of lazy client initialization."""
+
+    def test_concurrent_get_underlying_client_returns_single_instance(self) -> None:
+        """Multiple threads calling _get_underlying_client() must get the same instance.
+
+        Without the lock, N threads racing on first access would each create
+        an AzureOpenAI client, leaking N-1 HTTP connection pools.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        transform = AzureLLMTransform(
+            {
+                "endpoint": "https://test.openai.azure.com/",
+                "api_key": "test-key",
+                "deployment_name": "gpt-4",
+                "template": "{{ text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        clients: list[object] = []
+
+        with patch("openai.AzureOpenAI") as mock_cls:
+            # Return a fresh mock each call — without the lock, we'd get multiple
+            mock_cls.side_effect = lambda **kwargs: Mock()
+
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                futures = [executor.submit(transform._get_underlying_client) for _ in range(100)]
+                clients = [f.result() for f in futures]
+
+        # All 100 calls must return the same object
+        assert len({id(c) for c in clients}) == 1
+        # Constructor called exactly once
+        assert mock_cls.call_count == 1

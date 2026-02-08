@@ -214,6 +214,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._llm_clients: dict[str, AuditedLLMClient] = {}
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
+        self._underlying_client_lock = Lock()
 
         # Tier 2: Plugin-internal tracing
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
@@ -265,16 +266,21 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             self._setup_tracing()
 
     def _get_underlying_client(self) -> AzureOpenAI:
-        """Get or create the underlying Azure OpenAI client."""
-        if self._underlying_client is None:
-            from openai import AzureOpenAI
+        """Get or create the underlying Azure OpenAI client.
 
-            self._underlying_client = AzureOpenAI(
-                azure_endpoint=self._azure_endpoint,
-                api_key=self._azure_api_key,
-                api_version=self._azure_api_version,
-            )
-        return self._underlying_client
+        Thread-safe: protected by _underlying_client_lock to prevent
+        duplicate client creation from concurrent worker threads.
+        """
+        with self._underlying_client_lock:
+            if self._underlying_client is None:
+                from openai import AzureOpenAI
+
+                self._underlying_client = AzureOpenAI(
+                    azure_endpoint=self._azure_endpoint,
+                    api_key=self._azure_api_key,
+                    api_version=self._azure_api_version,
+                )
+            return self._underlying_client
 
     def _get_llm_client(self, state_id: str) -> AuditedLLMClient:
         """Get or create LLM client for a state_id."""

@@ -203,6 +203,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         self._llm_clients_lock = Lock()
         # Cache underlying Azure clients to avoid recreating them
         self._underlying_client: AzureOpenAI | None = None
+        self._underlying_client_lock = Lock()
 
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
@@ -518,18 +519,20 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client.
 
-        The underlying client is stateless and can be shared across all calls.
+        Thread-safe: protected by _underlying_client_lock to prevent
+        duplicate client creation from concurrent worker threads.
         """
-        if self._underlying_client is None:
-            # Import here to avoid hard dependency on openai package
-            from openai import AzureOpenAI
+        with self._underlying_client_lock:
+            if self._underlying_client is None:
+                # Import here to avoid hard dependency on openai package
+                from openai import AzureOpenAI
 
-            self._underlying_client = AzureOpenAI(
-                azure_endpoint=self._azure_endpoint,
-                api_key=self._azure_api_key,
-                api_version=self._azure_api_version,
-            )
-        return self._underlying_client
+                self._underlying_client = AzureOpenAI(
+                    azure_endpoint=self._azure_endpoint,
+                    api_key=self._azure_api_key,
+                    api_version=self._azure_api_version,
+                )
+            return self._underlying_client
 
     def _get_llm_client(self, state_id: str) -> AuditedLLMClient:
         """Get or create LLM client for a state_id.

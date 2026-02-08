@@ -21,6 +21,7 @@ import json
 import time
 import uuid
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Any
 
 from pydantic import Field
@@ -196,6 +197,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Azure OpenAI client (lazy init)
         self._client: Any = None
+        self._client_lock = Lock()
 
         # Tier 2: Plugin-internal tracing (Langfuse only for batch API)
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
@@ -341,18 +343,22 @@ class AzureBatchLLMTransform(BaseTransform):
     def _get_client(self) -> Any:
         """Lazy-initialize Azure OpenAI client.
 
+        Thread-safe: protected by _client_lock to prevent duplicate
+        client creation if future pooling adds concurrency.
+
         Returns:
             openai.AzureOpenAI client instance
         """
-        if self._client is None:
-            from openai import AzureOpenAI
+        with self._client_lock:
+            if self._client is None:
+                from openai import AzureOpenAI
 
-            self._client = AzureOpenAI(
-                azure_endpoint=self._endpoint,
-                api_key=self._api_key,
-                api_version=self._api_version,
-            )
-        return self._client
+                self._client = AzureOpenAI(
+                    azure_endpoint=self._endpoint,
+                    api_key=self._api_key,
+                    api_version=self._api_version,
+                )
+            return self._client
 
     def process(
         self,
