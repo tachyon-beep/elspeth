@@ -61,24 +61,27 @@ def linear_pipelines(draw: st.DrawFn, min_transforms: int = 1, max_transforms: i
 
 @st.composite
 def diamond_pipelines(draw: st.DrawFn) -> ExecutionGraph:
-    """Generate a diamond-shaped pipeline: source -> [A, B] -> merge -> sink."""
-    # Draw is required by @st.composite but not used for deterministic structure
-    _ = draw(st.just(None))
+    """Generate a diamond-shaped pipeline: source -> [branches...] -> merge -> sink.
+
+    Varies the number of parallel branches (2-4) so Hypothesis explores
+    different fan-out widths in the DAG.
+    """
+    num_branches = draw(st.integers(min_value=2, max_value=4))
     graph = ExecutionGraph()
 
     # Source
     graph.add_node("source", node_type="source", plugin_name="test_source")
 
-    # Two parallel transforms
-    graph.add_node("branch_a", node_type="transform", plugin_name="test_transform")
-    graph.add_node("branch_b", node_type="transform", plugin_name="test_transform")
-    graph.add_edge("source", "branch_a", label="path_a")
-    graph.add_edge("source", "branch_b", label="path_b")
+    # Parallel branches
+    for i in range(num_branches):
+        branch_id = f"branch_{i}"
+        graph.add_node(branch_id, node_type="transform", plugin_name="test_transform")
+        graph.add_edge("source", branch_id, label=f"path_{i}")
 
     # Merge point (simplified - in real ELSPETH this would be a coalesce)
     graph.add_node("merge", node_type="transform", plugin_name="test_transform")
-    graph.add_edge("branch_a", "merge", label="continue")
-    graph.add_edge("branch_b", "merge", label="continue")
+    for i in range(num_branches):
+        graph.add_edge(f"branch_{i}", "merge", label=f"continue_{i}")
 
     # Sink
     graph.add_node("sink", node_type="sink", plugin_name="test_sink")
@@ -88,10 +91,13 @@ def diamond_pipelines(draw: st.DrawFn) -> ExecutionGraph:
 
 
 @st.composite
-def multi_sink_pipelines(draw: st.DrawFn, num_sinks: int = 2) -> ExecutionGraph:
-    """Generate a pipeline with multiple sinks."""
-    # Draw is required by @st.composite but not used for deterministic structure
-    _ = draw(st.just(None))
+def multi_sink_pipelines(draw: st.DrawFn) -> ExecutionGraph:
+    """Generate a pipeline with multiple sinks.
+
+    Varies the number of sinks (2-5) so Hypothesis explores different
+    fan-out patterns at the terminal end of the DAG.
+    """
+    num_sinks = draw(st.integers(min_value=2, max_value=5))
     graph = ExecutionGraph()
 
     # Source
@@ -186,13 +192,14 @@ class TestTopologicalOrderProperties:
         topo_order = graph.topological_order()
         index_map = {node: idx for idx, node in enumerate(topo_order)}
 
-        # Source before branches
-        assert index_map["source"] < index_map["branch_a"]
-        assert index_map["source"] < index_map["branch_b"]
+        # Source before all branches
+        branch_ids = [n for n in index_map if n.startswith("branch_")]
+        for branch_id in branch_ids:
+            assert index_map["source"] < index_map[branch_id]
 
-        # Branches before merge
-        assert index_map["branch_a"] < index_map["merge"]
-        assert index_map["branch_b"] < index_map["merge"]
+        # All branches before merge
+        for branch_id in branch_ids:
+            assert index_map[branch_id] < index_map["merge"]
 
         # Merge before sink
         assert index_map["merge"] < index_map["sink"]
@@ -248,13 +255,13 @@ class TestValidationProperties:
         # Second call should also succeed
         graph.validate()  # Should not raise
 
-    @given(graph=multi_sink_pipelines(num_sinks=3))
+    @given(graph=multi_sink_pipelines())
     @settings(max_examples=50)
     def test_validate_accepts_multiple_sinks(self, graph: ExecutionGraph) -> None:
         """Property: Graphs with multiple sinks are valid."""
         graph.validate()  # Should not raise
         sinks = graph.get_sinks()
-        assert len(sinks) == 3, f"Expected 3 sinks, got {len(sinks)}"
+        assert len(sinks) >= 2, f"Expected at least 2 sinks, got {len(sinks)}"
 
 
 class TestValidationFailureProperties:

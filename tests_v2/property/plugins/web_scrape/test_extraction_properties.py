@@ -1,7 +1,14 @@
-"""Property-based tests for WebScrapeTransform components.
+# tests_v2/property/plugins/web_scrape/test_extraction_properties.py
+"""Property-based tests for WebScrapeTransform extraction and fingerprinting.
 
-Uses Hypothesis to verify invariants and edge cases that are difficult
-to enumerate manually. These tests are critical for audit integrity.
+Relocated from tests_v2/unit/plugins/transforms/test_web_scrape_properties.py
+to the correct property test directory.
+
+Uses Hypothesis to verify invariants:
+- Fingerprint determinism and collision resistance
+- Normalization idempotency and whitespace collapse
+- Content extraction preserves text, strips tags/scripts
+- URL scheme validation
 """
 
 import re

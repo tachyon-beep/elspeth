@@ -52,9 +52,21 @@ from elspeth.telemetry.manager import TelemetryManager
 # Strategies for generating telemetry events
 # =============================================================================
 
+# Fixed timestamp for non-Hypothesis tests (e.g., FutureEvent in forward compat)
 _REFERENCE_TIMESTAMP = datetime(2025, 1, 1, tzinfo=UTC)
+
+# Reusable strategies — vary all fields to defend against future regressions
+# where filtering might accidentally become value-dependent.
 run_ids = st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N")))
-timestamps = st.just(_REFERENCE_TIMESTAMP)
+timestamps = st.datetimes(
+    min_value=datetime(2020, 1, 1),
+    max_value=datetime(2030, 1, 1),
+    timezones=st.just(UTC),
+)
+_short_ids = st.text(min_size=1, max_size=12, alphabet="abcdefghijklmnopqrstuvwxyz0123456789_")
+_hash_strings = st.text(min_size=8, max_size=32, alphabet="0123456789abcdef")
+_plugin_names = st.sampled_from(["csv", "json", "database", "api", "llm_classifier", "passthrough"])
+_sink_names = st.sampled_from(["output", "quarantine", "archive", "default", "errors"])
 
 # Lifecycle events (always emitted at any granularity)
 lifecycle_events = st.one_of(
@@ -62,14 +74,14 @@ lifecycle_events = st.one_of(
         RunStarted,
         timestamp=timestamps,
         run_id=run_ids,
-        config_hash=st.just("hash123"),
-        source_plugin=st.just("csv"),
+        config_hash=_hash_strings,
+        source_plugin=_plugin_names,
     ),
     st.builds(
         RunFinished,
         timestamp=timestamps,
         run_id=run_ids,
-        status=st.just(RunStatus.COMPLETED),
+        status=st.sampled_from(list(RunStatus)),
         row_count=st.integers(min_value=0, max_value=1000),
         duration_ms=st.floats(min_value=0.0, max_value=10000.0, allow_nan=False, allow_infinity=False),
     ),
@@ -88,56 +100,72 @@ row_events = st.one_of(
         RowCreated,
         timestamp=timestamps,
         run_id=run_ids,
-        row_id=st.just("row_1"),
-        token_id=st.just("tok_1"),
-        content_hash=st.just("chash"),
+        row_id=_short_ids,
+        token_id=_short_ids,
+        content_hash=_hash_strings,
     ),
     st.builds(
         TransformCompleted,
         timestamp=timestamps,
         run_id=run_ids,
-        row_id=st.just("row_1"),
-        token_id=st.just("tok_1"),
-        node_id=st.just("node_1"),
-        plugin_name=st.just("passthrough"),
-        status=st.just(NodeStateStatus.COMPLETED),
+        row_id=_short_ids,
+        token_id=_short_ids,
+        node_id=_short_ids,
+        plugin_name=_plugin_names,
+        status=st.sampled_from(list(NodeStateStatus)),
         duration_ms=st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False),
-        input_hash=st.just("ihash"),
-        output_hash=st.just("ohash"),
+        input_hash=_hash_strings,
+        output_hash=_hash_strings,
     ),
     st.builds(
         GateEvaluated,
         timestamp=timestamps,
         run_id=run_ids,
-        row_id=st.just("row_1"),
-        token_id=st.just("tok_1"),
-        node_id=st.just("gate_1"),
-        plugin_name=st.just("threshold_gate"),
-        routing_mode=st.just(RoutingMode.MOVE),
-        destinations=st.just(("default",)),
+        row_id=_short_ids,
+        token_id=_short_ids,
+        node_id=_short_ids,
+        plugin_name=_plugin_names,
+        routing_mode=st.sampled_from(list(RoutingMode)),
+        destinations=st.tuples(_sink_names),
     ),
     st.builds(
         TokenCompleted,
         timestamp=timestamps,
         run_id=run_ids,
-        row_id=st.just("row_1"),
-        token_id=st.just("tok_1"),
-        outcome=st.just(RowOutcome.COMPLETED),
-        sink_name=st.just("output"),
+        row_id=_short_ids,
+        token_id=_short_ids,
+        outcome=st.sampled_from(list(RowOutcome)),
+        sink_name=_sink_names,
     ),
 )
 
 # External call events (emitted only at FULL)
-external_call_events = st.builds(
-    ExternalCallCompleted,
-    timestamp=timestamps,
-    run_id=run_ids,
-    call_type=st.just(CallType.LLM),
-    provider=st.just("azure-openai"),
-    status=st.just(CallStatus.SUCCESS),
-    latency_ms=st.floats(min_value=0.0, max_value=5000.0, allow_nan=False, allow_infinity=False),
-    state_id=st.just("state_1"),
-    operation_id=st.none(),
+# ExternalCallCompleted has XOR constraint: exactly one of state_id or operation_id.
+external_call_events = st.one_of(
+    # Transform context (has state_id, no operation_id)
+    st.builds(
+        ExternalCallCompleted,
+        timestamp=timestamps,
+        run_id=run_ids,
+        call_type=st.sampled_from(list(CallType)),
+        provider=st.sampled_from(["azure-openai", "openrouter", "litellm", "anthropic"]),
+        status=st.sampled_from(list(CallStatus)),
+        latency_ms=st.floats(min_value=0.0, max_value=5000.0, allow_nan=False, allow_infinity=False),
+        state_id=_short_ids,
+        operation_id=st.none(),
+    ),
+    # Operation context (has operation_id, no state_id)
+    st.builds(
+        ExternalCallCompleted,
+        timestamp=timestamps,
+        run_id=run_ids,
+        call_type=st.sampled_from(list(CallType)),
+        provider=st.sampled_from(["azure-openai", "openrouter", "litellm", "anthropic"]),
+        status=st.sampled_from(list(CallStatus)),
+        latency_ms=st.floats(min_value=0.0, max_value=5000.0, allow_nan=False, allow_infinity=False),
+        state_id=st.none(),
+        operation_id=_short_ids,
+    ),
 )
 
 # All events strategy
