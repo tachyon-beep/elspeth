@@ -303,9 +303,12 @@ def make_gate_continue(
 
     if isinstance(data, PipelineRow):
         row_dict = data.to_dict()
+        contract = contract or data.contract
     else:
-        row_dict = make_row(data, contract=contract).to_dict()
-    return GateResult(row=row_dict, action=RoutingAction.continue_())
+        row = make_row(data, contract=contract)
+        row_dict = row.to_dict()
+        contract = row.contract
+    return GateResult(row=row_dict, action=RoutingAction.continue_(), contract=contract)
 
 
 def make_gate_route(
@@ -320,9 +323,12 @@ def make_gate_route(
 
     if isinstance(data, PipelineRow):
         row_dict = data.to_dict()
+        contract = contract or data.contract
     else:
-        row_dict = make_row(data, contract=contract).to_dict()
-    return GateResult(row=row_dict, action=RoutingAction.route(sink))
+        row = make_row(data, contract=contract)
+        row_dict = row.to_dict()
+        contract = row.contract
+    return GateResult(row=row_dict, action=RoutingAction.route(sink), contract=contract)
 
 
 def make_gate_fork(
@@ -337,9 +343,12 @@ def make_gate_fork(
 
     if isinstance(data, PipelineRow):
         row_dict = data.to_dict()
+        contract = contract or data.contract
     else:
-        row_dict = make_row(data, contract=contract).to_dict()
-    return GateResult(row=row_dict, action=RoutingAction.fork_to_paths(paths))
+        row = make_row(data, contract=contract)
+        row_dict = row.to_dict()
+        contract = row.contract
+    return GateResult(row=row_dict, action=RoutingAction.fork_to_paths(paths), contract=contract)
 
 
 # =============================================================================
@@ -475,7 +484,7 @@ def make_row_result(
     token = make_token_info()
     return RowResult(
         token=token,
-        final_data=data or {"_result": True},
+        final_data=data if data is not None else {"_result": True},
         outcome=outcome or RowOutcome.COMPLETED,
         sink_name=sink_name,
         error=error,
