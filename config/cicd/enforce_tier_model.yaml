@@ -105,6 +105,11 @@ per_file_rules:
   - R1
   reason: Security utilities access optional environment variables (Tier 3) - defensive access for missing keys
   expires: null
+- pattern: testing/__init__.py
+  rules:
+  - R5
+  reason: Test factories accept dict|PipelineRow for convenience - isinstance() for input coercion, not bug masking
+  expires: null
 allow_hits:
 - key: core/landscape/_node_state_recording.py:R5:NodeStateRecordingMixin:complete_node_state:fp=449fbf004664406f
   owner: architecture

@@ -5,6 +5,11 @@ allowed_external_types:
   - "tui/types:TokenDisplayInfo"
   # SSRF safety type - security infrastructure, tightly coupled to validation logic
   - "core/security/web:SSRFSafeRequest"
+  # Engine types used in testing factories - test infrastructure wraps these for convenience
+  - "engine/orchestrator/types:PipelineConfig"
+  - "engine/orchestrator/types:RunResult"
+  - "engine/orchestrator/types:AggregationFlushResult"
+  - "engine/orchestrator/types:ExecutionCounters"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -352,9 +357,26 @@ allowed_dict_patterns:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TESTING UTILITIES - Test infrastructure (not production code)
-  # make_pipeline_row creates typed rows from arbitrary test data
+  # Test factories accept arbitrary dicts for convenience — they wrap typed
+  # constructors, so dict[str, Any] is the input type before factory conversion.
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/testing/__init__.py:make_pipeline_row:data"
+  - "src/elspeth/testing/__init__.py:make_contract:data"
+  - "src/elspeth/testing/__init__.py:make_row:data"
+  - "src/elspeth/testing/__init__.py:make_source_row:data"
+  - "src/elspeth/testing/__init__.py:make_source_row_quarantined:data"
+  - "src/elspeth/testing/__init__.py:make_success:data"
+  - "src/elspeth/testing/__init__.py:make_success:context_after"
+  - "src/elspeth/testing/__init__.py:make_gate_continue:data"
+  - "src/elspeth/testing/__init__.py:make_gate_route:data"
+  - "src/elspeth/testing/__init__.py:make_gate_fork:data"
+  - "src/elspeth/testing/__init__.py:make_token_info:data"
+  - "src/elspeth/testing/__init__.py:make_row_result:data"
+  - "src/elspeth/testing/__init__.py:make_pipeline_config:sinks"
+  - "src/elspeth/testing/__init__.py:make_success_reason:metadata"
+  - "src/elspeth/testing/__init__.py:make_success_reason:return"
+  - "src/elspeth/testing/__init__.py:make_error_reason:return"
+  - "src/elspeth/testing/__init__.py:make_contract_audit_record:data"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # CHAOSLLM - Fault injection test server
