@@ -19,6 +19,7 @@ Therefore, JSONExplode inherits from DataPluginConfig (NOT TransformDataConfig)
 and has no on_error configuration.
 """
 
+import copy
 from typing import Any
 
 from pydantic import Field
@@ -171,9 +172,12 @@ class JSONExplode(BaseTransform):
             )
 
         # Explode array into multiple rows
+        # Deep copy base for each row to prevent cross-row mutation via shared
+        # nested references (e.g., downstream mutating row["metadata"]["key"]
+        # would corrupt sibling rows if they shared the same dict object).
         output_rows: list[dict[str, Any]] = []
         for i, item in enumerate(array_value):
-            output = base.copy()
+            output = copy.deepcopy(base)
             output[self._output_field] = item
             if self._include_index:
                 output["item_index"] = i

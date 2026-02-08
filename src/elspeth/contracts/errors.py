@@ -256,6 +256,8 @@ TransformErrorCategory = Literal[
     # Contract violations (schema validation)
     "contract_violation",
     "multiple_contract_violations",
+    # Numeric/computation errors
+    "float_overflow",  # Arithmetic overflow producing inf (e.g., sum of large floats)
     # Executor lifecycle
     "shutdown_requested",  # Worker stopped mid-retry due to executor shutdown
     # Generic (for tests and edge cases)
@@ -400,6 +402,8 @@ class TransformErrorReason(TypedDict):
 
     # Batch processing context
     batch_id: NotRequired[str]
+    batch_size: NotRequired[int]  # Total rows in batch
+    valid_count: NotRequired[int]  # Rows that passed validation within batch
     queries_completed: NotRequired[int]
     row_errors: NotRequired[list[RowErrorEntry]]
     output_file_id: NotRequired[str]  # Batch output file reference

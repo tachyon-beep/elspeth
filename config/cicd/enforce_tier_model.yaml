@@ -847,7 +847,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=cf5a7341961534e0
+- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=0bd8dc8dca329b8b
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1322,7 +1322,7 @@ allow_hits:
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check converts PipelineRow to dict for audit trail consistency
   expires: null
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=32173d2b108569cc
+- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=f54b9087450d567e
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check required to handle union type from batch processing

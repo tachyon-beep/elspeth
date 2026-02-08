@@ -468,3 +468,74 @@ class TestJSONExplodeContractPropagation:
         # Original array field should not be accessible
         with pytest.raises(KeyError, match="not found in schema contract"):
             _ = output_row["tags"]
+
+
+class TestJSONExplodeCopyIsolation:
+    """Tests that exploded rows have independent copies of nested data.
+
+    Shallow copy shares nested dicts/lists between output rows.
+    If a downstream transform mutates a nested value in one row,
+    all sibling rows would be corrupted. Deep copy prevents this.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return PluginContext(run_id="test-run", config={})
+
+    def test_nested_dict_mutation_does_not_corrupt_siblings(self, ctx: PluginContext) -> None:
+        """Mutating a nested dict in one exploded row must not affect others."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode({"schema": DYNAMIC_SCHEMA, "array_field": "items"})
+
+        row = make_pipeline_row(
+            {
+                "id": 1,
+                "metadata": {"source": "api", "version": 2},
+                "items": ["a", "b", "c"],
+            }
+        )
+
+        result = transform.process(row, ctx)
+
+        assert result.is_multi_row
+        assert result.rows is not None
+        assert len(result.rows) == 3
+
+        # Mutate nested dict in first row
+        row_0_dict = result.rows[0].to_dict()
+        row_0_dict["metadata"]["corrupted"] = True
+
+        # Sibling rows must NOT see the mutation
+        row_1_dict = result.rows[1].to_dict()
+        row_2_dict = result.rows[2].to_dict()
+        assert "corrupted" not in row_1_dict["metadata"]
+        assert "corrupted" not in row_2_dict["metadata"]
+
+    def test_nested_list_mutation_does_not_corrupt_siblings(self, ctx: PluginContext) -> None:
+        """Mutating a nested list in one exploded row must not affect others."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode({"schema": DYNAMIC_SCHEMA, "array_field": "items"})
+
+        row = make_pipeline_row(
+            {
+                "id": 1,
+                "tags": ["original"],
+                "items": ["x", "y"],
+            }
+        )
+
+        result = transform.process(row, ctx)
+
+        assert result.is_multi_row
+        assert result.rows is not None
+        assert len(result.rows) == 2
+
+        # Mutate nested list in first row
+        row_0_dict = result.rows[0].to_dict()
+        row_0_dict["tags"].append("injected")
+
+        # Second row must NOT see the mutation
+        row_1_dict = result.rows[1].to_dict()
+        assert row_1_dict["tags"] == ["original"]

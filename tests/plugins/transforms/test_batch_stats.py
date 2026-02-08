@@ -8,6 +8,7 @@ BatchStats outputs a completely different shape ({count, sum, mean, batch_size})
 than its input, but incorrectly sets output_schema = input_schema.
 """
 
+import sys
 from typing import Any
 
 import pytest
@@ -180,3 +181,168 @@ class TestBatchStatsOutputSchema:
 
         config = transform.output_schema.model_config
         assert config.get("extra") == "allow", "Output schema should allow extra fields (dynamic)"
+
+
+class TestBatchStatsFloatOverflow:
+    """Tests for float overflow and NaN/Inf handling.
+
+    IEEE 754 NaN and Infinity pass isinstance(x, float) but produce garbage
+    in arithmetic and crash downstream canonical JSON (RFC 8785 rejects
+    non-finite values). These must be detected and handled.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return PluginContext(run_id="test-run", config={})
+
+    def test_nan_input_skipped_from_computation(self, ctx: PluginContext) -> None:
+        """NaN values are skipped from sum/mean, tracked in skipped_non_finite."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
+
+        rows = [
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": float("nan")}),
+            _make_row({"id": 3, "amount": 30.0}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["count"] == 2  # Only finite values counted
+        assert result.row["sum"] == 40.0
+        assert result.row["mean"] == 20.0
+        assert result.row["skipped_non_finite"] == 1
+
+    def test_inf_input_skipped_from_computation(self, ctx: PluginContext) -> None:
+        """Infinity values are skipped from sum/mean, tracked in skipped_non_finite."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
+
+        rows = [
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": float("inf")}),
+            _make_row({"id": 3, "amount": float("-inf")}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["count"] == 1
+        assert result.row["sum"] == 10.0
+        assert result.row["skipped_non_finite"] == 2
+
+    def test_all_non_finite_produces_zero_count(self, ctx: PluginContext) -> None:
+        """Batch with only NaN/Inf values produces count=0, sum=0."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
+
+        rows = [
+            _make_row({"id": 1, "amount": float("nan")}),
+            _make_row({"id": 2, "amount": float("inf")}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["count"] == 0
+        assert result.row["sum"] == 0.0
+        assert result.row["mean"] is None
+        assert result.row["skipped_non_finite"] == 2
+
+    def test_sum_overflow_returns_error(self, ctx: PluginContext) -> None:
+        """Summing large valid floats that overflow to inf returns error."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
+
+        rows = [
+            _make_row({"id": 1, "amount": sys.float_info.max}),
+            _make_row({"id": 2, "amount": sys.float_info.max}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "error"
+        assert result.reason["reason"] == "float_overflow"
+
+    def test_no_skipped_field_when_all_finite(self, ctx: PluginContext) -> None:
+        """skipped_non_finite field is absent when all values are finite."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
+
+        rows = [
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": 20.0}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert "skipped_non_finite" not in result.row.to_dict()
+
+
+class TestBatchStatsGroupByHomogeneity:
+    """Tests for group_by value validation across batch rows.
+
+    When group_by is configured, all rows in the batch must have the same
+    value for that field. Mixed values indicate a trigger/topology bug.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return PluginContext(run_id="test-run", config={})
+
+    def test_homogeneous_group_by_included(self, ctx: PluginContext) -> None:
+        """All rows same group_by value — included in output."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
+
+        rows = [
+            _make_row({"id": 1, "amount": 10.0, "category": "sales"}),
+            _make_row({"id": 2, "amount": 20.0, "category": "sales"}),
+            _make_row({"id": 3, "amount": 30.0, "category": "sales"}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.row["category"] == "sales"
+
+    def test_heterogeneous_group_by_raises(self, ctx: PluginContext) -> None:
+        """Mixed group_by values raise ValueError — topology/config bug."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
+
+        rows = [
+            _make_row({"id": 1, "amount": 10.0, "category": "sales"}),
+            _make_row({"id": 2, "amount": 20.0, "category": "returns"}),
+        ]
+
+        with pytest.raises(ValueError, match="Heterogeneous"):
+            transform.process(rows, ctx)
+
+    def test_group_by_field_missing_from_all_rows(self, ctx: PluginContext) -> None:
+        """group_by field absent from all rows — no group_by in output."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
+
+        rows = [
+            _make_row({"id": 1, "amount": 10.0}),
+            _make_row({"id": 2, "amount": 20.0}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert "category" not in result.row.to_dict()

@@ -7,6 +7,7 @@ IMPORTANT: This transform uses is_batch_aware=True, meaning the engine
 will buffer rows and call process() with a list when the trigger fires.
 """
 
+import math
 from typing import Any
 
 from pydantic import Field
@@ -142,6 +143,7 @@ class BatchStats(BaseTransform):
         # Extract numeric values - enforce type contract
         # Tier 2 pipeline data should already be validated; wrong types = upstream bug
         values: list[float] = []
+        skipped_non_finite = 0
         for i, row in enumerate(rows):
             # Direct access - field must exist (KeyError = upstream bug)
             raw_value = row[self._value_field]
@@ -155,10 +157,26 @@ class BatchStats(BaseTransform):
                     f"This indicates an upstream validation bug - check source schema or prior transforms."
                 )
 
-            values.append(float(raw_value))
+            float_value = float(raw_value)
+
+            # NaN/Inf are type-valid floats but operation-unsafe — they produce
+            # garbage in arithmetic and crash downstream canonical JSON (RFC 8785).
+            # Skip from computation and track for audit metadata.
+            if not math.isfinite(float_value):
+                skipped_non_finite += 1
+                continue
+
+            values.append(float_value)
 
         count = len(values)
-        total = sum(values) if values else 0
+        total = sum(values) if values else 0.0
+
+        # Guard against overflow: summing many large-but-valid floats can produce inf
+        if count > 0 and not math.isfinite(total):
+            return TransformResult.error(
+                {"reason": "float_overflow", "batch_size": len(rows), "valid_count": count},
+                retryable=False,
+            )
 
         result: dict[str, Any] = {
             "count": count,
@@ -171,15 +189,36 @@ class BatchStats(BaseTransform):
         elif self._compute_mean:
             result["mean"] = None
 
-        # Include group_by field from first row for context
-        if self._group_by and rows and self._group_by in rows[0]:
-            result[self._group_by] = rows[0][self._group_by]
+        if skipped_non_finite > 0:
+            result["skipped_non_finite"] = skipped_non_finite
+
+        # Include group_by field — validate homogeneity across batch
+        if self._group_by and rows:
+            group_value = None
+            group_present = False
+            for row in rows:
+                if self._group_by in row:
+                    val = row[self._group_by]
+                    if not group_present:
+                        group_value = val
+                        group_present = True
+                    elif val != group_value:
+                        raise ValueError(
+                            f"Heterogeneous '{self._group_by}' values in batch: "
+                            f"first row has {group_value!r}, found {val!r}. "
+                            f"Configure the aggregation trigger to group by "
+                            f"'{self._group_by}' or remove group_by config."
+                        )
+            if group_present:
+                result[self._group_by] = group_value
 
         # Determine which fields were added
         fields_added = ["count", "sum", "batch_size"]
         if self._compute_mean:
             fields_added.append("mean")
-        if self._group_by and rows and self._group_by in rows[0]:
+        if skipped_non_finite > 0:
+            fields_added.append("skipped_non_finite")
+        if self._group_by and self._group_by in result:
             fields_added.append(self._group_by)
 
         # Create OBSERVED contract from output fields for transform mode
