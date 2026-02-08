@@ -140,6 +140,9 @@ examples/*/runs/*
 !examples/*/output/.gitkeep
 !examples/*/runs/.gitkeep
 
+# Local test databases and logs
+state/
+
 # Real/production data - never commit
 real/
 examples/large_scale_test/input.csv
