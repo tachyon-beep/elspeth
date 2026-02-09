@@ -67,7 +67,7 @@ class TestElspethSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
         )
         assert settings.source.plugin == "csv"
         assert settings.retry.max_attempts == 3  # default
@@ -78,7 +78,7 @@ class TestElspethSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             retry={"max_attempts": 5},
         )
         assert settings.retry.max_attempts == 5
@@ -101,7 +101,7 @@ sinks:
     plugin: "csv"
     options:
       path: "output.csv"
-default_sink: "output"
+
 retry:
   max_attempts: 5
 """)
@@ -120,7 +120,7 @@ source:
 sinks:
   output:
     plugin: "csv"
-default_sink: "output"
+
 """)
         # Environment variable should override YAML
         monkeypatch.setenv("ELSPETH_SOURCE__PLUGIN", "json")
@@ -147,7 +147,7 @@ source:
 sinks:
   output:
     plugin: csv
-default_sink: output
+
 """)
         # Environment variable should override sink plugin
         monkeypatch.setenv("ELSPETH_SINKS__OUTPUT__PLUGIN", "json")
@@ -168,7 +168,7 @@ default_sink: output
         config_file.write_text("""
 source:
   plugin: csv
-default_sink: output
+
 """)
         # Define entire sink via env vars
         monkeypatch.setenv("ELSPETH_SINKS__OUTPUT__PLUGIN", "csv")
@@ -187,7 +187,7 @@ source:
 sinks:
   output:
     plugin: "csv"
-default_sink: "output"
+
 concurrency:
   max_workers: -1
 """)
@@ -468,7 +468,7 @@ gates:
       "true": flagged
       "false": continue
 
-default_sink: results
+
 
 landscape:
   enabled: true
@@ -483,7 +483,6 @@ landscape:
         assert len(settings.sinks) == 2
         assert len(settings.gates) == 1
         assert settings.gates[0].name == "safety_check"
-        assert settings.default_sink == "results"
         assert settings.landscape.backend == "sqlite"
 
     def test_load_minimal_config(self, tmp_path: Path) -> None:
@@ -499,7 +498,7 @@ sinks:
   output:
     plugin: csv
 
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -508,10 +507,8 @@ default_sink: output
         assert settings.landscape.enabled is True  # Default
         assert settings.concurrency.max_workers == 4  # Default
 
-    def test_load_invalid_output_sink(self, tmp_path: Path) -> None:
-        """Error when output_sink doesn't exist."""
-        from pydantic import ValidationError
-
+    def test_load_default_sink_in_yaml_rejected(self, tmp_path: Path) -> None:
+        """default_sink in YAML is rejected with migration message."""
         from elspeth.core.config import load_settings
 
         config_file = tmp_path / "settings.yaml"
@@ -523,13 +520,14 @@ sinks:
   results:
     plugin: csv
 
-default_sink: nonexistent
+default_sink: results
 """)
 
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(ValueError) as exc_info:
             load_settings(config_file)
 
         assert "default_sink" in str(exc_info.value)
+        assert "on_success" in str(exc_info.value)
 
 
 class TestExportSinkValidation:
@@ -543,7 +541,7 @@ class TestExportSinkValidation:
             ElspethSettings(
                 source={"plugin": "csv", "options": {"path": "input.csv"}},
                 sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-                default_sink="output",
+
                 landscape={
                     "export": {
                         "enabled": True,
@@ -562,7 +560,7 @@ class TestExportSinkValidation:
         settings = ElspethSettings(
             source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-            default_sink="output",
+
             landscape={
                 "export": {"enabled": False}  # No sink required
             },
@@ -577,7 +575,7 @@ class TestExportSinkValidation:
             ElspethSettings(
                 source={"plugin": "csv", "options": {"path": "input.csv"}},
                 sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-                default_sink="output",
+
                 landscape={
                     "export": {
                         "enabled": True,
@@ -599,7 +597,7 @@ class TestExportSinkValidation:
                 "output": {"plugin": "csv", "options": {"path": "out.csv"}},
                 "audit_archive": {"plugin": "csv", "options": {"path": "audit.csv"}},
             },
-            default_sink="output",
+
             landscape={
                 "export": {
                     "enabled": True,
@@ -686,7 +684,6 @@ class TestElspethSettingsArchitecture:
         missing_fields = {e["loc"][0] for e in errors if e["type"] == "missing"}
         assert "source" in missing_fields
         assert "sinks" in missing_fields
-        assert "default_sink" in missing_fields
 
     def test_elspeth_settings_minimal_valid(self) -> None:
         """Minimal valid configuration."""
@@ -699,19 +696,17 @@ class TestElspethSettingsArchitecture:
         settings = ElspethSettings(
             source=SourceSettings(plugin="csv", options={"path": "in.csv"}),
             sinks={"results": SinkSettings(plugin="csv", options={"path": "out.csv"})},
-            default_sink="results",
         )
 
         assert settings.source.plugin == "csv"
         assert "results" in settings.sinks
-        assert settings.default_sink == "results"
         # Defaults applied
         assert settings.transforms == []
         assert settings.landscape.enabled is True
         assert settings.concurrency.max_workers == 4
 
-    def test_elspeth_settings_output_sink_must_exist(self) -> None:
-        """output_sink must reference a defined sink."""
+    def test_elspeth_settings_rejects_default_sink(self) -> None:
+        """default_sink is rejected with migration message."""
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -722,10 +717,11 @@ class TestElspethSettingsArchitecture:
             ElspethSettings(
                 source=SourceSettings(plugin="csv"),
                 sinks={"results": SinkSettings(plugin="csv")},
-                default_sink="nonexistent",  # Not in sinks!
+                default_sink="results",
             )
 
         assert "default_sink" in str(exc_info.value)
+        assert "on_success" in str(exc_info.value)
 
     def test_elspeth_settings_at_least_one_sink(self) -> None:
         """At least one sink is required."""
@@ -735,7 +731,6 @@ class TestElspethSettingsArchitecture:
             ElspethSettings(
                 source=SourceSettings(plugin="csv"),
                 sinks={},  # Empty!
-                default_sink="results",
             )
 
         assert "sink" in str(exc_info.value).lower()
@@ -827,7 +822,7 @@ class TestResolveConfig:
         settings = ElspethSettings(
             source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "output.csv"}}},
-            default_sink="output",
+
         )
 
         resolved = resolve_config(settings)
@@ -835,8 +830,6 @@ class TestResolveConfig:
         assert isinstance(resolved, dict)
         assert "source" in resolved
         assert resolved["source"]["plugin"] == "csv"
-        assert "default_sink" in resolved
-        assert resolved["default_sink"] == "output"
 
     def test_resolve_config_includes_defaults(self) -> None:
         """resolve_config includes default values for audit completeness."""
@@ -845,7 +838,7 @@ class TestResolveConfig:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
         )
 
         resolved = resolve_config(settings)
@@ -867,7 +860,7 @@ class TestResolveConfig:
         settings = ElspethSettings(
             source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "output.csv"}}},
-            default_sink="output",
+
         )
 
         resolved = resolve_config(settings)
@@ -884,7 +877,7 @@ class TestResolveConfig:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             transforms=[
                 {
                     "plugin": "field_mapper",
@@ -1202,7 +1195,7 @@ class TestElspethSettingsWithGates:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
         )
         assert settings.gates == []
 
@@ -1213,7 +1206,7 @@ class TestElspethSettingsWithGates:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}, "review": {"plugin": "csv"}},
-            default_sink="output",
+
             gates=[
                 {
                     "name": "quality_check",
@@ -1232,7 +1225,7 @@ class TestElspethSettingsWithGates:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             gates=[
                 {
                     "name": "gate_1",
@@ -1260,7 +1253,7 @@ class TestElspethSettingsWithGates:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                default_sink="output",
+
                 gates=[
                     {
                         "name": "my_gate",
@@ -1285,7 +1278,7 @@ class TestElspethSettingsWithGates:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                default_sink="output",
+
                 gates=[
                     {"name": "gate_a", "condition": "True", "routes": {"true": "continue", "false": "output"}},
                     {"name": "gate_a", "condition": "True", "routes": {"true": "continue", "false": "output"}},
@@ -1306,7 +1299,7 @@ class TestElspethSettingsWithGates:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             gates=[
                 {
                     "name": "quality_check",
@@ -1342,7 +1335,7 @@ sinks:
   review:
     plugin: csv
 
-default_sink: output
+
 
 gates:
   - name: quality_check
@@ -1371,7 +1364,7 @@ sinks:
   output:
     plugin: csv
 
-default_sink: output
+
 
 gates:
   - name: parallel_analysis
@@ -1412,7 +1405,7 @@ sinks:
   archive:
     plugin: csv
 
-default_sink: output
+
 
 gates:
   - name: priority_router
@@ -1667,7 +1660,6 @@ class TestElspethSettingsWithCoalesce:
         settings = ElspethSettings(
             source=SourceSettings(plugin="csv_local", options={"path": "test.csv"}),
             sinks={"default": SinkSettings(plugin="csv", options={"path": "out.csv"})},
-            default_sink="default",
             coalesce=[
                 CoalesceSettings(
                     name="merge_results",
@@ -1688,7 +1680,7 @@ class TestElspethSettingsWithCoalesce:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
         )
         assert settings.coalesce == []
 
@@ -1699,7 +1691,7 @@ class TestElspethSettingsWithCoalesce:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             coalesce=[
                 {
                     "name": "merge_results",
@@ -1726,7 +1718,7 @@ class TestElspethSettingsWithCoalesce:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                default_sink="output",
+
                 coalesce=[
                     {
                         "name": "my_coalesce",
@@ -1753,7 +1745,7 @@ class TestElspethSettingsWithCoalesce:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                default_sink="output",
+
                 coalesce=[
                     {"name": "coal_a", "branches": ["x", "y"], "policy": "require_all", "merge": "union"},
                     {"name": "coal_a", "branches": ["x", "y"], "policy": "require_all", "merge": "union"},
@@ -1794,7 +1786,7 @@ sinks:
     plugin: csv_sink
     options:
       path: output.csv
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -1821,7 +1813,7 @@ sinks:
     plugin: csv_sink
     options:
       path: output.csv
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -1850,7 +1842,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -1873,7 +1865,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -1897,7 +1889,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -1920,7 +1912,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -1944,7 +1936,7 @@ sinks:
     plugin: database_sink
     options:
       password: super-secret-password
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -1967,7 +1959,7 @@ sinks:
     plugin: database_sink
     options:
       password: super-secret-password
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -1994,7 +1986,7 @@ sinks:
     plugin: csv_sink
     options:
       path: output.csv
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -2022,7 +2014,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -2046,7 +2038,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 transforms:
   - plugin: llm_transform
     options:
@@ -2075,7 +2067,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 transforms:
   - plugin: llm_transform
     options:
@@ -2104,7 +2096,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 telemetry:
   enabled: true
   exporters:
@@ -2248,7 +2240,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 """)
 
         # load_settings succeeds even without fingerprint key
@@ -2275,7 +2267,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -2316,7 +2308,7 @@ source:
 sinks:
   output:
     plugin: csv_sink
-default_sink: output
+
 """)
 
         settings = load_settings(config_file)
@@ -2463,7 +2455,6 @@ default_sink: output
             "landscape": {"url": "postgresql://user:mysecret@host/db"},
             "source": {"plugin": "csv", "options": {}},
             "sinks": {"output": {"plugin": "csv_sink"}},
-            "default_sink": "output",
         }
 
         result = _fingerprint_config_for_audit(config_dict)
@@ -2484,7 +2475,6 @@ default_sink: output
             "landscape": {"url": "postgresql://user:mysecret@host/db"},
             "source": {"plugin": "csv", "options": {}},
             "sinks": {"output": {"plugin": "csv_sink"}},
-            "default_sink": "output",
         }
 
         result = _fingerprint_config_for_audit(config_dict)
@@ -2505,7 +2495,7 @@ class TestRunModeSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
         )
 
         assert settings.run_mode == RunMode.LIVE
@@ -2519,7 +2509,7 @@ class TestRunModeSettings:
         settings_live = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             run_mode=RunMode.LIVE,
         )
         assert settings_live.run_mode == RunMode.LIVE
@@ -2528,7 +2518,7 @@ class TestRunModeSettings:
         settings_replay = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             run_mode=RunMode.REPLAY,
             replay_from="run-abc123",
         )
@@ -2538,7 +2528,7 @@ class TestRunModeSettings:
         settings_verify = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             run_mode=RunMode.VERIFY,
             replay_from="run-abc123",
         )
@@ -2553,7 +2543,7 @@ class TestRunModeSettings:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                default_sink="output",
+
                 run_mode=RunMode.REPLAY,
                 # Missing replay_from
             )
@@ -2570,7 +2560,7 @@ class TestRunModeSettings:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                default_sink="output",
+
                 run_mode=RunMode.VERIFY,
                 # Missing replay_from
             )
@@ -2587,7 +2577,7 @@ class TestRunModeSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             run_mode=RunMode.LIVE,
             # No replay_from
         )
@@ -2604,7 +2594,7 @@ class TestRunModeSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             run_mode=RunMode.LIVE,
             replay_from="run-abc123",  # Provided but not required
         )
@@ -2620,7 +2610,7 @@ class TestRunModeSettings:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                default_sink="output",
+
                 run_mode="invalid_mode",
             )
 
@@ -2632,7 +2622,7 @@ class TestRunModeSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            default_sink="output",
+
             run_mode=RunMode.REPLAY,
             replay_from="run-abc123",
         )
@@ -2959,7 +2949,7 @@ sinks:
   output:
     plugin: csv
 
-default_sink: output
+
 run_mode: live
 """)
         settings = load_settings(config_file)
@@ -2981,7 +2971,7 @@ sinks:
   output:
     plugin: csv
 
-default_sink: output
+
 run_mode: replay
 replay_from: run-abc123
 """)
@@ -3004,7 +2994,7 @@ sinks:
   output:
     plugin: csv
 
-default_sink: output
+
 run_mode: verify
 replay_from: run-xyz789
 """)
@@ -3026,7 +3016,7 @@ sinks:
   output:
     plugin: csv
 
-default_sink: output
+
 run_mode: replay
 """)
         with pytest.raises(ValidationError) as exc_info:
@@ -3062,7 +3052,7 @@ sinks:
     options:
       path: out.csv
 
-default_sink: output
+
 
 transforms:
   - plugin: openrouter_llm
@@ -3192,7 +3182,7 @@ class TestSinkNameCasing:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}, "error_sink": {"plugin": "csv"}},
-            default_sink="output",
+
         )
         assert "output" in settings.sinks
         assert "error_sink" in settings.sinks
@@ -3205,7 +3195,6 @@ class TestSinkNameCasing:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"MyOutput": {"plugin": "csv"}},
-                default_sink="MyOutput",
             )
         # Should get a clear error about lowercase requirement
         assert "lowercase" in str(exc_info.value).lower()
@@ -3219,7 +3208,6 @@ class TestSinkNameCasing:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"OUTPUT": {"plugin": "csv"}},
-                default_sink="OUTPUT",
             )
         assert "lowercase" in str(exc_info.value).lower()
 
@@ -3230,13 +3218,12 @@ class TestSinkNameCasing:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output_v2": {"plugin": "csv"}, "sink_123": {"plugin": "csv"}},
-            default_sink="output_v2",
         )
         assert "output_v2" in settings.sinks
         assert "sink_123" in settings.sinks
 
-    def test_default_sink_must_exist(self) -> None:
-        """default_sink must reference a defined sink."""
+    def test_default_sink_rejected(self) -> None:
+        """default_sink is rejected with migration guidance."""
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
@@ -3245,8 +3232,8 @@ class TestSinkNameCasing:
                 sinks={"output": {"plugin": "csv"}},
                 default_sink="nonexistent",
             )
-        assert "nonexistent" in str(exc_info.value)
-        assert "not found" in str(exc_info.value).lower()
+        assert "default_sink" in str(exc_info.value)
+        assert "on_success" in str(exc_info.value)
 
     def test_load_settings_rejects_mixed_case_sink_names(self, tmp_path: Path) -> None:
         """Mixed-case sink names from YAML are rejected with helpful error."""
@@ -3259,7 +3246,6 @@ source:
 sinks:
   MyOutput:
     plugin: csv
-default_sink: MyOutput
 """)
         # Mixed-case sink names are preserved so validator catches them
         with pytest.raises(ValidationError) as exc_info:

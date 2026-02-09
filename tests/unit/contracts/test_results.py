@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo, TransformErrorReason
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -319,18 +320,29 @@ class TestRowResult:
     """Tests for RowResult."""
 
     def test_creation(self) -> None:
-        """RowResult stores token, data, outcome, and optional sink_name."""
+        """COMPLETED RowResult stores token, data, outcome, and required sink_name."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
         result = RowResult(
             token=token,
             final_data={"x": 1, "processed": True},
             outcome=RowOutcome.COMPLETED,
+            sink_name="processed",
         )
 
         assert result.token == token
         assert result.final_data == {"x": 1, "processed": True}
         assert result.outcome == RowOutcome.COMPLETED
-        assert result.sink_name is None
+        assert result.sink_name == "processed"
+
+    def test_completed_without_sink_name_raises(self) -> None:
+        """COMPLETED outcome requires sink_name."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        with pytest.raises(OrchestrationInvariantError, match="COMPLETED outcome requires sink_name"):
+            RowResult(
+                token=token,
+                final_data={"x": 1},
+                outcome=RowOutcome.COMPLETED,
+            )
 
     def test_routed_with_sink_name(self) -> None:
         """ROUTED outcome includes sink_name."""
