@@ -100,6 +100,18 @@ def _validate_on_success_routing(
     to explicitly route completed rows to a sink. Non-terminal transforms MUST
     NOT have on_success set.
 
+    **Terminality model:** A node is "terminal" when its positional index is the
+    last in ``pipeline_nodes`` (i.e. ``step + 1 == len(pipeline_nodes)``). This
+    is functionally equivalent to structural terminality (no outgoing ``continue``
+    edge) because ``from_plugin_instances()`` constructs a linear chain where each
+    node connects to the next. If DAG construction is ever extended to support
+    non-linear topologies (e.g. conditional bypasses, diamond merges without
+    coalesce), this positional check MUST be replaced with a structural graph
+    query such as ``not any(graph.successors(node_id, label="continue"))``.
+    The same assumption applies to ``_validate_aggregation_on_success_routing``,
+    the coalesce terminal check, and the gate terminal check in
+    ``from_plugin_instances()``.
+
     Args:
         transforms: Ordered list of transform instances (includes plugin gates)
         transform_ids: Mapping from transform index to node ID
@@ -128,6 +140,7 @@ def _validate_on_success_routing(
 
         transform_node_id = transform_ids[i]
         transform_step = pipeline_index[transform_node_id]
+        # Positional terminality — see docstring above for assumptions.
         is_terminal = transform_step + 1 == len(pipeline_nodes)
 
         on_success = transform.on_success
@@ -187,6 +200,8 @@ def _validate_aggregation_on_success_routing(
     for agg_name, (transform, _agg_settings) in aggregations.items():
         agg_id = aggregation_ids[AggregationName(agg_name)]
         agg_step = pipeline_index[agg_id]
+        # Positional terminality — see docstring on _validate_on_success_routing
+        # for assumptions and migration path to structural terminality.
         is_terminal = agg_step + 1 == len(pipeline_nodes)
         on_success = transform.on_success
 
@@ -970,7 +985,10 @@ class ExecutionGraph:
             has_continue_route = any(target == "continue" for target in gate_entry.routes.values())
 
             if has_continue_route:
-                # Determine next node in chain
+                # Determine next node in chain.
+                # Positional terminality — see docstring on
+                # _validate_on_success_routing for assumptions and
+                # migration path to structural terminality.
                 gate_idx = pipeline_index[gate_entry.node_id]
                 if gate_idx + 1 < len(pipeline_nodes):
                     next_node_id = pipeline_nodes[gate_idx + 1]
@@ -1055,6 +1073,9 @@ class ExecutionGraph:
                 coalesce_name = CoalesceName(coalesce_config.name)
                 coalesce_id = coalesce_ids[coalesce_name]
                 gate_idx = coalesce_gate_index[coalesce_name]
+                # Positional terminality — see docstring on
+                # _validate_on_success_routing for assumptions and
+                # migration path to structural terminality.
                 if gate_idx + 1 < len(pipeline_nodes):
                     # Non-terminal coalesce: continue to next pipeline node
                     if coalesce_config.on_success is not None:
