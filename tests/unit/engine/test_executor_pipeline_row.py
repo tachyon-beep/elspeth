@@ -17,20 +17,8 @@ import pytest
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from elspeth.contracts.types import NodeID, StepResolver
 from tests.fixtures.factories import make_field, make_row
-
-
-def _make_step_resolver(step_map: dict[str, int] | None = None) -> StepResolver:
-    """Create a step resolver for testing that returns a fixed step or uses a map."""
-    _map = {NodeID(k): v for k, v in (step_map or {}).items()}
-
-    def resolve(node_id: NodeID) -> int:
-        if node_id in _map:
-            return _map[node_id]
-        return 1  # Default step for tests
-
-    return resolve
+from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 
 def _make_contract():

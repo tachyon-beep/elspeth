@@ -298,6 +298,85 @@ class TestTraversalNextNodeInvariants:
 
 
 # =============================================================================
+# _resolve_audit_step_for_node invariants
+# =============================================================================
+
+
+class TestAuditStepResolutionInvariants:
+    """Tests for strict Tier-1 audit step resolution invariants.
+
+    _resolve_audit_step_for_node has three branches:
+    1. node_id in step_map → return mapped step
+    2. node_id == source_node_id (not in map) → return 0
+    3. unknown node_id → raise OrchestrationInvariantError
+    """
+
+    def test_known_node_returns_mapped_step(self) -> None:
+        """Nodes in the step map return their assigned step value."""
+        _, recorder = _make_recorder()
+        transform_node = NodeID("transform-1")
+        processor = _make_processor(
+            recorder,
+            node_step_map={NodeID("source-0"): 0, transform_node: 3},
+            node_to_next={NodeID("source-0"): None, transform_node: None},
+        )
+
+        assert processor._resolve_audit_step_for_node(transform_node) == 3
+
+    def test_source_node_returns_zero(self) -> None:
+        """Source node resolves to step 0 even when not in the step map.
+
+        This is the convention distinguishing source-originated audit records
+        from transform-originated ones. The _make_processor helper auto-adds
+        the source to the step map, so we construct the processor directly
+        to test the explicit fallback branch.
+        """
+        _, recorder = _make_recorder()
+        source_node = NodeID("source-0")
+
+        # Build traversal WITHOUT source in the step map
+        traversal = DAGTraversalContext(
+            node_step_map={},
+            node_to_plugin={},
+            first_transform_node_id=None,
+            node_to_next={source_node: None},
+            coalesce_node_map={},
+        )
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id="test-run",
+            source_node_id=source_node,
+            source_on_success="default",
+            traversal=traversal,
+        )
+
+        assert processor._resolve_audit_step_for_node(source_node) == 0
+
+    def test_unknown_node_raises_invariant_error(self) -> None:
+        """Unknown node IDs must crash, not silently return a default step."""
+        _, recorder = _make_recorder()
+        processor = _make_processor(
+            recorder,
+            node_to_next={NodeID("source-0"): None},
+        )
+
+        with pytest.raises(OrchestrationInvariantError, match="missing from traversal step map"):
+            processor._resolve_audit_step_for_node(NodeID("nonexistent-node"))
+
+    def test_unknown_node_includes_node_id_in_error(self) -> None:
+        """Error message includes the offending node ID for debugging."""
+        _, recorder = _make_recorder()
+        processor = _make_processor(
+            recorder,
+            node_to_next={NodeID("source-0"): None},
+        )
+
+        with pytest.raises(OrchestrationInvariantError, match="phantom-node-42"):
+            processor._resolve_audit_step_for_node(NodeID("phantom-node-42"))
+
+
+# =============================================================================
 # _get_gate_destinations
 # =============================================================================
 

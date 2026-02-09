@@ -7,21 +7,10 @@ import pytest
 
 from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from elspeth.contracts.types import NodeID, StepResolver
+from elspeth.contracts.types import NodeID
 from elspeth.testing import make_field
 from tests.unit.engine.conftest import DYNAMIC_SCHEMA
-
-
-def _make_step_resolver(step_map: dict[str, int] | None = None) -> StepResolver:
-    """Create a step resolver for testing that returns a fixed step or uses a map."""
-    _map = {NodeID(k): v for k, v in (step_map or {}).items()}
-
-    def resolve(node_id: NodeID) -> int:
-        if node_id in _map:
-            return _map[node_id]
-        return 1  # Default step for tests
-
-    return resolve
+from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 
 def _make_observed_contract(*field_names: str) -> SchemaContract:

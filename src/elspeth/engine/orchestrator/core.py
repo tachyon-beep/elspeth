@@ -102,7 +102,7 @@ from elspeth.engine.orchestrator.validation import (
     validate_source_quarantine_destination,
     validate_transform_error_sinks,
 )
-from elspeth.engine.processor import DAGTraversalContext, RowProcessor
+from elspeth.engine.processor import DAGTraversalContext, RowProcessor, make_step_resolver
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
@@ -540,17 +540,9 @@ class Orchestrator:
         # node_step_map is available for the step_resolver closure they require.
         traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
 
-        # Build step_resolver: resolves NodeID -> 1-indexed audit step position.
-        # Matches RowProcessor._resolve_audit_step_for_node exactly.
-        node_step_map = dict(traversal.node_step_map)
-        _source_id = source_id
-
-        def step_resolver(node_id: NodeID) -> int:
-            if node_id in node_step_map:
-                return node_step_map[node_id]
-            if node_id == _source_id:
-                return 0
-            raise OrchestrationInvariantError(f"Node ID '{node_id}' missing from traversal step map")
+        # Build step_resolver from shared factory (single source of truth).
+        # Same factory is used by RowProcessor internally for its executors.
+        step_resolver = make_step_resolver(traversal.node_step_map, source_id)
 
         coalesce_executor: CoalesceExecutor | None = None
 
@@ -563,6 +555,9 @@ class Orchestrator:
                     "Coalesce settings are required when the pipeline has fork/join patterns."
                 )
 
+            # payload_store intentionally omitted: CoalesceExecutor's TokenManager only
+            # calls coalesce_tokens(), which does not persist payloads (payloads are
+            # recorded by the RowProcessor's TokenManager during initial token creation).
             token_manager = TokenManager(recorder, step_resolver=step_resolver)
             coalesce_executor = CoalesceExecutor(
                 recorder=recorder,

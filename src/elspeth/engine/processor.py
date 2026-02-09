@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName
+from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName, StepResolver
 
 if TYPE_CHECKING:
     from elspeth.contracts.events import TelemetryEvent
@@ -60,6 +60,35 @@ class DAGTraversalContext:
     first_transform_node_id: NodeID | None
     node_to_next: dict[NodeID, NodeID | None]
     coalesce_node_map: dict[CoalesceName, NodeID]
+
+
+def make_step_resolver(
+    node_step_map: dict[NodeID, int],
+    source_node_id: NodeID,
+) -> StepResolver:
+    """Create a StepResolver from a precomputed step map.
+
+    Single source of truth for audit step resolution. Used by both RowProcessor
+    (for its internal executors) and the orchestrator (for CoalesceExecutor and
+    its TokenManager, which are constructed before the processor).
+
+    Resolution order:
+    1. Known node in step_map → return mapped step
+    2. Source node (not in map) → return 0
+    3. Unknown node → raise OrchestrationInvariantError
+    """
+    # Defensive copy so callers can't mutate the map after creation
+    _map = dict(node_step_map)
+    _source = source_node_id
+
+    def resolve(node_id: NodeID) -> int:
+        if node_id in _map:
+            return _map[node_id]
+        if node_id == _source:
+            return 0
+        raise OrchestrationInvariantError(f"Node ID '{node_id}' missing from traversal step map")
+
+    return resolve
 
 
 @dataclass
@@ -157,6 +186,7 @@ class RowProcessor:
         self._source_on_success: str = source_on_success
         self._traversal = traversal
         self._node_step_map: dict[NodeID, int] = dict(traversal.node_step_map)
+        self._step_resolver: StepResolver = make_step_resolver(traversal.node_step_map, source_node_id)
         self._node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = dict(traversal.node_to_plugin)
         self._first_transform_node_id: NodeID | None = traversal.first_transform_node_id
         self._node_to_next: dict[NodeID, NodeID | None] = dict(traversal.node_to_next)
@@ -181,21 +211,21 @@ class RowProcessor:
 
         self._token_manager = TokenManager(
             recorder,
-            step_resolver=self._resolve_audit_step_for_node,
+            step_resolver=self._step_resolver,
             payload_store=payload_store,
         )
         self._transform_executor = TransformExecutor(
             recorder,
             span_factory,
-            self._resolve_audit_step_for_node,
+            self._step_resolver,
             max_workers=max_workers,
             error_edge_ids=error_edge_ids,
         )
-        self._gate_executor = GateExecutor(recorder, span_factory, self._resolve_audit_step_for_node, edge_map, route_resolution_map)
+        self._gate_executor = GateExecutor(recorder, span_factory, self._step_resolver, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(
             recorder,
             span_factory,
-            self._resolve_audit_step_for_node,
+            self._step_resolver,
             run_id,
             aggregation_settings=aggregation_settings,
             clock=self._clock,
@@ -249,7 +279,14 @@ class RowProcessor:
         return max(self._node_step_map.values()) + 1
 
     def _resolve_plugin_for_node(self, node_id: NodeID) -> TransformProtocol | GateProtocol | GateSettings | None:
-        """Resolve the plugin/gate associated with a processing node."""
+        """Resolve the plugin/gate associated with a processing node.
+
+        Returns None for structural nodes (e.g. coalesce points) that exist in
+        the DAG traversal but have no plugin to execute. The caller skips these
+        nodes and continues to the next processing node. This is intentional —
+        unlike _resolve_next_node_for_processing (which crashes on unknown nodes),
+        a None return here means "valid node, no plugin work needed."
+        """
         if node_id in self._node_to_plugin:
             return self._node_to_plugin[node_id]
         return None
@@ -263,12 +300,11 @@ class RowProcessor:
         return self._node_to_next[node_id]
 
     def _resolve_audit_step_for_node(self, node_id: NodeID) -> int:
-        """Resolve 1-indexed audit step for a processing node."""
-        if node_id in self._node_step_map:
-            return self._node_step_map[node_id]
-        if node_id == self._source_node_id:
-            return 0
-        raise OrchestrationInvariantError(f"Node ID '{node_id}' missing from traversal step map")
+        """Resolve 1-indexed audit step for a processing node.
+
+        Delegates to the factory-produced StepResolver (make_step_resolver).
+        """
+        return self._step_resolver(node_id)
 
     def _resolve_continuation_node_for_work_item(self, current_node_id: NodeID) -> NodeID | None:
         """Resolve next processing node for continuation work."""

@@ -1994,6 +1994,12 @@ class SinkExecutor:
     proof that the row reached its terminal state. The COMPLETED terminal state
     is DERIVED from having a completed node_state at a sink node.
 
+    Note: Unlike TransformExecutor/GateExecutor/AggregationExecutor, SinkExecutor
+    does NOT use StepResolver. Sinks are not DAG processing nodes — their step is
+    always max(processing_steps) + 1, computed by RowProcessor.resolve_sink_step()
+    and passed as step_in_pipeline by the orchestrator. This is intentional: sinks
+    exist after all processing nodes and have a fixed, deterministic step position.
+
     Example:
         executor = SinkExecutor(recorder, span_factory, run_id)
         artifact = executor.write(
