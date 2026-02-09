@@ -709,6 +709,215 @@ class TestProcessRowGateBranching:
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COMPLETED
 
+    def test_gate_processing_node_jump_preloads_subchain_sink_for_expanded_children(self) -> None:
+        """PROCESSING_NODE jumps should refresh inherited sink from jumped subchain."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+
+        gate = _make_mock_gate(node_id="gate-1", name="brancher")
+        expander = _make_mock_transform(
+            node_id="expander-2",
+            name="expander",
+            creates_tokens=True,
+            on_success=None,
+        )
+        terminal = _make_mock_transform(
+            node_id="terminal-3",
+            name="terminal",
+            on_success="branch_sink",
+        )
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("gate-1")
+        expander_node = NodeID("expander-2")
+        terminal_node = NodeID("terminal-3")
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            node_step_map={
+                source_node: 0,
+                gate_node: 1,
+                expander_node: 2,
+                terminal_node: 3,
+            },
+            node_to_next={
+                source_node: gate_node,
+                gate_node: None,
+                expander_node: terminal_node,
+                terminal_node: None,
+            },
+            first_transform_node_id=gate_node,
+            node_to_plugin={
+                gate_node: gate,
+                expander_node: expander,
+                terminal_node: terminal,
+            },
+        )
+
+        gate_contract = _make_contract()
+        gate_result = GateResult(
+            row={"value": 10},
+            action=RoutingAction.route("branch_a"),
+            contract=gate_contract,
+        )
+        expand_result = TransformResult.success_multi(
+            [
+                make_row({"value": 10, "idx": 1}, contract=gate_contract),
+                make_row({"value": 10, "idx": 2}, contract=gate_contract),
+            ],
+            success_reason={"action": "expand"},
+        )
+
+        def gate_side_effect(*, gate, token, ctx, token_manager=None):
+            return GateOutcome(
+                result=gate_result,
+                updated_token=token,
+                next_node_id=expander_node,
+            )
+
+        def transform_side_effect(*, transform, token, ctx, attempt=0):
+            if transform.name == "expander":
+                return (expand_result, token, None)
+            raise AssertionError("terminal transform should not execute in this regression harness")
+
+        inherited_sinks: list[str | None] = []
+
+        def continuation_side_effect(*, token, current_node_id, coalesce_name=None, on_success_sink=None):
+            inherited_sinks.append(on_success_sink)
+            return _WorkItem(
+                token=token,
+                current_node_id=None,
+                coalesce_node_id=None,
+                coalesce_name=coalesce_name,
+                on_success_sink=on_success_sink,
+            )
+
+        with (
+            patch.object(processor._gate_executor, "execute_gate", side_effect=gate_side_effect),
+            patch.object(processor._transform_executor, "execute_transform", side_effect=transform_side_effect),
+            patch.object(processor, "_create_continuation_work_item", side_effect=continuation_side_effect),
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[gate, expander, terminal],
+                ctx=ctx,
+            )
+
+        completed = [r for r in results if r.outcome == RowOutcome.COMPLETED]
+        assert len(completed) == 2
+        assert inherited_sinks == ["branch_sink", "branch_sink"]
+        assert all(r.sink_name == "branch_sink" for r in completed)
+
+    def test_config_gate_processing_node_jump_preloads_subchain_sink_for_expanded_children(self) -> None:
+        """Config gate PROCESSING_NODE jumps should refresh inherited sink from jumped subchain."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+
+        gate_node = NodeID("cfg-gate-1")
+        expander_node = NodeID("expander-2")
+        terminal_node = NodeID("terminal-3")
+        source_node = NodeID("source-0")
+
+        config_gate = GateSettings(
+            name="cfg_router",
+            input="in_conn",
+            condition="'branch_a'",
+            routes={"branch_a": "branch_conn"},
+        )
+        expander = _make_mock_transform(
+            node_id=str(expander_node),
+            name="expander",
+            creates_tokens=True,
+            on_success=None,
+        )
+        terminal = _make_mock_transform(
+            node_id=str(terminal_node),
+            name="terminal",
+            on_success="branch_sink",
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            node_step_map={
+                source_node: 0,
+                gate_node: 1,
+                expander_node: 2,
+                terminal_node: 3,
+            },
+            node_to_next={
+                source_node: gate_node,
+                gate_node: None,
+                expander_node: terminal_node,
+                terminal_node: None,
+            },
+            first_transform_node_id=gate_node,
+            node_to_plugin={
+                gate_node: config_gate,
+                expander_node: expander,
+                terminal_node: terminal,
+            },
+        )
+
+        gate_contract = _make_contract()
+        gate_result = GateResult(
+            row={"value": 10},
+            action=RoutingAction.route("branch_a"),
+            contract=gate_contract,
+        )
+        expand_result = TransformResult.success_multi(
+            [
+                make_row({"value": 10, "idx": 1}, contract=gate_contract),
+                make_row({"value": 10, "idx": 2}, contract=gate_contract),
+            ],
+            success_reason={"action": "expand"},
+        )
+
+        def config_gate_side_effect(*, gate_config, node_id, token, ctx, token_manager=None):
+            return GateOutcome(
+                result=gate_result,
+                updated_token=token,
+                next_node_id=expander_node,
+            )
+
+        def transform_side_effect(*, transform, token, ctx, attempt=0):
+            if transform.name == "expander":
+                return (expand_result, token, None)
+            raise AssertionError("terminal transform should not execute in this regression harness")
+
+        inherited_sinks: list[str | None] = []
+
+        def continuation_side_effect(*, token, current_node_id, coalesce_name=None, on_success_sink=None):
+            inherited_sinks.append(on_success_sink)
+            return _WorkItem(
+                token=token,
+                current_node_id=None,
+                coalesce_node_id=None,
+                coalesce_name=coalesce_name,
+                on_success_sink=on_success_sink,
+            )
+
+        with (
+            patch.object(processor._gate_executor, "execute_config_gate", side_effect=config_gate_side_effect),
+            patch.object(processor._transform_executor, "execute_transform", side_effect=transform_side_effect),
+            patch.object(processor, "_create_continuation_work_item", side_effect=continuation_side_effect),
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[expander, terminal],
+                ctx=ctx,
+            )
+
+        completed = [r for r in results if r.outcome == RowOutcome.COMPLETED]
+        assert len(completed) == 2
+        assert inherited_sinks == ["branch_sink", "branch_sink"]
+        assert all(r.sink_name == "branch_sink" for r in completed)
+
 
 # =============================================================================
 # process_row: Multi-row output (deaggregation)

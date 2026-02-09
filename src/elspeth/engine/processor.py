@@ -193,6 +193,9 @@ class RowProcessor:
         self._retry_manager = retry_manager
         self._coalesce_executor = coalesce_executor
         self._coalesce_node_ids: dict[CoalesceName, NodeID] = dict(traversal.coalesce_node_map)
+        self._coalesce_name_by_node_id: dict[NodeID, CoalesceName] = {
+            node_id: coalesce_name for coalesce_name, node_id in self._coalesce_node_ids.items()
+        }
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
         self._branch_to_sink: dict[BranchName, SinkName] = branch_to_sink or {}
         self._coalesce_on_success_map: dict[CoalesceName, str] = coalesce_on_success_map or {}
@@ -309,6 +312,36 @@ class RowProcessor:
     def _resolve_continuation_node_for_work_item(self, current_node_id: NodeID) -> NodeID | None:
         """Resolve next processing node for continuation work."""
         return self._resolve_next_node_for_processing(current_node_id)
+
+    def _resolve_jump_target_on_success_sink(self, start_node_id: NodeID) -> str | None:
+        """Resolve terminal on_success sink reachable from a route jump target."""
+        node_id: NodeID | None = start_node_id
+        resolved_sink: str | None = None
+        iterations = 0
+        max_iterations = len(self._node_to_next) + 1
+
+        while node_id is not None:
+            iterations += 1
+            if iterations > max_iterations:
+                raise OrchestrationInvariantError(
+                    f"Jump-target sink resolution exceeded {max_iterations} iterations from node '{start_node_id}'. "
+                    "Possible cycle in traversal map."
+                )
+
+            plugin = self._resolve_plugin_for_node(node_id)
+            if isinstance(plugin, TransformProtocol) and plugin.on_success is not None:
+                resolved_sink = plugin.on_success
+
+            next_node_id = self._resolve_next_node_for_processing(node_id)
+            if next_node_id is None and node_id in self._coalesce_name_by_node_id:
+                coalesce_name = self._coalesce_name_by_node_id[node_id]
+                coalesce_sink = self._coalesce_on_success_map.get(coalesce_name)
+                if coalesce_sink is not None:
+                    resolved_sink = coalesce_sink
+
+            node_id = next_node_id
+
+        return resolved_sink
 
     def _create_continuation_work_item(
         self,
@@ -1900,6 +1933,9 @@ class RowProcessor:
                         child_items,
                     )
                 elif outcome.next_node_id is not None:
+                    resolved_sink = self._resolve_jump_target_on_success_sink(outcome.next_node_id)
+                    if resolved_sink is not None:
+                        last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
                     continue
 
@@ -2130,6 +2166,9 @@ class RowProcessor:
                         child_items,
                     )
                 elif outcome.next_node_id is not None:
+                    resolved_sink = self._resolve_jump_target_on_success_sink(outcome.next_node_id)
+                    if resolved_sink is not None:
+                        last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
                     continue
 

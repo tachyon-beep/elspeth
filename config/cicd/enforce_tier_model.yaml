@@ -1488,55 +1488,65 @@ allow_hits:
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
   safety: TypeError raised if wrong URL type - explicit failure, not masking
   expires: null
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=f8c1bfb1432e467b
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=f737e981949099fb
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=613dcabf0f305bcf
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=3274eb654edefa69
   owner: architecture
   reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_maybe_coalesce_token:fp=af77680d1b49c8aa
+- key: engine/processor.py:R1:RowProcessor:_maybe_coalesce_token:fp=25ff3aed78ffd11e
   owner: architecture
   reason: dict.get() correct - not all coalesce names have step mappings
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=69826b0ecab643d8
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=e6379133979f91bd
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=60b2a606948cdbab
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=3a6723384793a05e
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=495cc5bb90ce5d6d
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=c4bca1323d250dbb
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=56aa5e5919917ba4
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=5face8b982f52859
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=614b2deb29b32e3c
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=711e8c77b0c26299
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=9417a29f50903c3a
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=05d08d40e3a3b84d
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=9a46fcca512cd00d
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=11ae8a26417021c0
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-09'
+- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=61af0f4cee26539c
+  owner: architecture
+  reason: Protocol dispatch while traversing jumped subchain to resolve inherited terminal sink
+  safety: Traversal map invariants are enforced; raises on cycles or invalid nodes
+  expires: '2026-03-09'
+- key: engine/processor.py:R1:RowProcessor:_resolve_jump_target_on_success_sink:fp=42090a9ecdf04295
+  owner: architecture
+  reason: Optional coalesce terminal sink mapping - only terminal coalesce nodes carry on_success sink
+  safety: Missing mapping intentionally falls back to previously resolved transform sink
   expires: '2026-03-09'
 - key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=87cb274cfe7da62e
   owner: architecture
@@ -1623,12 +1633,12 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=d7253d3d8f1ca44c
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=154f151ee4141dc1
   owner: architecture
   reason: dict.get() correct - coalesce node_id mapping may not exist for non-coalesce tokens
   safety: Code reviewed - returns None which is checked immediately
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=23e4672947c08f9b
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=9d849b7ffe0ef412
   owner: architecture
   reason: dict.get() correct - coalesce on_success mapping may not exist for non-terminal coalesce
   safety: Code reviewed - returns None which is checked immediately
