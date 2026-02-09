@@ -12,12 +12,12 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import PipelineRow, PluginSchema
-from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
 
@@ -83,19 +83,12 @@ class TestOrchestratorCleanup:
         source = ListSource([{"value": 1}, {"value": 2}])
         sink = CollectSink()
 
-        graph = ExecutionGraph.from_plugin_instances(
-            source=as_source(source),
-            transforms=[as_transform(transform_1), as_transform(transform_2)],
-            sinks={"default": as_sink(sink)},
-            aggregations={},
-            gates=[],
-        )
-
         config = PipelineConfig(
             source=as_source(source),
             transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
+        graph = build_production_graph(config)
 
         orchestrator = Orchestrator(landscape_db)
         orchestrator.run(config, graph=graph, payload_store=payload_store)
@@ -114,19 +107,12 @@ class TestOrchestratorCleanup:
         source = FailingSource([{"value": 1}])
         sink = CollectSink()
 
-        graph = ExecutionGraph.from_plugin_instances(
-            source=as_source(source),
-            transforms=[as_transform(transform_1), as_transform(transform_2)],
-            sinks={"default": as_sink(sink)},
-            aggregations={},
-            gates=[],
-        )
-
         config = PipelineConfig(
             source=as_source(source),
             transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
+        graph = build_production_graph(config)
 
         orchestrator = Orchestrator(landscape_db)
 
@@ -155,19 +141,12 @@ class TestOrchestratorCleanup:
         transform._on_success = "default"
         sink = CollectSink()
 
-        graph = ExecutionGraph.from_plugin_instances(
-            source=as_source(source),
-            transforms=[as_transform(transform)],
-            sinks={"default": as_sink(sink)},
-            aggregations={},
-            gates=[],
-        )
-
         config = PipelineConfig(
             source=as_source(source),
             transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
+        graph = build_production_graph(config)
 
         orchestrator = Orchestrator(landscape_db)
         result = orchestrator.run(config, graph=graph, payload_store=payload_store)
@@ -183,19 +162,12 @@ class TestOrchestratorCleanup:
         source = ListSource([{"value": 1}])
         sink = CollectSink()
 
-        graph = ExecutionGraph.from_plugin_instances(
-            source=as_source(source),
-            transforms=[as_transform(transform_1), as_transform(transform_2)],
-            sinks={"default": as_sink(sink)},
-            aggregations={},
-            gates=[],
-        )
-
         config = PipelineConfig(
             source=as_source(source),
             transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
+        graph = build_production_graph(config)
 
         orchestrator = Orchestrator(landscape_db)
         with pytest.raises(RuntimeError, match="Plugin cleanup failed"):

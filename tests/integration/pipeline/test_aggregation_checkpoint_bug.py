@@ -46,6 +46,7 @@ from tests.fixtures.base_classes import (
     as_source,
     as_transform,
 )
+from tests.fixtures.factories import wire_transforms
 
 
 class BatchCollectorTransform(BaseTransform):
@@ -151,7 +152,7 @@ class TestAggregationCheckpointFixVerification:
             ],
             output_schema=_TestSchema,
             source_name="buffering_source",
-            on_success="output",
+            on_success="source_out",
         )
         source = as_source(callback_source)
 
@@ -164,7 +165,8 @@ class TestAggregationCheckpointFixVerification:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([transform], source_connection="source_out", final_sink="output"),
             sinks={"output": sink},
             aggregations={},
             gates=[],
@@ -178,6 +180,7 @@ class TestAggregationCheckpointFixVerification:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_collector",
+            input="source_out",
             trigger=TriggerConfig(
                 count=10,  # High count - won't trigger during 5 rows
                 timeout_seconds=3600,  # 1 hour - won't trigger
@@ -203,7 +206,7 @@ class TestAggregationCheckpointFixVerification:
         )
 
         settings = ElspethSettings(
-            source=SourceSettings(plugin="buffering_source", options={"on_success": "output"}),
+            source=SourceSettings(plugin="buffering_source", on_success="source_out", options={}),
             sinks={"output": SinkSettings(plugin="collecting_sink", options={})},
             transforms=[],
             gates=[],

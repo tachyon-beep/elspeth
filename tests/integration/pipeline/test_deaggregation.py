@@ -59,6 +59,7 @@ class TestDeaggregationPipeline:
         config = {
             "source": {
                 "plugin": "json",
+                "on_success": "explode_input",
                 "options": {
                     "path": str(input_data),
                     "schema": {
@@ -66,18 +67,19 @@ class TestDeaggregationPipeline:
                         "fields": ["order_id: int", "items: any"],
                     },
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                 },
             },
             "transforms": [
                 {
+                    "name": "explode_items",
                     "plugin": "json_explode",
+                    "input": "explode_input",
+                    "on_success": "output",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",
                         "include_index": True,
                         "schema": {"mode": "observed"},
-                        "on_success": "output",
                     },
                 },
             ],
@@ -188,6 +190,7 @@ class TestDeaggregationAuditTrail:
         config_dict = {
             "source": {
                 "plugin": "json",
+                "on_success": "explode_input",
                 "options": {
                     "path": str(input_data),
                     "schema": {
@@ -195,18 +198,19 @@ class TestDeaggregationAuditTrail:
                         "fields": ["order_id: int", "items: any"],
                     },
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                 },
             },
             "transforms": [
                 {
+                    "name": "explode_items",
                     "plugin": "json_explode",
+                    "input": "explode_input",
+                    "on_success": "output",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",
                         "include_index": True,
                         "schema": {"mode": "observed"},
-                        "on_success": "output",
                     },
                 },
             ],
@@ -237,6 +241,7 @@ class TestDeaggregationAuditTrail:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
@@ -247,7 +252,7 @@ class TestDeaggregationAuditTrail:
         # This ensures the test exercises the production code path
         pipeline_config = PipelineConfig(
             source=plugins["source"],
-            transforms=plugins["transforms"],
+            transforms=[wired.plugin for wired in plugins["transforms"]],
             sinks=plugins["sinks"],
             config=resolve_config(settings),
         )
@@ -352,6 +357,7 @@ class TestSourceSchemaValidation:
         config = {
             "source": {
                 "plugin": "json",
+                "on_success": "explode_input",
                 "options": {
                     "path": str(valid_and_invalid_input),
                     "schema": {
@@ -360,18 +366,19 @@ class TestSourceSchemaValidation:
                     },
                     # Use discard so invalid row is dropped, not routed
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                 },
             },
             "transforms": [
                 {
+                    "name": "explode_items",
                     "plugin": "json_explode",
+                    "input": "explode_input",
+                    "on_success": "output",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",
                         "include_index": True,
                         "schema": {"mode": "observed"},
-                        "on_success": "output",
                     },
                 },
             ],

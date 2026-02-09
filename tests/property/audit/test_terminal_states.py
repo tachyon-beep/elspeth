@@ -138,22 +138,31 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     Replacement for v1 build_production_graph, inlined to avoid v1 imports.
     Auto-sets on_success on terminal transform for linear pipelines.
     """
-    transforms = list(config.transforms)
+    from elspeth.core.config import SourceSettings
+    from elspeth.plugins.protocols import TransformProtocol
+    from tests.fixtures.factories import wire_transforms
 
-    # Set on_success on the terminal transform if not already set
-    if transforms:
-        from elspeth.plugins.protocols import GateProtocol
+    row_transforms: list[TransformProtocol] = []
+    for transform in config.transforms:
+        if isinstance(transform, TransformProtocol):
+            row_transforms.append(transform)
 
-        for i in range(len(transforms) - 1, -1, -1):
-            if not isinstance(transforms[i], GateProtocol):
-                if getattr(transforms[i], "_on_success", None) is None:
-                    sink_name = next(iter(config.sinks))
-                    transforms[i]._on_success = sink_name
-                break
+    sink_name = next(iter(config.sinks))
+    source_on_success = "source_out" if row_transforms else sink_name
+    final_destination = config.gates[0].input if config.gates else sink_name
+    if not row_transforms and config.gates:
+        source_on_success = config.gates[0].input
+
+    config.source.on_success = source_on_success
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=transforms,
+        source_settings=SourceSettings(plugin=config.source.name, on_success=source_on_success, options={}),
+        transforms=wire_transforms(
+            row_transforms,
+            source_connection=source_on_success,
+            final_sink=final_destination,
+        ),
         sinks=config.sinks,
         aggregations={},
         gates=list(config.gates),

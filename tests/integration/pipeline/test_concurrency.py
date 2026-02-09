@@ -12,7 +12,7 @@ STATUS: IMPLEMENTED
 
 from elspeth.contracts.config import RuntimeConcurrencyConfig
 from elspeth.contracts.types import NodeID
-from elspeth.core.config import ConcurrencySettings
+from elspeth.core.config import ConcurrencySettings, SourceSettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.orchestrator import Orchestrator
@@ -242,6 +242,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="output", options={}),
             transforms=[],
             sinks={"output": as_sink(sink)},
             aggregations={},

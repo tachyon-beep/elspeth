@@ -34,12 +34,13 @@ from hypothesis import strategies as st
 from sqlalchemy import text
 
 from elspeth.contracts.enums import RowOutcome
-from elspeth.core.config import CoalesceSettings, GateSettings
+from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.engine.processor import MAX_WORK_QUEUE_ITERATIONS
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ConditionalErrorTransform, ListSource, PassTransform
 from tests.fixtures.stores import MockPayloadStore
 from tests.strategies.json import MAX_SAFE_INT
@@ -52,11 +53,10 @@ from tests.strategies.json import MAX_SAFE_INT
 def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build graph using production code path (from_plugin_instances).
 
-    Adapter that mirrors the v1 build_production_graph but uses v2 fixtures.
-    Auto-sets on_success on terminal transform for linear pipelines.
+    Adapter that mirrors production wiring with explicit source settings.
     """
     from elspeth.core.config import AggregationSettings
-    from elspeth.plugins.protocols import GateProtocol, TransformProtocol
+    from elspeth.plugins.protocols import TransformProtocol
 
     row_transforms: list[TransformProtocol] = []
     aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]] = {}
@@ -65,14 +65,32 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
         if isinstance(transform, TransformProtocol):
             row_transforms.append(transform)
 
-    # Set on_success on the terminal transform if not already set
+    default_sink = next(iter(config.sinks.keys()))
     if row_transforms:
-        for i in range(len(row_transforms) - 1, -1, -1):
-            if not isinstance(row_transforms[i], GateProtocol):
-                if getattr(row_transforms[i], "_on_success", None) is None:
-                    sink_name = next(iter(config.sinks))
-                    row_transforms[i]._on_success = sink_name  # type: ignore[attr-defined]
-                break
+        source_on_success = "source_out"
+        final_destination = default_sink
+    else:
+        source_on_success = default_sink
+        final_destination = default_sink
+
+    if config.gates:
+        first_gate_input = config.gates[0].input
+        final_destination = first_gate_input
+        if not row_transforms:
+            source_on_success = first_gate_input
+    elif config.aggregation_settings:
+        first_aggregation_input = next(iter(config.aggregation_settings.values())).input
+        final_destination = first_aggregation_input
+        if not row_transforms:
+            source_on_success = first_aggregation_input
+
+    config.source.on_success = source_on_success
+    source_settings = SourceSettings(plugin=config.source.name, on_success=source_on_success, options={})
+    wired_row_transforms = wire_transforms(
+        row_transforms,
+        source_connection=source_on_success,
+        final_sink=final_destination,
+    )
 
     for agg_name, agg_settings in config.aggregation_settings.items():
         from tests.fixtures.base_classes import _TestTransformBase
@@ -85,11 +103,16 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
 
                 return TransformResult.success(row, success_reason={"action": "test"})
 
-        aggregations[agg_name] = (_AggTransform(), agg_settings)  # type: ignore[assignment]
+        agg_transform = _AggTransform()
+        if agg_settings.on_success is None:
+            agg_settings = agg_settings.model_copy(update={"on_success": default_sink})
+        agg_transform._on_success = agg_settings.on_success
+        aggregations[agg_name] = (agg_transform, agg_settings)  # type: ignore[assignment]
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=row_transforms,
+        source_settings=source_settings,
+        transforms=wired_row_transforms,
         sinks=config.sinks,
         aggregations=aggregations,
         gates=list(config.gates),
@@ -328,13 +351,14 @@ class TestWorkQueueConservation:
         with LandscapeDB.in_memory() as db:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
-            source = ListSource(rows, on_success="sink_a")
+            source = ListSource(rows, on_success="route_in")
             sink_a = CollectSink("sink_a")
             sink_b = CollectSink("sink_b")
 
             # Gate that forks all rows to both sinks
             gate = GateSettings(
                 name="fork_gate",
+                input="route_in",
                 condition="True",
                 routes={"true": "fork", "false": "sink_b"},
                 fork_to=["sink_a", "sink_b"],
@@ -347,17 +371,10 @@ class TestWorkQueueConservation:
                 gates=[gate],
             )
 
-            graph = ExecutionGraph.from_plugin_instances(
-                source=as_source(source),
-                transforms=[],
-                sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
-                gates=[gate],
-                aggregations={},
-                coalesce_settings=[],
-            )
+            graph = _build_production_graph(config)
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test", "options": {"on_success": "sink_a"}},
+                source={"plugin": "test", "on_success": config.source.on_success, "options": {}},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
                 gates=[gate],
             )
@@ -569,12 +586,13 @@ class TestIterationGuardProperties:
         with LandscapeDB.in_memory() as db:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
-            source = ListSource(rows, on_success="sink_a")
+            source = ListSource(rows, on_success="route_in")
             sink_a = CollectSink("sink_a")
             sink_b = CollectSink("sink_b")
 
             gate = GateSettings(
                 name="fork_gate",
+                input="route_in",
                 condition="True",
                 routes={"true": "fork", "false": "sink_b"},
                 fork_to=["sink_a", "sink_b"],
@@ -587,17 +605,10 @@ class TestIterationGuardProperties:
                 gates=[gate],
             )
 
-            graph = ExecutionGraph.from_plugin_instances(
-                source=as_source(source),
-                transforms=[],
-                sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
-                gates=[gate],
-                aggregations={},
-                coalesce_settings=[],
-            )
+            graph = _build_production_graph(config)
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test", "options": {"on_success": "sink_a"}},
+                source={"plugin": "test", "on_success": config.source.on_success, "options": {}},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
                 gates=[gate],
             )
@@ -661,12 +672,13 @@ class TestTokenIdentityProperties:
         with LandscapeDB.in_memory() as db:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
-            source = ListSource(rows, on_success="sink_a")
+            source = ListSource(rows, on_success="route_in")
             sink_a = CollectSink("sink_a")
             sink_b = CollectSink("sink_b")
 
             gate = GateSettings(
                 name="fork_gate",
+                input="route_in",
                 condition="True",
                 routes={"true": "fork", "false": "sink_b"},
                 fork_to=["sink_a", "sink_b"],
@@ -679,17 +691,10 @@ class TestTokenIdentityProperties:
                 gates=[gate],
             )
 
-            graph = ExecutionGraph.from_plugin_instances(
-                source=as_source(source),
-                transforms=[],
-                sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
-                gates=[gate],
-                aggregations={},
-                coalesce_settings=[],
-            )
+            graph = _build_production_graph(config)
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test", "options": {"on_success": "sink_a"}},
+                source={"plugin": "test", "on_success": config.source.on_success, "options": {}},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
                 gates=[gate],
             )
@@ -877,6 +882,7 @@ class TestWorkQueueEdgeCases:
             # Gate that forks to two branches
             gate = GateSettings(
                 name="fork_gate",
+                input="gate_in",
                 condition="True",
                 routes={"true": "fork", "false": "default"},
                 fork_to=["path_a", "path_b"],
@@ -899,17 +905,10 @@ class TestWorkQueueEdgeCases:
                 coalesce_settings=[coalesce],
             )
 
-            graph = ExecutionGraph.from_plugin_instances(
-                source=as_source(source),
-                transforms=[as_transform(transform)],
-                sinks={"default": as_sink(sink)},
-                gates=[gate],
-                aggregations={},
-                coalesce_settings=[coalesce],
-            )
+            graph = _build_production_graph(config)
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test", "options": {"on_success": "default"}},
+                source={"plugin": "test", "on_success": config.source.on_success, "options": {}},
                 sinks={"default": {"plugin": "test"}},
                 gates=[gate],
                 coalesce=[coalesce],  # Note: ElspethSettings uses 'coalesce' not 'coalesce_settings'

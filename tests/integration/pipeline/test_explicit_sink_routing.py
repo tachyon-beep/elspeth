@@ -20,13 +20,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.contracts import PipelineRow, RunStatus
-from elspeth.core.config import AggregationSettings, CoalesceSettings, ElspethSettings, GateSettings, TriggerConfig
+from elspeth.core.config import AggregationSettings, CoalesceSettings, ElspethSettings, GateSettings, SourceSettings, TriggerConfig
 from elspeth.core.dag import GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -278,7 +279,8 @@ class TestExplicitSinkRouting:
         # Build graph with transform as regular transform (on_success wires to sink)
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([transform], source_connection="source_out", final_sink="output"),
             sinks={"output": sink},
             aggregations={},
             gates=[],
@@ -289,6 +291,7 @@ class TestExplicitSinkRouting:
         agg_settings = AggregationSettings(
             name="batch",
             plugin="batch_passthrough",
+            input="source_out",
             trigger=TriggerConfig(count=2),
             output_mode="transform",
         )

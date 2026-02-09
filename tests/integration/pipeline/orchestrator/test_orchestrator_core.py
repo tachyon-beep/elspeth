@@ -321,10 +321,10 @@ class TestOrchestratorAcceptsGraph:
         settings = ElspethSettings(
             source=SourceSettings(
                 plugin="csv",
+                on_success="output",
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             ),
@@ -334,6 +334,7 @@ class TestOrchestratorAcceptsGraph:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
@@ -403,10 +404,10 @@ class TestOrchestratorAcceptsGraph:
         settings = ElspethSettings(
             source=SourceSettings(
                 plugin="csv",
+                on_success="output_a",
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "on_success": "output_a",
                     "schema": {"mode": "observed"},
                 },
             ),
@@ -419,6 +420,7 @@ class TestOrchestratorAcceptsGraph:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],

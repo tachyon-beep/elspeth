@@ -18,11 +18,12 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
-from elspeth.core.config import GateSettings
+from elspeth.core.config import GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 from tests.fixtures.stores import MockPayloadStore
 
@@ -34,9 +35,9 @@ from tests.fixtures.stores import MockPayloadStore
 def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build graph using production code path (from_plugin_instances).
 
-    Sets on_success on terminal transform for linear pipelines.
+    Uses explicit source settings + wired transforms.
     """
-    from elspeth.plugins.protocols import GateProtocol, TransformProtocol
+    from elspeth.plugins.protocols import TransformProtocol
 
     row_transforms: list[TransformProtocol] = []
 
@@ -44,18 +45,25 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
         if isinstance(transform, TransformProtocol):
             row_transforms.append(transform)
 
-    # Set on_success on the terminal transform if not already set
-    if row_transforms:
-        for i in range(len(row_transforms) - 1, -1, -1):
-            if not isinstance(row_transforms[i], GateProtocol):
-                if getattr(row_transforms[i], "_on_success", None) is None:
-                    sink_name = next(iter(config.sinks))
-                    row_transforms[i]._on_success = sink_name  # type: ignore[attr-defined]
-                break
+    default_sink = next(iter(config.sinks))
+    source_on_success = "source_out" if row_transforms else default_sink
+    final_destination = config.gates[0].input if config.gates else default_sink
+
+    if not row_transforms and config.gates:
+        source_on_success = config.gates[0].input
+
+    config.source.on_success = source_on_success
+    source_settings = SourceSettings(plugin=config.source.name, on_success=source_on_success, options={})
+    wired_transforms = wire_transforms(
+        row_transforms,
+        source_connection=source_on_success,
+        final_sink=final_destination,
+    )
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=row_transforms,
+        source_settings=source_settings,
+        transforms=wired_transforms,
         sinks=config.sinks,
         aggregations={},
         gates=list(config.gates),
@@ -142,7 +150,7 @@ class TestSinkRoutingInvariant:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
 
-            source = ListSource(rows, on_success="sink_a")
+            source = ListSource(rows, on_success="route_in")
             sink_a = CollectSink("sink_a")
             sink_b = CollectSink("sink_b")
 
@@ -153,6 +161,7 @@ class TestSinkRoutingInvariant:
 
             gate = GateSettings(
                 name="fork_gate",
+                input="route_in",
                 condition="True",
                 routes={"true": "fork", "false": "sink_b"},
                 fork_to=["sink_a", "sink_b"],
@@ -167,6 +176,7 @@ class TestSinkRoutingInvariant:
 
             graph = ExecutionGraph.from_plugin_instances(
                 source=as_source(source),
+                source_settings=SourceSettings(plugin=source.name, on_success="route_in", options={}),
                 transforms=[],
                 sinks=configured_sinks,
                 gates=[gate],
@@ -175,7 +185,7 @@ class TestSinkRoutingInvariant:
             )
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test", "options": {"on_success": "sink_a"}},
+                source={"plugin": "test", "on_success": "route_in", "options": {}},
                 sinks={
                     "sink_a": {"plugin": "test"},
                     "sink_b": {"plugin": "test"},

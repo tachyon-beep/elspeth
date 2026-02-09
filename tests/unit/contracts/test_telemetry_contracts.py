@@ -158,8 +158,10 @@ def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
     ExecutionGraph.from_plugin_instances() directly for production-path
     fidelity (see BUG-LINEAGE-01).
     """
+    from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.protocols import GateProtocol, TransformProtocol
+    from elspeth.plugins.protocols import TransformProtocol
+    from tests.fixtures.factories import wire_transforms
 
     # Separate transforms (only TransformProtocol instances)
     row_transforms: list[TransformProtocol] = []
@@ -168,17 +170,21 @@ def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
             row_transforms.append(transform)
 
     sink_name = next(iter(config.sinks))
-    # Ensure explicit source routing for graph construction in tests
-    config.source.on_success = sink_name
-    # Ensure terminal transform has explicit on_success when transforms exist
-    for i in range(len(row_transforms) - 1, -1, -1):
-        if not isinstance(row_transforms[i], GateProtocol):
-            row_transforms[i]._on_success = sink_name  # type: ignore[attr-defined]
-            break
+    source_on_success = "source_out" if row_transforms else sink_name
+    final_destination = config.gates[0].input if config.gates else sink_name
+    if not row_transforms and config.gates:
+        source_on_success = config.gates[0].input
+
+    config.source.on_success = source_on_success
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=row_transforms,
+        source_settings=SourceSettings(plugin=config.source.name, on_success=source_on_success, options={}),
+        transforms=wire_transforms(
+            row_transforms,
+            source_connection=source_on_success,
+            final_sink=final_destination,
+        ),
         sinks=config.sinks,
         aggregations={},
         gates=list(config.gates),

@@ -13,7 +13,8 @@ import pytest
 
 from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.dag import ExecutionGraph
+from elspeth.core.config import AggregationSettings, SourceSettings, TransformSettings, TriggerConfig
+from elspeth.core.dag import ExecutionGraph, WiredTransform
 
 if TYPE_CHECKING:
     pass
@@ -90,10 +91,22 @@ class TestOutputSchemaConfigPropagation:
     def test_output_schema_config_propagates_to_nodeinfo(self) -> None:
         """Verify _output_schema_config is extracted and stored in NodeInfo."""
         transform = MockTransformWithSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="transform_0",
+                plugin=transform.name,
+                input="source_out",
+                on_success="output",
+                options={},
+            ),
+        )
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),  # type: ignore[arg-type]
-            transforms=[transform],  # type: ignore[list-item]
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
             gates=[],
@@ -114,10 +127,22 @@ class TestOutputSchemaConfigPropagation:
     def test_transform_without_schema_config_has_none(self) -> None:
         """Verify transforms without _output_schema_config have None in NodeInfo."""
         transform = MockTransformWithoutSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="transform_0",
+                plugin=transform.name,
+                input="source_out",
+                on_success="output",
+                options={},
+            ),
+        )
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),  # type: ignore[arg-type]
-            transforms=[transform],  # type: ignore[list-item]
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
             gates=[],
@@ -354,20 +379,22 @@ class TestAggregationSchemaConfigPropagation:
 
     def test_aggregation_schema_config_propagates(self) -> None:
         """Verify aggregation transform's _output_schema_config is stored in NodeInfo."""
-        from elspeth.core.config import AggregationSettings, TriggerConfig
-
         transform = MockAggregationTransform()
         trigger = TriggerConfig(count=10)
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="mock_agg_transform",
+            input="agg_in",
+            on_success="output",
             trigger=trigger,
             output_mode="transform",
             options={"schema": {"mode": "observed"}},
         )
 
+        source = MockSource()
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),  # type: ignore[arg-type]
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="agg_in", options={}),
             transforms=[],
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={"test_agg": (transform, agg_settings)},  # type: ignore[dict-item]
