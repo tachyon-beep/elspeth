@@ -83,7 +83,6 @@ class TestCSVToDatabase:
                 sinks={"default": sink},
                 aggregations={},
                 gates=[],
-
             )
 
             # -- Act --
@@ -163,7 +162,6 @@ class TestCSVToDatabase:
                 sinks={"default": sink},
                 aggregations={},
                 gates=[],
-
             )
 
             audit_db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")

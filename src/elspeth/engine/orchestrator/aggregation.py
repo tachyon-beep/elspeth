@@ -211,7 +211,7 @@ def check_aggregation_timeouts(
         if buffered_count == 0:
             continue
 
-        # Get transform and step from pre-computed lookup (O(1)) or compute (O(n))
+        # Get transform and aggregation node from pre-computed lookup (O(1)) or compute (O(n))
         if agg_transform_lookup and agg_node_id_str in agg_transform_lookup:
             agg_transform, _agg_node_id = agg_transform_lookup[agg_node_id_str]
         else:
@@ -239,11 +239,7 @@ def check_aggregation_timeouts(
         # These tokens need to continue through the pipeline
         for work_item in work_items:
             work_item_start_step, work_item_coalesce_at_step = _resolve_work_item_steps(processor, work_item)
-            continuation_start = (
-                work_item_coalesce_at_step
-                if work_item_coalesce_at_step is not None
-                else work_item_start_step
-            )
+            continuation_start = work_item_coalesce_at_step if work_item_coalesce_at_step is not None else work_item_start_step
             downstream_results = processor.process_token(
                 token=work_item.token,
                 transforms=config.transforms,
@@ -372,11 +368,7 @@ def flush_remaining_aggregation_buffers(
         # These tokens need to continue through the pipeline
         for work_item in work_items:
             work_item_start_step, work_item_coalesce_at_step = _resolve_work_item_steps(processor, work_item)
-            continuation_start = (
-                work_item_coalesce_at_step
-                if work_item_coalesce_at_step is not None
-                else work_item_start_step
-            )
+            continuation_start = work_item_coalesce_at_step if work_item_coalesce_at_step is not None else work_item_start_step
             downstream_results = processor.process_token(
                 token=work_item.token,
                 transforms=config.transforms,

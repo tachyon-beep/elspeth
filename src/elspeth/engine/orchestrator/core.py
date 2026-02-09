@@ -1049,10 +1049,7 @@ class Orchestrator:
         # Compute coalesce node mapping from graph topology.
         coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
         # Transitional compatibility: outcomes/coalesce APIs still use step indexes.
-        coalesce_step_map = {
-            coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1
-            for coalesce_name in coalesce_node_map
-        }
+        coalesce_step_map = {coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1 for coalesce_name in coalesce_node_map}
         traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
         coalesce_on_success_map: dict[CoalesceName, str] = {}
         if settings is not None and settings.coalesce:
@@ -1925,10 +1922,7 @@ class Orchestrator:
         # Compute coalesce node mapping from graph topology (same as main run path).
         coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
         # Transitional compatibility: outcomes/coalesce APIs still use step indexes.
-        coalesce_step_map = {
-            coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1
-            for coalesce_name in coalesce_node_map
-        }
+        coalesce_step_map = {coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1 for coalesce_name in coalesce_node_map}
         traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
         coalesce_on_success_map: dict[CoalesceName, str] = {}
         if settings is not None and settings.coalesce:

@@ -97,7 +97,6 @@ class TestOutputSchemaConfigPropagation:
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
             gates=[],
-
         )
 
         # Find the transform node
@@ -122,7 +121,6 @@ class TestOutputSchemaConfigPropagation:
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
             gates=[],
-
         )
 
         # Find the transform node
@@ -374,7 +372,6 @@ class TestAggregationSchemaConfigPropagation:
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={"test_agg": (transform, agg_settings)},  # type: ignore[dict-item]
             gates=[],
-
         )
 
         # Find the aggregation node

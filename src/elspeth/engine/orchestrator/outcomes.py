@@ -136,9 +136,9 @@ def handle_coalesce_timeouts(
         for outcome in timed_out:
             if outcome.merged_token is not None:
                 counters.rows_coalesced += 1
-                # Route merged token through processor for remaining transforms.
-                # When coalesce_step >= total_steps (no downstream nodes), the
-                # processor returns COMPLETED with sink_name from on_success routing.
+                # Route merged token through processor from the coalesce node.
+                # Processor internals decide terminal vs non-terminal using DAG
+                # continuation metadata and return COMPLETED with sink_name when terminal.
                 continuation_results = processor.process_token(
                     token=outcome.merged_token,
                     transforms=config_transforms,
@@ -185,10 +185,7 @@ def flush_coalesce_pending(
         pending_tokens: Dict of sink_name -> tokens to append results to
     """
     # Convert CoalesceName -> str for CoalesceExecutor API
-    flush_step_map = {
-        str(name): processor.resolve_node_step(node_id)
-        for name, node_id in coalesce_node_map.items()
-    }
+    flush_step_map = {str(name): processor.resolve_node_step(node_id) for name, node_id in coalesce_node_map.items()}
     pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
 
     # Handle any merged tokens from flush
@@ -200,9 +197,9 @@ def flush_coalesce_pending(
             assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
             coalesce_name = CoalesceName(outcome.coalesce_name)
             coalesce_step = processor.resolve_node_step(coalesce_node_map[coalesce_name])
-            # Route merged token through processor for remaining transforms.
-            # When coalesce_step >= total_steps (no downstream nodes), the
-            # processor returns COMPLETED with sink_name from on_success routing.
+            # Route merged token through processor from the coalesce node.
+            # Processor internals decide terminal vs non-terminal using DAG
+            # continuation metadata and return COMPLETED with sink_name when terminal.
             continuation_results = processor.process_token(
                 token=outcome.merged_token,
                 transforms=config_transforms,

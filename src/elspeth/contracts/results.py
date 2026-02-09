@@ -337,9 +337,7 @@ class RowResult:
 
     def __post_init__(self) -> None:
         if self.outcome == RowOutcome.COMPLETED and self.sink_name is None:
-            raise OrchestrationInvariantError(
-                "COMPLETED outcome requires sink_name to be set"
-            )
+            raise OrchestrationInvariantError("COMPLETED outcome requires sink_name to be set")
 
 
 @dataclass(frozen=True)

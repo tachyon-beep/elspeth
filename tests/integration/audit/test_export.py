@@ -413,7 +413,7 @@ class TestSignedExportDeterminism:
                         },
                     },
                 },
-                    "landscape": {
+                "landscape": {
                     "url": f"sqlite:///{db_path}",
                     "export": {
                         "enabled": True,

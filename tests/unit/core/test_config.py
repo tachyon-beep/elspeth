@@ -67,7 +67,6 @@ class TestElspethSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
         )
         assert settings.source.plugin == "csv"
         assert settings.retry.max_attempts == 3  # default
@@ -78,7 +77,6 @@ class TestElspethSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             retry={"max_attempts": 5},
         )
         assert settings.retry.max_attempts == 5
@@ -541,7 +539,6 @@ class TestExportSinkValidation:
             ElspethSettings(
                 source={"plugin": "csv", "options": {"path": "input.csv"}},
                 sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-
                 landscape={
                     "export": {
                         "enabled": True,
@@ -560,7 +557,6 @@ class TestExportSinkValidation:
         settings = ElspethSettings(
             source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-
             landscape={
                 "export": {"enabled": False}  # No sink required
             },
@@ -575,7 +571,6 @@ class TestExportSinkValidation:
             ElspethSettings(
                 source={"plugin": "csv", "options": {"path": "input.csv"}},
                 sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-
                 landscape={
                     "export": {
                         "enabled": True,
@@ -597,7 +592,6 @@ class TestExportSinkValidation:
                 "output": {"plugin": "csv", "options": {"path": "out.csv"}},
                 "audit_archive": {"plugin": "csv", "options": {"path": "audit.csv"}},
             },
-
             landscape={
                 "export": {
                     "enabled": True,
@@ -822,7 +816,6 @@ class TestResolveConfig:
         settings = ElspethSettings(
             source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "output.csv"}}},
-
         )
 
         resolved = resolve_config(settings)
@@ -838,7 +831,6 @@ class TestResolveConfig:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
         )
 
         resolved = resolve_config(settings)
@@ -860,7 +852,6 @@ class TestResolveConfig:
         settings = ElspethSettings(
             source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "output.csv"}}},
-
         )
 
         resolved = resolve_config(settings)
@@ -877,7 +868,6 @@ class TestResolveConfig:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             transforms=[
                 {
                     "plugin": "field_mapper",
@@ -1195,7 +1185,6 @@ class TestElspethSettingsWithGates:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
         )
         assert settings.gates == []
 
@@ -1206,7 +1195,6 @@ class TestElspethSettingsWithGates:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}, "review": {"plugin": "csv"}},
-
             gates=[
                 {
                     "name": "quality_check",
@@ -1225,7 +1213,6 @@ class TestElspethSettingsWithGates:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             gates=[
                 {
                     "name": "gate_1",
@@ -1253,7 +1240,6 @@ class TestElspethSettingsWithGates:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-
                 gates=[
                     {
                         "name": "my_gate",
@@ -1278,7 +1264,6 @@ class TestElspethSettingsWithGates:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-
                 gates=[
                     {"name": "gate_a", "condition": "True", "routes": {"true": "continue", "false": "output"}},
                     {"name": "gate_a", "condition": "True", "routes": {"true": "continue", "false": "output"}},
@@ -1299,7 +1284,6 @@ class TestElspethSettingsWithGates:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             gates=[
                 {
                     "name": "quality_check",
@@ -1680,7 +1664,6 @@ class TestElspethSettingsWithCoalesce:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
         )
         assert settings.coalesce == []
 
@@ -1691,7 +1674,6 @@ class TestElspethSettingsWithCoalesce:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             coalesce=[
                 {
                     "name": "merge_results",
@@ -1718,7 +1700,6 @@ class TestElspethSettingsWithCoalesce:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-
                 coalesce=[
                     {
                         "name": "my_coalesce",
@@ -1745,7 +1726,6 @@ class TestElspethSettingsWithCoalesce:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-
                 coalesce=[
                     {"name": "coal_a", "branches": ["x", "y"], "policy": "require_all", "merge": "union"},
                     {"name": "coal_a", "branches": ["x", "y"], "policy": "require_all", "merge": "union"},
@@ -2495,7 +2475,6 @@ class TestRunModeSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
         )
 
         assert settings.run_mode == RunMode.LIVE
@@ -2509,7 +2488,6 @@ class TestRunModeSettings:
         settings_live = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             run_mode=RunMode.LIVE,
         )
         assert settings_live.run_mode == RunMode.LIVE
@@ -2518,7 +2496,6 @@ class TestRunModeSettings:
         settings_replay = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             run_mode=RunMode.REPLAY,
             replay_from="run-abc123",
         )
@@ -2528,7 +2505,6 @@ class TestRunModeSettings:
         settings_verify = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             run_mode=RunMode.VERIFY,
             replay_from="run-abc123",
         )
@@ -2543,7 +2519,6 @@ class TestRunModeSettings:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-
                 run_mode=RunMode.REPLAY,
                 # Missing replay_from
             )
@@ -2560,7 +2535,6 @@ class TestRunModeSettings:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-
                 run_mode=RunMode.VERIFY,
                 # Missing replay_from
             )
@@ -2577,7 +2551,6 @@ class TestRunModeSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             run_mode=RunMode.LIVE,
             # No replay_from
         )
@@ -2594,7 +2567,6 @@ class TestRunModeSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             run_mode=RunMode.LIVE,
             replay_from="run-abc123",  # Provided but not required
         )
@@ -2610,7 +2582,6 @@ class TestRunModeSettings:
             ElspethSettings(
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-
                 run_mode="invalid_mode",
             )
 
@@ -2622,7 +2593,6 @@ class TestRunModeSettings:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-
             run_mode=RunMode.REPLAY,
             replay_from="run-abc123",
         )
@@ -3182,7 +3152,6 @@ class TestSinkNameCasing:
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}, "error_sink": {"plugin": "csv"}},
-
         )
         assert "output" in settings.sinks
         assert "error_sink" in settings.sinks

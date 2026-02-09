@@ -122,7 +122,12 @@ def test_schema_extraction_from_instance():
     config_dict = {
         "source": {
             "plugin": "csv",
-            "options": {"path": "test.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}, "on_validation_failure": "discard", "on_success": "out"},
+            "options": {
+                "path": "test.csv",
+                "schema": {"mode": "fixed", "fields": ["value: float"]},
+                "on_validation_failure": "discard",
+                "on_success": "out",
+            },
         },
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}}}},
     }

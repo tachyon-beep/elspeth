@@ -288,14 +288,8 @@ class RowProcessor:
         resolved_current_node_id = current_node_id
         if resolved_current_node_id is None:
             if start_step is None:
-                raise OrchestrationInvariantError(
-                    "_create_work_item requires either current_node_id or start_step"
-                )
-            if (
-                resolved_coalesce_node_id is not None
-                and coalesce_at_step is not None
-                and start_step == coalesce_at_step
-            ):
+                raise OrchestrationInvariantError("_create_work_item requires either current_node_id or start_step")
+            if resolved_coalesce_node_id is not None and coalesce_at_step is not None and start_step == coalesce_at_step:
                 resolved_current_node_id = resolved_coalesce_node_id
             else:
                 resolved_current_node_id = self._step_to_node_id(start_step)
@@ -317,9 +311,7 @@ class RowProcessor:
         """Resolve a node ID to processor step index (0-indexed)."""
         return self._node_id_to_step(node_id)
 
-    def _resolve_plugin_for_node(
-        self, node_id: NodeID, transforms: list[Any]
-    ) -> TransformProtocol | GateProtocol | GateSettings | None:
+    def _resolve_plugin_for_node(self, node_id: NodeID, transforms: list[Any]) -> TransformProtocol | GateProtocol | GateSettings | None:
         """Resolve the plugin/gate associated with a processing node."""
         if node_id in self._node_to_plugin:
             return self._node_to_plugin[node_id]
@@ -1710,9 +1702,7 @@ class RowProcessor:
 
         coalesce_node_id = self._coalesce_node_ids.get(coalesce_name)
         if coalesce_node_id is None:
-            raise OrchestrationInvariantError(
-                f"Coalesce node_id missing for coalesce '{coalesce_name}' during branch-loss handling"
-            )
+            raise OrchestrationInvariantError(f"Coalesce node_id missing for coalesce '{coalesce_name}' during branch-loss handling")
         coalesce_step = self._coalesce_step_map.get(coalesce_name)
         if coalesce_step is None:
             coalesce_step = self._node_id_to_step(coalesce_node_id)
