@@ -567,6 +567,7 @@ class TestAggregationRecoveryIntegration:
         executor = AggregationExecutor(
             recorder=recorder,
             span_factory=span_factory,
+            step_resolver=lambda node_id: 1,
             run_id=run.run_id,
             aggregation_settings=agg_settings,
         )

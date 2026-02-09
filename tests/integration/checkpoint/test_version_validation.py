@@ -52,6 +52,7 @@ class TestCheckpointVersionValidation:
         executor = AggregationExecutor(
             recorder=None,  # type: ignore
             span_factory=span_factory,
+            step_resolver=lambda node_id: 1,
             run_id="test_run",
         )
 
@@ -77,6 +78,7 @@ class TestCheckpointVersionValidation:
         executor = AggregationExecutor(
             recorder=None,  # type: ignore
             span_factory=span_factory,
+            step_resolver=lambda node_id: 1,
             run_id="test_run",
         )
 
@@ -114,6 +116,7 @@ class TestCheckpointVersionValidation:
         executor = AggregationExecutor(
             recorder=None,  # type: ignore
             span_factory=span_factory,
+            step_resolver=lambda node_id: 1,
             run_id="test_run",
         )
 
@@ -152,6 +155,7 @@ class TestCheckpointVersionValidation:
         executor = AggregationExecutor(
             recorder=None,  # type: ignore
             span_factory=span_factory,
+            step_resolver=lambda node_id: 1,
             run_id="test_run",
             aggregation_settings=aggregation_settings,
         )
@@ -208,6 +212,7 @@ class TestCheckpointVersionValidation:
         executor = AggregationExecutor(
             recorder=recorder,
             span_factory=span_factory,
+            step_resolver=lambda node_id: 1,
             run_id="test_run",
             aggregation_settings=aggregation_settings,
         )

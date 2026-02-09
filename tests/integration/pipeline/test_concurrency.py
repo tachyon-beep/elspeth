@@ -64,7 +64,7 @@ class TestConcurrencyConfigInTransformExecutor:
         span_factory = SpanFactory()
 
         try:
-            executor = TransformExecutor(recorder, span_factory, max_workers=8)
+            executor = TransformExecutor(recorder, span_factory, lambda node_id: 1, max_workers=8)
             assert executor._max_workers == 8
         finally:
             db.close()
@@ -76,7 +76,7 @@ class TestConcurrencyConfigInTransformExecutor:
         span_factory = SpanFactory()
 
         try:
-            executor = TransformExecutor(recorder, span_factory)
+            executor = TransformExecutor(recorder, span_factory, lambda node_id: 1)
             assert executor._max_workers is None
         finally:
             db.close()
