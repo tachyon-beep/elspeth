@@ -40,16 +40,18 @@ def _make_mock_span_factory() -> MagicMock:
     """Create a mock SpanFactory."""
     span_factory = MagicMock()
     span_factory.row_span.return_value.__enter__ = Mock()
-    span_factory.row_span.return_value.__exit__ = Mock()
+    # Never suppress processor exceptions in tests.
+    span_factory.row_span.return_value.__exit__ = Mock(return_value=False)
     return span_factory
 
 
-def _empty_traversal() -> DAGTraversalContext:
+def _empty_traversal(source_node_id: str = "source_001") -> DAGTraversalContext:
+    source_node = NodeID(source_node_id)
     return DAGTraversalContext(
-        node_step_map={},
+        node_step_map={source_node: 0},
         node_to_plugin={},
         first_transform_node_id=None,
-        node_to_next={},
+        node_to_next={source_node: None},
         coalesce_node_map={},
     )
 

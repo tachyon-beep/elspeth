@@ -129,12 +129,16 @@ def _make_processor(
             if config_gate_id_map and GateName(gate.name) in config_gate_id_map
         }
     )
+    traversal_next = dict(node_to_next or {})
+    traversal_next.setdefault(source_node, None)
+    for coalesce_node in coalesce_nodes.values():
+        traversal_next.setdefault(coalesce_node, None)
 
     traversal = DAGTraversalContext(
         node_step_map=traversal_steps,
         node_to_plugin=traversal_node_to_plugin,
         first_transform_node_id=first_transform_node_id,
-        node_to_next=node_to_next or {},
+        node_to_next=traversal_next,
         coalesce_node_map=coalesce_nodes,
     )
 
@@ -250,6 +254,45 @@ class TestConstructorErrorEdgeMap:
             },
         )
         assert processor is not None
+
+
+class TestTraversalNextNodeInvariants:
+    """Tests for strict Tier-1 traversal next-node invariants."""
+
+    def test_resolve_next_node_missing_entry_raises_invariant(self) -> None:
+        """Missing traversal next-node entry must crash, not silently return None."""
+        _, recorder = _make_recorder()
+        processor = _make_processor(
+            recorder,
+            node_to_next={NodeID("source-0"): None},
+        )
+
+        with pytest.raises(OrchestrationInvariantError, match="missing from traversal next-node map"):
+            processor._resolve_next_node_for_processing(NodeID("missing-node"))
+
+    def test_process_row_raises_when_transform_missing_next_node_entry(self) -> None:
+        """Processing nodes must have explicit next-node entries (None for terminal)."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row()
+        ctx = PluginContext(run_id="test-run", config={})
+        transform = _make_mock_transform()
+        source_node = NodeID("source-0")
+        transform_node = NodeID(transform.node_id)
+        processor = _make_processor(
+            recorder,
+            node_step_map={source_node: 0, transform_node: 1},
+            node_to_next={source_node: transform_node},
+            first_transform_node_id=transform_node,
+            node_to_plugin={transform_node: transform},
+        )
+
+        with pytest.raises(OrchestrationInvariantError, match="missing from traversal next-node map"):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
 
 
 # =============================================================================

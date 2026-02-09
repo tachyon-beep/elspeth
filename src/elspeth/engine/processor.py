@@ -233,7 +233,12 @@ class RowProcessor:
 
     def _resolve_next_node_for_processing(self, node_id: NodeID) -> NodeID | None:
         """Resolve the next processing node from traversal metadata."""
-        return self._node_to_next.get(node_id)
+        if node_id not in self._node_to_next:
+            raise OrchestrationInvariantError(
+                f"Node ID '{node_id}' missing from traversal next-node map "
+                "(terminal nodes must have explicit None entries)"
+            )
+        return self._node_to_next[node_id]
 
     def _resolve_audit_step_for_node(self, node_id: NodeID) -> int:
         """Resolve 1-indexed audit step for a processing node."""
