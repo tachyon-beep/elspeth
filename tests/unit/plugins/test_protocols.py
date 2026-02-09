@@ -34,6 +34,7 @@ class TestSourceProtocol:
             determinism = Determinism.IO_READ
             plugin_version = "1.0.0"
             _on_validation_failure = "discard"
+            on_success = "output"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -107,6 +108,7 @@ class TestSourceProtocol:
             determinism = Determinism.IO_READ
             plugin_version = "1.0.0"
             _on_validation_failure = "discard"
+            on_success = "output"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -164,10 +166,15 @@ class TestTransformProtocol:
             creates_tokens = False  # Deaggregation (multi-row output)
             transforms_adds_fields = False  # Schema evolution tracking
             _on_error: str | None = None  # Error routing (WP-11.99b)
+            _on_success: str | None = None  # Success routing
 
             @property
             def on_error(self) -> str | None:
                 return self._on_error
+
+            @property
+            def on_success(self) -> str | None:
+                return self._on_success
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config

@@ -42,6 +42,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
                 "path": str(source_data),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 
@@ -58,6 +59,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
                 "delimiter": "\t",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
         ctx = PluginContext(run_id="test", config={})
@@ -86,6 +88,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
                 "path": str(empty_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
         ctx = PluginContext(run_id="test", config={})
@@ -104,6 +107,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
                 "path": str(header_only),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
         ctx = PluginContext(run_id="test", config={})
@@ -137,6 +141,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
                     "fields": ["id: int", "name: str"],
                 },
                 "on_validation_failure": "quarantine_sink",
+                "on_success": "output",
             }
         )
 
@@ -224,6 +229,7 @@ class TestCSVSourceDiscardContract:
                     "fields": ["id: int", "name: str"],
                 },
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
         ctx = PluginContext(
@@ -256,6 +262,7 @@ class TestCSVSourceFileNotFoundContract:
                 "path": str(tmp_path / "nonexistent.csv"),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
         ctx = PluginContext(run_id="test", config={})

@@ -76,6 +76,7 @@ class SimpleSource(_TestSourceBase):
 
     name = "simple_source"
     output_schema = DynamicSchema
+    on_success = "output"
 
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         super().__init__()
@@ -118,10 +119,15 @@ class PassthroughTransform:
     creates_tokens = False
     transforms_adds_fields = False
     _on_error: str | None = None
+    _on_success: str | None = "output"
 
     @property
     def on_error(self) -> str | None:
         return self._on_error
+
+    @property
+    def on_success(self) -> str | None:
+        return self._on_success
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, PipelineRow):

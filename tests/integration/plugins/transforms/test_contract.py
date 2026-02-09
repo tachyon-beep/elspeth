@@ -89,6 +89,7 @@ class TestSourceToSinkContractFlow:
                 "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 
@@ -155,6 +156,7 @@ class TestSourceToSinkContractFlow:
                 "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 
@@ -192,6 +194,7 @@ class TestSourceToSinkContractFlow:
                 "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 
@@ -222,6 +225,7 @@ class TestContractPreservationThroughTransforms:
                 "path": str(input_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 
@@ -258,6 +262,7 @@ class TestContractPreservationThroughTransforms:
                 "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 
@@ -297,6 +302,7 @@ class TestContractPreservationThroughTransforms:
                 "path": str(input_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 
@@ -330,6 +336,7 @@ class TestContractWithSinkHeaderModes:
                 "normalize_fields": True,
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 
@@ -371,6 +378,7 @@ class TestContractWithSinkHeaderModes:
                 "path": str(input_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "output",
             }
         )
 

@@ -103,7 +103,7 @@ def _make_processor(
     coalesce_executor: Any = None,
     coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
     branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
-    coalesce_step_map: dict[CoalesceName, int] | None = None,
+    node_step_map: dict[NodeID, int] | None = None,
     coalesce_on_success_map: dict[CoalesceName, str] | None = None,
     node_to_next: dict[NodeID, NodeID | None] | None = None,
     restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
@@ -111,12 +111,14 @@ def _make_processor(
 ) -> RowProcessor:
     """Create a RowProcessor with sensible defaults."""
     coalesce_nodes = dict(coalesce_node_ids or {})
-    if coalesce_step_map:
-        for coalesce_name in coalesce_step_map:
-            coalesce_nodes.setdefault(coalesce_name, NodeID(f"coalesce::{coalesce_name}"))
+    traversal_steps = dict(node_step_map or {})
+    source_node = NodeID(source_node_id)
+    traversal_steps.setdefault(source_node, 0)
+    for idx, coalesce_node in enumerate(coalesce_nodes.values(), start=1):
+        traversal_steps.setdefault(coalesce_node, idx)
 
     traversal = DAGTraversalContext(
-        node_step_map={},
+        node_step_map=traversal_steps,
         node_to_plugin={
             config_gate_id_map[GateName(gate.name)]: gate
             for gate in (config_gates or [])
@@ -139,7 +141,6 @@ def _make_processor(
         retry_manager=retry_manager,
         coalesce_executor=coalesce_executor,
         branch_to_coalesce=branch_to_coalesce,
-        coalesce_step_map=coalesce_step_map,
         coalesce_on_success_map=coalesce_on_success_map,
         restored_aggregation_state=restored_aggregation_state,
         telemetry_manager=telemetry_manager,
@@ -659,7 +660,7 @@ class TestProcessToken:
             token=token,
             transforms=[],
             ctx=ctx,
-            start_step=0,
+            current_node_id=NodeID("source-0"),
         )
 
         assert len(results) == 1
@@ -1041,7 +1042,8 @@ class TestMaybeCoalesceToken:
         processor = _make_processor(
             recorder,
             coalesce_executor=coalesce,
-            coalesce_step_map={CoalesceName("merge"): 1},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 1},
         )
         token = make_token_info()
         # Ensure branch_name is None
@@ -1069,7 +1071,8 @@ class TestMaybeCoalesceToken:
         processor = _make_processor(
             recorder,
             coalesce_executor=coalesce,
-            coalesce_step_map={CoalesceName("merge"): 5},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 5},
         )
         token = TokenInfo(
             row_id="row-1",
@@ -1096,7 +1099,8 @@ class TestMaybeCoalesceToken:
         processor = _make_processor(
             recorder,
             coalesce_executor=coalesce,
-            coalesce_step_map={CoalesceName("merge"): 2},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 2},
         )
         token = TokenInfo(
             row_id="row-1",
@@ -1125,7 +1129,8 @@ class TestMaybeCoalesceToken:
         processor = _make_processor(
             recorder,
             coalesce_executor=coalesce,
-            coalesce_step_map={CoalesceName("merge"): 3},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 3},
             coalesce_on_success_map={CoalesceName("merge"): "output"},
         )
         token = TokenInfo(
@@ -1156,7 +1161,8 @@ class TestMaybeCoalesceToken:
         processor = _make_processor(
             recorder,
             coalesce_executor=coalesce,
-            coalesce_step_map={CoalesceName("merge"): 2},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 2},
             node_to_next={NodeID("coalesce::merge"): NodeID("transform-5")},
         )
         token = TokenInfo(
@@ -1178,7 +1184,7 @@ class TestMaybeCoalesceToken:
         assert handled is True
         assert result is None
         assert len(child_items) == 1
-        assert processor._node_id_to_step(child_items[0].current_node_id) == 2
+        assert child_items[0].current_node_id == NodeID("coalesce::merge")
 
 
 # =============================================================================
@@ -1266,7 +1272,8 @@ class TestNotifyCoalesceOfLostBranch:
             recorder,
             coalesce_executor=coalesce,
             branch_to_coalesce={BranchName("path_a"): CoalesceName("merge")},
-            coalesce_step_map={CoalesceName("merge"): 3},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 3},
         )
         token = TokenInfo(
             row_id="row-1",
@@ -1300,7 +1307,8 @@ class TestNotifyCoalesceOfLostBranch:
             recorder,
             coalesce_executor=coalesce,
             branch_to_coalesce={BranchName("path_a"): CoalesceName("merge")},
-            coalesce_step_map={CoalesceName("merge"): 5},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 5},
             coalesce_on_success_map={CoalesceName("merge"): "output"},
         )
         token = TokenInfo(
@@ -1334,7 +1342,8 @@ class TestNotifyCoalesceOfLostBranch:
             recorder,
             coalesce_executor=coalesce,
             branch_to_coalesce={BranchName("path_a"): CoalesceName("merge")},
-            coalesce_step_map={CoalesceName("merge"): 3},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 3},
             node_to_next={NodeID("coalesce::merge"): NodeID("transform-4")},
         )
         token = TokenInfo(
@@ -1352,7 +1361,7 @@ class TestNotifyCoalesceOfLostBranch:
 
         assert results == []
         assert len(child_items) == 1
-        assert processor._node_id_to_step(child_items[0].current_node_id) == 3
+        assert child_items[0].current_node_id == NodeID("coalesce::merge")
 
 
 # =============================================================================

@@ -325,6 +325,7 @@ class TestSourceDataConfig:
             path="data.csv",
             schema_config=SchemaConfig.from_dict({"fields": ["id: int", "name: str"], "mode": "fixed"}),
             on_validation_failure="quarantine_sink",
+            on_success="output",
         )
 
         assert config.on_validation_failure == "quarantine_sink"
@@ -338,6 +339,7 @@ class TestSourceDataConfig:
             path="data.csv",
             schema_config=SchemaConfig.from_dict({"fields": ["id: int"], "mode": "flexible"}),
             on_validation_failure="discard",
+            on_success="output",
         )
 
         assert config.on_validation_failure == "discard"
@@ -352,6 +354,7 @@ class TestSourceDataConfig:
                 path="data.csv",
                 schema_config=SchemaConfig.from_dict({"fields": ["id: int"], "mode": "fixed"}),
                 on_validation_failure="",
+                on_success="output",
             )
 
     def test_source_config_inherits_path_and_schema(self) -> None:
@@ -363,6 +366,7 @@ class TestSourceDataConfig:
             path="data/input.csv",
             schema_config=SchemaConfig.from_dict({"fields": ["name: str"], "mode": "fixed"}),
             on_validation_failure="bad_rows",
+            on_success="output",
         )
 
         assert config.path == "data/input.csv"

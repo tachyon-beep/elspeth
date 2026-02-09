@@ -40,15 +40,24 @@ class JSONExplodeConfig(DataPluginConfig):
     Requires 'schema' in config to define input/output expectations.
     Use 'schema: {mode: observed}' for dynamic field handling.
 
+    Extends DataPluginConfig (not TransformDataConfig) because JSONExplode
+    has no on_error behavior -- type violations crash to surface upstream bugs.
+    However, on_success IS needed for terminal position routing.
+
     Attributes:
         array_field: Name of the array field to explode (required)
         output_field: Name for the exploded element (default: "item")
         include_index: Whether to include item_index field (default: True)
+        on_success: Sink name for terminal transforms (optional)
     """
 
     array_field: str = Field(..., description="Name of the array field to explode")
     output_field: str = Field(default="item", description="Name for the exploded element")
     include_index: bool = Field(default=True, description="Whether to include item_index field")
+    on_success: str | None = Field(
+        default=None,
+        description="Sink name for successfully processed rows. Required for terminal transforms.",
+    )
 
 
 class JSONExplode(BaseTransform):
@@ -99,6 +108,7 @@ class JSONExplode(BaseTransform):
         self._array_field = cfg.array_field
         self._output_field = cfg.output_field
         self._include_index = cfg.include_index
+        self._on_success: str | None = cfg.on_success
 
         # Input schema from config for validation
         self.input_schema = create_schema_from_config(cfg.schema_config, "JSONExplodeInputSchema", allow_coercion=False)

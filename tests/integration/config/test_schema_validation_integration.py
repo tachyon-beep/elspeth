@@ -153,6 +153,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
 
         name = "static_source"
         output_schema = StaticSchema  # Class-level static schema
+        on_success = "output"  # Route to output sink
 
         def __init__(self) -> None:
             super().__init__()
@@ -167,6 +168,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
         name = "static_transform"
         input_schema = StaticSchema  # Class-level static schema
         output_schema = StaticSchema  # Class-level static schema
+        _on_success = "output"  # Terminal transform routes to output sink
 
         def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
             return TransformResult.success(row, success_reason={"action": "passthrough"})

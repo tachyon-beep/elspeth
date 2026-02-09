@@ -156,6 +156,7 @@ aggregations:
         fields:
           - "value: float"
       value_field: value
+      on_success: output
 
 sinks:
   output:
@@ -250,6 +251,7 @@ aggregations:
         fields:
           - "value: float"  # Requires 'value' field
       value_field: value
+      on_success: output
 
 sinks:
   output:
@@ -308,6 +310,7 @@ aggregations:
         fields:
           - "value: float"
       value_field: value
+      on_success: output
     # Outputs: count, sum, mean, etc. (dynamic schema)
 
 sinks:
@@ -349,6 +352,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
         "path": "test.csv",
         "schema": {"mode": "fixed", "fields": ["invalid syntax!!!"]},
         "on_validation_failure": "discard",
+        "on_success": "out",
     }
 
     with pytest.raises(PluginConfigError, match="Invalid field spec"):

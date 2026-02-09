@@ -416,7 +416,7 @@ class TestForkJoinRuntimeBalance:
         gate = GateSettings(
             name="fork_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
         )
 
@@ -533,7 +533,7 @@ class TestForkJoinEdgeCases:
         gate = GateSettings(
             name="fork_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
         )
 
@@ -606,7 +606,7 @@ class TestForkRecoveryInvariant:
         gate = GateSettings(
             name="fork_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
         )
 

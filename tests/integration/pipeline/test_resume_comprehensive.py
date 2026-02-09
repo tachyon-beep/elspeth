@@ -288,7 +288,7 @@ class TestResumeComprehensive:
         # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
         strict_schema = {"mode": "fixed", "fields": ["id: int", "value: str"]}
         config = PipelineConfig(
-            source=NullSource({}),
+            source=NullSource({"on_success": "default"}),
             transforms=[PassThrough({"schema": strict_schema})],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
@@ -394,7 +394,7 @@ class TestResumeComprehensive:
         # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
         strict_schema = {"mode": "fixed", "fields": ["id: int", "value: str"]}
         config = PipelineConfig(
-            source=NullSource({}),
+            source=NullSource({"on_success": "default"}),
             transforms=[PassThrough({"schema": strict_schema})],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
@@ -596,7 +596,7 @@ class TestResumeComprehensive:
         # CSVSink stringifies datetime values automatically
         strict_schema = {"mode": "fixed", "fields": ["id: int", "timestamp: str"]}
         config = PipelineConfig(
-            source=NullSource({}),
+            source=NullSource({"on_success": "default"}),
             transforms=[PassThrough({"schema": strict_schema})],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
@@ -798,7 +798,7 @@ class TestResumeComprehensive:
         # CSVSink stringifies Decimal values automatically
         strict_schema = {"mode": "fixed", "fields": ["id: int", "amount: str"]}
         config = PipelineConfig(
-            source=NullSource({}),
+            source=NullSource({"on_success": "default"}),
             transforms=[PassThrough({"schema": strict_schema})],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
@@ -993,7 +993,7 @@ class TestResumeComprehensive:
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
-            source=NullSource({}),
+            source=NullSource({"on_success": "default"}),
             transforms=[PassThrough({"schema": {"mode": "observed"}})],
             sinks={
                 "default": JSONSink(
@@ -1191,7 +1191,7 @@ class TestResumeComprehensive:
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
-            source=NullSource({}),
+            source=NullSource({"on_success": "default"}),
             transforms=[PassThrough({"schema": {"mode": "observed"}})],
             sinks={
                 "default": JSONSink(
@@ -1369,7 +1369,7 @@ class TestResumeComprehensive:
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
-            source=NullSource({}),
+            source=NullSource({"on_success": "default"}),
             transforms=[PassThrough({"schema": {"mode": "observed"}})],
             sinks={"default": JSONSink({"path": "/tmp/dummy.json", "schema": {"mode": "observed"}, "mode": "write", "format": "jsonl"})},
         )

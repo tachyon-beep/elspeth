@@ -525,7 +525,7 @@ class TestAggregationRecoveryIntegration:
             "contract": contract.to_checkpoint_format(),  # v2.0: contract required for PipelineRow restoration
         }
         agg_state: dict[str, Any] = {
-            "_version": "2.1",  # Required checkpoint version
+            "_version": "3.0",  # Required checkpoint version
             "sum_aggregator": sum_agg_state,
         }
 

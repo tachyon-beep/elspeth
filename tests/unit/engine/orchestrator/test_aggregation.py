@@ -82,14 +82,14 @@ def _make_result(
 def _make_work_item(
     *,
     token: TokenInfo | None = None,
-    start_step: int = 0,
-    coalesce_at_step: int | None = None,
+    current_node_id: NodeID | None = None,
+    coalesce_node_id: NodeID | None = None,
     coalesce_name: str | None = None,
 ) -> Mock:
     item = Mock()
     item.token = token or make_token_info()
-    item.start_step = start_step
-    item.coalesce_at_step = coalesce_at_step
+    item.current_node_id = current_node_id if current_node_id is not None else NodeID("node-0")
+    item.coalesce_node_id = coalesce_node_id
     item.coalesce_name = coalesce_name
     return item
 
@@ -375,7 +375,7 @@ class TestCheckAggregationTimeouts:
     def test_work_items_continue_processing(self) -> None:
         """Work items from flush continue through remaining transforms."""
         work_token = make_token_info()
-        work_item = _make_work_item(token=work_token, start_step=0, coalesce_at_step=None)
+        work_item = _make_work_item(token=work_token, current_node_id=NodeID("continue-node"))
         downstream_result = _make_result(RowOutcome.COMPLETED, token=work_token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
@@ -402,12 +402,15 @@ class TestCheckAggregationTimeouts:
 
         assert result.rows_succeeded == 1
         processor.process_token.assert_called_once()
-        # Work items now carry continuation node directly, so start_step is unchanged.
-        assert processor.process_token.call_args.kwargs["start_step"] == 0
+        assert processor.process_token.call_args.kwargs["current_node_id"] == NodeID("continue-node")
 
-    def test_work_items_with_coalesce_step(self) -> None:
-        """Work items with coalesce_at_step use that as continuation start."""
-        work_item = _make_work_item(start_step=0, coalesce_at_step=2, coalesce_name="merge")
+    def test_work_items_with_coalesce_node(self) -> None:
+        """Work items can carry an explicit coalesce node continuation."""
+        work_item = _make_work_item(
+            current_node_id=NodeID("continue-node"),
+            coalesce_node_id=NodeID("coalesce::merge"),
+            coalesce_name="merge",
+        )
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -431,8 +434,8 @@ class TestCheckAggregationTimeouts:
             agg_transform_lookup=lookup,
         )
 
-        assert processor.process_token.call_args.kwargs["start_step"] == 2
-        assert processor.process_token.call_args.kwargs["coalesce_at_step"] == 2
+        assert processor.process_token.call_args.kwargs["current_node_id"] == NodeID("continue-node")
+        assert processor.process_token.call_args.kwargs["coalesce_node_id"] == NodeID("coalesce::merge")
         assert processor.process_token.call_args.kwargs["coalesce_name"] == "merge"
 
     def test_downstream_routed_outcome(self) -> None:
@@ -805,7 +808,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_work_items_continue_downstream(self) -> None:
         """Work items from flush continue through remaining transforms."""
         work_token = make_token_info()
-        work_item = _make_work_item(token=work_token, start_step=0)
+        work_item = _make_work_item(token=work_token, current_node_id=NodeID("continue-node"))
         downstream = _make_result(RowOutcome.COMPLETED, token=work_token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
@@ -1055,9 +1058,13 @@ class TestFlushRemainingAggregationBuffers:
         assert result.rows_expanded == 1
         assert result.rows_buffered == 1
 
-    def test_work_item_with_coalesce_step_in_flush(self) -> None:
-        """Work items with coalesce_at_step use that for continuation in flush."""
-        work_item = _make_work_item(start_step=0, coalesce_at_step=2, coalesce_name="merge")
+    def test_work_item_with_coalesce_node_in_flush(self) -> None:
+        """Work items with coalesce_node_id preserve continuation metadata in flush."""
+        work_item = _make_work_item(
+            current_node_id=NodeID("continue-node"),
+            coalesce_node_id=NodeID("coalesce::merge"),
+            coalesce_name="merge",
+        )
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -1078,8 +1085,8 @@ class TestFlushRemainingAggregationBuffers:
             pending_tokens=pending,
         )
 
-        assert processor.process_token.call_args.kwargs["start_step"] == 2
-        assert processor.process_token.call_args.kwargs["coalesce_at_step"] == 2
+        assert processor.process_token.call_args.kwargs["current_node_id"] == NodeID("continue-node")
+        assert processor.process_token.call_args.kwargs["coalesce_node_id"] == NodeID("coalesce::merge")
 
     def test_completed_result_branch_fallback_to_sink_name(self) -> None:
         """Completed result with branch not in pending routes to sink_name from result."""

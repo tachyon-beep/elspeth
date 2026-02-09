@@ -467,6 +467,7 @@ checkpoints_table = Table(
     # Format version for compatibility checking (replaces hardcoded date check)
     # Version 1: Pre-deterministic node IDs (legacy, rejected)
     # Version 2: Deterministic node IDs (2026-01-24+)
+    # Version 3: Phase 2 traversal refactor checkpoint break
     Column("format_version", Integer, nullable=True),  # Nullable for backwards compat with existing checkpoints
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(

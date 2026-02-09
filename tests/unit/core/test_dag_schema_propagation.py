@@ -330,7 +330,7 @@ class MockAggregationTransform:
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     _on_error: str | None = None
-    _on_success: str | None = None
+    _on_success: str | None = "output"
 
     @property
     def on_error(self) -> str | None:

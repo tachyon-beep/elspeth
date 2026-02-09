@@ -2197,19 +2197,19 @@ class TestCoalesceNodes:
         )
         branch_map = graph.get_branch_to_coalesce_map()
 
-        # Should map branches to coalesce_name (not node_id) for processor step lookup
+        # Should map branches to coalesce_name (not node_id) for processor node-map lookup
         assert branch_map[BranchName("path_a")] == "merge_results"
         assert branch_map[BranchName("path_b")] == "merge_results"
 
-    def test_branch_to_coalesce_maps_to_coalesce_name_for_step_lookup(self, plugin_manager) -> None:
-        """branch_to_coalesce should map to coalesce_name (not node_id) for use with coalesce_step_map.
+    def test_branch_to_coalesce_maps_to_coalesce_name_for_node_lookup(self, plugin_manager) -> None:
+        """branch_to_coalesce should map to coalesce_name (not node_id) for coalesce node lookup.
 
-        BUG-LINEAGE-01: The processor needs to look up coalesce step position using:
+        BUG-LINEAGE-01: The processor needs to look up coalesce node position using:
             coalesce_name = branch_to_coalesce[branch_name]
-            step = coalesce_step_map[coalesce_name]
+            coalesce_node_id = coalesce_node_map[coalesce_name]
 
         But branch_to_coalesce was mapping branch_name -> node_id, causing KeyError
-        when trying to look up in coalesce_step_map which expects coalesce_name keys.
+        when trying to look up in coalesce_node_map which expects coalesce_name keys.
         """
         from elspeth.contracts import BranchName
         from elspeth.core.config import (
@@ -2263,9 +2263,9 @@ class TestCoalesceNodes:
 
         branch_map = graph.get_branch_to_coalesce_map()
 
-        # CRITICAL: Must map to coalesce_name (not node_id) for processor step lookup
-        # The processor does: coalesce_step_map[branch_to_coalesce[branch_name]]
-        # coalesce_step_map has keys like "join_point", NOT node_ids like "coalesce_join_point_abc123"
+        # CRITICAL: Must map to coalesce_name (not node_id) for processor node lookup
+        # The processor does: coalesce_node_map[branch_to_coalesce[branch_name]]
+        # coalesce_node_map has keys like "join_point", NOT node_ids like "coalesce_join_point_abc123"
         assert branch_map[BranchName("analysis_path")] == "join_point", (
             f"Expected coalesce_name 'join_point', got {branch_map[BranchName('analysis_path')]}"
         )
@@ -2421,11 +2421,11 @@ class TestCoalesceNodes:
                 coalesce_settings=settings.coalesce,
             )
 
-    def test_fork_coalesce_contract_branch_map_compatible_with_step_map(self, plugin_manager) -> None:
-        """Contract test: branch_to_coalesce values must be usable as coalesce_step_map keys.
+    def test_fork_coalesce_contract_branch_map_compatible_with_node_map(self, plugin_manager) -> None:
+        """Contract test: branch_to_coalesce values must be usable as coalesce_node_map keys.
 
         This is the CRITICAL contract between DAG builder and Processor.
-        The processor does: coalesce_step_map[branch_to_coalesce[branch_name]]
+        The processor does: coalesce_node_map[branch_to_coalesce[branch_name]]
         This test ensures the production path (`from_plugin_instances`) produces compatible mappings.
         """
         from elspeth.core.config import (
@@ -2491,27 +2491,13 @@ class TestCoalesceNodes:
 
         # Get the mappings that processor would use
         branch_to_coalesce = graph.get_branch_to_coalesce_map()
+        coalesce_node_map = graph.get_coalesce_id_map()
 
-        # Simulate what orchestrator does (build coalesce_step_map)
-        coalesce_step_map: dict[str, int] = {}
-        branch_steps: dict[str, int] = {}
-        base_step = len(settings.transforms)
-        for gate_idx, gate in enumerate(settings.gates):
-            if gate.fork_to:
-                step = base_step + gate_idx + 1
-                for branch in gate.fork_to:
-                    existing = branch_steps.get(branch)
-                    if existing is None or step > existing:
-                        branch_steps[branch] = step
-        for cs in settings.coalesce:
-            coalesce_step_map[cs.name] = max(branch_steps[branch] for branch in cs.branches)
-
-        # CRITICAL CONTRACT: Every value in branch_to_coalesce must be a key in coalesce_step_map
-        # This is what processor relies on at lines 695-696
+        # CRITICAL CONTRACT: Every value in branch_to_coalesce must be a key in coalesce_node_map.
         for branch_name, coalesce_name in branch_to_coalesce.items():
-            assert coalesce_name in coalesce_step_map, (
+            assert coalesce_name in coalesce_node_map, (
                 f"Contract violation: branch_to_coalesce['{branch_name}'] = '{coalesce_name}', "
-                f"but '{coalesce_name}' not in coalesce_step_map keys: {list(coalesce_step_map.keys())}"
+                f"but '{coalesce_name}' not in coalesce_node_map keys: {list(coalesce_node_map.keys())}"
             )
 
             # Also verify it's the coalesce_name, not a node_id

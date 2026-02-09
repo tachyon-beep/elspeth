@@ -92,6 +92,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = IdentityTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -146,6 +147,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": i} for i in range(7)])
         transform = IdentityTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -191,6 +193,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = IdentityTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -375,6 +378,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = IdentityTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -417,6 +421,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": 1}])
         transform = IdentityTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(

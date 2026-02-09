@@ -349,7 +349,7 @@ class TestSanitizeDsnProperties:
 
     @given(
         password=st.text(
-            min_size=8,
+            min_size=11,
             max_size=50,
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),
@@ -360,9 +360,10 @@ class TestSanitizeDsnProperties:
     def test_password_never_in_sanitized_url(self, password: str) -> None:
         """Property: For ANY password string, sanitized URL does not contain it.
 
-        Uses min_size=8 because very short passwords (1-2 chars) may coincidentally
-        appear in the URL structure (e.g., 'o' in 'postgresql'). Real passwords
-        are always longer, so this is not a meaningful security gap.
+        Uses min_size=11 because shorter passwords may coincidentally appear in
+        the URL structure (e.g., 'postgres' in 'postgresql://', 'localhost' in
+        the host). Real passwords are always longer, so this is not a meaningful
+        security gap.
         """
         url = f"postgresql://user:{password}@localhost/db"
         sanitized, _, had_password = _sanitize_dsn_dev_mode(url)

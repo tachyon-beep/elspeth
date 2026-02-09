@@ -78,6 +78,7 @@ class TestOrchestratorCleanup:
         """All transforms should have close() called after successful run."""
         transform_1 = TrackingTransform("transform_1")
         transform_2 = TrackingTransform("transform_2")
+        transform_2._on_success = "default"
 
         source = ListSource([{"value": 1}, {"value": 2}])
         sink = CollectSink()
@@ -108,6 +109,7 @@ class TestOrchestratorCleanup:
         """All transforms should have close() called even if run fails."""
         transform_1 = TrackingTransform("transform_1")
         transform_2 = TrackingTransform("transform_2")
+        transform_2._on_success = "default"
 
         source = FailingSource([{"value": 1}])
         sink = CollectSink()
@@ -150,6 +152,7 @@ class TestOrchestratorCleanup:
 
         source = ListSource([{"value": 1}])
         transform = MinimalTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         graph = ExecutionGraph.from_plugin_instances(
@@ -175,6 +178,7 @@ class TestOrchestratorCleanup:
         """If one transform's close() fails, others should still be closed."""
         transform_1 = FailingCloseTransform("failing_close")
         transform_2 = TrackingTransform("normal_close")
+        transform_2._on_success = "default"
 
         source = ListSource([{"value": 1}])
         sink = CollectSink()

@@ -13,6 +13,7 @@ def test_source_validates_output_schema_on_init() -> None:
         "path": "test.csv",
         "schema": {"mode": "observed"},
         "on_validation_failure": "discard",
+        "on_success": "output",
     }
     CSVSource(config)  # Should not raise
 
@@ -21,6 +22,7 @@ def test_source_validates_output_schema_on_init() -> None:
         "path": "test.csv",
         "schema": {"mode": "fixed", "fields": ["invalid syntax"]},
         "on_validation_failure": "discard",
+        "on_success": "output",
     }
 
     with pytest.raises(PluginConfigError, match="Invalid field spec"):

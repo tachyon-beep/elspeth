@@ -89,12 +89,20 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
 
     Uses from_plugin_instances() for production-path fidelity.
     """
+    from elspeth.plugins.protocols import GateProtocol
 
-    # We use build_linear_pipeline's graph construction, but need to
-    # build the graph from config's actual plugins.
+    transforms = list(config.transforms)
+
+    # Set on_success on the terminal transform for explicit sink routing
+    sink_name = next(iter(config.sinks))
+    for i in range(len(transforms) - 1, -1, -1):
+        if not isinstance(transforms[i], GateProtocol):
+            transforms[i]._on_success = sink_name  # type: ignore[attr-defined]
+            break
+
     graph = ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=list(config.transforms),
+        transforms=transforms,
         sinks=config.sinks,
         aggregations={},
         gates=[],

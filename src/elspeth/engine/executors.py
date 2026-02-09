@@ -76,6 +76,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
+AGGREGATION_CHECKPOINT_VERSION = "3.0"
 
 
 class MissingEdgeError(Exception):
@@ -1604,7 +1605,8 @@ class AggregationExecutor:
         # v1.1: Added count_fire_offset/condition_fire_offset for trigger ordering (P2-2026-02-01)
         # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
         # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
-        state["_version"] = "2.1"
+        # v3.0: Phase 2 traversal refactor checkpoint break (no backwards compatibility)
+        state["_version"] = AGGREGATION_CHECKPOINT_VERSION
 
         # Size validation (on serialized checkpoint)
         # Use checkpoint_dumps to handle datetime (P1-2026-02-05 fix)
@@ -1636,7 +1638,7 @@ class AggregationExecutor:
         Args:
             state: Checkpoint state with format:
                 {
-                    "_version": "2.1",
+                    "_version": "3.0",
                     "node_id": {
                         "tokens": [{"token_id", "row_id", "branch_name", "row_data", ...}],
                         "batch_id": str,
@@ -1653,20 +1655,21 @@ class AggregationExecutor:
         # v1.1: Pre-PipelineRow migration format
         # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
         # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
-        CHECKPOINT_VERSION = "2.1"
+        # v3.0: Phase 2 traversal refactor checkpoint break (no backwards compatibility)
+        checkpoint_version = AGGREGATION_CHECKPOINT_VERSION
         version = state.get("_version")
 
-        if version != CHECKPOINT_VERSION:
+        if version != checkpoint_version:
             # Log checkpoint rejection for observability
             slog.warning(
                 "checkpoint_version_rejected",
                 found_version=version,
-                expected_version=CHECKPOINT_VERSION,
+                expected_version=checkpoint_version,
                 reason="incompatible_checkpoint_version",
             )
             raise ValueError(
                 f"Incompatible checkpoint version: {version!r}. "
-                f"Expected: {CHECKPOINT_VERSION!r}. "
+                f"Expected: {checkpoint_version!r}. "
                 f"Cannot resume from incompatible checkpoint format. "
                 f"This checkpoint may be from a different ELSPETH version."
             )
@@ -1692,12 +1695,12 @@ class AggregationExecutor:
             if not isinstance(tokens_data, list):
                 raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
 
-            # Restore contract from checkpoint (v2.1: stored once per node)
+            # Restore contract from checkpoint (stored once per node)
             # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
             if "contract" not in node_state:
                 raise ValueError(
                     f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
-                    f"v2.1 format requires contract for PipelineRow restoration."
+                    f"Checkpoint format {checkpoint_version} requires contract for PipelineRow restoration."
                 )
             restored_contract = SchemaContract.from_checkpoint(node_state["contract"])
 
@@ -1705,7 +1708,7 @@ class AggregationExecutor:
             reconstructed_tokens = []
             for t in tokens_data:
                 # Validate required fields (crash on missing - per CLAUDE.md)
-                # All these fields are required in checkpoint format v2.1 (values can be None)
+                # All these fields are required in current checkpoint format (values can be None)
                 required_fields = {
                     "token_id",
                     "row_id",
@@ -1720,7 +1723,7 @@ class AggregationExecutor:
                 if missing:
                     raise ValueError(
                         f"Checkpoint token missing required fields: {missing}. "
-                        f"Required in v2.1 format: {required_fields}. Found: {set(t.keys())}"
+                        f"Required in checkpoint format {checkpoint_version}: {required_fields}. Found: {set(t.keys())}"
                     )
 
                 # Validate contract_version matches restored contract
@@ -1737,7 +1740,7 @@ class AggregationExecutor:
 
                 # Reconstruct TokenInfo from checkpoint data
                 # NOTE: These fields CAN be None (valid state for unforked tokens), but they
-                # are ALWAYS present in checkpoint format v2.1 - use direct access to detect
+                # are ALWAYS present in current checkpoint format - use direct access to detect
                 # corruption/missing fields. The difference between "field is None" and
                 # "field is missing" matters: the former is valid, the latter is corruption.
                 reconstructed_tokens.append(
@@ -1781,7 +1784,7 @@ class AggregationExecutor:
             # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
             # The old approach called record_accept() which set fire times to current time,
             # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
-            # NOTE: All fields are required in checkpoint format v2.1 - no backwards compat
+            # NOTE: All fields are required in current checkpoint format - no backwards compat
             elapsed_seconds = node_state["elapsed_age_seconds"]
             count_fire_offset = node_state["count_fire_offset"]
             condition_fire_offset = node_state["condition_fire_offset"]
@@ -1798,7 +1801,7 @@ class AggregationExecutor:
                 "checkpoint_restored",
                 node_id=str(node_id),
                 token_count=len(reconstructed_tokens),
-                checkpoint_version=CHECKPOINT_VERSION,
+                checkpoint_version=checkpoint_version,
             )
 
     def get_batch_id(self, node_id: NodeID) -> str | None:

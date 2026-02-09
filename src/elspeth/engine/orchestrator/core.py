@@ -486,6 +486,9 @@ class Orchestrator:
     ) -> DAGTraversalContext:
         """Build traversal context for RowProcessor from graph + pipeline config."""
         node_step_map = graph.build_step_map()
+        coalesce_gate_index = graph.get_coalesce_gate_index()
+        for coalesce_name, coalesce_node_id in graph.get_coalesce_id_map().items():
+            node_step_map[coalesce_node_id] = coalesce_gate_index[coalesce_name] + 1
         node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = {}
 
         for transform in config.transforms:
@@ -504,6 +507,8 @@ class Orchestrator:
             node_to_next[source_id] = graph.get_next_node(source_id)
         for node_id in graph.get_pipeline_node_sequence():
             node_to_next[node_id] = graph.get_next_node(node_id)
+        for coalesce_node_id in graph.get_coalesce_id_map().values():
+            node_to_next[coalesce_node_id] = graph.get_next_node(coalesce_node_id)
 
         return DAGTraversalContext(
             node_step_map=node_step_map,
@@ -565,7 +570,6 @@ class Orchestrator:
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
         coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
-        coalesce_step_map = {coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1 for coalesce_name in coalesce_node_map}
         traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
         coalesce_on_success_map: dict[CoalesceName, str] = {}
         if settings is not None and settings.coalesce:
@@ -588,7 +592,6 @@ class Orchestrator:
             retry_manager=retry_manager,
             coalesce_executor=coalesce_executor,
             branch_to_coalesce=branch_to_coalesce,
-            coalesce_step_map=coalesce_step_map,
             coalesce_on_success_map=coalesce_on_success_map,
             restored_aggregation_state=restored_aggregation_state,
             payload_store=payload_store,

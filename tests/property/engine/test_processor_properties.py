@@ -336,7 +336,7 @@ class TestWorkQueueConservation:
             gate = GateSettings(
                 name="fork_gate",
                 condition="True",
-                routes={"true": "fork", "false": "continue"},
+                routes={"true": "fork", "false": "sink_b"},
                 fork_to=["sink_a", "sink_b"],
             )
 
@@ -576,7 +576,7 @@ class TestIterationGuardProperties:
             gate = GateSettings(
                 name="fork_gate",
                 condition="True",
-                routes={"true": "fork", "false": "continue"},
+                routes={"true": "fork", "false": "sink_b"},
                 fork_to=["sink_a", "sink_b"],
             )
 
@@ -668,7 +668,7 @@ class TestTokenIdentityProperties:
             gate = GateSettings(
                 name="fork_gate",
                 condition="True",
-                routes={"true": "fork", "false": "continue"},
+                routes={"true": "fork", "false": "sink_b"},
                 fork_to=["sink_a", "sink_b"],
             )
 
@@ -878,7 +878,7 @@ class TestWorkQueueEdgeCases:
             gate = GateSettings(
                 name="fork_gate",
                 condition="True",
-                routes={"true": "fork", "false": "continue"},
+                routes={"true": "fork", "false": "default"},
                 fork_to=["path_a", "path_b"],
             )
 
@@ -888,6 +888,7 @@ class TestWorkQueueEdgeCases:
                 branches=["path_a", "path_b"],
                 policy="require_all",
                 merge="union",
+                on_success="default",
             )
 
             config = PipelineConfig(

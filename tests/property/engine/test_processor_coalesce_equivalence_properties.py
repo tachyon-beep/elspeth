@@ -25,7 +25,6 @@ def _make_processor(
     step_count: int,
     coalesce_name: CoalesceName | None,
     coalesce_node_id: NodeID | None,
-    coalesce_step: int | None,
     coalesce_executor: Mock | None,
 ) -> tuple[RowProcessor, Mock]:
     """Construct a minimal processor with deterministic step/node mappings."""
@@ -67,7 +66,6 @@ def _make_processor(
         source_node_id=source_node_id,
         traversal=traversal,
         coalesce_executor=coalesce_executor,
-        coalesce_step_map={coalesce_name: coalesce_step} if coalesce_name is not None and coalesce_step is not None else None,
     )
 
     return processor, coalesce_executor if coalesce_executor is not None else Mock()
@@ -108,7 +106,6 @@ class TestCoalesceTriggerEquivalence:
             step_count=step_count,
             coalesce_name=coalesce_name,
             coalesce_node_id=coalesce_node_id,
-            coalesce_step=coalesce_step if has_coalesce_name else None,
             coalesce_executor=executor if has_executor else None,
         )
 

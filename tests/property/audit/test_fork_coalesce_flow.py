@@ -255,7 +255,7 @@ class TestForkCoalesceFlow:
         gate = GateSettings(
             name="fork_gate",
             condition="True",  # Always fork
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
         )
 
@@ -265,6 +265,7 @@ class TestForkCoalesceFlow:
             branches=["path_a", "path_b"],
             policy="require_all",
             merge="union",
+            on_success="default",
         )
 
         config = PipelineConfig(
@@ -348,7 +349,7 @@ class TestForkCoalesceFlow:
         gate = GateSettings(
             name="fork_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
         )
 
@@ -357,6 +358,7 @@ class TestForkCoalesceFlow:
             branches=["path_a", "path_b"],
             policy="require_all",
             merge="union",
+            on_success="default",
         )
 
         config = PipelineConfig(
@@ -415,7 +417,7 @@ class TestForkCoalesceFlow:
         gate = GateSettings(
             name="fork_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
         )
 
@@ -424,6 +426,7 @@ class TestForkCoalesceFlow:
             branches=["path_a", "path_b"],
             policy="require_all",
             merge="union",
+            on_success="default",
         )
 
         config = PipelineConfig(
@@ -479,7 +482,7 @@ class TestForkCoalesceEdgeCases:
         gate = GateSettings(
             name="fork_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
         )
 
@@ -488,6 +491,7 @@ class TestForkCoalesceEdgeCases:
             branches=["path_a", "path_b"],
             policy="require_all",
             merge="union",
+            on_success="default",
         )
 
         config = PipelineConfig(
@@ -537,7 +541,7 @@ class TestForkCoalesceEdgeCases:
         gate = GateSettings(
             name="fork_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
         )
 
@@ -546,6 +550,7 @@ class TestForkCoalesceEdgeCases:
             branches=["path_a", "path_b"],
             policy="require_all",
             merge="union",
+            on_success="default",
         )
 
         config = PipelineConfig(

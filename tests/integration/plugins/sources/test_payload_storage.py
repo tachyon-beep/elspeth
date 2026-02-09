@@ -94,6 +94,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
     class _PayloadTestSource(_TestSourceBase):
         name = "test_source"
         output_schema = _TestSchema
+        on_success = "output"
 
         def __init__(self, data: list[dict[str, Any]]) -> None:
             super().__init__()

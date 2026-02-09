@@ -283,6 +283,7 @@ class TestManagerValidation:
             "path": "/tmp/test.csv",
             "schema": {"mode": "observed"},
             "on_validation_failure": "quarantine",
+            "on_success": "output",
         }
 
         source = manager.create_source("csv", valid_config)

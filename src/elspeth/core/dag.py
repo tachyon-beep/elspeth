@@ -1023,8 +1023,8 @@ class ExecutionGraph:
                 f"'{source.on_success}'. "
                 f"Available sinks: {sorted(sink_ids.keys())}"
             )
-        # For source-only pipelines (no transforms/gates), create direct edge
-        if not transforms and not gates:
+        # For source-only pipelines (no transforms/gates/aggregations), create direct edge
+        if not transforms and not gates and not aggregations:
             graph.add_edge(
                 source_id,
                 sink_ids[source_on_success],
@@ -1166,8 +1166,7 @@ class ExecutionGraph:
         """Get coalesce_name -> producing gate pipeline index mapping.
 
         Returns the pipeline index of the gate that produces each coalesce's
-        branches. Used by orchestrator to compute coalesce_step_map aligned
-        with graph topology.
+        branches.
 
         Returns:
             Dict mapping coalesce name to the pipeline index of its producing

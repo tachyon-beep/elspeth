@@ -143,7 +143,7 @@ def handle_coalesce_timeouts(
                     token=outcome.merged_token,
                     transforms=config_transforms,
                     ctx=ctx,
-                    start_step=coalesce_step,
+                    current_node_id=coalesce_node_id,
                 )
                 accumulate_row_outcomes(
                     continuation_results,
@@ -196,7 +196,6 @@ def flush_coalesce_pending(
             # Business logic: coalesce_name is guaranteed non-None when merged_token is not None
             assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
             coalesce_name = CoalesceName(outcome.coalesce_name)
-            coalesce_step = processor.resolve_node_step(coalesce_node_map[coalesce_name])
             # Route merged token through processor from the coalesce node.
             # Processor internals decide terminal vs non-terminal using DAG
             # continuation metadata and return COMPLETED with sink_name when terminal.
@@ -204,7 +203,7 @@ def flush_coalesce_pending(
                 token=outcome.merged_token,
                 transforms=config_transforms,
                 ctx=ctx,
-                start_step=coalesce_step,
+                current_node_id=coalesce_node_map[coalesce_name],
             )
             accumulate_row_outcomes(
                 continuation_results,

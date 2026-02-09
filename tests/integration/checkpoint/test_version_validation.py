@@ -8,6 +8,7 @@ Migrated from tests/integration/test_checkpoint_version_validation.py.
 """
 
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -42,7 +43,7 @@ class TestCheckpointVersionValidation:
         Scenario:
         1. Create AggregationExecutor
         2. Get checkpoint state
-        3. Verify: State contains "_version" field with value "2.1"
+        3. Verify: State contains "_version" field with value "3.0"
 
         This is Bug #12 fix: checkpoint state must include version for
         future compatibility when checkpoint format changes.
@@ -59,7 +60,7 @@ class TestCheckpointVersionValidation:
 
         # Verify version field exists
         assert "_version" in state, "Checkpoint state must include _version field (Bug #12 fix)"
-        assert state["_version"] == "2.1", f"Expected version '2.1', got {state['_version']!r}"
+        assert state["_version"] == "3.0", f"Expected version '3.0', got {state['_version']!r}"
 
     def test_restore_requires_matching_version(self) -> None:
         """Verify restore fails with incompatible checkpoint version.
@@ -95,7 +96,7 @@ class TestCheckpointVersionValidation:
         error_msg = str(exc_info.value)
         assert "Incompatible checkpoint version" in error_msg
         assert "1.1" in error_msg
-        assert "2.1" in error_msg
+        assert "3.0" in error_msg
         assert "Cannot resume" in error_msg
 
     def test_restore_fails_without_version(self) -> None:
@@ -159,7 +160,7 @@ class TestCheckpointVersionValidation:
         contract = _make_contract({"value": 1})
         contract_version = contract.version_hash()
         valid_state = {
-            "_version": "2.1",  # Matching version
+            "_version": "3.0",  # Matching version
             "test_node": {
                 "tokens": [
                     {
@@ -186,3 +187,45 @@ class TestCheckpointVersionValidation:
 
         # Verify executor state was updated
         assert executor.get_buffer_count(NodeID("test_node")) == 1  # Restored single buffered token
+
+    def test_checkpoint_state_excludes_work_item_fields(self) -> None:
+        """Checkpoint payload must never persist transient _WorkItem traversal fields."""
+        from elspeth.contracts import TokenInfo
+        from tests.fixtures.factories import make_row
+
+        span_factory = SpanFactory()
+        node_id = NodeID("test_node")
+        aggregation_settings = {
+            node_id: AggregationSettings(
+                name="test_agg",
+                plugin="batch_stats",
+                trigger=TriggerConfig(count=10),
+            )
+        }
+        recorder = Mock()
+        recorder.create_batch.return_value = Mock(batch_id="batch-001")
+        recorder.add_batch_member.return_value = None
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            run_id="test_run",
+            aggregation_settings=aggregation_settings,
+        )
+
+        token = TokenInfo(
+            row_id="row-001",
+            token_id="tok-001",
+            row_data=make_row({"value": 1}, contract=_make_contract({"value": 1})),
+        )
+        executor.buffer_row(node_id, token)
+        state = executor.get_checkpoint_state()
+
+        token_state = state["test_node"]["tokens"][0]
+        forbidden_fields = {
+            "start_step",
+            "current_node_id",
+            "coalesce_at_step",
+            "coalesce_node_id",
+            "coalesce_name",
+        }
+        assert forbidden_fields.isdisjoint(token_state.keys())

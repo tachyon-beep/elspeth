@@ -58,19 +58,6 @@ def _route_aggregation_outcome(
         checkpoint_callback(result.token)
 
 
-def _resolve_work_item_steps(processor: RowProcessor, work_item: object) -> tuple[int, int | None]:
-    """Resolve legacy start/coalesce steps from a work item.
-
-    During Phase 2 transition, work items may expose either legacy step fields
-    or node-id fields. Prefer processor.resolve_work_item_steps() when present.
-    """
-    try:
-        start_step, coalesce_at_step = processor.resolve_work_item_steps(work_item)  # type: ignore[arg-type]
-        return start_step, coalesce_at_step
-    except (AttributeError, TypeError):
-        return work_item.start_step, work_item.coalesce_at_step  # type: ignore[attr-defined]
-
-
 def find_aggregation_transform(
     config: PipelineConfig,
     agg_node_id_str: str,
@@ -238,14 +225,14 @@ def check_aggregation_timeouts(
         # Process work items through remaining transforms
         # These tokens need to continue through the pipeline
         for work_item in work_items:
-            work_item_start_step, work_item_coalesce_at_step = _resolve_work_item_steps(processor, work_item)
-            continuation_start = work_item_coalesce_at_step if work_item_coalesce_at_step is not None else work_item_start_step
+            if work_item.current_node_id is None:
+                raise RuntimeError("Aggregation continuation work item missing current_node_id")
             downstream_results = processor.process_token(
                 token=work_item.token,
                 transforms=config.transforms,
                 ctx=ctx,
-                start_step=continuation_start,
-                coalesce_at_step=work_item_coalesce_at_step,
+                current_node_id=work_item.current_node_id,
+                coalesce_node_id=work_item.coalesce_node_id,
                 coalesce_name=work_item.coalesce_name,
             )
 
@@ -367,14 +354,14 @@ def flush_remaining_aggregation_buffers(
         # Process work items through remaining transforms
         # These tokens need to continue through the pipeline
         for work_item in work_items:
-            work_item_start_step, work_item_coalesce_at_step = _resolve_work_item_steps(processor, work_item)
-            continuation_start = work_item_coalesce_at_step if work_item_coalesce_at_step is not None else work_item_start_step
+            if work_item.current_node_id is None:
+                raise RuntimeError("Aggregation continuation work item missing current_node_id")
             downstream_results = processor.process_token(
                 token=work_item.token,
                 transforms=config.transforms,
                 ctx=ctx,
-                start_step=continuation_start,
-                coalesce_at_step=work_item_coalesce_at_step,
+                current_node_id=work_item.current_node_id,
+                coalesce_node_id=work_item.coalesce_node_id,
                 coalesce_name=work_item.coalesce_name,
             )
 

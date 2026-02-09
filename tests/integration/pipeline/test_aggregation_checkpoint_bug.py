@@ -55,6 +55,7 @@ class BatchCollectorTransform(BaseTransform):
     input_schema = _TestSchema
     output_schema = _TestSchema
     is_batch_aware = True
+    _on_success: str | None = "output"
 
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
@@ -150,6 +151,7 @@ class TestAggregationCheckpointFixVerification:
             ],
             output_schema=_TestSchema,
             source_name="buffering_source",
+            on_success="output",
         )
         source = as_source(callback_source)
 

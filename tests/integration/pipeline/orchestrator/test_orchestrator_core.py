@@ -110,6 +110,7 @@ class TestOrchestrator:
         db = LandscapeDB.in_memory()
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = DoubleTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -133,11 +134,11 @@ class TestOrchestrator:
 
         db = LandscapeDB.in_memory()
 
-        # Config-driven gate: routes values > 50 to "high" sink, else continues
+        # Config-driven gate: routes values > 50 to "high" sink, else to "default"
         threshold_gate = GateSettings(
             name="threshold",
             condition="row['value'] > 50",
-            routes={"true": "high", "false": "continue"},
+            routes={"true": "high", "false": "default"},
         )
 
         source = ListSource([{"value": 10}, {"value": 100}, {"value": 30}])
@@ -159,6 +160,67 @@ class TestOrchestrator:
         assert len(default_sink.results) == 2
         assert len(high_sink.results) == 1
 
+    def test_nonterminal_coalesce_continues_to_downstream_gate(self, payload_store) -> None:
+        """Merged fork paths at a non-terminal coalesce must continue downstream."""
+        from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+        source = ListSource([{"value": 1}, {"value": 2}], on_success="source_sink")
+        transform = IdentityTransform()
+        output_sink = CollectSink(name="output")
+        source_sink = CollectSink(name="source_sink")
+
+        fork_gate = GateSettings(
+            name="fork_gate",
+            condition="True",
+            routes={"true": "fork", "false": "continue"},
+            fork_to=["path_a", "path_b"],
+        )
+        terminal_gate = GateSettings(
+            name="terminal_gate",
+            condition="True",
+            routes={"true": "output", "false": "output"},
+        )
+        coalesce = CoalesceSettings(
+            name="merge_paths",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+        )
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={
+                "output": as_sink(output_sink),
+                "source_sink": as_sink(source_sink),
+            },
+            gates=[fork_gate, terminal_gate],
+            coalesce_settings=[coalesce],
+        )
+
+        settings = ElspethSettings(
+            source={"plugin": "test", "options": {"on_success": "source_sink"}},
+            sinks={"output": {"plugin": "test"}, "source_sink": {"plugin": "test"}},
+            gates=[fork_gate, terminal_gate],
+            coalesce=[coalesce],
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(
+            config,
+            graph=build_production_graph(config),
+            settings=settings,
+            payload_store=payload_store,
+        )
+
+        assert run_result.status == RunStatus.COMPLETED
+        assert run_result.rows_processed == 2
+        assert len(output_sink.results) == 2
+        assert len(source_sink.results) == 0
+
 
 class TestOrchestratorMultipleTransforms:
     """Test pipelines with multiple transforms."""
@@ -172,6 +234,7 @@ class TestOrchestratorMultipleTransforms:
         source = ListSource([{"value": 5}])
         transform1 = AddOneTransform()
         transform2 = MultiplyTwoTransform()
+        transform2._on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -223,6 +286,7 @@ class TestOrchestratorEmptyPipeline:
         db = LandscapeDB.in_memory()
         source = ListSource([])  # Empty source
         transform = IdentityTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(

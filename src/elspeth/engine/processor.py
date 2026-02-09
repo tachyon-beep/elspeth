@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
+from elspeth.contracts.types import BranchName, CoalesceName, NodeID
 
 if TYPE_CHECKING:
     from elspeth.contracts.events import TelemetryEvent
@@ -49,7 +49,6 @@ from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, Tran
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
-_SYNTHETIC_STEP_NODE_PREFIX = "__step__:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +67,7 @@ class _WorkItem:
     """Item in the work queue for DAG processing."""
 
     token: TokenInfo
-    current_node_id: NodeID
+    current_node_id: NodeID | None
     coalesce_node_id: NodeID | None = None
     coalesce_name: CoalesceName | None = None  # Name of the coalesce point (if any)
 
@@ -117,7 +116,6 @@ class RowProcessor:
         retry_manager: RetryManager | None = None,
         coalesce_executor: CoalesceExecutor | None = None,
         branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
-        coalesce_step_map: dict[CoalesceName, int] | None = None,
         coalesce_on_success_map: dict[CoalesceName, str] | None = None,
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
         payload_store: PayloadStore | None = None,
@@ -140,7 +138,6 @@ class RowProcessor:
             retry_manager: Optional retry manager for transform execution
             coalesce_executor: Optional coalesce executor for fork/join operations
             branch_to_coalesce: Map of branch_name -> coalesce_name for fork/join routing
-            coalesce_step_map: Map of coalesce_name -> step position in pipeline
             coalesce_on_success_map: Map of coalesce_name -> terminal sink_name
                 for COALESCED outcomes produced at terminal coalesce points
             restored_aggregation_state: Map of node_id -> state dict for crash recovery
@@ -161,32 +158,13 @@ class RowProcessor:
         self._node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = dict(traversal.node_to_plugin)
         self._first_transform_node_id: NodeID | None = traversal.first_transform_node_id
         self._node_to_next: dict[NodeID, NodeID | None] = dict(traversal.node_to_next)
-        gate_entries: list[tuple[NodeID, GateSettings]] = sorted(
-            [(node_id, plugin) for node_id, plugin in traversal.node_to_plugin.items() if isinstance(plugin, GateSettings)],
-            key=lambda item: traversal.node_step_map[item[0]],
-        )
-        self._config_gates = [gate for _node_id, gate in gate_entries]
-        self._config_gate_id_map: dict[GateName, NodeID] = {GateName(gate.name): node_id for node_id, gate in gate_entries}
         self._retry_manager = retry_manager
         self._coalesce_executor = coalesce_executor
         self._coalesce_node_ids: dict[CoalesceName, NodeID] = dict(traversal.coalesce_node_map)
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
-        traversal_coalesce_steps: dict[CoalesceName, int] = {
-            coalesce_name: traversal.node_step_map[coalesce_node_id]
-            for coalesce_name, coalesce_node_id in self._coalesce_node_ids.items()
-            if coalesce_node_id in traversal.node_step_map
-        }
-        self._coalesce_step_map: dict[CoalesceName, int] = coalesce_step_map or traversal_coalesce_steps
-        self._coalesce_step_by_node_id: dict[NodeID, int] = {
-            self._coalesce_node_ids[coalesce_name]: step
-            for coalesce_name, step in self._coalesce_step_map.items()
-            if coalesce_name in self._coalesce_node_ids
-        }
         self._coalesce_on_success_map: dict[CoalesceName, str] = coalesce_on_success_map or {}
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
         self._clock = clock if clock is not None else DEFAULT_CLOCK
-        self._active_step_to_node: dict[int, NodeID] = {}
-        self._active_node_to_step: dict[NodeID, int] = {}
 
         # Build error edge map: transform node_id -> DIVERT edge_id.
         # Scans edge_map for __error_N__ labels (created by dag.py for transforms
@@ -221,117 +199,65 @@ class RowProcessor:
         """Expose token manager for orchestrator to create tokens for quarantined rows."""
         return self._token_manager
 
-    def _initialize_active_pipeline_maps(self, transforms: list[Any]) -> None:
-        """Build active step/node maps for the current processing call."""
-        step_to_node: dict[int, NodeID] = {}
+    def _bind_runtime_transforms(self, transforms: list[Any]) -> None:
+        """Bind runtime transforms into traversal maps when tests provide sparse context."""
+        if not transforms:
+            return
 
-        for step, transform in enumerate(transforms):
-            try:
-                node_id_raw = transform.node_id
-            except AttributeError:
-                step_to_node[step] = NodeID(f"{_SYNTHETIC_STEP_NODE_PREFIX}{step}")
-                continue
-            if node_id_raw is None:
-                raise OrchestrationInvariantError(f"Transform '{transform.name}' missing node_id during work item conversion")
-            step_to_node[step] = NodeID(node_id_raw)
+        ordered_nodes: list[NodeID] = []
+        for idx, transform in enumerate(transforms):
+            raw_node_id = getattr(transform, "node_id", None)
+            if raw_node_id is None:
+                raw_node_id = f"runtime-node-{idx}"
+            node_id = NodeID(raw_node_id)
+            self._node_to_plugin.setdefault(node_id, transform)
+            ordered_nodes.append(node_id)
 
-        base_step = len(transforms)
-        for offset, gate in enumerate(self._config_gates):
-            step_to_node[base_step + offset] = self._config_gate_id_map[GateName(gate.name)]
+        if self._first_transform_node_id is None and ordered_nodes:
+            self._first_transform_node_id = ordered_nodes[0]
 
-        self._active_step_to_node = step_to_node
-        self._active_node_to_step = {node_id: step for step, node_id in step_to_node.items()}
+        self._node_to_next.setdefault(self._source_node_id, ordered_nodes[0])
 
-    def _step_to_node_id(self, step: int) -> NodeID:
-        """Convert positional step index to current processing node ID."""
-        if step in self._active_step_to_node:
-            return self._active_step_to_node[step]
-        if self._active_step_to_node and step == len(self._active_step_to_node):
-            # One-past-end continuation sentinel (e.g., deaggregation at terminal node).
-            return NodeID(f"{_SYNTHETIC_STEP_NODE_PREFIX}{step}")
-        if not self._active_step_to_node:
-            # Source-only pipelines still enter _process_single_token with step 0.
-            if step == 0:
-                return self._source_node_id
-            # Direct unit tests call helpers without full traversal context.
-            return NodeID(f"{_SYNTHETIC_STEP_NODE_PREFIX}{step}")
-        raise OrchestrationInvariantError(f"Step index {step} is out of range for active pipeline maps")
-
-    def _node_id_to_step(self, node_id: NodeID) -> int:
-        """Convert node ID from _WorkItem back to legacy positional step index."""
-        if node_id in self._active_node_to_step:
-            return self._active_node_to_step[node_id]
-        if node_id in self._coalesce_step_by_node_id:
-            return self._coalesce_step_by_node_id[node_id]
-        node_text = str(node_id)
-        if node_text.startswith(_SYNTHETIC_STEP_NODE_PREFIX):
-            return int(node_text.split(":", 1)[1])
-        if node_id == self._source_node_id and not self._active_node_to_step:
-            return 0
-        raise OrchestrationInvariantError(f"Node ID '{node_id}' cannot be mapped to a positional step index")
+        for idx, node_id in enumerate(ordered_nodes):
+            self._node_step_map.setdefault(node_id, idx + 1)
+            if node_id not in self._node_to_next:
+                self._node_to_next[node_id] = ordered_nodes[idx + 1] if idx + 1 < len(ordered_nodes) else None
 
     def _create_work_item(
         self,
         *,
         token: TokenInfo,
-        start_step: int | None = None,
-        current_node_id: NodeID | None = None,
-        coalesce_at_step: int | None = None,
+        current_node_id: NodeID | None,
         coalesce_name: CoalesceName | None = None,
         coalesce_node_id: NodeID | None = None,
     ) -> _WorkItem:
-        """Create node-id based work item from legacy step/coalesce metadata."""
+        """Create node-id based work item."""
         resolved_coalesce_node_id = coalesce_node_id
         if resolved_coalesce_node_id is None and coalesce_name is not None:
             resolved_coalesce_node_id = self._coalesce_node_ids[coalesce_name]
 
-        resolved_current_node_id = current_node_id
-        if resolved_current_node_id is None:
-            if start_step is None:
-                raise OrchestrationInvariantError("_create_work_item requires either current_node_id or start_step")
-            if resolved_coalesce_node_id is not None and coalesce_at_step is not None and start_step == coalesce_at_step:
-                resolved_current_node_id = resolved_coalesce_node_id
-            else:
-                resolved_current_node_id = self._step_to_node_id(start_step)
-
         return _WorkItem(
             token=token,
-            current_node_id=resolved_current_node_id,
+            current_node_id=current_node_id,
             coalesce_node_id=resolved_coalesce_node_id,
             coalesce_name=coalesce_name,
         )
 
-    def resolve_work_item_steps(self, work_item: _WorkItem) -> tuple[int, int | None]:
-        """Convert a node-id work item to legacy positional step metadata."""
-        start_step = self._node_id_to_step(work_item.current_node_id)
-        coalesce_at_step = self._node_id_to_step(work_item.coalesce_node_id) if work_item.coalesce_node_id is not None else None
-        return start_step, coalesce_at_step
-
     def resolve_node_step(self, node_id: NodeID) -> int:
         """Resolve a node ID to processor step index (0-indexed)."""
-        return self._node_id_to_step(node_id)
+        if node_id not in self._node_step_map:
+            raise OrchestrationInvariantError(f"Node ID '{node_id}' missing from traversal step map")
+        return self._node_step_map[node_id]
 
-    def _resolve_plugin_for_node(self, node_id: NodeID, transforms: list[Any]) -> TransformProtocol | GateProtocol | GateSettings | None:
+    def _resolve_plugin_for_node(self, node_id: NodeID) -> TransformProtocol | GateProtocol | GateSettings | None:
         """Resolve the plugin/gate associated with a processing node."""
         if node_id in self._node_to_plugin:
             return self._node_to_plugin[node_id]
-        if node_id in self._active_node_to_step:
-            step = self._active_node_to_step[node_id]
-            if step < len(transforms):
-                return cast(TransformProtocol | GateProtocol, transforms[step])
-            gate_idx = step - len(transforms)
-            if 0 <= gate_idx < len(self._config_gates):
-                return self._config_gates[gate_idx]
         return None
 
     def _resolve_next_node_for_processing(self, node_id: NodeID) -> NodeID | None:
         """Resolve the next processing node from traversal metadata."""
-        if node_id in self._node_to_next:
-            return self._node_to_next[node_id]
-        if node_id in self._active_node_to_step:
-            next_step = self._active_node_to_step[node_id] + 1
-            return self._active_step_to_node.get(next_step)
-        return None
+        return self._node_to_next.get(node_id)
 
     def _resolve_audit_step_for_node(self, node_id: NodeID) -> int:
         """Resolve 1-indexed audit step for a processing node."""
@@ -339,14 +265,11 @@ class RowProcessor:
             return self._node_step_map[node_id]
         if node_id == self._source_node_id:
             return 0
-        return self._node_id_to_step(node_id) + 1
+        raise OrchestrationInvariantError(f"Node ID '{node_id}' missing from traversal step map")
 
-    def _resolve_continuation_node_for_work_item(self, current_node_id: NodeID) -> NodeID:
-        """Resolve next processing node, falling back to one-past-end sentinel."""
-        next_node_id = self._resolve_next_node_for_processing(current_node_id)
-        if next_node_id is not None:
-            return next_node_id
-        return self._step_to_node_id(self._node_id_to_step(current_node_id) + 1)
+    def _resolve_continuation_node_for_work_item(self, current_node_id: NodeID) -> NodeID | None:
+        """Resolve next processing node for continuation work."""
+        return self._resolve_next_node_for_processing(current_node_id)
 
     def _create_continuation_work_item(
         self,
@@ -723,16 +646,13 @@ class RowProcessor:
         # Derive coalesce metadata from buffered tokens' branch_name
         # For timeout/end-of-source flushes, we need to preserve coalesce path
         # so tokens can still join at coalesce points after aggregation
-        coalesce_at_step: int | None = None
+        coalesce_node_id: NodeID | None = None
         coalesce_name: CoalesceName | None = None
         if buffered_tokens:
             branch_name = buffered_tokens[0].branch_name
             if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
                 coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
-                # Direct indexing: coalesce_step_map is internal data. If coalesce_name
-                # exists in branch_to_coalesce but not in coalesce_step_map, that's a
-                # bug in graph construction that must crash immediately (Tier 1 data).
-                coalesce_at_step = self._coalesce_step_map[coalesce_name]
+                coalesce_node_id = self._coalesce_node_ids[coalesce_name]
 
         if output_mode == OutputMode.PASSTHROUGH:
             # Passthrough: original tokens continue with enriched data
@@ -761,7 +681,7 @@ class RowProcessor:
 
                 # Check if token needs to go to a coalesce point
                 # This must happen EVEN if no more transforms - coalesce may be last step
-                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and updated_token.branch_name is not None
+                needs_coalesce = coalesce_node_id is not None and coalesce_name is not None and updated_token.branch_name is not None
 
                 if has_downstream_processing or needs_coalesce:
                     work_item_coalesce_name = coalesce_name if needs_coalesce else None
@@ -837,7 +757,7 @@ class RowProcessor:
                 # This must happen EVEN if no more transforms - coalesce may be last step
                 # Use first expanded token to check branch_name
                 first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
-                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_expanded_branch is not None
+                needs_coalesce = coalesce_node_id is not None and coalesce_name is not None and first_expanded_branch is not None
 
                 if has_downstream_processing or needs_coalesce:
                     work_item_coalesce_name = coalesce_name if needs_coalesce else None
@@ -873,7 +793,7 @@ class RowProcessor:
         ctx: PluginContext,
         step: int,
         child_items: list[_WorkItem],
-        coalesce_at_step: int | None = None,
+        coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
     ) -> tuple[RowResult | list[RowResult], list[_WorkItem]]:
         """Process a row at an aggregation node using engine buffering.
@@ -908,7 +828,7 @@ class RowProcessor:
             ctx: Plugin context
             step: Pipeline step number
             child_items: Work items to return with result
-            coalesce_at_step: Step index at which fork children should coalesce (optional)
+            coalesce_node_id: Node ID at which fork children should coalesce (optional)
             coalesce_name: Name of the coalesce point for merging (optional)
 
         Returns:
@@ -1070,7 +990,7 @@ class RowProcessor:
                 # This must happen EVEN if no more transforms - coalesce may be last step
                 # Use first buffered token to check branch_name (all should have same branch)
                 first_token_branch = buffered_tokens[0].branch_name if buffered_tokens else None
-                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_token_branch is not None
+                needs_coalesce = coalesce_node_id is not None and coalesce_name is not None and first_token_branch is not None
 
                 if has_downstream_processing or needs_coalesce:
                     work_item_coalesce_name = coalesce_name if needs_coalesce else None
@@ -1185,7 +1105,7 @@ class RowProcessor:
                 # This must happen EVEN if no more transforms - coalesce may be last step
                 # Use first expanded token to check branch_name
                 first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
-                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_expanded_branch is not None
+                needs_coalesce = coalesce_node_id is not None and coalesce_name is not None and first_expanded_branch is not None
 
                 if has_downstream_processing or needs_coalesce:
                     work_item_coalesce_name = coalesce_name if needs_coalesce else None
@@ -1431,7 +1351,7 @@ class RowProcessor:
         transforms: list[Any],
         ctx: PluginContext,
         *,
-        coalesce_at_step: int | None = None,
+        coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
     ) -> list[RowResult]:
         """Process a row through all transforms.
@@ -1445,7 +1365,7 @@ class RowProcessor:
             source_row: SourceRow from source (must have contract)
             transforms: List of transform plugins
             ctx: Plugin context
-            coalesce_at_step: Step index at which fork children should coalesce
+            coalesce_node_id: Node ID at which fork children should coalesce
             coalesce_name: Name of the coalesce point for merging
 
         Returns:
@@ -1479,12 +1399,13 @@ class RowProcessor:
             duration_ms=0,
         )
 
-        self._initialize_active_pipeline_maps(transforms)
+        self._bind_runtime_transforms(transforms)
+        initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
         return self._drain_work_queue(
             self._create_work_item(
                 token=token,
-                start_step=0,
-                coalesce_at_step=coalesce_at_step,
+                current_node_id=initial_node_id,
+                coalesce_node_id=coalesce_node_id,
                 coalesce_name=coalesce_name,
             ),
             transforms,
@@ -1498,7 +1419,7 @@ class RowProcessor:
         transforms: list[Any],
         ctx: PluginContext,
         *,
-        coalesce_at_step: int | None = None,
+        coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
     ) -> list[RowResult]:
         """Process an existing row (row already in database, create new token only).
@@ -1512,7 +1433,7 @@ class RowProcessor:
             row_data: Row data (retrieved from payload store)
             transforms: List of transform plugins
             ctx: Plugin context
-            coalesce_at_step: Step index at which fork children should coalesce
+            coalesce_node_id: Node ID at which fork children should coalesce
             coalesce_name: Name of the coalesce point for merging
 
         Returns:
@@ -1542,12 +1463,13 @@ class RowProcessor:
             duration_ms=0,
         )
 
-        self._initialize_active_pipeline_maps(transforms)
+        self._bind_runtime_transforms(transforms)
+        initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
         return self._drain_work_queue(
             self._create_work_item(
                 token=token,
-                start_step=0,
-                coalesce_at_step=coalesce_at_step,
+                current_node_id=initial_node_id,
+                coalesce_node_id=coalesce_node_id,
                 coalesce_name=coalesce_name,
             ),
             transforms,
@@ -1560,20 +1482,20 @@ class RowProcessor:
         transforms: list[Any],
         ctx: PluginContext,
         *,
-        start_step: int,
-        coalesce_at_step: int | None = None,
+        current_node_id: NodeID,
+        coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
     ) -> list[RowResult]:
-        """Process an existing token through the pipeline starting at start_step.
+        """Process an existing token through the pipeline starting at current_node_id.
 
         Used for mid-pipeline coalesce merges that must continue processing.
         """
-        self._initialize_active_pipeline_maps(transforms)
+        self._bind_runtime_transforms(transforms)
         return self._drain_work_queue(
             self._create_work_item(
                 token=token,
-                start_step=start_step,
-                coalesce_at_step=coalesce_at_step,
+                current_node_id=current_node_id,
+                coalesce_node_id=coalesce_node_id,
                 coalesce_name=coalesce_name,
             ),
             transforms,
@@ -1598,9 +1520,7 @@ class RowProcessor:
         ):
             return False, None
 
-        coalesce_step = self._coalesce_step_map.get(coalesce_name)
-        if coalesce_step is None:
-            coalesce_step = self._node_id_to_step(coalesce_node_id)
+        coalesce_step = self.resolve_node_step(coalesce_node_id)
 
         coalesce_outcome = self._coalesce_executor.accept(
             token=current_token,
@@ -1703,9 +1623,7 @@ class RowProcessor:
         coalesce_node_id = self._coalesce_node_ids.get(coalesce_name)
         if coalesce_node_id is None:
             raise OrchestrationInvariantError(f"Coalesce node_id missing for coalesce '{coalesce_name}' during branch-loss handling")
-        coalesce_step = self._coalesce_step_map.get(coalesce_name)
-        if coalesce_step is None:
-            coalesce_step = self._node_id_to_step(coalesce_node_id)
+        coalesce_step = self.resolve_node_step(coalesce_node_id)
         outcome = self._coalesce_executor.notify_branch_lost(
             coalesce_name=coalesce_name,
             row_id=current_token.row_id,
@@ -1779,7 +1697,6 @@ class RowProcessor:
         may produce child work items (from forks, expansions, etc.) which are
         appended to the queue.
         """
-        self._initialize_active_pipeline_maps(transforms)
         work_queue: deque[_WorkItem] = deque([initial_item])
         results: list[RowResult] = []
         iterations = 0
@@ -1815,7 +1732,7 @@ class RowProcessor:
         token: TokenInfo,
         transforms: list[Any],
         ctx: PluginContext,
-        current_node_id: NodeID,
+        current_node_id: NodeID | None,
         coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
     ) -> tuple[RowResult | list[RowResult] | None, list[_WorkItem]]:
@@ -1825,7 +1742,7 @@ class RowProcessor:
             token: Token to process
             transforms: List of transform plugins
             ctx: Plugin context
-            current_node_id: Node ID to start processing from
+            current_node_id: Node ID to start processing from (or None for terminal completion)
             coalesce_node_id: Node ID at which fork children should coalesce
             coalesce_name: Name of the coalesce point for merging
 
@@ -1839,7 +1756,6 @@ class RowProcessor:
         current_token = token
         child_items: list[_WorkItem] = []
         last_on_success_sink: str = self._source_on_success
-        coalesce_at_step = self._node_id_to_step(coalesce_node_id) if coalesce_node_id is not None else None
 
         node_id: NodeID | None = current_node_id
         while node_id is not None:
@@ -1854,7 +1770,7 @@ class RowProcessor:
                 return (result, child_items)
 
             next_node_id = self._resolve_next_node_for_processing(node_id)
-            plugin = self._resolve_plugin_for_node(node_id, transforms)
+            plugin = self._resolve_plugin_for_node(node_id)
             if plugin is None:
                 # Non-processing structural nodes (e.g. coalesce) are traversed but not executed.
                 node_id = next_node_id
@@ -1942,7 +1858,7 @@ class RowProcessor:
                         ctx=ctx,
                         step=step,
                         child_items=child_items,
-                        coalesce_at_step=coalesce_at_step,
+                        coalesce_node_id=coalesce_node_id,
                         coalesce_name=coalesce_name,
                     )
 
@@ -2162,12 +2078,23 @@ class RowProcessor:
 
             node_id = next_node_id
 
+        # Determine sink name: fork children targeting direct sinks use their
+        # branch_name as the sink (the DAG created edges from gate -> sink using
+        # the branch_name as the label, with RoutingMode.COPY). Non-fork tokens
+        # use the last transform's on_success or the source's on_success.
+        effective_sink = last_on_success_sink
+        if current_token.branch_name is not None:
+            branch = BranchName(current_token.branch_name)
+            if branch not in self._branch_to_coalesce:
+                # Fork child targeting a direct sink (not a coalesce branch)
+                effective_sink = current_token.branch_name
+
         return (
             RowResult(
                 token=current_token,
                 final_data=current_token.row_data,
                 outcome=RowOutcome.COMPLETED,
-                sink_name=last_on_success_sink,
+                sink_name=effective_sink,
             ),
             child_items,
         )
