@@ -81,7 +81,7 @@ class TestCSVToCSV:
             sinks={"default": sink},
             aggregations={},
             gates=[],
-            default_sink="default",
+
         )
 
         # -- Act: run pipeline --
@@ -148,7 +148,7 @@ class TestCSVToCSV:
             sinks={"default": sink},
             aggregations={},
             gates=[],
-            default_sink="default",
+
         )
 
         db_path = tmp_path / "audit.db"

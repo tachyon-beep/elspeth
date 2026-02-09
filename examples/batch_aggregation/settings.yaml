@@ -1,12 +1,3 @@
-# ELSPETH Aggregation Example Pipeline
-#
-# This pipeline demonstrates batch aggregation by computing statistics
-# over groups of transactions. Each batch of 5 rows is aggregated into
-# a single summary row with count, sum, and mean.
-#
-# Run with:
-#   uv run elspeth run -s examples/batch_aggregation/settings.yaml --execute
-
 source:
   plugin: csv
   options:
@@ -14,29 +5,25 @@ source:
     schema:
       mode: fixed
       fields:
-        - "id: int"
-        - "date: str"
-        - "category: str"
-        - "amount: int"  # Coerce to int for numeric aggregation
-        - "region: str"
+      - 'id: int'
+      - 'date: str'
+      - 'category: str'
+      - 'amount: int'
+      - 'region: str'
     on_validation_failure: discard
-
-# Aggregation batches rows and computes statistics
-# Trigger fires every 5 rows, producing one summary row per batch
+    on_success: output
 aggregations:
-  - name: batch_totals
-    plugin: batch_stats
-    trigger:
-      count: 5  # Aggregate every 5 rows
-    output_mode: transform  # Produce one summary row per batch
-    # Use expected_output_count: 1 to validate N→1 cardinality
-    options:
-      schema:
-        mode: observed
-      value_field: amount
-      group_by: category
-      compute_mean: true
-
+- name: batch_totals
+  plugin: batch_stats
+  trigger:
+    count: 5
+  output_mode: transform
+  options:
+    schema:
+      mode: observed
+    value_field: amount
+    group_by: category
+    compute_mean: true
 sinks:
   output:
     plugin: csv
@@ -45,14 +32,10 @@ sinks:
       schema:
         mode: fixed
         fields:
-          - "count: int"
-          - "sum: float"
-          - "batch_size: int"
-          - "mean: float"
-          - "category: str"
-
-default_sink: output
-
-# Audit trail for traceability
+        - 'count: int'
+        - 'sum: float'
+        - 'batch_size: int'
+        - 'mean: float'
+        - 'category: str'
 landscape:
   url: sqlite:///examples/batch_aggregation/runs/audit.db

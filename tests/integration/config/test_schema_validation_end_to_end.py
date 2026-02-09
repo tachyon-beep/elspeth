@@ -34,6 +34,7 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
@@ -42,6 +43,7 @@ transforms:
         mode: fixed
         fields:
           - "value: float"
+      on_success: output
 
 sinks:
   output:
@@ -52,8 +54,6 @@ sinks:
         mode: fixed
         fields:
           - "value: float"
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -83,6 +83,7 @@ source:
       fields:
         - "field_a: str"
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
@@ -97,6 +98,7 @@ transforms:
         mode: fixed
         fields:
           - "field_b: int"  # INCOMPATIBLE: requires field_b, gets field_a
+      on_success: output
 
 sinks:
   output:
@@ -105,8 +107,6 @@ sinks:
       path: test_output.json
       schema: {mode: observed}
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -143,6 +143,7 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
+    on_success: output
 
 aggregations:
   - name: stats
@@ -165,8 +166,6 @@ sinks:
         mode: fixed
         fields:
           - "total_records: int"  # Would be incompatible, but validation is skipped
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -194,11 +193,13 @@ source:
     path: test_input.csv
     schema: {mode: observed}  # Dynamic schema
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
     options:
       schema: {mode: observed}
+      on_success: output
 
 sinks:
   output:
@@ -207,8 +208,6 @@ sinks:
       path: test_output.json
       schema: {mode: observed}
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -238,6 +237,7 @@ source:
       fields:
         - "wrong_field: str"  # Aggregation expects 'value', not 'wrong_field'
     on_validation_failure: discard
+    on_success: output
 
 aggregations:
   - name: stats
@@ -258,8 +258,6 @@ sinks:
       path: out.json
       schema: {mode: observed}
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -297,6 +295,7 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
+    on_success: output
 
 aggregations:
   - name: stats
@@ -320,8 +319,6 @@ sinks:
         mode: fixed
         fields:
           - "nonexistent_field: str"  # Would be incompatible, but validation is skipped
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -367,6 +364,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
                 "path": "test.csv",
                 "schema": {"mode": "fixed", "fields": ["id: int"]},  # Only has 'id'
                 "on_validation_failure": "discard",
+                "on_success": "out",
             },
         },
         "transforms": [
@@ -374,6 +372,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
                 "plugin": "passthrough",
                 "options": {
                     "schema": {"mode": "fixed", "fields": ["id: int", "email: str"]},  # Requires 'email'!
+                    "on_success": "out",
                 },
             }
         ],
@@ -383,7 +382,6 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
                 "options": {"path": "out.json", "schema": {"mode": "observed"}, "format": "jsonl"},
             }
         },
-        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -400,5 +398,4 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )

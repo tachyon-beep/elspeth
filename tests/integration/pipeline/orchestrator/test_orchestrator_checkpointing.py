@@ -318,8 +318,6 @@ class TestOrchestratorCheckpointing:
             (NodeID("config_gate_split"), "true"): "good",
             (NodeID("config_gate_split"), "false"): "bad",
         }
-        graph._default_sink = "good"
-
         orchestrator = Orchestrator(
             db=landscape_db,
             checkpoint_manager=checkpoint_mgr,

@@ -44,6 +44,7 @@ class _TestSourceBase:
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
     _on_validation_failure: str = "discard"
+    on_success: str = "default"
 
     def __init__(self) -> None:
         self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
@@ -100,11 +101,13 @@ class CallbackSource(_TestSourceBase):
         output_schema: type[PluginSchema] | None = None,
         after_yield_callback: Callable[[int], None] | None = None,
         source_name: str = "callback_source",
+        on_success: str = "default",
     ) -> None:
         super().__init__()
         self._rows = rows
         self._after_yield_callback = after_yield_callback
         self.name = source_name
+        self.on_success = on_success
         if output_schema is not None:
             self.output_schema = output_schema
 
@@ -169,11 +172,17 @@ class _TestTransformBase:
     creates_tokens: bool = False
     transforms_adds_fields: bool = False
     _on_error: str | None = None
+    _on_success: str | None = None
 
     @property
     def on_error(self) -> str | None:
         """Error routing destination for this transform."""
         return self._on_error
+
+    @property
+    def on_success(self) -> str | None:
+        """Success routing destination for this transform."""
+        return self._on_success
 
     def __init__(self) -> None:
         self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]

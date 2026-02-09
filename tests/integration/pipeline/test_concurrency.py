@@ -229,7 +229,6 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
             sinks={"output": as_sink(sink)},
             aggregations={},
             gates=[],
-            default_sink="output",
         )
 
         from elspeth.engine.orchestrator import PipelineConfig

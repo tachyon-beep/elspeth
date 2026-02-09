@@ -35,8 +35,12 @@ def _run_pipeline(
     db = LandscapeDB.in_memory()
     payload_store = MockPayloadStore()
 
-    source = ListSource(source_data)
+    source = ListSource(source_data, on_success=sink_name)
     sinks = {sink_name: as_sink(sink)}
+
+    # Set on_success on terminal transform if any
+    if transforms:
+        transforms[-1]._on_success = sink_name
 
     config = PipelineConfig(
         source=as_source(source),
@@ -44,7 +48,7 @@ def _run_pipeline(
         sinks=sinks,
     )
 
-    graph = build_production_graph(config, default_sink=sink_name)
+    graph = build_production_graph(config)
     orchestrator = Orchestrator(db)
     orchestrator.run(config, graph=graph, payload_store=payload_store)
 
@@ -141,7 +145,7 @@ def test_throughput_fork_pipeline() -> None:
     db = LandscapeDB.in_memory()
     payload_store = MockPayloadStore()
 
-    source = ListSource(rows)
+    source = ListSource(rows, on_success="default")
     config = PipelineConfig(
         source=as_source(source),
         transforms=[],
@@ -149,7 +153,7 @@ def test_throughput_fork_pipeline() -> None:
         gates=[threshold_gate],
     )
 
-    graph = build_production_graph(config, default_sink="default")
+    graph = build_production_graph(config)
 
     with benchmark_timer() as timing:
         orchestrator = Orchestrator(db)

@@ -98,7 +98,6 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
         sinks=config.sinks,
         aggregations={},
         gates=[],
-        default_sink="default",
     )
     return graph
 

@@ -94,6 +94,7 @@ class JSONSource(BaseSource):
 
         # Store quarantine routing destination
         self._on_validation_failure = cfg.on_validation_failure
+        self.on_success = cfg.on_success
 
         # CRITICAL: allow_coercion=True for sources (external data boundary)
         # Sources are the ONLY place where type coercion is allowed

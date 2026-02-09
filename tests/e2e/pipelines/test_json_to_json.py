@@ -62,7 +62,7 @@ class TestJSONToJSON:
             sinks={"default": sink},
             aggregations={},
             gates=[],
-            default_sink="default",
+
         )
 
         # -- Act: run pipeline --
@@ -167,7 +167,7 @@ class TestJSONToJSON:
             sinks={"default": sink},
             aggregations={},
             gates=[],
-            default_sink="default",
+
         )
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")

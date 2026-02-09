@@ -960,7 +960,6 @@ class Orchestrator:
         sink_id_map = graph.get_sink_id_map()
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
-        default_sink_name = graph.get_default_sink()
 
         # Assign node_ids to all plugins
         self._assign_plugin_node_ids(
@@ -1030,6 +1029,11 @@ class Orchestrator:
 
         # Compute coalesce step positions FROM GRAPH TOPOLOGY
         coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
+        coalesce_on_success_map: dict[CoalesceName, str] = {}
+        if settings is not None and settings.coalesce:
+            for coalesce_settings in settings.coalesce:
+                if coalesce_settings.on_success is not None:
+                    coalesce_on_success_map[CoalesceName(coalesce_settings.name)] = coalesce_settings.on_success
 
         # Convert aggregation_settings keys from str to NodeID
         typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
@@ -1040,6 +1044,7 @@ class Orchestrator:
             span_factory=self._span_factory,
             run_id=run_id,
             source_node_id=source_id,
+            source_on_success=config.source.on_success,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
             config_gates=config.gates,
@@ -1050,6 +1055,7 @@ class Orchestrator:
             coalesce_node_ids=coalesce_id_map,
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
+            coalesce_on_success_map=coalesce_on_success_map,
             payload_store=payload_store,
             clock=self._clock,
             max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
@@ -1363,7 +1369,6 @@ class Orchestrator:
                             processor=processor,
                             ctx=ctx,
                             pending_tokens=pending_tokens,
-                            default_sink_name=default_sink_name,
                             agg_transform_lookup=agg_transform_lookup,
                         )
                         counters.accumulate_flush_result(timeout_result)
@@ -1382,7 +1387,7 @@ class Orchestrator:
                         # AFTER successful sink writes. A crash before sink write means:
                         # - Counters may be inflated (row counted but not persisted)
                         # - But recovery will correctly identify the unwritten rows
-                        accumulate_row_outcomes(results, counters, config.sinks, default_sink_name, pending_tokens)
+                        accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
                         # ─────────────────────────────────────────────────────────────────
                         # Check for timed-out coalesces after processing each row
@@ -1399,7 +1404,6 @@ class Orchestrator:
                                 ctx=ctx,
                                 counters=counters,
                                 pending_tokens=pending_tokens,
-                                default_sink_name=default_sink_name,
                             )
 
                         # Emit progress every N rows or every M seconds (after outcome counters are updated)
@@ -1465,7 +1469,6 @@ class Orchestrator:
                             processor=processor,
                             ctx=ctx,
                             pending_tokens=pending_tokens,
-                            default_sink_name=default_sink_name,
                             checkpoint_callback=checkpoint_callback,
                         )
                         counters.accumulate_flush_result(flush_result)
@@ -1482,7 +1485,6 @@ class Orchestrator:
                             ctx=ctx,
                             counters=counters,
                             pending_tokens=pending_tokens,
-                            default_sink_name=default_sink_name,
                         )
 
                     # Source iteration complete - for loop ends here
@@ -1790,7 +1792,6 @@ class Orchestrator:
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
         coalesce_id_map = graph.get_coalesce_id_map()
-        default_sink_name = graph.get_default_sink()
 
         # Build edge_map from database (load real edge IDs registered in original run)
         # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
@@ -1902,6 +1903,11 @@ class Orchestrator:
 
         # Compute coalesce step positions FROM GRAPH TOPOLOGY (same as main run path)
         coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
+        coalesce_on_success_map: dict[CoalesceName, str] = {}
+        if settings is not None and settings.coalesce:
+            for coalesce_settings in settings.coalesce:
+                if coalesce_settings.on_success is not None:
+                    coalesce_on_success_map[CoalesceName(coalesce_settings.name)] = coalesce_settings.on_success
 
         # Convert aggregation_settings keys from str to NodeID
         typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
@@ -1915,6 +1921,7 @@ class Orchestrator:
             span_factory=self._span_factory,
             run_id=run_id,
             source_node_id=source_id,
+            source_on_success=config.source.on_success,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
             config_gates=config.gates,
@@ -1925,6 +1932,7 @@ class Orchestrator:
             coalesce_node_ids=coalesce_id_map,
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
+            coalesce_on_success_map=coalesce_on_success_map,
             restored_aggregation_state=typed_restored_state,
             payload_store=payload_store,
             clock=self._clock,
@@ -1973,7 +1981,6 @@ class Orchestrator:
                     processor=processor,
                     ctx=ctx,
                     pending_tokens=pending_tokens,
-                    default_sink_name=default_sink_name,
                     agg_transform_lookup=agg_transform_lookup,
                 )
                 counters.accumulate_flush_result(timeout_result)
@@ -1990,7 +1997,7 @@ class Orchestrator:
                 )
 
                 # Handle all results from this row
-                accumulate_row_outcomes(results, counters, config.sinks, default_sink_name, pending_tokens)
+                accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
                 # ─────────────────────────────────────────────────────────────────
                 # Check for timed-out coalesces after processing each row
@@ -2007,7 +2014,6 @@ class Orchestrator:
                         ctx=ctx,
                         counters=counters,
                         pending_tokens=pending_tokens,
-                        default_sink_name=default_sink_name,
                     )
 
             # ─────────────────────────────────────────────────────────────────
@@ -2021,7 +2027,6 @@ class Orchestrator:
                     processor=processor,
                     ctx=ctx,
                     pending_tokens=pending_tokens,
-                    default_sink_name=default_sink_name,
                     checkpoint_callback=None,
                 )
                 counters.accumulate_flush_result(flush_result)
@@ -2038,7 +2043,6 @@ class Orchestrator:
                     ctx=ctx,
                     counters=counters,
                     pending_tokens=pending_tokens,
-                    default_sink_name=default_sink_name,
                 )
 
             # Write to sinks (no checkpoint callbacks for resume path)

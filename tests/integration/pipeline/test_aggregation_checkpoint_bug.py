@@ -166,7 +166,6 @@ class TestAggregationCheckpointFixVerification:
             sinks={"output": sink},
             aggregations={},
             gates=[],
-            default_sink="output",
             coalesce_settings=None,
         )
 
@@ -202,9 +201,8 @@ class TestAggregationCheckpointFixVerification:
         )
 
         settings = ElspethSettings(
-            source=SourceSettings(plugin="buffering_source", options={}),
+            source=SourceSettings(plugin="buffering_source", options={"on_success": "output"}),
             sinks={"output": SinkSettings(plugin="collecting_sink", options={})},
-            default_sink="output",
             transforms=[],
             gates=[],
             checkpoint=checkpoint_settings,

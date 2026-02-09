@@ -132,26 +132,31 @@ def get_all_token_outcomes(db: LandscapeDB, run_id: str) -> list[tuple[str, str,
 # =============================================================================
 
 
-def _build_production_graph(config: PipelineConfig, default_sink: str | None = None) -> ExecutionGraph:
+def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build graph using production code path (from_plugin_instances).
 
     Replacement for v1 build_production_graph, inlined to avoid v1 imports.
+    Auto-sets on_success on terminal transform for linear pipelines.
     """
-    if default_sink is None:
-        if "default" in config.sinks:
-            default_sink = "default"
-        elif config.sinks:
-            default_sink = next(iter(config.sinks))
-        else:
-            default_sink = ""
+    transforms = list(config.transforms)
+
+    # Set on_success on the terminal transform if not already set
+    if transforms:
+        from elspeth.plugins.protocols import GateProtocol
+
+        for i in range(len(transforms) - 1, -1, -1):
+            if not isinstance(transforms[i], GateProtocol):
+                if getattr(transforms[i], "_on_success", None) is None:
+                    sink_name = next(iter(config.sinks))
+                    transforms[i]._on_success = sink_name
+                break
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=list(config.transforms),
+        transforms=transforms,
         sinks=config.sinks,
         aggregations={},
         gates=list(config.gates),
-        default_sink=default_sink,
         coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
     )
 

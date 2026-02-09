@@ -340,7 +340,6 @@ class TestElspethSettingsAlignment:
         "source",  # Required - source plugin config
         "transforms",  # Optional - transform chain
         "sinks",  # Required - named sink configs
-        "default_sink",  # Required - default output sink name
         "gates",  # Optional - config-driven routing
         "coalesce",  # Optional - fork path merging
         "aggregations",  # Optional - config-driven batching

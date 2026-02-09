@@ -16,6 +16,7 @@ source:
   plugin: csv
   options:
     path: test.csv
+    on_success: output
     schema:
       mode: observed
     on_validation_failure: discard
@@ -23,6 +24,7 @@ source:
 transforms:
   - plugin: passthrough
     options:
+      on_success: output
       schema:
         mode: observed
 
@@ -36,7 +38,6 @@ sinks:
         fields:
           - "data: str"
 
-default_sink: output
 """
     config_file = tmp_path / "settings.yaml"
     config_file.write_text(config_yaml)
@@ -86,7 +87,6 @@ def test_instantiate_plugins_raises_on_invalid_plugin():
     config_dict = {
         "source": {"plugin": "nonexistent", "options": {}},
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
-        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -109,6 +109,7 @@ source:
   plugin: csv
   options:
     path: test.csv
+    on_success: output
     schema:
       mode: observed
     on_validation_failure: discard
@@ -132,7 +133,6 @@ sinks:
         fields:
           - "data: str"
 
-default_sink: output
 """
     config_file = tmp_path / "settings.yaml"
     config_file.write_text(config_yaml)
@@ -160,6 +160,7 @@ source:
   plugin: csv
   options:
     path: test.csv
+    on_success: output
     schema:
       mode: observed
     on_validation_failure: discard
@@ -184,7 +185,6 @@ sinks:
         fields:
           - "data: str"
 
-default_sink: output
 """
     config_file = tmp_path / "settings.yaml"
     config_file.write_text(config_yaml)
@@ -225,10 +225,9 @@ def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
     mock_manager.get_sink_by_name.return_value = MagicMock(return_value=MagicMock())
 
     config_dict = {
-        "source": {"plugin": "csv", "options": {"path": "t.csv"}},
+        "source": {"plugin": "csv", "options": {"path": "t.csv", "on_success": "out", "on_validation_failure": "discard"}},
         "aggregations": [{"name": "broken_agg", "plugin": "mock", "options": {}, "trigger": {"count": 5}}],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
-        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)

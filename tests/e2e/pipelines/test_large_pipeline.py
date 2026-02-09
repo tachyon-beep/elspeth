@@ -39,7 +39,7 @@ class TestLargePipeline:
             sinks={"default": sink},
             aggregations={},
             gates=[],
-            default_sink="default",
+
         )
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")
@@ -80,7 +80,7 @@ class TestLargePipeline:
             sinks={"default": sink},
             aggregations={},
             gates=[],
-            default_sink="default",
+
         )
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")

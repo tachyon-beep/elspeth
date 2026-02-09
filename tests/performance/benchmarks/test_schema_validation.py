@@ -32,6 +32,7 @@ source:
     schema:
       mode: observed
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
@@ -46,6 +47,7 @@ transforms:
     options:
       schema:
         mode: observed
+      on_success: output
 
 sinks:
   output:
@@ -55,8 +57,6 @@ sinks:
       schema:
         mode: observed
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -88,12 +88,14 @@ source:
     schema:
       mode: observed
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
     options:
       schema:
         mode: observed
+      on_success: output
 
 sinks:
   output:
@@ -103,8 +105,6 @@ sinks:
       schema:
         mode: observed
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -122,7 +122,6 @@ default_sink: output
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(config.gates),
-                default_sink=config.default_sink,
             )
             graph.validate()
 
@@ -146,6 +145,7 @@ source:
     schema:
       mode: observed
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
@@ -156,6 +156,7 @@ transforms:
     options:
       schema:
         mode: observed
+      on_success: output
 
 sinks:
   output:
@@ -165,8 +166,6 @@ sinks:
       schema:
         mode: observed
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -183,7 +182,6 @@ default_sink: output
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(config.gates),
-                default_sink=config.default_sink,
             )
             graph.validate()
 

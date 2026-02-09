@@ -49,21 +49,14 @@ from tests.strategies.json import MAX_SAFE_INT
 # =============================================================================
 
 
-def _build_production_graph(config: PipelineConfig, default_sink: str | None = None) -> ExecutionGraph:
+def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build graph using production code path (from_plugin_instances).
 
     Adapter that mirrors the v1 build_production_graph but uses v2 fixtures.
+    Auto-sets on_success on terminal transform for linear pipelines.
     """
     from elspeth.core.config import AggregationSettings
-    from elspeth.plugins.protocols import TransformProtocol
-
-    if default_sink is None:
-        if "default" in config.sinks:
-            default_sink = "default"
-        elif config.sinks:
-            default_sink = next(iter(config.sinks))
-        else:
-            default_sink = ""
+    from elspeth.plugins.protocols import GateProtocol, TransformProtocol
 
     row_transforms: list[TransformProtocol] = []
     aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]] = {}
@@ -71,6 +64,15 @@ def _build_production_graph(config: PipelineConfig, default_sink: str | None = N
     for transform in config.transforms:
         if isinstance(transform, TransformProtocol):
             row_transforms.append(transform)
+
+    # Set on_success on the terminal transform if not already set
+    if row_transforms:
+        for i in range(len(row_transforms) - 1, -1, -1):
+            if not isinstance(row_transforms[i], GateProtocol):
+                if getattr(row_transforms[i], "_on_success", None) is None:
+                    sink_name = next(iter(config.sinks))
+                    row_transforms[i]._on_success = sink_name  # type: ignore[attr-defined]
+                break
 
     for agg_name, agg_settings in config.aggregation_settings.items():
         from tests.fixtures.base_classes import _TestTransformBase
@@ -91,7 +93,6 @@ def _build_production_graph(config: PipelineConfig, default_sink: str | None = N
         sinks=config.sinks,
         aggregations=aggregations,
         gates=list(config.gates),
-        default_sink=default_sink,
         coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
     )
 
@@ -327,7 +328,7 @@ class TestWorkQueueConservation:
         with LandscapeDB.in_memory() as db:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
-            source = ListSource(rows)
+            source = ListSource(rows, on_success="sink_a")
             sink_a = CollectSink("sink_a")
             sink_b = CollectSink("sink_b")
 
@@ -353,13 +354,11 @@ class TestWorkQueueConservation:
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[],
-                default_sink="sink_a",
             )
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test"},
+                source={"plugin": "test", "options": {"on_success": "sink_a"}},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-                default_sink="sink_a",
                 gates=[gate],
             )
 
@@ -570,7 +569,7 @@ class TestIterationGuardProperties:
         with LandscapeDB.in_memory() as db:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
-            source = ListSource(rows)
+            source = ListSource(rows, on_success="sink_a")
             sink_a = CollectSink("sink_a")
             sink_b = CollectSink("sink_b")
 
@@ -595,13 +594,11 @@ class TestIterationGuardProperties:
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[],
-                default_sink="sink_a",
             )
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test"},
+                source={"plugin": "test", "options": {"on_success": "sink_a"}},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-                default_sink="sink_a",
                 gates=[gate],
             )
 
@@ -664,7 +661,7 @@ class TestTokenIdentityProperties:
         with LandscapeDB.in_memory() as db:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
-            source = ListSource(rows)
+            source = ListSource(rows, on_success="sink_a")
             sink_a = CollectSink("sink_a")
             sink_b = CollectSink("sink_b")
 
@@ -689,13 +686,11 @@ class TestTokenIdentityProperties:
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[],
-                default_sink="sink_a",
             )
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test"},
+                source={"plugin": "test", "options": {"on_success": "sink_a"}},
                 sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-                default_sink="sink_a",
                 gates=[gate],
             )
 
@@ -875,7 +870,7 @@ class TestWorkQueueEdgeCases:
         with LandscapeDB.in_memory() as db:
             payload_store = MockPayloadStore()
             rows = [{"value": i} for i in range(num_rows)]
-            source = ListSource(rows)
+            source = ListSource(rows, on_success="default")
             transform = PassTransform()  # Transform before fork for proper routing
             sink = CollectSink()
 
@@ -910,13 +905,11 @@ class TestWorkQueueEdgeCases:
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[coalesce],
-                default_sink="default",
             )
 
             elspeth_settings = ElspethSettings(
-                source={"plugin": "test"},
+                source={"plugin": "test", "options": {"on_success": "default"}},
                 sinks={"default": {"plugin": "test"}},
-                default_sink="default",
                 gates=[gate],
                 coalesce=[coalesce],  # Note: ElspethSettings uses 'coalesce' not 'coalesce_settings'
             )

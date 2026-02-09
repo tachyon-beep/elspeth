@@ -306,6 +306,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._temperature = cfg.temperature
         self._max_tokens = cfg.max_tokens
         self._on_error = cfg.on_error
+        self._on_success = cfg.on_success
 
         # Multi-query specific settings
         self._output_mapping: dict[str, OutputFieldConfig] = cfg.output_mapping

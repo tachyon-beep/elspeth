@@ -78,6 +78,7 @@ class BatchStats(BaseTransform):
         self._group_by = cfg.group_by
         self._compute_mean = cfg.compute_mean
         self._on_error = cfg.on_error
+        self._on_success = cfg.on_success
 
         self._schema_config = cfg.schema_config
 

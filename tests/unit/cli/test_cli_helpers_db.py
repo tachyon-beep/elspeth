@@ -45,12 +45,13 @@ source:
   plugin: csv
   options:
     path: input.csv
+    on_validation_failure: discard
+    on_success: output
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
-default_sink: output
 """)
 
         url, _ = resolve_database_url(database=None, settings_path=settings_file)
@@ -68,12 +69,13 @@ source:
   plugin: csv
   options:
     path: input.csv
+    on_validation_failure: discard
+    on_success: output
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
-default_sink: output
 """)
 
         url, config = resolve_database_url(database=None, settings_path=settings_file)
@@ -95,12 +97,13 @@ source:
   plugin: csv
   options:
     path: input.csv
+    on_validation_failure: discard
+    on_success: output
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
-default_sink: output
 """)
 
         url, _ = resolve_database_url(database=None, settings_path=None)
@@ -129,12 +132,13 @@ source:
   plugin: csv
   options:
     path: input.csv
+    on_validation_failure: discard
+    on_success: output
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
-default_sink: output
 """)
 
         missing_settings = tmp_path / "explicit.yaml"

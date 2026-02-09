@@ -66,6 +66,7 @@ class TestDeaggregationPipeline:
                         "fields": ["order_id: int", "items: any"],
                     },
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                 },
             },
             "transforms": [
@@ -76,6 +77,7 @@ class TestDeaggregationPipeline:
                         "output_field": "item",
                         "include_index": True,
                         "schema": {"mode": "observed"},
+                        "on_success": "output",
                     },
                 },
             ],
@@ -88,7 +90,6 @@ class TestDeaggregationPipeline:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
         config_file = tmp_path / "settings.yaml"
@@ -194,6 +195,7 @@ class TestDeaggregationAuditTrail:
                         "fields": ["order_id: int", "items: any"],
                     },
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                 },
             },
             "transforms": [
@@ -204,6 +206,7 @@ class TestDeaggregationAuditTrail:
                         "output_field": "item",
                         "include_index": True,
                         "schema": {"mode": "observed"},
+                        "on_success": "output",
                     },
                 },
             ],
@@ -216,7 +219,6 @@ class TestDeaggregationAuditTrail:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
 
@@ -239,7 +241,6 @@ class TestDeaggregationAuditTrail:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
         )
 
         # Build pipeline config using the SAME plugin instances as the graph
@@ -359,6 +360,7 @@ class TestSourceSchemaValidation:
                     },
                     # Use discard so invalid row is dropped, not routed
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                 },
             },
             "transforms": [
@@ -369,6 +371,7 @@ class TestSourceSchemaValidation:
                         "output_field": "item",
                         "include_index": True,
                         "schema": {"mode": "observed"},
+                        "on_success": "output",
                     },
                 },
             ],
@@ -381,7 +384,6 @@ class TestSourceSchemaValidation:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
 

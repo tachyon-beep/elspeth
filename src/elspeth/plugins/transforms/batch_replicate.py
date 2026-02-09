@@ -89,6 +89,7 @@ class BatchReplicate(BaseTransform):
         self._default_copies = cfg.default_copies
         self._include_copy_index = cfg.include_copy_index
         self._on_error = cfg.on_error
+        self._on_success = cfg.on_success
 
         self._schema_config = cfg.schema_config
 

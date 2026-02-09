@@ -260,11 +260,11 @@ class TestOrchestratorAcceptsGraph:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
-            default_sink="output",
         )
         plugins = instantiate_plugins_from_config(settings)
 
@@ -274,7 +274,6 @@ class TestOrchestratorAcceptsGraph:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -343,6 +342,7 @@ class TestOrchestratorAcceptsGraph:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
+                    "on_success": "output_a",
                     "schema": {"mode": "observed"},
                 },
             ),
@@ -350,7 +350,6 @@ class TestOrchestratorAcceptsGraph:
                 "output_a": SinkSettings(plugin="json", options={"path": "a.json", "schema": {"mode": "observed"}}),
                 "output_b": SinkSettings(plugin="json", options={"path": "b.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output_a",
         )
         plugins = instantiate_plugins_from_config(settings)
 
@@ -360,7 +359,6 @@ class TestOrchestratorAcceptsGraph:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 

@@ -150,12 +150,25 @@ class SourceDataConfig(PathConfig):
         description="Sink name for non-conformant rows, or 'discard' for explicit drop",
     )
 
+    on_success: str = Field(
+        ...,  # Required - no default
+        description="Sink name for rows that pass source validation",
+    )
+
     @field_validator("on_validation_failure")
     @classmethod
     def validate_on_validation_failure(cls, v: str) -> str:
         """Ensure on_validation_failure is not empty."""
         if not v or not v.strip():
             raise ValueError("on_validation_failure must be a sink name or 'discard'")
+        return v.strip()
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str) -> str:
+        """Ensure on_success is not empty."""
+        if not v or not v.strip():
+            raise ValueError("on_success must be a sink name")
         return v.strip()
 
 
@@ -343,6 +356,11 @@ class TransformDataConfig(DataPluginConfig):
         description="Sink name for rows that cannot be processed, or 'discard'. Required if transform can return errors.",
     )
 
+    on_success: str | None = Field(
+        default=None,
+        description="Sink name for successfully processed rows. Required for terminal transforms (last in chain).",
+    )
+
     required_input_fields: list[str] | None = Field(
         default=None,
         description=(
@@ -358,6 +376,14 @@ class TransformDataConfig(DataPluginConfig):
         """Ensure on_error is not empty string."""
         if v is not None and not v.strip():
             raise ValueError("on_error must be a sink name, 'discard', or omitted entirely")
+        return v.strip() if v else None
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str | None) -> str | None:
+        """Ensure on_success is not empty string."""
+        if v is not None and not v.strip():
+            raise ValueError("on_success must be a sink name or omitted entirely")
         return v.strip() if v else None
 
     @field_validator("required_input_fields")

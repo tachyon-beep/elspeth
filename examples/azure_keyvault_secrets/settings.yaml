@@ -1,36 +1,23 @@
-# Example: Loading secrets from Azure Key Vault
-#
-# This pipeline demonstrates using Azure Key Vault for secret management.
-# All API keys and the fingerprint key are loaded from Key Vault at startup.
-#
-# IMPORTANT: vault_url must be a literal URL - ${VAR} references are NOT
-# supported because secrets are loaded before environment variable resolution.
-
 secrets:
   source: keyvault
-  # Use literal URL here - environment variables not supported in vault_url
   vault_url: https://YOUR-VAULT-NAME.vault.azure.net
   mapping:
-    # Map environment variable names to Key Vault secret names
     AZURE_OPENAI_KEY: azure-openai-api-key
     AZURE_OPENAI_ENDPOINT: azure-openai-endpoint
     ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
-
 source:
   plugin: csv
   options:
     path: ./input/data.csv
-
+    on_success: output
 transforms:
-  - plugin: passthrough
-
+- plugin: passthrough
+  options:
+    on_success: output
 sinks:
   output:
     plugin: csv
     options:
       path: ./output/results.csv
-
-default_sink: output
-
 landscape:
   url: sqlite:///./runs/audit.db

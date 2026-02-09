@@ -23,6 +23,7 @@ class TestValidateCommand:
                 "options": {
                     "path": "/data/input.csv",
                     "on_validation_failure": "quarantine",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -35,7 +36,6 @@ class TestValidateCommand:
                     },
                 },
             },
-            "default_sink": "output",
         }
         config_file = tmp_path / "valid.yaml"
         config_file.write_text(yaml.dump(config))
@@ -61,7 +61,6 @@ class TestValidateCommand:
                     },
                 },
             },
-            "default_sink": "output",
         }
         config_file = tmp_path / "missing_datasource.yaml"
         config_file.write_text(yaml.dump(config))
@@ -69,13 +68,14 @@ class TestValidateCommand:
 
     @pytest.fixture
     def invalid_output_sink_config(self, tmp_path: Path) -> Path:
-        """Create config with invalid default_sink reference."""
+        """Create config with invalid source on_success sink reference."""
         config = {
             "source": {
                 "plugin": "csv",
                 "options": {
                     "path": "/data/input.csv",
                     "on_validation_failure": "quarantine",
+                    "on_success": "nonexistent",  # References non-existent sink
                     "schema": {"mode": "observed"},
                 },
             },
@@ -88,7 +88,6 @@ class TestValidateCommand:
                     },
                 },
             },
-            "default_sink": "nonexistent",  # References non-existent sink
         }
         config_file = tmp_path / "invalid_output_sink.yaml"
         config_file.write_text(yaml.dump(config))
@@ -125,10 +124,10 @@ class TestValidateCommand:
         assert "source" in result.output.lower()
 
     def test_validate_invalid_output_sink(self, invalid_output_sink_config: Path) -> None:
-        """Invalid default_sink reference shows error."""
+        """Invalid on_success sink reference shows error."""
         result = runner.invoke(app, ["validate", "-s", str(invalid_output_sink_config)])
         assert result.exit_code != 0
-        assert "nonexistent" in result.output.lower() or "default_sink" in result.output.lower()
+        assert "nonexistent" in result.output.lower() or "on_success" in result.output.lower()
 
 
 class TestValidateCommandGraphValidation:
@@ -143,6 +142,7 @@ source:
   options:
     path: /data/input.csv
     on_validation_failure: quarantine
+    on_success: output
     schema:
       mode: observed
 
@@ -161,9 +161,7 @@ gates:
     condition: "True"
     routes:
       "true": nonexistent_sink
-      "false": continue
-
-default_sink: output
+      "false": output
 """)
 
         result = runner.invoke(app, ["validate", "-s", str(config_file)])
@@ -181,6 +179,7 @@ source:
   options:
     path: /data/input.csv
     on_validation_failure: quarantine
+    on_success: results
     schema:
       mode: observed
 
@@ -207,9 +206,7 @@ gates:
     condition: "row['suspicious'] == True"
     routes:
       "true": flagged
-      "false": continue
-
-default_sink: results
+      "false": results
 """)
 
         result = runner.invoke(app, ["validate", "-s", str(config_file)])

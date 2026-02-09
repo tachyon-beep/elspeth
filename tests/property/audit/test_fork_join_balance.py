@@ -185,26 +185,31 @@ row_for_fork = st.fixed_dictionaries(
 # =============================================================================
 
 
-def _build_production_graph(config: PipelineConfig, default_sink: str | None = None) -> ExecutionGraph:
+def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build graph using production code path (from_plugin_instances).
 
     Replacement for v1 build_production_graph, inlined to avoid v1 imports.
+    Auto-sets on_success on terminal transform for linear pipelines.
     """
-    if default_sink is None:
-        if "default" in config.sinks:
-            default_sink = "default"
-        elif config.sinks:
-            default_sink = next(iter(config.sinks))
-        else:
-            default_sink = ""
+    transforms = list(config.transforms)
+
+    # Set on_success on the terminal transform if not already set
+    if transforms:
+        from elspeth.plugins.protocols import GateProtocol
+
+        for i in range(len(transforms) - 1, -1, -1):
+            if not isinstance(transforms[i], GateProtocol):
+                if getattr(transforms[i], "_on_success", None) is None:
+                    sink_name = next(iter(config.sinks))
+                    transforms[i]._on_success = sink_name
+                break
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=list(config.transforms),
+        transforms=transforms,
         sinks=config.sinks,
         aggregations={},
         gates=list(config.gates),
-        default_sink=default_sink,
         coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
     )
 
@@ -231,11 +236,11 @@ class TestDagForkBranchValidation:
         gate = GateSettings(
             name="bad_fork_gate",
             condition="True",  # Always fork
-            routes={"true": "fork", "false": "continue"},  # Route to fork action
+            routes={"true": "fork", "false": "default"},  # Route to fork action
             fork_to=["unknown_branch"],  # No coalesce or sink with this name
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="default")
         sink = CollectSink()
 
         # This should fail at graph construction
@@ -247,7 +252,6 @@ class TestDagForkBranchValidation:
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[],  # No coalesce with "unknown_branch"
-                default_sink="default",
             )
 
     def test_fork_to_sink_is_valid(self) -> None:
@@ -255,11 +259,11 @@ class TestDagForkBranchValidation:
         gate = GateSettings(
             name="fork_to_sink_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="sink_a")
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
@@ -271,7 +275,6 @@ class TestDagForkBranchValidation:
             gates=[gate],
             aggregations={},
             coalesce_settings=[],
-            default_sink="sink_a",
         )
 
         gate_id = graph.get_config_gate_id_map()[GateName(gate.name)]
@@ -293,16 +296,17 @@ class TestDagForkBranchValidation:
         gate = GateSettings(
             name="fork_to_coalesce_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["branch_a", "branch_b"],
         )
 
         coalesce = CoalesceSettings(
             name="merge_point",
             branches=["branch_a", "branch_b"],
+            on_success="default",
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="default")
         sink = CollectSink()
 
         # This should succeed - branches match coalesce branches
@@ -313,7 +317,6 @@ class TestDagForkBranchValidation:
             gates=[gate],
             aggregations={},
             coalesce_settings=[coalesce],
-            default_sink="default",
         )
 
         branch_map = graph.get_branch_to_coalesce_map()
@@ -337,11 +340,11 @@ class TestDagForkBranchValidation:
         gate = GateSettings(
             name="dup_fork_gate",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["branch_a", "branch_a"],  # Duplicate!
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="default")
         sink = CollectSink()
 
         # RoutingAction.fork_to_paths() validates uniqueness
@@ -353,7 +356,6 @@ class TestDagForkBranchValidation:
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[],
-                default_sink="default",
             )
 
     def test_coalesce_branch_not_produced_rejected(self) -> None:
@@ -362,7 +364,7 @@ class TestDagForkBranchValidation:
         gate = GateSettings(
             name="partial_fork",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["branch_a"],  # Only one branch
         )
 
@@ -371,7 +373,7 @@ class TestDagForkBranchValidation:
             branches=["branch_a", "branch_b"],  # Expects branch_b too!
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="default")
         sink = CollectSink()
 
         with pytest.raises(GraphValidationError, match="branch_b"):
@@ -382,7 +384,6 @@ class TestDagForkBranchValidation:
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[coalesce],
-                default_sink="default",
             )
 
 
@@ -407,7 +408,7 @@ class TestForkJoinRuntimeBalance:
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
-        source = ListSource(rows)
+        source = ListSource(rows, on_success="sink_a")
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
@@ -433,14 +434,12 @@ class TestForkJoinRuntimeBalance:
             gates=[gate],
             aggregations={},
             coalesce_settings=[],
-            default_sink="sink_a",
         )
 
         # Settings needed for fork execution
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "options": {"on_success": "sink_a"}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-            default_sink="sink_a",
             gates=[gate],
         )
 
@@ -527,7 +526,7 @@ class TestForkJoinEdgeCases:
         db = LandscapeDB.in_memory()
         payload_store = MockPayloadStore()
 
-        source = ListSource([])  # Empty
+        source = ListSource([], on_success="sink_a")  # Empty
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
@@ -552,15 +551,13 @@ class TestForkJoinEdgeCases:
             gates=[gate],
             aggregations={},
             coalesce_settings=[],
-            default_sink="sink_a",
         )
 
         from elspeth.core.config import ElspethSettings
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "options": {"on_success": "sink_a"}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-            default_sink="sink_a",
             gates=[gate],
         )
 
@@ -601,7 +598,7 @@ class TestForkRecoveryInvariant:
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
-        source = ListSource(rows)
+        source = ListSource(rows, on_success="sink_a")
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
@@ -627,13 +624,11 @@ class TestForkRecoveryInvariant:
             gates=[gate],
             aggregations={},
             coalesce_settings=[],
-            default_sink="sink_a",
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "options": {"on_success": "sink_a"}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-            default_sink="sink_a",
             gates=[gate],
         )
 

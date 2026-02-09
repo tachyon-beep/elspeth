@@ -51,13 +51,14 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
             options={
                 "path": str(csv_path),
                 "on_validation_failure": "discard",
+                "on_success": "output",
                 "schema": {"mode": "observed"},
             },
         ),
         transforms=[
             TransformSettings(
                 plugin="passthrough",
-                options={"schema": {"mode": "observed"}},
+                options={"schema": {"mode": "observed"}, "on_success": "output"},
             ),
         ],
         sinks={
@@ -70,7 +71,6 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
                 },
             ),
         },
-        default_sink="output",
     )
 
     # Build graph with real PluginManager
@@ -85,7 +85,6 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
         gates=list(config.gates),
-        default_sink=config.default_sink,
     )
 
     # Validation should pass (schemas are compatible)
@@ -197,7 +196,6 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
         sinks={"output": as_sink(sink)},
         aggregations={},
         gates=[],
-        default_sink="output",
     )
 
     # Validation should pass (schemas are compatible - all use StaticSchema)

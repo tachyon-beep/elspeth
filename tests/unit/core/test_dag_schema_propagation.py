@@ -27,10 +27,15 @@ class MockTransformWithSchemaConfig:
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     _on_error: str | None = None
+    _on_success: str | None = "output"
 
     @property
     def on_error(self) -> str | None:
         return self._on_error
+
+    @property
+    def on_success(self) -> str | None:
+        return self._on_success
 
     def __init__(self) -> None:
         # Computed schema config with guaranteed and audit fields
@@ -50,10 +55,15 @@ class MockTransformWithoutSchemaConfig:
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed", "guaranteed_fields": ["config_field"]}}
     _on_error: str | None = None
+    _on_success: str | None = "output"
 
     @property
     def on_error(self) -> str | None:
         return self._on_error
+
+    @property
+    def on_success(self) -> str | None:
+        return self._on_success
 
 
 class MockSource:
@@ -63,6 +73,7 @@ class MockSource:
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     _on_validation_failure = "discard"
+    on_success = "output"
 
 
 class MockSink:
@@ -86,7 +97,7 @@ class TestOutputSchemaConfigPropagation:
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
             gates=[],
-            default_sink="output",
+
         )
 
         # Find the transform node
@@ -111,7 +122,7 @@ class TestOutputSchemaConfigPropagation:
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
             gates=[],
-            default_sink="output",
+
         )
 
         # Find the transform node
@@ -321,10 +332,15 @@ class MockAggregationTransform:
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     _on_error: str | None = None
+    _on_success: str | None = None
 
     @property
     def on_error(self) -> str | None:
         return self._on_error
+
+    @property
+    def on_success(self) -> str | None:
+        return self._on_success
 
     def __init__(self) -> None:
         self._output_schema_config = SchemaConfig(
@@ -358,7 +374,7 @@ class TestAggregationSchemaConfigPropagation:
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={"test_agg": (transform, agg_settings)},  # type: ignore[dict-item]
             gates=[],
-            default_sink="output",
+
         )
 
         # Find the aggregation node

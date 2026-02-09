@@ -152,7 +152,6 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
 
     graph._sink_id_map = sink_ids
     graph._transform_id_map = transform_ids
-    graph._default_sink = SinkName("default") if SinkName("default") in sink_ids else next(iter(sink_ids))
     graph._route_resolution_map = {}
     graph._config_gate_id_map = {}
 
@@ -418,7 +417,6 @@ class TestResumeIdempotence:
         graph_b.add_edge("transform_0", "sink_default", label="continue", mode=RoutingMode.MOVE)
         graph_b._sink_id_map = {SinkName("default"): NodeID("sink_default")}
         graph_b._transform_id_map = {0: NodeID("transform_0")}
-        graph_b._default_sink = SinkName("default")
         graph_b._route_resolution_map = {}
         graph_b._config_gate_id_map = {}
 

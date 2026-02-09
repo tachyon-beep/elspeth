@@ -507,6 +507,10 @@ class CoalesceSettings(BaseModel):
         default=None,
         description="Which branch to take for 'select' merge strategy",
     )
+    on_success: str | None = Field(
+        default=None,
+        description="Sink name for coalesce output. Required when coalesce is terminal (no downstream transforms).",
+    )
 
     @model_validator(mode="after")
     def validate_policy_requirements(self) -> "CoalesceSettings":
@@ -880,9 +884,6 @@ class ElspethSettings(BaseModel):
     sinks: dict[str, SinkSettings] = Field(
         description="Named sink configurations (one or more required)",
     )
-    default_sink: str = Field(
-        description="Default sink for rows that complete the pipeline",
-    )
 
     # Run mode configuration
     run_mode: RunMode = Field(
@@ -948,12 +949,18 @@ class ElspethSettings(BaseModel):
         description="Telemetry and observability configuration",
     )
 
-    @model_validator(mode="after")
-    def validate_default_sink_exists(self) -> "ElspethSettings":
-        """Ensure default_sink references a defined sink."""
-        if self.default_sink not in self.sinks:
-            raise ValueError(f"default_sink '{self.default_sink}' not found in sinks. Available sinks: {list(self.sinks.keys())}")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def reject_default_sink(cls, data: Any) -> Any:
+        """Reject deprecated default_sink with migration message."""
+        if isinstance(data, dict) and "default_sink" in data:
+            raise ValueError(
+                "'default_sink' has been removed. Use explicit 'on_success' routing instead.\n"
+                "Migration: Add 'on_success: <sink_name>' to your source options and to the "
+                "options of each terminal transform (the last transform before output).\n"
+                "Then remove the 'default_sink' line from your pipeline YAML."
+            )
+        return data
 
     @model_validator(mode="after")
     def validate_export_sink_exists(self) -> "ElspethSettings":
@@ -1610,6 +1617,16 @@ def load_settings(config_path: Path) -> ElspethSettings:
     # Dynaconf returns uppercase keys; convert to lowercase for Pydantic
     raw_dict = dynaconf_settings.as_dict()
     raw_config = _lowercase_schema_keys(raw_dict)
+
+    # Explicitly reject deprecated default_sink in YAML before allowlist filtering.
+    # This ensures the validate command catches migration issues early.
+    if "default_sink" in raw_config:
+        raise ValueError(
+            "'default_sink' has been removed. Use explicit 'on_success' routing instead.\n"
+            "Migration: Add 'on_success: <sink_name>' to your source options and to the "
+            "options of each terminal transform (the last transform before output).\n"
+            "Then remove the 'default_sink' line from your pipeline YAML."
+        )
 
     # Positive allowlist: only pass keys that ElspethSettings knows about.
     # Dynaconf injects internal settings (LOAD_DOTENV, ENVIRONMENTS, SETTINGS_FILES,

@@ -91,10 +91,20 @@ class BaseTransform(ABC):
     # None means: transform doesn't return errors, OR errors are bugs.
     _on_error: str | None = None
 
+    # Success routing configuration
+    # Terminal transforms set this to the output sink name.
+    # None means: non-terminal (more transforms follow in the pipeline).
+    _on_success: str | None = None
+
     @property
     def on_error(self) -> str | None:
         """Error routing destination for this transform."""
         return self._on_error
+
+    @property
+    def on_success(self) -> str | None:
+        """Success routing destination for this transform."""
+        return self._on_success
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
@@ -429,6 +439,10 @@ class BaseSource(ABC):
     # Sink name for quarantined rows, or "discard" to drop invalid rows
     # All sources must set this - config-based sources get it from SourceDataConfig
     _on_validation_failure: str
+
+    # Success routing: sink name for rows that pass source validation
+    # All sources must set this - config-based sources get it from SourceDataConfig
+    on_success: str
 
     # Schema contract for row validation (Phase 2)
     _schema_contract: "SchemaContract | None" = None

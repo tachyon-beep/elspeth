@@ -66,12 +66,13 @@ source:
   plugin: csv
   options:
     path: input.csv
+    on_validation_failure: discard
+    on_success: default
 sinks:
   default:
     plugin: json
     options:
       path: output.json
-default_sink: default
 """
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(settings_content)
@@ -99,12 +100,13 @@ source:
   plugin: csv
   options:
     path: input.csv
+    on_validation_failure: discard
+    on_success: default
 sinks:
   default:
     plugin: json
     options:
       path: output.json
-default_sink: default
 """
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(settings_content)

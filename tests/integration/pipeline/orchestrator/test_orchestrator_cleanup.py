@@ -88,7 +88,6 @@ class TestOrchestratorCleanup:
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
-            default_sink="default",
         )
 
         config = PipelineConfig(
@@ -119,7 +118,6 @@ class TestOrchestratorCleanup:
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
-            default_sink="default",
         )
 
         config = PipelineConfig(
@@ -160,7 +158,6 @@ class TestOrchestratorCleanup:
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
-            default_sink="default",
         )
 
         config = PipelineConfig(
@@ -188,7 +185,6 @@ class TestOrchestratorCleanup:
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
-            default_sink="default",
         )
 
         config = PipelineConfig(

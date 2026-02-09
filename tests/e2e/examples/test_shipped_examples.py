@@ -4,7 +4,7 @@
 Every example directory under examples/ must contain at least one YAML
 settings file, and each file must:
   1. Be parseable as YAML
-  2. Contain a dict with the required top-level keys (source, sinks, default_sink)
+  2. Contain a dict with the required top-level keys (source, sinks)
   3. Where possible, pass full ElspethSettings validation via load_settings()
 
 Examples that require external services (Azure, OpenRouter) or
@@ -57,7 +57,7 @@ _EXAMPLES_WITHOUT_SETTINGS: frozenset[str] = frozenset(
 )
 
 # Required top-level keys for any Elspeth settings file.
-_REQUIRED_KEYS: frozenset[str] = frozenset({"source", "sinks", "default_sink"})
+_REQUIRED_KEYS: frozenset[str] = frozenset({"source", "sinks"})
 
 
 class TestShippedExamples:
@@ -166,18 +166,6 @@ class TestShippedExamples:
                 assert isinstance(sink_config, dict), f"{name}/{path.name}: sink '{sink_name}' must be a dict"
                 assert "plugin" in sink_config, f"{name}/{path.name}: sink '{sink_name}' missing 'plugin' key"
 
-    def test_default_sink_references_defined_sink(self, example_pipeline_dir: Path) -> None:
-        """The default_sink value references a key defined in sinks."""
-        settings = self._find_example_settings(example_pipeline_dir)
-
-        for name, path in settings:
-            with open(path) as f:
-                data: dict[str, Any] = yaml.safe_load(f)
-
-            default_sink = data.get("default_sink")
-            sinks = data.get("sinks", {})
-            assert default_sink in sinks, f"{name}/{path.name}: default_sink '{default_sink}' not found in sinks {list(sinks.keys())}"
-
     def test_local_examples_load_via_config_system(self, example_pipeline_dir: Path) -> None:
         """Examples without env var requirements load through ElspethSettings.
 
@@ -217,7 +205,6 @@ class TestShippedExamples:
             # These must have the required keys
             assert "source" in data, f"{name}/{path.name}: missing source"
             assert "sinks" in data, f"{name}/{path.name}: missing sinks"
-            assert "default_sink" in data, f"{name}/{path.name}: missing default_sink"
 
             # Verify transforms structure if present
             if "transforms" in data:

@@ -52,6 +52,7 @@ class NullSource(BaseSource):
     output_schema: type[PluginSchema] = NullSourceSchema
     # NullSource yields no rows, so it never quarantines - but set to satisfy protocol
     _on_validation_failure: str = "discard"
+    on_success: str = "continue"
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize NullSource.
@@ -67,6 +68,9 @@ class NullSource(BaseSource):
         super().__init__(config_copy)
         # Set _schema_class to satisfy protocol, but resume will use stored schema from audit trail
         self._schema_class = NullSourceSchema
+        # Read on_success from config if provided (overrides class default)
+        if "on_success" in config:
+            self.on_success = config["on_success"]
 
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Yield no rows.

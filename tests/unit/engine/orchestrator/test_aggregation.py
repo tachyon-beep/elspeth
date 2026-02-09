@@ -259,7 +259,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
@@ -277,7 +276,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
@@ -294,7 +292,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
@@ -312,7 +309,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
@@ -321,7 +317,7 @@ class TestCheckAggregationTimeouts:
     def test_timeout_flush_completed_results(self) -> None:
         """Timeout flush produces completed tokens routed to sink."""
         token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -341,7 +337,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -370,7 +365,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -381,7 +375,7 @@ class TestCheckAggregationTimeouts:
         """Work items from flush continue through remaining transforms."""
         work_token = make_token_info()
         work_item = _make_work_item(token=work_token, start_step=0, coalesce_at_step=None)
-        downstream_result = _make_result(RowOutcome.COMPLETED, token=work_token)
+        downstream_result = _make_result(RowOutcome.COMPLETED, token=work_token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -402,7 +396,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -434,7 +427,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -466,7 +458,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -498,7 +489,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -507,7 +497,7 @@ class TestCheckAggregationTimeouts:
     def test_downstream_coalesced_outcome(self) -> None:
         """COALESCED outcome increments both coalesced and succeeded."""
         work_item = _make_work_item()
-        coalesced = _make_result(RowOutcome.COALESCED)
+        coalesced = _make_result(RowOutcome.COALESCED, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -528,7 +518,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -559,17 +548,16 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
         assert result.rows_failed == 1
 
     def test_downstream_completed_branch_fallback_in_timeout(self) -> None:
-        """COMPLETED work item with unknown branch falls back to default in timeout."""
+        """COMPLETED work item with unknown branch routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="unknown")
         work_item = _make_work_item(token=token)
-        completed = _make_result(RowOutcome.COMPLETED, token=token)
+        completed = _make_result(RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -590,7 +578,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -625,7 +612,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -634,9 +620,9 @@ class TestCheckAggregationTimeouts:
         assert result.rows_buffered == 1
 
     def test_completed_result_branch_fallback_in_timeout(self) -> None:
-        """Completed result with branch not in pending falls back to default."""
+        """Completed result with branch not in pending routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="missing_sink")
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -656,7 +642,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -683,7 +668,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=None,
         )
 
@@ -710,7 +694,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
@@ -719,7 +702,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_flush_completed_results(self) -> None:
         """Completed results from flush go to sink."""
         token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -737,7 +720,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
@@ -746,7 +728,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_checkpoint_callback_called_for_completed(self) -> None:
         """checkpoint_callback is invoked for each completed token."""
         token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -765,7 +747,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -792,7 +773,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -816,7 +796,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         call_kwargs = processor.handle_timeout_flush.call_args.kwargs
@@ -826,7 +805,7 @@ class TestFlushRemainingAggregationBuffers:
         """Work items from flush continue through remaining transforms."""
         work_token = make_token_info()
         work_item = _make_work_item(token=work_token, start_step=0)
-        downstream = _make_result(RowOutcome.COMPLETED, token=work_token)
+        downstream = _make_result(RowOutcome.COMPLETED, token=work_token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -846,7 +825,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -876,7 +854,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -886,7 +863,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_downstream_coalesced_with_checkpoint(self) -> None:
         """COALESCED downstream outcome increments both counters + checkpoint."""
         work_item = _make_work_item()
-        coalesced = _make_result(RowOutcome.COALESCED)
+        coalesced = _make_result(RowOutcome.COALESCED, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -906,7 +883,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -917,7 +893,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_no_callback_when_none(self) -> None:
         """No crash when checkpoint_callback is None."""
         token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -936,14 +912,13 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=None,
         )
 
     def test_branch_routing_for_completed_tokens(self) -> None:
-        """Completed tokens with branch_name route to matching sink."""
+        """Completed tokens route via result.sink_name, not branch_name."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="path_a")
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -961,12 +936,11 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
-        assert len(pending["path_a"]) == 1
-        assert len(pending["output"]) == 0
+        assert len(pending["path_a"]) == 0
+        assert len(pending["output"]) == 1
 
     def test_downstream_failed_in_flush(self) -> None:
         """FAILED outcome from downstream work items counted in flush."""
@@ -990,16 +964,15 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_failed == 1
 
     def test_downstream_completed_branch_fallback_in_flush(self) -> None:
-        """COMPLETED work item with unknown branch falls back to default in flush."""
+        """COMPLETED work item with unknown branch routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="unknown")
         work_item = _make_work_item(token=token)
-        completed = _make_result(RowOutcome.COMPLETED, token=token)
+        completed = _make_result(RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -1018,7 +991,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
@@ -1046,7 +1018,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_quarantined == 1
@@ -1077,7 +1048,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_forked == 1
@@ -1105,16 +1075,15 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert processor.process_token.call_args.kwargs["start_step"] == 2
         assert processor.process_token.call_args.kwargs["coalesce_at_step"] == 2
 
-    def test_completed_result_branch_fallback_to_default(self) -> None:
-        """Completed result with branch not in pending falls back to default."""
+    def test_completed_result_branch_fallback_to_sink_name(self) -> None:
+        """Completed result with branch not in pending routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="missing")
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -1132,16 +1101,15 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
         assert len(pending["output"]) == 1
 
-    def test_branch_routing_falls_back_to_default(self) -> None:
-        """Branch name not in pending_tokens falls back to default sink."""
+    def test_branch_routing_falls_back_to_sink_name(self) -> None:
+        """Branch name not in pending_tokens routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="nonexistent")
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -1159,7 +1127,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1

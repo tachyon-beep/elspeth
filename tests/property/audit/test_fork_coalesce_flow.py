@@ -247,6 +247,7 @@ class TestForkCoalesceFlow:
 
         rows = [{"value": i} for i in range(n_rows)]
         source = _ListSource(rows)
+        source.on_success = "default"
         transform = _EnrichTransform()
         sink = _CollectSink()
 
@@ -281,13 +282,11 @@ class TestForkCoalesceFlow:
             gates=[gate],
             aggregations={},
             coalesce_settings=[coalesce],
-            default_sink="default",
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "options": {"on_success": "default"}},
             sinks={"default": {"plugin": "test"}},
-            default_sink="default",
             gates=[gate],
             coalesce=[coalesce],
         )
@@ -342,6 +341,7 @@ class TestForkCoalesceFlow:
 
         rows = [{"value": i} for i in range(n_rows)]
         source = _ListSource(rows)
+        source.on_success = "default"
         transform = _EnrichTransform()
         sink = _CollectSink()
 
@@ -374,13 +374,11 @@ class TestForkCoalesceFlow:
             gates=[gate],
             aggregations={},
             coalesce_settings=[coalesce],
-            default_sink="default",
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "options": {"on_success": "default"}},
             sinks={"default": {"plugin": "test"}},
-            default_sink="default",
             gates=[gate],
             coalesce=[coalesce],
         )
@@ -410,6 +408,7 @@ class TestForkCoalesceFlow:
 
         rows = [{"value": i} for i in range(n_rows)]
         source = _ListSource(rows)
+        source.on_success = "default"
         transform = _EnrichTransform()  # Adds "enriched": True
         sink = _CollectSink()
 
@@ -442,13 +441,11 @@ class TestForkCoalesceFlow:
             gates=[gate],
             aggregations={},
             coalesce_settings=[coalesce],
-            default_sink="default",
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "options": {"on_success": "default"}},
             sinks={"default": {"plugin": "test"}},
-            default_sink="default",
             gates=[gate],
             coalesce=[coalesce],
         )
@@ -475,6 +472,7 @@ class TestForkCoalesceEdgeCases:
         payload_store = MockPayloadStore()
 
         source = _ListSource([])  # Empty
+        source.on_success = "default"
         transform = _EnrichTransform()
         sink = _CollectSink()
 
@@ -507,13 +505,11 @@ class TestForkCoalesceEdgeCases:
             gates=[gate],
             aggregations={},
             coalesce_settings=[coalesce],
-            default_sink="default",
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "options": {"on_success": "default"}},
             sinks={"default": {"plugin": "test"}},
-            default_sink="default",
             gates=[gate],
             coalesce=[coalesce],
         )
@@ -534,6 +530,7 @@ class TestForkCoalesceEdgeCases:
         payload_store = MockPayloadStore()
 
         source = _ListSource([{"value": 42}])
+        source.on_success = "default"
         transform = _EnrichTransform()
         sink = _CollectSink()
 
@@ -566,13 +563,11 @@ class TestForkCoalesceEdgeCases:
             gates=[gate],
             aggregations={},
             coalesce_settings=[coalesce],
-            default_sink="default",
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "options": {"on_success": "default"}},
             sinks={"default": {"plugin": "test"}},
-            default_sink="default",
             gates=[gate],
             coalesce=[coalesce],
         )

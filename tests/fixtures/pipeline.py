@@ -47,11 +47,14 @@ def build_linear_pipeline(
     Returns:
         (source, transforms, sinks_dict, graph)
     """
-    source = ListSource(source_data, name=source_name)
+    source = ListSource(source_data, name=source_name, on_success=sink_name)
     transforms = transforms or []
     if sink is None:
         sink = CollectSink(sink_name)
     sinks = {sink_name: sink}
+
+    # Set on_success on the terminal transform (last non-gate transform)
+    _set_terminal_on_success(transforms, sink_name)
 
     graph = ExecutionGraph.from_plugin_instances(
         source=source,
@@ -59,7 +62,6 @@ def build_linear_pipeline(
         sinks=sinks,
         aggregations={},
         gates=[],
-        default_sink=sink_name,
     )
     return source, transforms, sinks, graph
 
@@ -71,21 +73,21 @@ def build_fork_pipeline(
     sinks: dict[str, CollectSink] | None = None,
     *,
     source_name: str = "list_source",
-    default_sink: str = "default",
+    sink_name: str = "default",
     coalesce_settings: list[Any] | None = None,
 ) -> tuple[ListSource, list[Any], dict[str, CollectSink], ExecutionGraph]:
     """Build a fork/join pipeline with gate routing.
 
     Uses ExecutionGraph.from_plugin_instances() for production-path fidelity.
     """
-    source = ListSource(source_data, name=source_name)
+    source = ListSource(source_data, name=source_name, on_success=sink_name)
 
     all_transforms: list[Any] = []
     for branch_list in branch_transforms.values():
         all_transforms.extend(branch_list)
 
     if sinks is None:
-        sinks = {default_sink: CollectSink(default_sink)}
+        sinks = {sink_name: CollectSink(sink_name)}
 
     graph = ExecutionGraph.from_plugin_instances(
         source=source,
@@ -93,7 +95,6 @@ def build_fork_pipeline(
         sinks=sinks,
         aggregations={},
         gates=[gate],
-        default_sink=default_sink,
         coalesce_settings=coalesce_settings,
     )
     return source, all_transforms, sinks, graph
@@ -113,7 +114,7 @@ def build_aggregation_pipeline(
 
     Uses ExecutionGraph.from_plugin_instances() for production-path fidelity.
     """
-    source = ListSource(source_data, name=source_name)
+    source = ListSource(source_data, name=source_name, on_success=sink_name)
     if sink is None:
         sink = CollectSink(sink_name)
     sinks = {sink_name: sink}
@@ -125,14 +126,12 @@ def build_aggregation_pipeline(
         sinks=sinks,
         aggregations=aggregations,
         gates=[],
-        default_sink=sink_name,
     )
     return source, aggregations, sinks, graph
 
 
 def build_production_graph(
     config: PipelineConfig,
-    default_sink: str | None = None,
 ) -> ExecutionGraph:
     """Build graph from PipelineConfig using production code path.
 
@@ -142,14 +141,6 @@ def build_production_graph(
     from elspeth.core.config import AggregationSettings
     from elspeth.plugins.protocols import TransformProtocol
     from tests.fixtures.base_classes import _TestTransformBase
-
-    if default_sink is None:
-        if "default" in config.sinks:
-            default_sink = "default"
-        elif config.sinks:
-            default_sink = next(iter(config.sinks))
-        else:
-            default_sink = ""
 
     row_transforms: list[TransformProtocol] = []
     aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]] = {}
@@ -176,6 +167,20 @@ def build_production_graph(
         sinks=config.sinks,
         aggregations=aggregations,
         gates=list(config.gates),
-        default_sink=default_sink,
         coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
     )
+
+
+def _set_terminal_on_success(transforms: list[Any], sink_name: str) -> None:
+    """Set on_success on the terminal transform in a linear pipeline.
+
+    The terminal transform is the last non-gate transform in the list.
+    This is a test helper — production code sets on_success via config.
+    """
+    from elspeth.plugins.protocols import GateProtocol
+
+    # Find the last non-gate transform
+    for i in range(len(transforms) - 1, -1, -1):
+        if not isinstance(transforms[i], GateProtocol):
+            transforms[i]._on_success = sink_name
+            return

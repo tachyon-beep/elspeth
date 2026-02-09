@@ -32,7 +32,6 @@ sinks:
         fields:
           - "data: str"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -55,11 +54,10 @@ def test_unknown_transform_plugin_error():
     config_dict = {
         "source": {
             "plugin": "csv",
-            "options": {"path": "test.csv", "schema": {"mode": "observed"}, "on_validation_failure": "discard"},
+            "options": {"path": "test.csv", "schema": {"mode": "observed"}, "on_validation_failure": "discard", "on_success": "out"},
         },
         "transforms": [{"plugin": "nonexistent_transform", "options": {}}],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["data: str"]}}}},
-        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -95,7 +93,6 @@ sinks:
         fields:
           - "data: str"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -125,10 +122,9 @@ def test_schema_extraction_from_instance():
     config_dict = {
         "source": {
             "plugin": "csv",
-            "options": {"path": "test.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}, "on_validation_failure": "discard"},
+            "options": {"path": "test.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}, "on_validation_failure": "discard", "on_success": "out"},
         },
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}}}},
-        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -158,6 +154,7 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
+    on_success: output
 
 gates:
   - name: split
@@ -183,6 +180,7 @@ coalesce:
       - branch_high
       - branch_low
     policy: first
+    on_success: output
 
 sinks:
   output:
@@ -202,7 +200,6 @@ sinks:
         fields:
           - "value: float"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -241,13 +238,14 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
+    on_success: output
 
 gates:
   - name: split
     condition: "row['value'] > 50"
     routes:
       "true": fork
-      "false": continue
+      "false": output
     fork_to:
       - high_values
       - low_values
@@ -278,7 +276,6 @@ sinks:
         fields:
           - "value: float"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -330,13 +327,14 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
+    on_success: output
 
 gates:
   - name: split
     condition: "row['value'] > 50"
     routes:
       "true": fork
-      "false": continue
+      "false": output
     fork_to:
       - branch_high
       - branch_low
@@ -359,6 +357,7 @@ coalesce:
       - branch_high
       - branch_low
     policy: first
+    on_success: output
 
 sinks:
   output:
@@ -370,7 +369,6 @@ sinks:
         fields:
           - "value: float"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -408,6 +406,7 @@ source:
     path: test.csv
     schema: {mode: observed}  # Dynamic schema
     on_validation_failure: discard
+    on_success: output
 
 sinks:
   output:
@@ -419,7 +418,6 @@ sinks:
         fields:
           - "field_a: str"  # Specific schema
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -446,10 +444,12 @@ source:
       fields:
         - "value: float"  # Specific
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
     options:
+      on_success: output
       schema: {mode: observed}  # Dynamic transform
 
 sinks:
@@ -462,7 +462,6 @@ sinks:
         fields:
           - "value: float"  # Specific
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

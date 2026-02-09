@@ -25,9 +25,37 @@ from elspeth.engine.orchestrator.types import AggregationFlushResult, PipelineCo
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
+    from elspeth.contracts.results import RowResult
     from elspeth.core.landscape import LandscapeRecorder
     from elspeth.engine.processor import RowProcessor
     from elspeth.plugins.protocols import TransformProtocol
+
+
+def _route_aggregation_outcome(
+    result: RowResult,
+    pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
+    checkpoint_callback: Callable[[TokenInfo], None] | None = None,
+) -> None:
+    """Route a non-failed aggregation result to the appropriate sink.
+
+    Consolidates the routing logic that was previously duplicated across 4 blocks
+    in check_aggregation_timeouts() and flush_remaining_aggregation_buffers().
+
+    Routing uses result.sink_name which is set by on_success routing in the
+    processor. The sink_name is authoritative for COMPLETED results (guaranteed
+    by RowResult.__post_init__).
+
+    Args:
+        result: A non-FAILED RowResult from aggregation processing
+        pending_tokens: Dict of sink_name -> tokens to append results to
+        checkpoint_callback: Optional callback after successful routing
+    """
+    if result.sink_name is None:
+        raise RuntimeError("Aggregation outcome requires sink_name for routing")
+    pending_tokens[result.sink_name].append((result.token, PendingOutcome(result.outcome)))
+
+    if checkpoint_callback is not None:
+        checkpoint_callback(result.token)
 
 
 def find_aggregation_transform(
@@ -105,7 +133,6 @@ def check_aggregation_timeouts(
     processor: RowProcessor,
     ctx: PluginContext,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    default_sink_name: str,
     agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] | None = None,
 ) -> AggregationFlushResult:
     """Check and flush any aggregations whose timeout has expired.
@@ -129,12 +156,14 @@ def check_aggregation_timeouts(
     streaming sources that may never end, consider using count triggers or
     implementing periodic polling at the source level.
 
+    Routing uses result.sink_name (set by on_success in the processor) rather
+    than a default_sink_name parameter.
+
     Args:
         config: Pipeline configuration with aggregation_settings
         processor: RowProcessor with public aggregation timeout API
         ctx: Plugin context for transform execution
         pending_tokens: Dict of sink_name -> tokens to append results to
-        default_sink_name: Default sink for aggregation output
         agg_transform_lookup: Pre-computed dict mapping node_id_str -> (transform, step).
             If None, lookup is computed on each call (less efficient).
 
@@ -194,11 +223,7 @@ def check_aggregation_timeouts(
             if result.outcome == RowOutcome.FAILED:
                 rows_failed += 1
             else:
-                # Route to appropriate sink based on branch_name if set
-                sink_name = result.token.branch_name or default_sink_name
-                if sink_name not in pending_tokens:
-                    sink_name = default_sink_name
-                pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
+                _route_aggregation_outcome(result, pending_tokens)
                 rows_succeeded += 1
 
         # Process work items through remaining transforms
@@ -223,36 +248,28 @@ def check_aggregation_timeouts(
                 if result.outcome == RowOutcome.FAILED:
                     rows_failed += 1
                 elif result.outcome == RowOutcome.COMPLETED:
-                    # Route to appropriate sink
-                    sink_name = result.token.branch_name or default_sink_name
-                    if sink_name not in pending_tokens:
-                        sink_name = default_sink_name
-                    pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
+                    _route_aggregation_outcome(result, pending_tokens)
                     rows_succeeded += 1
                 elif result.outcome == RowOutcome.ROUTED:
-                    # Gate routed to named sink - MUST enqueue or row is lost
-                    # GateExecutor contract: ROUTED outcome always has sink_name set
                     rows_routed += 1
-                    routed_sink = result.sink_name or default_sink_name
+                    routed_sink = result.sink_name
+                    if routed_sink is None:
+                        raise RuntimeError("ROUTED outcome requires sink_name")
                     routed_destinations[routed_sink] += 1
                     pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                 elif result.outcome == RowOutcome.QUARANTINED:
-                    # Row quarantined by downstream transform - already recorded
                     rows_quarantined += 1
                 elif result.outcome == RowOutcome.COALESCED:
-                    # Merged token from terminal coalesce - route to output sink
-                    # This handles the case where coalesce is the last step
+                    if result.sink_name is None:
+                        raise RuntimeError("COALESCED outcome requires sink_name")
                     rows_coalesced += 1
                     rows_succeeded += 1
-                    pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+                    pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                 elif result.outcome == RowOutcome.FORKED:
-                    # Parent token split into multiple paths - children counted separately
                     rows_forked += 1
                 elif result.outcome == RowOutcome.EXPANDED:
-                    # Deaggregation parent token - children counted separately
                     rows_expanded += 1
                 elif result.outcome == RowOutcome.BUFFERED:
-                    # Passthrough mode buffered token (into downstream aggregation)
                     rows_buffered += 1
                 # CONSUMED_IN_BATCH is handled within process_token
 
@@ -274,7 +291,6 @@ def flush_remaining_aggregation_buffers(
     processor: RowProcessor,
     ctx: PluginContext,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    default_sink_name: str,
     checkpoint_callback: Callable[[TokenInfo], None] | None = None,
 ) -> AggregationFlushResult:
     """Flush remaining aggregation buffers at end-of-source.
@@ -286,12 +302,14 @@ def flush_remaining_aggregation_buffers(
     all output_mode semantics (single, passthrough, transform) and route
     tokens through remaining transforms if any exist after the aggregation.
 
+    Routing uses result.sink_name (set by on_success in the processor) rather
+    than a default_sink_name parameter.
+
     Args:
         config: Pipeline configuration with aggregation_settings
         processor: RowProcessor with public aggregation facades
         ctx: Plugin context for transform execution
         pending_tokens: Dict of sink_name -> tokens to append results to
-        default_sink_name: Default sink for aggregation output
         checkpoint_callback: Optional callback to create checkpoint after successful
             token processing. Called with the token that was processed. The callback
             should capture run_id, node_id, and processor for getting aggregation state.
@@ -342,16 +360,8 @@ def flush_remaining_aggregation_buffers(
             if result.outcome == RowOutcome.FAILED:
                 rows_failed += 1
             else:
-                # Route to appropriate sink based on branch_name if set
-                sink_name = result.token.branch_name or default_sink_name
-                if sink_name not in pending_tokens:
-                    sink_name = default_sink_name
-                pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
+                _route_aggregation_outcome(result, pending_tokens, checkpoint_callback)
                 rows_succeeded += 1
-
-                # Checkpoint if callback provided
-                if checkpoint_callback is not None:
-                    checkpoint_callback(result.token)
 
         # Process work items through remaining transforms
         # These tokens need to continue through the pipeline
@@ -375,48 +385,32 @@ def flush_remaining_aggregation_buffers(
                 if result.outcome == RowOutcome.FAILED:
                     rows_failed += 1
                 elif result.outcome == RowOutcome.COMPLETED:
-                    # Route to appropriate sink
-                    sink_name = result.token.branch_name or default_sink_name
-                    if sink_name not in pending_tokens:
-                        sink_name = default_sink_name
-                    pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
+                    _route_aggregation_outcome(result, pending_tokens, checkpoint_callback)
                     rows_succeeded += 1
-
-                    # Checkpoint if callback provided
-                    if checkpoint_callback is not None:
-                        checkpoint_callback(result.token)
                 elif result.outcome == RowOutcome.ROUTED:
-                    # Gate routed to named sink - MUST enqueue or row is lost
-                    # GateExecutor contract: ROUTED outcome always has sink_name set
                     rows_routed += 1
-                    routed_sink = result.sink_name or default_sink_name
+                    routed_sink = result.sink_name
+                    if routed_sink is None:
+                        raise RuntimeError("ROUTED outcome requires sink_name")
                     routed_destinations[routed_sink] += 1
                     pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
-
-                    # Checkpoint if callback provided
                     if checkpoint_callback is not None:
                         checkpoint_callback(result.token)
                 elif result.outcome == RowOutcome.QUARANTINED:
-                    # Row quarantined by downstream transform - already recorded
                     rows_quarantined += 1
                 elif result.outcome == RowOutcome.COALESCED:
-                    # Merged token from terminal coalesce - route to output sink
-                    # This handles the case where coalesce is the last step
+                    if result.sink_name is None:
+                        raise RuntimeError("COALESCED outcome requires sink_name")
                     rows_coalesced += 1
                     rows_succeeded += 1
-                    pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
-
-                    # Checkpoint if callback provided
+                    pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                     if checkpoint_callback is not None:
                         checkpoint_callback(result.token)
                 elif result.outcome == RowOutcome.FORKED:
-                    # Parent token split into multiple paths - children counted separately
                     rows_forked += 1
                 elif result.outcome == RowOutcome.EXPANDED:
-                    # Deaggregation parent token - children counted separately
                     rows_expanded += 1
                 elif result.outcome == RowOutcome.BUFFERED:
-                    # Passthrough mode buffered token (into downstream aggregation)
                     rows_buffered += 1
                 # CONSUMED_IN_BATCH is handled within process_token
 

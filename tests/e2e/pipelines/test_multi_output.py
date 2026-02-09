@@ -48,7 +48,7 @@ class TestMultiOutput:
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[category_gate],
         )
-        graph = build_production_graph(config, default_sink="sink_a")
+        graph = build_production_graph(config)
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -98,7 +98,7 @@ class TestMultiOutput:
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[category_gate],
         )
-        graph = build_production_graph(config, default_sink="sink_a")
+        graph = build_production_graph(config)
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")

@@ -36,6 +36,7 @@ class TestCLIIntegration:
                 "options": {
                     "path": str(sample_csv),
                     "on_validation_failure": "discard",
+                    "on_success": "default",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -49,7 +50,6 @@ class TestCLIIntegration:
                     },
                 },
             },
-            "default_sink": "default",
             # Use temp-path DB to avoid polluting CWD during tests
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
@@ -150,6 +150,7 @@ class TestSourceQuarantineRouting:
                 "options": {
                     "path": str(csv_with_invalid_rows),
                     "on_validation_failure": "quarantine",  # Route to quarantine sink
+                    "on_success": "default",
                     "schema": {
                         "mode": "fixed",
                         "fields": ["id: int", "name: str", "score: int"],
@@ -172,7 +173,6 @@ class TestSourceQuarantineRouting:
                     },
                 },
             },
-            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         config_file = tmp_path / "settings.yaml"
@@ -214,6 +214,7 @@ class TestSourceQuarantineRouting:
                 "options": {
                     "path": str(csv_with_invalid_rows),
                     "on_validation_failure": "discard",  # Intentionally drop
+                    "on_success": "default",
                     "schema": {
                         "mode": "fixed",
                         "fields": ["id: int", "name: str", "score: int"],
@@ -229,7 +230,6 @@ class TestSourceQuarantineRouting:
                     },
                 },
             },
-            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         config_file = tmp_path / "settings.yaml"
@@ -264,13 +264,14 @@ class TestTransformErrorSinkRouting:
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
+                    "on_success": "default",
                     "schema": {"mode": "observed"},
                 },
             },
             "transforms": [
                 {
                     "plugin": "passthrough",
-                    "options": {"on_error": "errors", "schema": {"mode": "observed"}},
+                    "options": {"on_error": "errors", "on_success": "default", "schema": {"mode": "observed"}},
                 },
             ],
             "sinks": {
@@ -289,7 +290,6 @@ class TestTransformErrorSinkRouting:
                     },
                 },
             },
-            "default_sink": "default",
         }
 
         config_path = tmp_path / "settings.yaml"

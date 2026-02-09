@@ -97,6 +97,7 @@ class RowProcessor:
         run_id: str,
         source_node_id: NodeID,
         *,
+        source_on_success: str = "continue",
         edge_map: dict[tuple[NodeID, str], str] | None = None,
         route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
         config_gates: list[GateSettings] | None = None,
@@ -107,6 +108,7 @@ class RowProcessor:
         coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
         branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
         coalesce_step_map: dict[CoalesceName, int] | None = None,
+        coalesce_on_success_map: dict[CoalesceName, str] | None = None,
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
         payload_store: PayloadStore | None = None,
         clock: Clock | None = None,
@@ -120,6 +122,7 @@ class RowProcessor:
             span_factory: Span factory for tracing
             run_id: Current run ID
             source_node_id: Source node ID
+            source_on_success: Source's on_success sink name for COMPLETED routing
             edge_map: Map of (node_id, label) -> edge_id
             route_resolution_map: Map of (node_id, label) -> "continue" | sink_name
             config_gates: List of config-driven gate settings
@@ -130,6 +133,8 @@ class RowProcessor:
             coalesce_node_ids: Map of coalesce_name -> node_id for coalesce points
             branch_to_coalesce: Map of branch_name -> coalesce_name for fork/join routing
             coalesce_step_map: Map of coalesce_name -> step position in pipeline
+            coalesce_on_success_map: Map of coalesce_name -> terminal sink_name
+                for COALESCED outcomes produced at terminal coalesce points
             restored_aggregation_state: Map of node_id -> state dict for crash recovery
             payload_store: Optional PayloadStore for persisting source row payloads
             clock: Optional clock for time access. Defaults to system clock.
@@ -142,6 +147,7 @@ class RowProcessor:
         self._spans = span_factory
         self._run_id = run_id
         self._source_node_id: NodeID = source_node_id
+        self._source_on_success: str = source_on_success
         self._config_gates = config_gates or []
         self._config_gate_id_map: dict[GateName, NodeID] = config_gate_id_map or {}
         self._retry_manager = retry_manager
@@ -149,6 +155,7 @@ class RowProcessor:
         self._coalesce_node_ids: dict[CoalesceName, NodeID] = coalesce_node_ids or {}
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
         self._coalesce_step_map: dict[CoalesceName, int] = coalesce_step_map or {}
+        self._coalesce_on_success_map: dict[CoalesceName, str] = coalesce_on_success_map or {}
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
         self._clock = clock if clock is not None else DEFAULT_CLOCK
 
@@ -602,6 +609,7 @@ class RowProcessor:
                             token=updated_token,
                             final_data=enriched_data,
                             outcome=RowOutcome.COMPLETED,
+                            sink_name=transform.on_success,
                         )
                     )
 
@@ -681,6 +689,7 @@ class RowProcessor:
                                 token=token,
                                 final_data=token.row_data,
                                 outcome=RowOutcome.COMPLETED,
+                                sink_name=transform.on_success,
                             )
                         )
 
@@ -923,13 +932,13 @@ class RowProcessor:
                     for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
                         updated_token = token.with_updated_data(enriched_data)
-                        # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
                         # Convert PipelineRow to dict for final_data (RowResult expects dict)
                         passthrough_results.append(
                             RowResult(
                                 token=updated_token,
                                 final_data=enriched_data.to_dict(),
                                 outcome=RowOutcome.COMPLETED,
+                                sink_name=transform.on_success,
                             )
                         )
                     return (passthrough_results, child_items)
@@ -1040,12 +1049,12 @@ class RowProcessor:
                     # No more transforms and no coalesce - return COMPLETED for expanded tokens
                     output_results: list[RowResult] = [triggering_result]
                     for token in expanded_tokens:
-                        # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
                         output_results.append(
                             RowResult(
                                 token=token,
                                 final_data=token.row_data,
                                 outcome=RowOutcome.COMPLETED,
+                                sink_name=transform.on_success,
                             )
                         )
                     # Return triggering + completed results
@@ -1444,12 +1453,20 @@ class RowProcessor:
 
         if coalesce_outcome.merged_token is not None:
             if coalesce_at_step >= total_steps:
+                if coalesce_name is None:
+                    raise OrchestrationInvariantError("Terminal coalesce outcome missing coalesce_name")
+                sink_name = self._coalesce_on_success_map.get(coalesce_name)
+                if sink_name is None:
+                    raise OrchestrationInvariantError(
+                        f"Terminal coalesce '{coalesce_name}' produced COALESCED outcome without on_success sink mapping"
+                    )
                 return (
                     True,
                     RowResult(
                         token=coalesce_outcome.merged_token,
                         final_data=coalesce_outcome.merged_token.row_data,
                         outcome=RowOutcome.COALESCED,
+                        sink_name=sink_name,
                     ),
                 )
 
@@ -1537,6 +1554,11 @@ class RowProcessor:
 
         if outcome.merged_token is not None:
             if coalesce_step >= total_steps:
+                sink_name = self._coalesce_on_success_map.get(coalesce_name)
+                if sink_name is None:
+                    raise OrchestrationInvariantError(
+                        f"Terminal coalesce '{coalesce_name}' produced COALESCED outcome without on_success sink mapping"
+                    )
                 # Terminal coalesce — no downstream transforms.
                 # Do NOT emit TokenCompleted here: the merged token still
                 # needs to flow through the sink write for durable recording.
@@ -1546,6 +1568,7 @@ class RowProcessor:
                         token=outcome.merged_token,
                         final_data=outcome.merged_token.row_data,
                         outcome=RowOutcome.COALESCED,
+                        sink_name=sink_name,
                     ),
                 ]
             # Non-terminal — resume merged token at coalesce step
@@ -1650,6 +1673,7 @@ class RowProcessor:
         current_token = token
         child_items: list[_WorkItem] = []
         total_steps = len(transforms) + len(self._config_gates)
+        last_on_success_sink: str | None = self._source_on_success
 
         handled, result = self._maybe_coalesce_token(
             current_token,
@@ -1864,6 +1888,10 @@ class RowProcessor:
                             return ([current_result, *sibling_results], child_items)
                         return (current_result, child_items)
 
+                # Track on_success for sink routing at end of chain
+                if transform.on_success is not None:
+                    last_on_success_sink = transform.on_success
+
                 # Handle multi-row output (deaggregation)
                 # NOTE: This is ONLY for non-aggregation transforms. Aggregation
                 # transforms route through _process_batch_aggregation_node() above.
@@ -2039,13 +2067,12 @@ class RowProcessor:
         if handled:
             return (result, child_items)
 
-        # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
-        # Orchestrator knows branch→sink mapping, processor does not.
         return (
             RowResult(
                 token=current_token,
                 final_data=current_token.row_data,
                 outcome=RowOutcome.COMPLETED,
+                sink_name=last_on_success_sink,
             ),
             child_items,
         )

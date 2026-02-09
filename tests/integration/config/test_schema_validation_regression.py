@@ -36,6 +36,7 @@ source:
         - "field_a: str"
         - "field_b: int"
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
@@ -45,6 +46,7 @@ transforms:
         fields:
           - "field_a: str"
           - "field_b: int"
+      on_success: output
 
 sinks:
   output:
@@ -55,8 +57,6 @@ sinks:
         mode: fixed
         fields:
           - "field_c: float"  # INCOMPATIBLE: requires field_c, gets field_a/field_b
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -97,6 +97,7 @@ source:
         - "field_a: str"
         - "field_b: int"
     on_validation_failure: discard
+    on_success: output
 
 transforms:
   - plugin: passthrough
@@ -106,6 +107,7 @@ transforms:
         fields:
           - "field_a: str"
           - "field_b: int"
+      on_success: output
 
 sinks:
   output:
@@ -117,8 +119,6 @@ sinks:
         fields:
           - "field_a: str"  # Compatible: subset of producer schema
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

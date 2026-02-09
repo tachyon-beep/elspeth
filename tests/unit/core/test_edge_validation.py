@@ -206,15 +206,18 @@ def test_edge_validation_timing_from_plugin_instances() -> None:
         config: ClassVar[dict[str, Any]] = {}
         input_schema: ClassVar[type[PluginSchema]] = ConsumerSchema  # Needs: id, name, email
 
+    # Set on_success on source for explicit routing
+    source = as_source(MockSource())
+    source.on_success = "out"
+
     # Should fail DURING from_plugin_instances (PHASE 2 validation)
     with pytest.raises(ValueError, match=r"Missing fields.*email"):
         ExecutionGraph.from_plugin_instances(
-            source=as_source(MockSource()),
+            source=source,
             transforms=[],
             sinks={"out": as_sink(MockSink())},
             aggregations={},
             gates=[],
-            default_sink="out",
         )
 
 

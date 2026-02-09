@@ -77,6 +77,10 @@ class SourceProtocol(Protocol):
     # All sources must set this - config-based sources get it from SourceDataConfig
     _on_validation_failure: str
 
+    # Success routing: sink name for rows that pass source validation
+    # All sources must set this - config-based sources get it from SourceDataConfig
+    on_success: str
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
         ...
@@ -206,6 +210,12 @@ class TransformProtocol(Protocol):
     @property
     def on_error(self) -> str | None: ...
 
+    # Success routing configuration
+    # Terminal transforms (last in chain) set this to the output sink name.
+    # None means: non-terminal (more transforms follow in the pipeline).
+    @property
+    def on_success(self) -> str | None: ...
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
         ...
@@ -305,6 +315,10 @@ class BatchTransformProtocol(Protocol):
     # Error routing configuration (WP-11.99b)
     @property
     def on_error(self) -> str | None: ...
+
+    # Success routing configuration
+    @property
+    def on_success(self) -> str | None: ...
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""

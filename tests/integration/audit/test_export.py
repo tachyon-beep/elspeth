@@ -49,6 +49,7 @@ class TestLandscapeExport:
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -69,7 +70,6 @@ class TestLandscapeExport:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -170,6 +170,7 @@ class TestLandscapeExport:
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -184,7 +185,6 @@ class TestLandscapeExport:
                 },
                 # NOTE: No audit_export sink - export is disabled
             },
-            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -319,6 +319,7 @@ class TestSignedExportDeterminism:
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -339,7 +340,6 @@ class TestSignedExportDeterminism:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -392,6 +392,7 @@ class TestSignedExportDeterminism:
                     "options": {
                         "path": str(input_csv),
                         "on_validation_failure": "discard",
+                        "on_success": "output",
                         "schema": {"mode": "observed"},
                     },
                 },
@@ -412,8 +413,7 @@ class TestSignedExportDeterminism:
                         },
                     },
                 },
-                "default_sink": "output",
-                "landscape": {
+                    "landscape": {
                     "url": f"sqlite:///{db_path}",
                     "export": {
                         "enabled": True,

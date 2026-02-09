@@ -33,10 +33,11 @@ class ListSource(_TestSourceBase):
 
     output_schema = _EngineTestSchema
 
-    def __init__(self, data: list[dict[str, Any]], name: str = "list_source") -> None:
+    def __init__(self, data: list[dict[str, Any]], name: str = "list_source", on_success: str = "default") -> None:
         super().__init__()
         self._data = data
         self.name = name
+        self.on_success = on_success
 
     def on_start(self, ctx: Any) -> None:
         pass

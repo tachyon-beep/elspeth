@@ -35,7 +35,6 @@ def accumulate_row_outcomes(
     results: Iterable[Any],
     counters: ExecutionCounters,
     config_sinks: Mapping[str, object],
-    default_sink_name: str,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
 ) -> None:
     """Accumulate row processing outcomes into counters and pending_tokens.
@@ -48,22 +47,20 @@ def accumulate_row_outcomes(
     In particular, COALESCED outcomes always increment rows_succeeded (fixing
     the bug where the resume path omitted this).
 
+    Routing is determined by result.sink_name (set by on_success routing in
+    the processor) rather than a default_sink_name parameter.
+
     Args:
         results: Iterable of RowProcessingResult from processor.process_row/process_token
         counters: Mutable ExecutionCounters to update
-        config_sinks: Dict of sink_name -> sink plugin (for branch routing validation)
-        default_sink_name: Default output sink name
+        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         pending_tokens: Dict of sink_name -> list of (token, pending_outcome) pairs
     """
     for result in results:
         if result.outcome == RowOutcome.COMPLETED:
             counters.rows_succeeded += 1
-            # Fork children route to branch-named sink if it exists
-            sink_name = default_sink_name
-            if result.token.branch_name is not None and result.token.branch_name in config_sinks:
-                sink_name = result.token.branch_name
-
-            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+            # RowResult.__post_init__ guarantees sink_name is set for COMPLETED
+            pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.ROUTED:
             counters.rows_routed += 1
             # GateExecutor contract: ROUTED outcome always has sink_name set
@@ -83,9 +80,12 @@ def accumulate_row_outcomes(
             pass
         elif result.outcome == RowOutcome.COALESCED:
             # Merged token from coalesce - route to output sink
+            # Use result.sink_name set by on_success routing
+            if result.sink_name is None:
+                raise RuntimeError("COALESCED outcome requires sink_name")
             counters.rows_coalesced += 1
             counters.rows_succeeded += 1
-            pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+            pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.EXPANDED:
             # Deaggregation parent token - children counted separately
             counters.rows_expanded += 1
@@ -104,7 +104,6 @@ def handle_coalesce_timeouts(
     ctx: PluginContext,
     counters: ExecutionCounters,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    default_sink_name: str,
 ) -> None:
     """Check and handle coalesce timeouts after processing each row.
 
@@ -120,14 +119,12 @@ def handle_coalesce_timeouts(
         coalesce_step_map: Maps CoalesceName -> step position in pipeline
         processor: RowProcessor for downstream processing
         config_transforms: Pipeline transform list for process_token
-        config_gates: Pipeline gate list (for total_steps calculation)
-        config_sinks: Dict of sink_name -> sink plugin (for branch routing)
+        config_gates: Pipeline gate list (retained for interface compatibility)
+        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         ctx: Plugin context for transform execution
         counters: Mutable ExecutionCounters to update
         pending_tokens: Dict of sink_name -> tokens to append results to
-        default_sink_name: Default sink for output
     """
-    total_steps = len(config_transforms) + len(config_gates)
     for coalesce_name_str in coalesce_executor.get_registered_names():
         coalesce_name = CoalesceName(coalesce_name_str)
         coalesce_step = coalesce_step_map[coalesce_name]
@@ -138,26 +135,21 @@ def handle_coalesce_timeouts(
         for outcome in timed_out:
             if outcome.merged_token is not None:
                 counters.rows_coalesced += 1
-                # Check if merged token should continue downstream processing
-                if coalesce_step < total_steps:
-                    # Continue processing through downstream nodes
-                    continuation_results = processor.process_token(
-                        token=outcome.merged_token,
-                        transforms=config_transforms,
-                        ctx=ctx,
-                        start_step=coalesce_step,
-                    )
-                    accumulate_row_outcomes(
-                        continuation_results,
-                        counters,
-                        config_sinks,
-                        default_sink_name,
-                        pending_tokens,
-                    )
-                else:
-                    # No downstream nodes - send directly to sink
-                    counters.rows_succeeded += 1
-                    pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
+                # Route merged token through processor for remaining transforms.
+                # When coalesce_step >= total_steps (no downstream nodes), the
+                # processor returns COMPLETED with sink_name from on_success routing.
+                continuation_results = processor.process_token(
+                    token=outcome.merged_token,
+                    transforms=config_transforms,
+                    ctx=ctx,
+                    start_step=coalesce_step,
+                )
+                accumulate_row_outcomes(
+                    continuation_results,
+                    counters,
+                    config_sinks,
+                    pending_tokens,
+                )
             elif outcome.failure_reason:
                 counters.rows_coalesce_failed += 1
 
@@ -172,7 +164,6 @@ def flush_coalesce_pending(
     ctx: PluginContext,
     counters: ExecutionCounters,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    default_sink_name: str,
 ) -> None:
     """Flush pending coalesce operations at end-of-source.
 
@@ -186,14 +177,12 @@ def flush_coalesce_pending(
         coalesce_step_map: Maps CoalesceName -> step position in pipeline
         processor: RowProcessor for downstream processing
         config_transforms: Pipeline transform list for process_token
-        config_gates: Pipeline gate list (for total_steps calculation)
-        config_sinks: Dict of sink_name -> sink plugin (for branch routing)
+        config_gates: Pipeline gate list (retained for interface compatibility)
+        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         ctx: Plugin context for transform execution
         counters: Mutable ExecutionCounters to update
         pending_tokens: Dict of sink_name -> tokens to append results to
-        default_sink_name: Default sink for output
     """
-    total_steps = len(config_transforms) + len(config_gates)
     # Convert CoalesceName -> str for CoalesceExecutor API
     flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
     pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
@@ -207,26 +196,21 @@ def flush_coalesce_pending(
             assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
             coalesce_name = CoalesceName(outcome.coalesce_name)
             coalesce_step = coalesce_step_map[coalesce_name]
-            # Check if merged token should continue downstream processing
-            if coalesce_step < total_steps:
-                # Continue processing through downstream nodes
-                continuation_results = processor.process_token(
-                    token=outcome.merged_token,
-                    transforms=config_transforms,
-                    ctx=ctx,
-                    start_step=coalesce_step,
-                )
-                accumulate_row_outcomes(
-                    continuation_results,
-                    counters,
-                    config_sinks,
-                    default_sink_name,
-                    pending_tokens,
-                )
-            else:
-                # No downstream nodes - send directly to sink
-                counters.rows_succeeded += 1
-                pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
+            # Route merged token through processor for remaining transforms.
+            # When coalesce_step >= total_steps (no downstream nodes), the
+            # processor returns COMPLETED with sink_name from on_success routing.
+            continuation_results = processor.process_token(
+                token=outcome.merged_token,
+                transforms=config_transforms,
+                ctx=ctx,
+                start_step=coalesce_step,
+            )
+            accumulate_row_outcomes(
+                continuation_results,
+                counters,
+                config_sinks,
+                pending_tokens,
+            )
         elif outcome.failure_reason:
             # Coalesce failed (quorum_not_met, incomplete_branches)
             # Audit trail recorded by executor: each consumed token has

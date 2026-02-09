@@ -115,6 +115,7 @@ class TestDatabaseConnectionErrors:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -127,7 +128,6 @@ class TestDatabaseConnectionErrors:
                     },
                 },
             },
-            "default_sink": "output",
             # Put database in unwritable directory
             "landscape": {"url": f"sqlite:///{readonly_dir}/cannot_write.db"},
         }
@@ -173,6 +173,7 @@ class TestDatabaseConnectionErrors:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -185,7 +186,6 @@ class TestDatabaseConnectionErrors:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{db_file}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -217,6 +217,7 @@ class TestSourceFileErrors:
                 "options": {
                     "path": str(missing_file),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -229,7 +230,6 @@ class TestSourceFileErrors:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -259,6 +259,7 @@ class TestSourceFileErrors:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -271,7 +272,6 @@ class TestSourceFileErrors:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -303,6 +303,7 @@ class TestExitCodeConsistency:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -315,7 +316,6 @@ class TestExitCodeConsistency:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -333,7 +333,6 @@ class TestExitCodeConsistency:
 sinks:
   output:
     plugin: json
-default_sink: output
 """)
 
         result = runner.invoke(app, ["run", "-s", str(config_file)])
@@ -355,6 +354,7 @@ default_sink: output
                 "options": {
                     "path": str(tmp_path / "missing.csv"),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -367,7 +367,6 @@ default_sink: output
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -409,6 +408,7 @@ class TestJsonModeErrors:
                 "options": {
                     "path": str(tmp_path / "missing.csv"),
                     "on_validation_failure": "discard",
+                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -421,7 +421,6 @@ class TestJsonModeErrors:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -465,7 +464,6 @@ source:
 sinks:
   output:
     plugin: json
-default_sink: nonexistent
 concurrency:
   max_workers: -5
 """)

@@ -60,6 +60,7 @@ class FieldMapper(BaseTransform):
         self._strict: bool = cfg.strict
         self._validate_input: bool = cfg.validate_input
         self._on_error: str | None = cfg.on_error
+        self._on_success: str | None = cfg.on_success
 
         self._schema_config = cfg.schema_config
 

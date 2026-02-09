@@ -418,7 +418,6 @@ def run(
             sinks=execution_sinks,
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
@@ -977,7 +976,6 @@ def validate(
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
@@ -1381,6 +1379,16 @@ def _execute_resume_with_instances(
             telemetry_manager.close()
 
 
+def _resolve_resume_null_source_on_success(
+    source: SourceProtocol,
+    sinks: dict[str, SinkProtocol],
+) -> str:
+    """Resolve a valid on_success sink for NullSource in resume mode."""
+    if source.on_success in sinks:
+        return source.on_success
+    return next(iter(sinks))
+
+
 def _build_resume_graphs(
     settings_config: ElspethSettings,
     plugins: dict[str, Any],
@@ -1405,19 +1413,18 @@ def _build_resume_graphs(
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
         gates=gate_settings,
-        default_sink=settings_config.default_sink,
         coalesce_settings=coalesce_settings,
     )
     validation_graph.validate()
 
     # Execution graph uses NullSource — resume data comes from stored payloads
+    null_source_on_success = _resolve_resume_null_source_on_success(plugins["source"], plugins["sinks"])
     execution_graph = ExecutionGraph.from_plugin_instances(
-        source=NullSource({}),
+        source=NullSource({"on_success": null_source_on_success}),
         transforms=plugins["transforms"],
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
         gates=gate_settings,
-        default_sink=settings_config.default_sink,
         coalesce_settings=coalesce_settings,
     )
     execution_graph.validate()
@@ -1652,7 +1659,8 @@ def resume(
             resume_sinks[sink_name] = sink
 
         # Override source with NullSource for resume (data comes from payloads)
-        null_source = NullSource({})
+        null_source_on_success = _resolve_resume_null_source_on_success(plugins["source"], resume_sinks)
+        null_source = NullSource({"on_success": null_source_on_success})
         resume_plugins = {
             **plugins,
             "source": null_source,

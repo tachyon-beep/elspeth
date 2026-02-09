@@ -1,14 +1,3 @@
-# ELSPETH OpenRouter Sentiment Analysis Example
-#
-# This pipeline reads text from a CSV, analyzes sentiment using an LLM
-# via OpenRouter, and outputs the results with sentiment scores.
-#
-# Prerequisites:
-#   export OPENROUTER_API_KEY="your-api-key-here"
-#
-# Run with:
-#   uv run elspeth run -s examples/openrouter_sentiment/settings.yaml --execute
-
 source:
   plugin: csv
   options:
@@ -16,28 +5,33 @@ source:
     schema:
       mode: fixed
       fields:
-        - "id: int"
-        - "text: str"
+      - 'id: int'
+      - 'text: str'
     on_validation_failure: discard
-
+    on_success: output
 transforms:
-  - plugin: openrouter_llm
-    options:
-      api_key: "${OPENROUTER_API_KEY}"
-      model: "openai/gpt-4o-mini"  # Fast and cheap for demos
-      template: |
-        Analyze the sentiment of the following text and respond with ONLY a JSON object.
+- plugin: openrouter_llm
+  options:
+    api_key: ${OPENROUTER_API_KEY}
+    model: openai/gpt-4o-mini
+    template: 'Analyze the sentiment of the following text and respond with ONLY a JSON object.
 
-        Text: {{ row.text }}
 
-        Respond with exactly this format (no other text):
-        {"sentiment": "positive" or "negative" or "neutral", "confidence": 0.0-1.0, "summary": "brief explanation"}
-      temperature: 0.0  # Deterministic for consistent results
-      response_field: sentiment_analysis
-      required_input_fields: [text]  # Template uses row.text
-      schema:
-        mode: observed
+      Text: {{ row.text }}
 
+
+      Respond with exactly this format (no other text):
+
+      {"sentiment": "positive" or "negative" or "neutral", "confidence": 0.0-1.0, "summary": "brief explanation"}
+
+      '
+    temperature: 0.0
+    response_field: sentiment_analysis
+    required_input_fields:
+    - text
+    schema:
+      mode: observed
+    on_success: output
 sinks:
   output:
     plugin: json
@@ -46,9 +40,5 @@ sinks:
       schema:
         mode: observed
       format: jsonl
-
-default_sink: output
-
-# Audit trail stored in runs/
 landscape:
   url: sqlite:///examples/openrouter_sentiment/runs/audit.db
