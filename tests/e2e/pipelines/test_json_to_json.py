@@ -45,9 +45,11 @@ class TestJSONToJSON:
                 "path": str(input_json),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "default",
             }
         )
         transform = PassTransform()
+        transform._on_success = "default"
         sink = JSONSink(
             {
                 "path": str(output_json),
@@ -151,9 +153,11 @@ class TestJSONToJSON:
                     ],
                 },
                 "on_validation_failure": "discard",
+                "on_success": "default",
             }
         )
         transform = PassTransform()
+        transform._on_success = "default"
         sink = JSONSink(
             {
                 "path": str(output_json),

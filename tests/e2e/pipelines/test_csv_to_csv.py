@@ -64,9 +64,11 @@ class TestCSVToCSV:
                 "path": str(input_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "default",
             }
         )
         transform = PassTransform()
+        transform._on_success = "default"
         sink = CSVSink(
             {
                 "path": str(output_csv),
@@ -132,9 +134,11 @@ class TestCSVToCSV:
                 "path": str(input_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
+                "on_success": "default",
             }
         )
         transform = PassTransform()
+        transform._on_success = "default"
         sink = CSVSink(
             {
                 "path": str(output_csv),

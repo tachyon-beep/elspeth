@@ -31,6 +31,7 @@ class TestLargePipeline:
 
         source = ListSource(source_data)
         transform = PassTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         graph = ExecutionGraph.from_plugin_instances(
@@ -72,6 +73,7 @@ class TestLargePipeline:
 
         source = ListSource(source_data)
         transform = PassTransform()
+        transform._on_success = "default"
         sink = CollectSink()
 
         graph = ExecutionGraph.from_plugin_instances(

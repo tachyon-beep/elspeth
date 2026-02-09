@@ -62,9 +62,11 @@ class TestCSVToDatabase:
                     "path": str(input_csv),
                     "schema": {"mode": "observed"},
                     "on_validation_failure": "discard",
+                    "on_success": "default",
                 }
             )
             transform = PassTransform()
+            transform._on_success = "default"
             sink = DatabaseSink(
                 {
                     "url": output_db_url,
@@ -141,9 +143,11 @@ class TestCSVToDatabase:
                     "path": str(input_csv),
                     "schema": {"mode": "observed"},
                     "on_validation_failure": "discard",
+                    "on_success": "default",
                 }
             )
             transform = PassTransform()
+            transform._on_success = "default"
             sink = DatabaseSink(
                 {
                     "url": output_db_url,
