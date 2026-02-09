@@ -1318,6 +1318,16 @@ class TestExecutionGraphFromConfig:
         assert step_map[config_gate_map[GateName("g1")]] == 4
         assert step_map[config_gate_map[GateName("g2")]] == 5
 
+        expected_step_map = {
+            source_id: 0,
+            transform_map[0]: 1,
+            transform_map[1]: 2,
+            transform_map[2]: 3,
+            config_gate_map[GateName("g1")]: 4,
+            config_gate_map[GateName("g2")]: 5,
+        }
+        assert step_map == expected_step_map
+
         inverse_transform_map = graph.get_inverse_transform_id_map()
         assert inverse_transform_map[transform_map[0]] == 0
         assert inverse_transform_map[transform_map[1]] == 1
