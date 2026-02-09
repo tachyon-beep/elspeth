@@ -243,12 +243,11 @@ def check_aggregation_timeouts(
         # These tokens need to continue through the pipeline
         for work_item in work_items:
             work_item_start_step, work_item_coalesce_at_step = _resolve_work_item_steps(processor, work_item)
-            # Determine start_step: if coalesce is set, use it directly
-            # Otherwise, add 1 to current position to get next transform
-            if work_item_coalesce_at_step is not None:
-                continuation_start = work_item_coalesce_at_step
-            else:
-                continuation_start = work_item_start_step + 1
+            continuation_start = (
+                work_item_coalesce_at_step
+                if work_item_coalesce_at_step is not None
+                else work_item_start_step
+            )
             downstream_results = processor.process_token(
                 token=work_item.token,
                 transforms=config.transforms,
@@ -381,12 +380,11 @@ def flush_remaining_aggregation_buffers(
         # These tokens need to continue through the pipeline
         for work_item in work_items:
             work_item_start_step, work_item_coalesce_at_step = _resolve_work_item_steps(processor, work_item)
-            # Determine start_step: if coalesce is set, use it directly
-            # Otherwise, add 1 to current position to get next transform
-            if work_item_coalesce_at_step is not None:
-                continuation_start = work_item_coalesce_at_step
-            else:
-                continuation_start = work_item_start_step + 1
+            continuation_start = (
+                work_item_coalesce_at_step
+                if work_item_coalesce_at_step is not None
+                else work_item_start_step
+            )
             downstream_results = processor.process_token(
                 token=work_item.token,
                 transforms=config.transforms,

@@ -401,8 +401,8 @@ class TestCheckAggregationTimeouts:
 
         assert result.rows_succeeded == 1
         processor.process_token.assert_called_once()
-        # start_step should be work_item.start_step + 1 = 1
-        assert processor.process_token.call_args.kwargs["start_step"] == 1
+        # Work items now carry continuation node directly, so start_step is unchanged.
+        assert processor.process_token.call_args.kwargs["start_step"] == 0
 
     def test_work_items_with_coalesce_step(self) -> None:
         """Work items with coalesce_at_step use that as continuation start."""

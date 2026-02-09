@@ -274,24 +274,36 @@ class RowProcessor:
         self,
         *,
         token: TokenInfo,
-        start_step: int,
+        start_step: int | None = None,
+        current_node_id: NodeID | None = None,
         coalesce_at_step: int | None = None,
         coalesce_name: CoalesceName | None = None,
+        coalesce_node_id: NodeID | None = None,
     ) -> _WorkItem:
         """Create node-id based work item from legacy step/coalesce metadata."""
-        coalesce_node_id: NodeID | None = None
-        if coalesce_name is not None:
-            coalesce_node_id = self._coalesce_node_ids[coalesce_name]
+        resolved_coalesce_node_id = coalesce_node_id
+        if resolved_coalesce_node_id is None and coalesce_name is not None:
+            resolved_coalesce_node_id = self._coalesce_node_ids[coalesce_name]
 
-        if coalesce_node_id is not None and coalesce_at_step is not None and start_step == coalesce_at_step:
-            current_node_id = coalesce_node_id
-        else:
-            current_node_id = self._step_to_node_id(start_step)
+        resolved_current_node_id = current_node_id
+        if resolved_current_node_id is None:
+            if start_step is None:
+                raise OrchestrationInvariantError(
+                    "_create_work_item requires either current_node_id or start_step"
+                )
+            if (
+                resolved_coalesce_node_id is not None
+                and coalesce_at_step is not None
+                and start_step == coalesce_at_step
+            ):
+                resolved_current_node_id = resolved_coalesce_node_id
+            else:
+                resolved_current_node_id = self._step_to_node_id(start_step)
 
         return _WorkItem(
             token=token,
-            current_node_id=current_node_id,
-            coalesce_node_id=coalesce_node_id,
+            current_node_id=resolved_current_node_id,
+            coalesce_node_id=resolved_coalesce_node_id,
             coalesce_name=coalesce_name,
         )
 
@@ -332,6 +344,35 @@ class RowProcessor:
         if node_id == self._source_node_id:
             return 0
         return self._node_id_to_step(node_id) + 1
+
+    def _resolve_continuation_node_for_work_item(self, current_node_id: NodeID) -> NodeID:
+        """Resolve next processing node, falling back to one-past-end sentinel."""
+        next_node_id = self._resolve_next_node_for_processing(current_node_id)
+        if next_node_id is not None:
+            return next_node_id
+        return self._step_to_node_id(self._node_id_to_step(current_node_id) + 1)
+
+    def _create_continuation_work_item(
+        self,
+        *,
+        token: TokenInfo,
+        current_node_id: NodeID,
+        coalesce_name: CoalesceName | None = None,
+    ) -> _WorkItem:
+        """Create child work item that continues after current node or resumes at coalesce."""
+        if coalesce_name is not None:
+            coalesce_node_id = self._coalesce_node_ids[coalesce_name]
+            return self._create_work_item(
+                token=token,
+                current_node_id=coalesce_node_id,
+                coalesce_name=coalesce_name,
+                coalesce_node_id=coalesce_node_id,
+            )
+
+        return self._create_work_item(
+            token=token,
+            current_node_id=self._resolve_continuation_node_for_work_item(current_node_id),
+        )
 
     def _emit_telemetry(self, event: TelemetryEvent) -> None:
         """Emit telemetry event if manager is configured.
@@ -733,14 +774,12 @@ class RowProcessor:
                 needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and updated_token.branch_name is not None
 
                 if more_transforms or needs_coalesce:
-                    # Queue for remaining transforms with coalesce metadata
-                    # NOTE: start_step is set to current 0-indexed position.
+                    work_item_coalesce_name = coalesce_name if needs_coalesce else None
                     child_items.append(
-                        self._create_work_item(
+                        self._create_continuation_work_item(
                             token=updated_token,
-                            start_step=step,
-                            coalesce_at_step=coalesce_at_step,
-                            coalesce_name=coalesce_name,
+                            current_node_id=node_id,
+                            coalesce_name=work_item_coalesce_name,
                         )
                     )
                 else:
@@ -811,15 +850,13 @@ class RowProcessor:
                 needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_expanded_branch is not None
 
                 if more_transforms or needs_coalesce:
-                    # Queue expanded tokens for remaining transforms with coalesce metadata
-                    # NOTE: start_step is set to current 0-indexed position.
+                    work_item_coalesce_name = coalesce_name if needs_coalesce else None
                     for token in expanded_tokens:
                         child_items.append(
-                            self._create_work_item(
+                            self._create_continuation_work_item(
                                 token=token,
-                                start_step=step,
-                                coalesce_at_step=coalesce_at_step,
-                                coalesce_name=coalesce_name,
+                                current_node_id=node_id,
+                                coalesce_name=work_item_coalesce_name,
                             )
                         )
                 else:
@@ -1048,21 +1085,15 @@ class RowProcessor:
                 needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_token_branch is not None
 
                 if more_transforms or needs_coalesce:
-                    # Queue enriched tokens as work items for remaining transforms
-                    # NOTE: `step` is 1-indexed (for audit) but happens to equal the
-                    # 0-indexed position of the NEXT transform (since step = p + 1 where
-                    # p is current 0-indexed position). So transforms[step:] gives remaining.
-                    # If there's a coalesce point, skip directly there (matches fork behavior).
-                    continuation_start = coalesce_at_step if coalesce_at_step is not None else step
+                    work_item_coalesce_name = coalesce_name if needs_coalesce else None
                     for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
                         updated_token = token.with_updated_data(enriched_data)
                         child_items.append(
-                            self._create_work_item(
+                            self._create_continuation_work_item(
                                 token=updated_token,
-                                start_step=continuation_start,
-                                coalesce_at_step=coalesce_at_step,
-                                coalesce_name=coalesce_name,
+                                current_node_id=node_id,
+                                coalesce_name=work_item_coalesce_name,
                             )
                         )
                     # Return empty list - all results will come from child items
@@ -1169,19 +1200,13 @@ class RowProcessor:
                 needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_expanded_branch is not None
 
                 if more_transforms or needs_coalesce:
-                    # Queue expanded tokens as work items for remaining transforms
-                    # NOTE: `step` is 1-indexed (for audit) but happens to equal the
-                    # 0-indexed position of the NEXT transform (since step = p + 1 where
-                    # p is current 0-indexed position). So transforms[step:] gives remaining.
-                    # If there's a coalesce point, skip directly there (matches fork behavior).
-                    continuation_start = coalesce_at_step if coalesce_at_step is not None else step
+                    work_item_coalesce_name = coalesce_name if needs_coalesce else None
                     for token in expanded_tokens:
                         child_items.append(
-                            self._create_work_item(
+                            self._create_continuation_work_item(
                                 token=token,
-                                start_step=continuation_start,
-                                coalesce_at_step=coalesce_at_step,
-                                coalesce_name=coalesce_name,
+                                current_node_id=node_id,
+                                coalesce_name=work_item_coalesce_name,
                             )
                         )
                     # Return triggering result - expanded tokens will produce results via work queue
@@ -1614,10 +1639,16 @@ class RowProcessor:
                     ),
                 )
 
+            if coalesce_name in self._coalesce_node_ids:
+                coalesce_node_id = self._coalesce_node_ids[coalesce_name]
+            else:
+                # Transitional fallback for tests that provide coalesce_at_step without
+                # a coalesce node map in traversal context.
+                coalesce_node_id = self._step_to_node_id(coalesce_at_step)
             child_items.append(
                 self._create_work_item(
                     token=coalesce_outcome.merged_token,
-                    start_step=coalesce_at_step,
+                    current_node_id=coalesce_node_id,
                 )
             )
             return True, None
@@ -1716,10 +1747,11 @@ class RowProcessor:
                     ),
                 ]
             # Non-terminal — resume merged token at coalesce step
+            coalesce_node_id = self._coalesce_node_ids[coalesce_name]
             child_items.append(
                 self._create_work_item(
                     token=outcome.merged_token,
-                    start_step=coalesce_step,
+                    current_node_id=coalesce_node_id,
                 )
             )
             return []
@@ -1884,26 +1916,19 @@ class RowProcessor:
                         child_items,
                     )
                 elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
-                    # Parent becomes FORKED, children continue from next node.
-                    continuation_start = (
-                        self._node_id_to_step(next_node_id) if next_node_id is not None else self._node_id_to_step(node_id) + 1
-                    )
                     for child_token in outcome.child_tokens:
                         # Look up coalesce info for this branch
                         branch_name = child_token.branch_name
                         child_coalesce_name: CoalesceName | None = None
-                        child_coalesce_step: int | None = None
 
                         if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
                             child_coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
-                            child_coalesce_step = self._coalesce_step_map[child_coalesce_name]
 
-                        # Children skip directly to coalesce step (or next step if no coalesce)
+                        # Children skip directly to coalesce node (or continue to next node).
                         child_items.append(
-                            self._create_work_item(
+                            self._create_continuation_work_item(
                                 token=child_token,
-                                start_step=child_coalesce_step if child_coalesce_step is not None else continuation_start,
-                                coalesce_at_step=child_coalesce_step,
+                                current_node_id=node_id,
                                 coalesce_name=child_coalesce_name,
                             )
                         )
@@ -2074,16 +2099,13 @@ class RowProcessor:
                     )
 
                     # Queue each child for continued processing
-                    continuation_start = (
-                        self._node_id_to_step(next_node_id) if next_node_id is not None else self._node_id_to_step(node_id) + 1
-                    )
                     for child_token in child_tokens:
+                        child_coalesce_name = coalesce_name if coalesce_name is not None and child_token.branch_name is not None else None
                         child_items.append(
-                            self._create_work_item(
+                            self._create_continuation_work_item(
                                 token=child_token,
-                                start_step=continuation_start,
-                                coalesce_at_step=coalesce_at_step,
-                                coalesce_name=coalesce_name,
+                                current_node_id=node_id,
+                                coalesce_name=child_coalesce_name,
                             )
                         )
 
@@ -2147,25 +2169,19 @@ class RowProcessor:
                         child_items,
                     )
                 elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
-                    continuation_start = (
-                        self._node_id_to_step(next_node_id) if next_node_id is not None else self._node_id_to_step(node_id) + 1
-                    )
                     for child_token in outcome.child_tokens:
                         # Look up coalesce info for this branch
                         cfg_branch_name = child_token.branch_name
                         cfg_coalesce_name: CoalesceName | None = None
-                        cfg_coalesce_step: int | None = None
 
                         if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
                             cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
-                            cfg_coalesce_step = self._coalesce_step_map[cfg_coalesce_name]
 
                         # Children skip directly to coalesce step (or next processing node if no coalesce)
                         child_items.append(
-                            self._create_work_item(
+                            self._create_continuation_work_item(
                                 token=child_token,
-                                start_step=cfg_coalesce_step if cfg_coalesce_step is not None else continuation_start,
-                                coalesce_at_step=cfg_coalesce_step,
+                                current_node_id=node_id,
                                 coalesce_name=cfg_coalesce_name,
                             )
                         )
