@@ -118,6 +118,30 @@ class TestDAGBuilder:
         assert graph.node_count == 4
         assert graph.edge_count == 3
 
+    def test_pipeline_sequence_includes_route_labeled_processing_targets(self) -> None:
+        """Fallback sequence discovery must include MOVE edges beyond 'continue'."""
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("router", node_type=NodeType.GATE, plugin_name="router")
+        graph.add_node("branch_t", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="json")
+
+        graph.add_edge("source", "router", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("router", "branch_t", label="high", mode=RoutingMode.MOVE)
+        graph.add_edge("branch_t", "sink", label="on_success", mode=RoutingMode.MOVE)
+
+        sequence = graph.get_pipeline_node_sequence()
+        assert sequence == [NodeID("router"), NodeID("branch_t")]
+
+        step_map = graph.build_step_map()
+        assert step_map[NodeID("source")] == 0
+        assert step_map[NodeID("router")] == 1
+        assert step_map[NodeID("branch_t")] == 2
+
 
 class TestDAGValidation:
     """Validation of execution graphs."""

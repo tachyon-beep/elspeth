@@ -238,6 +238,45 @@ class TestRoutingAction:
             )
 
 
+class TestRouteDestination:
+    """Tests for RouteDestination dataclass invariants."""
+
+    def test_sink_destination_requires_sink_name(self) -> None:
+        """SINK destination must include sink_name."""
+        from elspeth.contracts import RouteDestination, RouteDestinationKind
+
+        with pytest.raises(ValueError, match="requires sink_name"):
+            RouteDestination(kind=RouteDestinationKind.SINK)
+
+    def test_processing_destination_requires_next_node_id(self) -> None:
+        """PROCESSING_NODE destination must include next_node_id."""
+        from elspeth.contracts import RouteDestination, RouteDestinationKind
+
+        with pytest.raises(ValueError, match="requires next_node_id"):
+            RouteDestination(kind=RouteDestinationKind.PROCESSING_NODE)
+
+    def test_continue_destination_rejects_payload_fields(self) -> None:
+        """CONTINUE destination cannot carry sink or node payloads."""
+        from elspeth.contracts import NodeID, RouteDestination, RouteDestinationKind
+
+        with pytest.raises(ValueError, match="must not include sink_name or next_node_id"):
+            RouteDestination(kind=RouteDestinationKind.CONTINUE, sink_name="out")
+
+        with pytest.raises(ValueError, match="must not include sink_name or next_node_id"):
+            RouteDestination(kind=RouteDestinationKind.CONTINUE, next_node_id=NodeID("transform-1"))
+
+    def test_processing_destination_rejects_sink_name(self) -> None:
+        """PROCESSING_NODE destination cannot carry sink_name."""
+        from elspeth.contracts import NodeID, RouteDestination, RouteDestinationKind
+
+        with pytest.raises(ValueError, match="must not include sink_name"):
+            RouteDestination(
+                kind=RouteDestinationKind.PROCESSING_NODE,
+                sink_name="out",
+                next_node_id=NodeID("transform-1"),
+            )
+
+
 class TestRoutingSpec:
     """Tests for RoutingSpec dataclass."""
 

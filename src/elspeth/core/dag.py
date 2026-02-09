@@ -390,16 +390,27 @@ class ExecutionGraph:
         if self._pipeline_nodes:
             return list(self._pipeline_nodes)
 
-        sequence: list[NodeID] = []
-        visited: set[NodeID] = set()
-        current = self.get_first_transform_node()
-        while current is not None:
-            if current in visited:
-                raise GraphValidationError(f"Cycle detected while building pipeline node sequence at node '{current}'")
-            sequence.append(current)
-            visited.add(current)
-            current = self.get_next_node(current)
-        return sequence
+        first_node = self.get_first_transform_node()
+        if first_node is None:
+            return []
+
+        reachable: set[NodeID] = set()
+        pending: list[NodeID] = [first_node]
+        while pending:
+            current = pending.pop()
+            if current in reachable:
+                continue
+            reachable.add(current)
+
+            for _from_id, to_id, _edge_key, edge_data in self._graph.out_edges(current, keys=True, data=True):
+                if edge_data["mode"] != RoutingMode.MOVE:
+                    continue
+                target = NodeID(to_id)
+                if self.is_sink_node(target):
+                    continue
+                pending.append(target)
+
+        return [node_id for node_id in (NodeID(node) for node in self.topological_order()) if node_id in reachable]
 
     def build_step_map(self) -> dict[NodeID, int]:
         """Build node -> audit step map (source=0, processing nodes start at 1)."""

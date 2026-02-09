@@ -683,8 +683,6 @@ class GateExecutor:
                     )
                 elif destination.kind == RouteDestinationKind.SINK:
                     # Route label resolves to a sink name
-                    if destination.sink_name is None:
-                        raise ValueError(f"Resolved sink destination missing sink_name for gate {gate.node_id} route '{route_label}'")
                     sink_name = destination.sink_name
                     # Record routing event using the route label to find the edge
                     self._record_routing(
@@ -693,10 +691,6 @@ class GateExecutor:
                         action=action,
                     )
                 elif destination.kind == RouteDestinationKind.PROCESSING_NODE:
-                    if destination.next_node_id is None:
-                        raise ValueError(
-                            f"Resolved processing destination missing next_node_id for gate {gate.node_id} route '{route_label}'"
-                        )
                     next_node_id = destination.next_node_id
                     self._record_routing(
                         state_id=state.state_id,
@@ -968,8 +962,6 @@ class GateExecutor:
 
             elif destination.kind == RouteDestinationKind.SINK:
                 # Route to a named sink
-                if destination.sink_name is None:
-                    raise ValueError(f"Resolved sink destination missing sink_name for config gate {node_id} route '{route_label}'")
                 sink_name = destination.sink_name
                 action = RoutingAction.route(route_label, mode=RoutingMode.MOVE, reason=reason)
 
@@ -980,10 +972,6 @@ class GateExecutor:
                     action=action,
                 )
             elif destination.kind == RouteDestinationKind.PROCESSING_NODE:
-                if destination.next_node_id is None:
-                    raise ValueError(
-                        f"Resolved processing destination missing next_node_id for config gate {node_id} route '{route_label}'"
-                    )
                 next_node_id = destination.next_node_id
                 action = RoutingAction.route(route_label, mode=RoutingMode.MOVE, reason=reason)
                 self._record_routing(

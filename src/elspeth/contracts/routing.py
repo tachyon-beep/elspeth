@@ -165,6 +165,25 @@ class RouteDestination:
     sink_name: str | None = None
     next_node_id: NodeID | None = None
 
+    def __post_init__(self) -> None:
+        """Validate destination payload by kind."""
+        if self.kind == RouteDestinationKind.SINK:
+            if self.sink_name is None:
+                raise ValueError("SINK destination requires sink_name")
+            if self.next_node_id is not None:
+                raise ValueError("SINK destination must not include next_node_id")
+            return
+
+        if self.kind == RouteDestinationKind.PROCESSING_NODE:
+            if self.next_node_id is None:
+                raise ValueError("PROCESSING_NODE destination requires next_node_id")
+            if self.sink_name is not None:
+                raise ValueError("PROCESSING_NODE destination must not include sink_name")
+            return
+
+        if self.sink_name is not None or self.next_node_id is not None:
+            raise ValueError(f"{self.kind.value.upper()} destination must not include sink_name or next_node_id")
+
     @classmethod
     def continue_(cls) -> "RouteDestination":
         return cls(kind=RouteDestinationKind.CONTINUE)
