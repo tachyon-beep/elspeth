@@ -20,10 +20,10 @@ class TestValidateCommand:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": "/data/input.csv",
                     "on_validation_failure": "quarantine",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -72,10 +72,10 @@ class TestValidateCommand:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "nonexistent",  # References non-existent sink
                 "options": {
                     "path": "/data/input.csv",
                     "on_validation_failure": "quarantine",
-                    "on_success": "nonexistent",  # References non-existent sink
                     "schema": {"mode": "observed"},
                 },
             },
@@ -139,10 +139,10 @@ class TestValidateCommandGraphValidation:
         config_file.write_text("""
 source:
   plugin: csv
+  on_success: my_gate
   options:
     path: /data/input.csv
     on_validation_failure: quarantine
-    on_success: output
     schema:
       mode: observed
 
@@ -158,6 +158,7 @@ sinks:
 
 gates:
   - name: my_gate
+    input: my_gate
     condition: "True"
     routes:
       "true": nonexistent_sink
@@ -176,10 +177,10 @@ gates:
         config_file.write_text("""
 source:
   plugin: csv
+  on_success: classifier
   options:
     path: /data/input.csv
     on_validation_failure: quarantine
-    on_success: results
     schema:
       mode: observed
 
@@ -203,6 +204,7 @@ sinks:
 
 gates:
   - name: classifier
+    input: classifier
     condition: "row['suspicious'] == True"
     routes:
       "true": flagged

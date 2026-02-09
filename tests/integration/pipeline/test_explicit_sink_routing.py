@@ -153,6 +153,7 @@ class TestExplicitSinkRouting:
         # Terminal fork gate: true=fork, false=sink_a (required but never fires)
         fork_gate = GateSettings(
             name="fork_gate",
+            input="source_out",
             condition="True",
             routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
@@ -201,14 +202,16 @@ class TestExplicitSinkRouting:
 
         fork_gate = GateSettings(
             name="fork_gate",
+            input="transform_out",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "output"},
             fork_to=["path_a", "path_b"],
         )
 
         # Terminal gate routes merged result to output sink
         terminal_gate = GateSettings(
             name="terminal_gate",
+            input="merge_paths",
             condition="True",
             routes={"true": "output", "false": "output"},
         )
@@ -235,7 +238,7 @@ class TestExplicitSinkRouting:
         )
 
         settings = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "source_sink"}},
+            source={"plugin": "test", "on_success": "source_out", "options": {}},
             sinks={"output": {"plugin": "test"}, "source_sink": {"plugin": "test"}},
             gates=[fork_gate, terminal_gate],
             coalesce=[coalesce],
@@ -323,21 +326,21 @@ class TestExplicitSinkRouting:
 class TestExplicitSinkRoutingEdgeCases:
     """Edge cases and error conditions for explicit sink routing."""
 
-    def test_missing_on_success_raises_error(self, payload_store) -> None:
-        """Terminal transform without on_success raises GraphValidationError."""
-        source = ListSource([{"value": 1}], on_success="output")
+    def test_wire_transforms_always_provides_on_success(self, payload_store) -> None:
+        """wire_transforms always sets on_success, preventing terminal-without-routing.
+
+        With WiredTransform architecture, wire_transforms() always provides
+        on_success to the last transform (pointing to final_sink). This means
+        the old scenario of a "terminal transform without on_success" can no
+        longer occur through the production wiring path.
+        """
+        from tests.fixtures.factories import wire_transforms
+
         transform = IdentityTransform()
-        # Deliberately NOT setting on_success — terminal transform without it
-        sink = CollectSink(name="output")
+        wired = wire_transforms([as_transform(transform)], final_sink="output")
 
-        config = PipelineConfig(
-            source=as_source(source),
-            transforms=[as_transform(transform)],
-            sinks={"output": as_sink(sink)},
-        )
-
-        with pytest.raises(GraphValidationError, match=r"terminal transform.*no 'on_success'"):
-            build_production_graph(config)
+        # wire_transforms always provides on_success to the last transform
+        assert wired[-1].settings.on_success == "output"
 
     def test_source_on_success_used_when_no_transforms(self, payload_store) -> None:
         """Source on_success routes directly to sink when no transforms exist."""
@@ -359,37 +362,59 @@ class TestExplicitSinkRoutingEdgeCases:
         assert run_result.rows_processed == 1
         assert len(sink.results) == 1
 
-    def test_only_terminal_transform_can_have_on_success(self, payload_store) -> None:
-        """Non-terminal transform is allowed (no on_success), terminal declares sink.
+    def test_wire_transforms_routes_last_transform_to_final_sink(self, payload_store) -> None:
+        """wire_transforms routes the last transform to the declared final sink.
 
-        Setup: source → transform1 → transform2(on_success=sink_b) → sink_b
-        Verify: Rows route to terminal transform's on_success, not sink_a.
+        Setup: source → transform1 → transform2 → sink_b (via wire_transforms final_sink)
+        Verify: Rows route to the final sink declared in wire_transforms, not other sinks.
+
+        With WiredTransform architecture, routing is determined by wire_transforms()
+        and TransformSettings, not by individual transform._on_success attributes.
         """
+        from tests.fixtures.factories import wire_transforms
+
         db = LandscapeDB.in_memory()
 
         source = ListSource([{"value": 1}], on_success="sink_b")
 
         transform1 = AddFieldTransform("t1", "done")
-        # transform1._on_success is None (non-terminal, correct)
-
         transform2 = AddFieldTransform("t2", "done")
-        transform2._on_success = "sink_b"  # Terminal transform declares sink
 
         sink_a = CollectSink(name="sink_a")
         sink_b = CollectSink(name="sink_b")
 
+        # Explicitly wire transforms to route to sink_b
+        wired = wire_transforms(
+            [as_transform(transform1), as_transform(transform2)],
+            source_connection="source_out",
+            final_sink="sink_b",
+        )
+
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[as_transform(transform1), as_transform(transform2)],
+            transforms=[t.plugin for t in wired],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
         )
 
+        from elspeth.core.config import SourceSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
+        graph = ExecutionGraph.from_plugin_instances(
+            source=config.source,
+            source_settings=source_settings,
+            transforms=wired,
+            sinks=config.sinks,
+            aggregations={},
+            gates=[],
+        )
+
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
         assert run_result.rows_processed == 1
 
-        # Row arrives at sink_b (terminal transform's on_success), not sink_a
+        # Row arrives at sink_b (wire_transforms final_sink), not sink_a
         assert len(sink_b.results) == 1
         assert len(sink_a.results) == 0

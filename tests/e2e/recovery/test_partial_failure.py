@@ -24,6 +24,7 @@ from elspeth.contracts import (
     RowOutcome,
     RunStatus,
 )
+from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.lineage import explain
@@ -42,6 +43,7 @@ from tests.fixtures.base_classes import (
     as_sink,
     as_source,
 )
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource
 
 # ---------------------------------------------------------------------------
@@ -89,20 +91,21 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
 
     Uses from_plugin_instances() for production-path fidelity.
     """
-    from elspeth.plugins.protocols import GateProtocol
-
     transforms = list(config.transforms)
-
-    # Set on_success on the terminal transform for explicit sink routing
     sink_name = next(iter(config.sinks))
-    for i in range(len(transforms) - 1, -1, -1):
-        if not isinstance(transforms[i], GateProtocol):
-            transforms[i]._on_success = sink_name  # type: ignore[attr-defined]
-            break
+
+    # Set source routing
+    source_connection = "source_out" if transforms else sink_name
+    config.source.on_success = source_connection
+    source_settings = SourceSettings(plugin=config.source.name, on_success=source_connection, options={})
+
+    # Wire transforms with explicit routing
+    wired = wire_transforms(transforms, source_connection=source_connection, final_sink=sink_name)
 
     graph = ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=transforms,
+        source_settings=source_settings,
+        transforms=wired,
         sinks=config.sinks,
         aggregations={},
         gates=[],

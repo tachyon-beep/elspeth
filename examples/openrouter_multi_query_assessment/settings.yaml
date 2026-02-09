@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/openrouter_multi_query_assessment/input.csv
     schema:
@@ -13,9 +14,11 @@ source:
       - 'cs2_symptoms: str'
       - 'cs2_history: str'
     on_validation_failure: discard
-    on_success: output
 transforms:
-- plugin: openrouter_multi_query_llm
+- name: openrouter_multi_query_llm_0
+  plugin: openrouter_multi_query_llm
+  input: source_out
+  on_success: output
   options:
     model: anthropic/claude-3-5-sonnet
     api_key: ${OPENROUTER_API_KEY}
@@ -118,7 +121,6 @@ transforms:
     max_tokens: 500
     schema:
       mode: observed
-    on_success: output
 sinks:
   output:
     plugin: csv

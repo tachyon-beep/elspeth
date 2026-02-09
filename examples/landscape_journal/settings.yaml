@@ -4,6 +4,7 @@ landscape:
   dump_to_jsonl_path: examples/landscape_journal/runs/audit.journal.jsonl
 source:
   plugin: json
+  on_success: source_out
   options:
     path: examples/landscape_journal/input.jsonl
     format: jsonl
@@ -13,13 +14,14 @@ source:
       fields:
       - 'id: int'
       - 'message: str'
-    on_success: output
 transforms:
-- plugin: passthrough
+- name: passthrough_0
+  plugin: passthrough
+  input: source_out
+  on_success: output
   options:
     schema:
       mode: observed
-    on_success: output
 sinks:
   output:
     plugin: json

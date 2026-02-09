@@ -138,14 +138,15 @@ def test_throughput_fork_pipeline() -> None:
 
     threshold_gate = GateSettings(
         name="threshold",
+        input="gate_in",
         condition="row['value'] >= 50",
-        routes={"true": "high", "false": "continue"},
+        routes={"true": "high", "false": "default"},
     )
 
     db = LandscapeDB.in_memory()
     payload_store = MockPayloadStore()
 
-    source = ListSource(rows, on_success="default")
+    source = ListSource(rows, on_success="gate_in")
     config = PipelineConfig(
         source=as_source(source),
         transforms=[],

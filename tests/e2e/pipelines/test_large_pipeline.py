@@ -12,12 +12,14 @@ from pathlib import Path
 from sqlalchemy import func, select
 
 from elspeth.contracts import RunStatus
+from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import rows_table, token_outcomes_table
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
 
 
@@ -29,14 +31,16 @@ class TestLargePipeline:
         # -- Arrange --
         source_data = [{"id": i, "value": f"item_{i}", "score": i * 0.1} for i in range(1000)]
 
-        source = ListSource(source_data)
+        source = ListSource(source_data, on_success="source_out")
+        source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
         transform = PassTransform()
-        transform._on_success = "default"
+        wired = wire_transforms([transform], source_connection="source_out", final_sink="default")
         sink = CollectSink()
 
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=source_settings,
+            transforms=wired,
             sinks={"default": sink},
             aggregations={},
             gates=[],
@@ -70,14 +74,16 @@ class TestLargePipeline:
         # -- Arrange --
         source_data = [{"id": i, "value": f"record_{i}"} for i in range(1000)]
 
-        source = ListSource(source_data)
+        source = ListSource(source_data, on_success="source_out")
+        source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
         transform = PassTransform()
-        transform._on_success = "default"
+        wired = wire_transforms([transform], source_connection="source_out", final_sink="default")
         sink = CollectSink()
 
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=source_settings,
+            transforms=wired,
             sinks={"default": sink},
             aggregations={},
             gates=[],

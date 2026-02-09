@@ -9,7 +9,7 @@ from enum import StrEnum
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import RoutingReason
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.types import NodeID, SinkName
 
 
 def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
@@ -162,7 +162,7 @@ class RouteDestination:
     """Resolved destination for a (gate_node_id, route_label) pair."""
 
     kind: RouteDestinationKind
-    sink_name: str | None = None
+    sink_name: SinkName | None = None
     next_node_id: NodeID | None = None
 
     def __post_init__(self) -> None:
@@ -193,7 +193,7 @@ class RouteDestination:
         return cls(kind=RouteDestinationKind.FORK)
 
     @classmethod
-    def sink(cls, sink_name: str) -> "RouteDestination":
+    def sink(cls, sink_name: SinkName) -> "RouteDestination":
         return cls(kind=RouteDestinationKind.SINK, sink_name=sink_name)
 
     @classmethod

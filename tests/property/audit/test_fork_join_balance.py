@@ -27,10 +27,11 @@ from sqlalchemy import text
 
 from elspeth.contracts import CoalesceName, GateName, RoutingAction, RoutingMode, SinkName
 from elspeth.contracts.enums import RowOutcome
-from elspeth.core.config import CoalesceSettings, GateSettings
+from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.base_classes import (
     as_sink,
     as_source,
@@ -192,21 +193,22 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     Auto-sets on_success on terminal transform for linear pipelines.
     """
     transforms = list(config.transforms)
-
-    # Set on_success on the terminal transform if not already set
-    if transforms:
-        from elspeth.plugins.protocols import GateProtocol
-
-        for i in range(len(transforms) - 1, -1, -1):
-            if not isinstance(transforms[i], GateProtocol):
-                if getattr(transforms[i], "_on_success", None) is None:
-                    sink_name = next(iter(config.sinks))
-                    transforms[i]._on_success = sink_name
-                break
+    sink_name = next(iter(config.sinks))
+    source_on_success = "source_out" if transforms else sink_name
+    wired_transforms = (
+        wire_transforms(
+            transforms,
+            source_connection=source_on_success,
+            final_sink=sink_name,
+        )
+        if transforms
+        else []
+    )
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=transforms,
+        source_settings=SourceSettings(plugin=config.source.name, on_success=source_on_success, options={}),
+        transforms=wired_transforms,
         sinks=config.sinks,
         aggregations={},
         gates=list(config.gates),
@@ -235,6 +237,7 @@ class TestDagForkBranchValidation:
         # Create a gate config that forks to a branch that doesn't exist
         gate = GateSettings(
             name="bad_fork_gate",
+            input="gate_in",
             condition="True",  # Always fork
             routes={"true": "fork", "false": "default"},  # Route to fork action
             fork_to=["unknown_branch"],  # No coalesce or sink with this name
@@ -247,6 +250,7 @@ class TestDagForkBranchValidation:
         with pytest.raises(GraphValidationError, match="unknown_branch"):
             ExecutionGraph.from_plugin_instances(
                 source=as_source(source),
+                source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
                 transforms=[],
                 sinks={"default": as_sink(sink)},  # No "unknown_branch" sink
                 gates=[gate],
@@ -258,6 +262,7 @@ class TestDagForkBranchValidation:
         """Fork branch targeting a sink is accepted."""
         gate = GateSettings(
             name="fork_to_sink_gate",
+            input="gate_in",
             condition="True",
             routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
@@ -270,6 +275,7 @@ class TestDagForkBranchValidation:
         # This should succeed - branches match sink names
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[gate],
@@ -295,6 +301,7 @@ class TestDagForkBranchValidation:
         """Fork branch targeting a coalesce is accepted."""
         gate = GateSettings(
             name="fork_to_coalesce_gate",
+            input="gate_in",
             condition="True",
             routes={"true": "fork", "false": "default"},
             fork_to=["branch_a", "branch_b"],
@@ -312,6 +319,7 @@ class TestDagForkBranchValidation:
         # This should succeed - branches match coalesce branches
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"default": as_sink(sink)},
             gates=[gate],
@@ -339,6 +347,7 @@ class TestDagForkBranchValidation:
         """Fork with duplicate branch names is rejected."""
         gate = GateSettings(
             name="dup_fork_gate",
+            input="gate_in",
             condition="True",
             routes={"true": "fork", "false": "default"},
             fork_to=["branch_a", "branch_a"],  # Duplicate!
@@ -351,6 +360,7 @@ class TestDagForkBranchValidation:
         with pytest.raises((GraphValidationError, ValueError), match=r"[Dd]uplicate"):
             ExecutionGraph.from_plugin_instances(
                 source=as_source(source),
+                source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
                 transforms=[],
                 sinks={"default": as_sink(sink)},
                 gates=[gate],
@@ -363,6 +373,7 @@ class TestDagForkBranchValidation:
         # Gate only produces branch_a, but coalesce expects both
         gate = GateSettings(
             name="partial_fork",
+            input="gate_in",
             condition="True",
             routes={"true": "fork", "false": "default"},
             fork_to=["branch_a"],  # Only one branch
@@ -379,6 +390,7 @@ class TestDagForkBranchValidation:
         with pytest.raises(GraphValidationError, match="branch_b"):
             ExecutionGraph.from_plugin_instances(
                 source=as_source(source),
+                source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
                 transforms=[],
                 sinks={"default": as_sink(sink)},
                 gates=[gate],
@@ -415,6 +427,7 @@ class TestForkJoinRuntimeBalance:
         # Gate that forks all rows to both sinks
         gate = GateSettings(
             name="fork_gate",
+            input="gate_in",
             condition="True",
             routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
@@ -429,6 +442,7 @@ class TestForkJoinRuntimeBalance:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[gate],
@@ -438,7 +452,7 @@ class TestForkJoinRuntimeBalance:
 
         # Settings needed for fork execution
         settings_obj = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "sink_a"}},
+            source={"plugin": "test", "on_success": "sink_a", "options": {}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
             gates=[gate],
         )
@@ -532,6 +546,7 @@ class TestForkJoinEdgeCases:
 
         gate = GateSettings(
             name="fork_gate",
+            input="gate_in",
             condition="True",
             routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
@@ -546,6 +561,7 @@ class TestForkJoinEdgeCases:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[gate],
@@ -556,7 +572,7 @@ class TestForkJoinEdgeCases:
         from elspeth.core.config import ElspethSettings
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "sink_a"}},
+            source={"plugin": "test", "on_success": "sink_a", "options": {}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
             gates=[gate],
         )
@@ -605,6 +621,7 @@ class TestForkRecoveryInvariant:
         # Gate that forks all rows to both sinks
         gate = GateSettings(
             name="fork_gate",
+            input="gate_in",
             condition="True",
             routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
@@ -619,6 +636,7 @@ class TestForkRecoveryInvariant:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[gate],
@@ -627,7 +645,7 @@ class TestForkRecoveryInvariant:
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "sink_a"}},
+            source={"plugin": "test", "on_success": "sink_a", "options": {}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
             gates=[gate],
         )

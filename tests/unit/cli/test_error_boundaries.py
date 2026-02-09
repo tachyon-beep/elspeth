@@ -112,10 +112,10 @@ class TestDatabaseConnectionErrors:
         settings = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -170,10 +170,10 @@ class TestDatabaseConnectionErrors:
         settings = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -214,10 +214,10 @@ class TestSourceFileErrors:
         settings = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(missing_file),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -256,10 +256,10 @@ class TestSourceFileErrors:
         settings = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -300,10 +300,10 @@ class TestExitCodeConsistency:
         settings = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -351,10 +351,10 @@ sinks:
         settings = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(tmp_path / "missing.csv"),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -405,10 +405,10 @@ class TestJsonModeErrors:
         settings = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(tmp_path / "missing.csv"),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },

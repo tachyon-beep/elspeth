@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from elspeth.contracts import RunStatus
+from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -18,6 +19,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.json_source import JSONSource
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import PassTransform
 
 
@@ -45,11 +47,12 @@ class TestJSONToJSON:
                 "path": str(input_json),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "default",
             }
         )
+        source.on_success = "json_out"
+        source_settings = SourceSettings(plugin=source.name, on_success="json_out", options={})
         transform = PassTransform()
-        transform._on_success = "default"
+        wired = wire_transforms([transform], source_connection="json_out", final_sink="default")
         sink = JSONSink(
             {
                 "path": str(output_json),
@@ -60,7 +63,8 @@ class TestJSONToJSON:
         # Build graph via production path (BUG-LINEAGE-01)
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=source_settings,
+            transforms=wired,
             sinks={"default": sink},
             aggregations={},
             gates=[],
@@ -152,11 +156,12 @@ class TestJSONToJSON:
                     ],
                 },
                 "on_validation_failure": "discard",
-                "on_success": "default",
             }
         )
+        source.on_success = "json_out"
+        source_settings = SourceSettings(plugin=source.name, on_success="json_out", options={})
         transform = PassTransform()
-        transform._on_success = "default"
+        wired = wire_transforms([transform], source_connection="json_out", final_sink="default")
         sink = JSONSink(
             {
                 "path": str(output_json),
@@ -166,7 +171,8 @@ class TestJSONToJSON:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=source_settings,
+            transforms=wired,
             sinks={"default": sink},
             aggregations={},
             gates=[],

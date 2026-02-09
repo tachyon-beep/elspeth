@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import TriggerType
@@ -50,9 +50,8 @@ def _route_aggregation_outcome(
         pending_tokens: Dict of sink_name -> tokens to append results to
         checkpoint_callback: Optional callback after successful routing
     """
-    if result.sink_name is None:
-        raise RuntimeError("Aggregation outcome requires sink_name for routing")
-    pending_tokens[result.sink_name].append((result.token, PendingOutcome(result.outcome)))
+    sink_name = cast(str, result.sink_name)
+    pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
 
     if checkpoint_callback is not None:
         checkpoint_callback(result.token)
@@ -244,19 +243,16 @@ def check_aggregation_timeouts(
                     rows_succeeded += 1
                 elif result.outcome == RowOutcome.ROUTED:
                     rows_routed += 1
-                    routed_sink = result.sink_name
-                    if routed_sink is None:
-                        raise RuntimeError("ROUTED outcome requires sink_name")
+                    routed_sink = cast(str, result.sink_name)
                     routed_destinations[routed_sink] += 1
                     pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                 elif result.outcome == RowOutcome.QUARANTINED:
                     rows_quarantined += 1
                 elif result.outcome == RowOutcome.COALESCED:
-                    if result.sink_name is None:
-                        raise RuntimeError("COALESCED outcome requires sink_name")
+                    sink_name = cast(str, result.sink_name)
                     rows_coalesced += 1
                     rows_succeeded += 1
-                    pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+                    pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                 elif result.outcome == RowOutcome.FORKED:
                     rows_forked += 1
                 elif result.outcome == RowOutcome.EXPANDED:
@@ -373,9 +369,7 @@ def flush_remaining_aggregation_buffers(
                     rows_succeeded += 1
                 elif result.outcome == RowOutcome.ROUTED:
                     rows_routed += 1
-                    routed_sink = result.sink_name
-                    if routed_sink is None:
-                        raise RuntimeError("ROUTED outcome requires sink_name")
+                    routed_sink = cast(str, result.sink_name)
                     routed_destinations[routed_sink] += 1
                     pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                     if checkpoint_callback is not None:
@@ -383,11 +377,10 @@ def flush_remaining_aggregation_buffers(
                 elif result.outcome == RowOutcome.QUARANTINED:
                     rows_quarantined += 1
                 elif result.outcome == RowOutcome.COALESCED:
-                    if result.sink_name is None:
-                        raise RuntimeError("COALESCED outcome requires sink_name")
+                    sink_name = cast(str, result.sink_name)
                     rows_coalesced += 1
                     rows_succeeded += 1
-                    pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+                    pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                     if checkpoint_callback is not None:
                         checkpoint_callback(result.token)
                 elif result.outcome == RowOutcome.FORKED:

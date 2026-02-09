@@ -1,5 +1,6 @@
 source:
   plugin: json
+  on_success: source_out
   options:
     path: examples/json_explode/input.json
     schema:
@@ -8,16 +9,17 @@ source:
       - 'order_id: int'
       - 'items: any'
     on_validation_failure: discard
-    on_success: output
 transforms:
-- plugin: json_explode
+- name: json_explode_0
+  plugin: json_explode
+  input: source_out
+  on_success: output
   options:
     array_field: items
     output_field: item
     include_index: true
     schema:
       mode: observed
-    on_success: output
 sinks:
   output:
     plugin: json

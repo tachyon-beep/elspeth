@@ -43,10 +43,10 @@ landscape:
   url: sqlite:///./state/audit.db
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
     on_validation_failure: discard
-    on_success: output
 sinks:
   output:
     plugin: csv
@@ -67,10 +67,10 @@ sinks:
         settings_file.write_text("""
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
     on_validation_failure: discard
-    on_success: output
 sinks:
   output:
     plugin: csv
@@ -95,10 +95,10 @@ landscape:
   url: sqlite:///./state/audit.db
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
     on_validation_failure: discard
-    on_success: output
 sinks:
   output:
     plugin: csv
@@ -130,10 +130,10 @@ landscape:
   url: sqlite:///./state/audit.db
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
     on_validation_failure: discard
-    on_success: output
 sinks:
   output:
     plugin: csv

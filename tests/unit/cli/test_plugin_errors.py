@@ -19,6 +19,7 @@ def test_unknown_source_plugin_error():
     config_yaml = """
 source:
   plugin: nonexistent_source  # Unknown plugin
+  on_success: output
   options:
     path: test.csv
 
@@ -54,9 +55,10 @@ def test_unknown_transform_plugin_error():
     config_dict = {
         "source": {
             "plugin": "csv",
-            "options": {"path": "test.csv", "schema": {"mode": "observed"}, "on_validation_failure": "discard", "on_success": "out"},
+            "on_success": "t0_in",
+            "options": {"path": "test.csv", "schema": {"mode": "observed"}, "on_validation_failure": "discard"},
         },
-        "transforms": [{"plugin": "nonexistent_transform", "options": {}}],
+        "transforms": [{"plugin": "nonexistent_transform", "name": "t0", "input": "t0_in", "on_success": "out", "options": {}}],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["data: str"]}}}},
     }
 
@@ -79,6 +81,7 @@ def test_plugin_initialization_error():
     config_yaml = """
 source:
   plugin: csv
+  on_success: output
   options:
     # Missing required 'path' option
     schema: {mode: observed}
@@ -122,11 +125,11 @@ def test_schema_extraction_from_instance():
     config_dict = {
         "source": {
             "plugin": "csv",
+            "on_success": "out",
             "options": {
                 "path": "test.csv",
                 "schema": {"mode": "fixed", "fields": ["value: float"]},
                 "on_validation_failure": "discard",
-                "on_success": "out",
             },
         },
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}}}},
@@ -152,6 +155,7 @@ def test_fork_join_validation():
     config_yaml = """
 source:
   plugin: csv
+  on_success: split_in
   options:
     path: test.csv
     schema:
@@ -159,10 +163,10 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
-    on_success: output
 
 gates:
   - name: split
+    input: split_in
     condition: "row['value'] > 50"
     routes:
       "true": fork
@@ -170,14 +174,6 @@ gates:
     fork_to:
       - branch_high
       - branch_low
-
-transforms:
-  - plugin: passthrough
-    options:
-      schema:
-        mode: fixed
-        fields:
-          - "value: float"
 
 coalesce:
   - name: merge
@@ -214,7 +210,7 @@ sinks:
     try:
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should pass validation - fork/join pattern with compatible schemas
-        assert result.exit_code == 0
+        assert result.exit_code == 0, f"Validation failed: {result.output}"
         # Use exact phrase to avoid matching "invalid"
         assert "pipeline configuration valid" in result.output.lower(), (
             f"Expected 'Pipeline configuration valid' in output, got: {result.output}"
@@ -236,6 +232,7 @@ def test_fork_to_separate_sinks_without_coalesce():
     config_yaml = """
 source:
   plugin: csv
+  on_success: split_in
   options:
     path: test.csv
     schema:
@@ -243,10 +240,10 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
-    on_success: output
 
 gates:
   - name: split
+    input: split_in
     condition: "row['value'] > 50"
     routes:
       "true": fork
@@ -325,6 +322,7 @@ def test_coalesce_compatible_branch_schemas():
     config_yaml = """
 source:
   plugin: csv
+  on_success: split_in
   options:
     path: test.csv
     schema:
@@ -332,10 +330,10 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
-    on_success: output
 
 gates:
   - name: split
+    input: split_in
     condition: "row['value'] > 50"
     routes:
       "true": fork
@@ -343,14 +341,6 @@ gates:
     fork_to:
       - branch_high
       - branch_low
-
-transforms:
-  - plugin: passthrough
-    options:
-      schema:
-        mode: fixed
-        fields:
-          - "value: float"
 
 # Simulate branches producing different schemas
 # (In reality this would require different transform chains per branch)
@@ -407,11 +397,11 @@ def test_dynamic_schema_to_specific_schema_validation():
     config_yaml_dynamic_to_specific = """
 source:
   plugin: csv
+  on_success: output
   options:
     path: test.csv
     schema: {mode: observed}  # Dynamic schema
     on_validation_failure: discard
-    on_success: output
 
 sinks:
   output:
@@ -442,6 +432,7 @@ sinks:
     config_yaml_mixed = """
 source:
   plugin: csv
+  on_success: t0_in
   options:
     path: test.csv
     schema:
@@ -449,12 +440,13 @@ source:
       fields:
         - "value: float"  # Specific
     on_validation_failure: discard
-    on_success: output
 
 transforms:
   - plugin: passthrough
+    name: t0
+    input: t0_in
+    on_success: output
     options:
-      on_success: output
       schema: {mode: observed}  # Dynamic transform
 
 sinks:

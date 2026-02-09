@@ -2,6 +2,7 @@ landscape:
   url: sqlite:///examples/template_lookups/runs/audit.db
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/template_lookups/input.csv
     on_validation_failure: discard
@@ -13,7 +14,6 @@ source:
       - 'priority_id: str'
       - 'subject: str'
       - 'body: str'
-    on_success: output
 sinks:
   output:
     plugin: json
@@ -23,7 +23,10 @@ sinks:
         mode: observed
       format: jsonl
 transforms:
-- plugin: openrouter_llm
+- name: openrouter_llm_0
+  plugin: openrouter_llm
+  input: source_out
+  on_success: output
   options:
     model: anthropic/claude-3-haiku
     api_key: ${OPENROUTER_API_KEY}
@@ -47,4 +50,3 @@ transforms:
     - body
     schema:
       mode: observed
-    on_success: output

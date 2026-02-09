@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: batch_in
   options:
     path: examples/batch_aggregation/input.csv
     schema:
@@ -11,15 +12,15 @@ source:
       - 'amount: int'
       - 'region: str'
     on_validation_failure: discard
-    on_success: output
 aggregations:
 - name: batch_totals
   plugin: batch_stats
+  input: batch_in
+  on_success: output
   trigger:
     count: 5
   output_mode: transform
   options:
-    on_success: output
     schema:
       mode: observed
     value_field: amount

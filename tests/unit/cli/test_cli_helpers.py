@@ -6,6 +6,7 @@ import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.core.config import load_settings
+from elspeth.core.dag import WiredTransform
 from elspeth.plugins.base import BaseSink, BaseSource, BaseTransform
 
 
@@ -14,17 +15,19 @@ def test_instantiate_plugins_from_config(tmp_path: Path):
     config_yaml = """
 source:
   plugin: csv
+  on_success: pass1
   options:
     path: test.csv
-    on_success: output
     schema:
       mode: observed
     on_validation_failure: discard
 
 transforms:
-  - plugin: passthrough
+  - name: pass1
+    plugin: passthrough
+    input: pass1
+    on_success: output
     options:
-      on_success: output
       schema:
         mode: observed
 
@@ -54,17 +57,19 @@ sinks:
     # Verify types
     assert isinstance(plugins["source"], BaseSource)
     assert len(plugins["transforms"]) == 1
-    assert isinstance(plugins["transforms"][0], BaseTransform)
+    wired = plugins["transforms"][0]
+    assert isinstance(wired, WiredTransform)
+    assert isinstance(wired.plugin, BaseTransform)
     assert "output" in plugins["sinks"]
     assert isinstance(plugins["sinks"]["output"], BaseSink)
 
     # CRITICAL: Verify schemas NOT None
     assert plugins["source"].output_schema is not None
-    assert plugins["transforms"][0].input_schema is not None
+    assert wired.plugin.input_schema is not None
 
     # Verify plugin identity (not just type) - plugins must have correct name
     assert plugins["source"].name == "csv", f"Expected source plugin 'csv', got '{plugins['source'].name}'"
-    assert plugins["transforms"][0].name == "passthrough", f"Expected transform plugin 'passthrough', got '{plugins['transforms'][0].name}'"
+    assert wired.plugin.name == "passthrough", f"Expected transform plugin 'passthrough', got '{wired.plugin.name}'"
     assert plugins["sinks"]["output"].name == "csv", f"Expected sink plugin 'csv', got '{plugins['sinks']['output'].name}'"
 
     # Verify config propagation - options must be preserved in plugin.config
@@ -85,7 +90,7 @@ def test_instantiate_plugins_raises_on_invalid_plugin():
     from elspeth.core.config import ElspethSettings
 
     config_dict = {
-        "source": {"plugin": "nonexistent", "options": {}},
+        "source": {"plugin": "nonexistent", "on_success": "out", "options": {}},
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
     }
 
@@ -107,9 +112,9 @@ def test_aggregation_rejects_non_batch_aware_transform(tmp_path: Path):
     config_yaml = """
 source:
   plugin: csv
+  on_success: my_batch
   options:
     path: test.csv
-    on_success: output
     schema:
       mode: observed
     on_validation_failure: discard
@@ -117,6 +122,8 @@ source:
 aggregations:
   - name: my_batch
     plugin: passthrough
+    input: my_batch
+    on_success: output
     options:
       schema:
         mode: observed
@@ -158,9 +165,9 @@ def test_aggregation_accepts_batch_aware_transform(tmp_path: Path):
     config_yaml = """
 source:
   plugin: csv
+  on_success: stats_batch
   options:
     path: test.csv
-    on_success: output
     schema:
       mode: observed
     on_validation_failure: discard
@@ -168,6 +175,8 @@ source:
 aggregations:
   - name: stats_batch
     plugin: batch_stats
+    input: stats_batch
+    on_success: output
     options:
       schema:
         mode: observed
@@ -201,11 +210,11 @@ sinks:
 
 
 def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
-    """Transforms missing is_batch_aware attribute should be rejected.
+    """Transforms with is_batch_aware=False should be rejected for aggregation.
 
-    The validation uses getattr(transform, 'is_batch_aware', False) which
-    should default to False for transforms that don't define the attribute.
-    This tests the fallback behavior.
+    The validation checks transform.is_batch_aware directly (plugins are
+    system-owned code, so the attribute always exists). This tests the
+    rejection of non-batch-aware transforms via the mock path.
     """
     from unittest.mock import MagicMock, patch
 
@@ -213,9 +222,9 @@ def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
 
     from elspeth.core.config import ElspethSettings
 
-    # Create a mock transform class that doesn't have is_batch_aware
+    # Create a mock transform that explicitly declares is_batch_aware=False
     mock_transform = MagicMock()
-    del mock_transform.is_batch_aware  # Ensure attribute doesn't exist
+    mock_transform.is_batch_aware = False
     mock_transform.name = "mock_transform"
 
     # Mock the plugin manager to return our broken transform
@@ -225,8 +234,8 @@ def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
     mock_manager.get_sink_by_name.return_value = MagicMock(return_value=MagicMock())
 
     config_dict = {
-        "source": {"plugin": "csv", "options": {"path": "t.csv", "on_success": "out", "on_validation_failure": "discard"}},
-        "aggregations": [{"name": "broken_agg", "plugin": "mock", "options": {}, "trigger": {"count": 5}}],
+        "source": {"plugin": "csv", "on_success": "broken_agg", "options": {"path": "t.csv", "on_validation_failure": "discard"}},
+        "aggregations": [{"name": "broken_agg", "plugin": "mock", "input": "broken_agg", "on_success": "out", "options": {}, "trigger": {"count": 5}}],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
     }
 

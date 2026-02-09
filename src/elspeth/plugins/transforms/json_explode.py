@@ -29,7 +29,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.config_base import DataPluginConfig
+from elspeth.plugins.config_base import DataPluginConfig, PluginConfigError
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -42,22 +42,18 @@ class JSONExplodeConfig(DataPluginConfig):
 
     Extends DataPluginConfig (not TransformDataConfig) because JSONExplode
     has no on_error behavior -- type violations crash to surface upstream bugs.
-    However, on_success IS needed for terminal position routing.
+    Routing fields such as on_success are owned by TransformSettings at the
+    pipeline settings layer, not plugin options.
 
     Attributes:
         array_field: Name of the array field to explode (required)
         output_field: Name for the exploded element (default: "item")
         include_index: Whether to include item_index field (default: True)
-        on_success: Sink name for terminal transforms (optional)
     """
 
     array_field: str = Field(..., description="Name of the array field to explode")
     output_field: str = Field(default="item", description="Name for the exploded element")
     include_index: bool = Field(default=True, description="Whether to include item_index field")
-    on_success: str | None = Field(
-        default=None,
-        description="Sink name for successfully processed rows. Required for terminal transforms.",
-    )
 
 
 class JSONExplode(BaseTransform):
@@ -103,6 +99,11 @@ class JSONExplode(BaseTransform):
         Raises:
             PluginConfigError: If required config is missing or invalid
         """
+        if "on_success" in config:
+            raise PluginConfigError(
+                "JSONExplode does not accept 'on_success' in plugin options. "
+                "Set routing at the settings layer with transforms[].on_success."
+            )
         super().__init__(config)
         cfg = JSONExplodeConfig.from_dict(config)
         self._array_field = cfg.array_field

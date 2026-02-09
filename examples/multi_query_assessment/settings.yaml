@@ -2,6 +2,7 @@ name: case_study_assessment
 description: Assess multiple case studies against multiple criteria
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/multi_query_assessment/input.csv
     schema:
@@ -15,9 +16,11 @@ source:
       - 'cs2_symptoms: str'
       - 'cs2_history: str'
     on_validation_failure: discard
-    on_success: results
 transforms:
-- plugin: azure_multi_query_llm
+- name: azure_multi_query_llm_0
+  plugin: azure_multi_query_llm
+  input: source_out
+  on_success: results
   options:
     deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
     endpoint: ${AZURE_OPENAI_ENDPOINT}
@@ -121,7 +124,6 @@ transforms:
     max_tokens: 500
     schema:
       mode: observed
-    on_success: results
 sinks:
   results:
     plugin: csv

@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: gate_in
   options:
     path: examples/large_scale_test/input.csv
     schema:
@@ -11,9 +12,9 @@ source:
       - 'priority: int'
       - 'timestamp: str'
     on_validation_failure: discard
-    on_success: output
 gates:
 - name: value_threshold
+  input: gate_in
   condition: row['value'] >= 5000
   routes:
     'true': high_value

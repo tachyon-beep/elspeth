@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: gate_in
   options:
     path: examples/boolean_routing/input.csv
     schema:
@@ -9,9 +10,9 @@ source:
       - 'message: str'
       - 'approved: str'
     on_validation_failure: discard
-    on_success: rejected
 gates:
 - name: approval_check
+  input: gate_in
   condition: row['approved'] == 'true'
   routes:
     'true': approved

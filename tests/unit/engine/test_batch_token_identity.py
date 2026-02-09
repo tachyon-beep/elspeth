@@ -153,6 +153,7 @@ class TestBatchTokenIdentity:
             NodeID(agg_node.node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
+                input="default",
                 trigger=TriggerConfig(count=3),  # Batch of 3
                 output_mode="transform",
             ),
@@ -245,6 +246,7 @@ class TestBatchTokenIdentity:
             NodeID(agg_node.node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
+                input="default",
                 trigger=TriggerConfig(count=2),  # Batch of 2
                 output_mode="transform",
             ),
@@ -339,6 +341,7 @@ class TestBatchTokenIdentity:
             NodeID(agg_node.node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
+                input="default",
                 trigger=TriggerConfig(count=3),  # Batch of 3
                 output_mode="transform",
             ),

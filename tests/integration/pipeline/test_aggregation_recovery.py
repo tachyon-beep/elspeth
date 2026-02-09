@@ -558,6 +558,7 @@ class TestAggregationRecoveryIntegration:
             NodeID("sum_aggregator"): AggregationSettings(
                 name="sum_aggregator",
                 plugin="test_aggregation",
+                input="source_out",
                 trigger=trigger_config,
                 output_mode="transform",
                 options={},

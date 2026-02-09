@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/azure_openai_sentiment/input.csv
     schema:
@@ -8,9 +9,11 @@ source:
       - 'id: int'
       - 'text: str'
     on_validation_failure: discard
-    on_success: output
 transforms:
-- plugin: azure_llm
+- name: azure_llm_0
+  plugin: azure_llm
+  input: source_out
+  on_success: output
   options:
     deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
     endpoint: ${AZURE_OPENAI_ENDPOINT}
@@ -31,7 +34,6 @@ transforms:
     response_field: sentiment_analysis
     schema:
       mode: observed
-    on_success: output
 sinks:
   output:
     plugin: json

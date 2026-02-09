@@ -27,6 +27,7 @@ def test_compatible_pipeline_passes_validation():
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: test_input.csv
     schema:
@@ -34,16 +35,17 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
-    on_success: output
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    plugin: passthrough
+    input: source_out
+    on_success: output
     options:
       schema:
         mode: fixed
         fields:
           - "value: float"
-      on_success: output
 
 sinks:
   output:
@@ -76,6 +78,7 @@ def test_transform_chain_incompatibility_detected():
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: test_input.csv
     schema:
@@ -83,22 +86,26 @@ source:
       fields:
         - "field_a: str"
     on_validation_failure: discard
-    on_success: output
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    plugin: passthrough
+    input: source_out
+    on_success: t0_out
     options:
       schema:
         mode: fixed
         fields:
           - "field_a: str"
-  - plugin: passthrough
+  - name: passthrough_1
+    plugin: passthrough
+    input: t0_out
+    on_success: output
     options:
       schema:
         mode: fixed
         fields:
           - "field_b: int"  # INCOMPATIBLE: requires field_b, gets field_a
-      on_success: output
 
 sinks:
   output:
@@ -136,6 +143,7 @@ def test_aggregation_output_incompatibility_detected():
     config_yaml = """
 source:
   plugin: csv
+  on_success: stats_input
   options:
     path: test_input.csv
     schema:
@@ -143,11 +151,12 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
-    on_success: output
 
 aggregations:
   - name: stats
     plugin: batch_stats
+    input: stats_input
+    on_success: output
     trigger:
       count: 10
     options:
@@ -156,7 +165,6 @@ aggregations:
         fields:
           - "value: float"
       value_field: value
-      on_success: output
 
 sinks:
   output:
@@ -190,17 +198,19 @@ def test_dynamic_schemas_skip_validation():
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: test_input.csv
     schema: {mode: observed}  # Dynamic schema
     on_validation_failure: discard
-    on_success: output
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    plugin: passthrough
+    input: source_out
+    on_success: output
     options:
       schema: {mode: observed}
-      on_success: output
 
 sinks:
   output:
@@ -231,6 +241,7 @@ def test_aggregation_incoming_edge_uses_input_schema():
     config_yaml = """
 source:
   plugin: csv
+  on_success: stats_input
   options:
     path: test.csv
     schema:
@@ -238,11 +249,12 @@ source:
       fields:
         - "wrong_field: str"  # Aggregation expects 'value', not 'wrong_field'
     on_validation_failure: discard
-    on_success: output
 
 aggregations:
   - name: stats
     plugin: batch_stats
+    input: stats_input
+    on_success: output
     trigger:
       count: 10
     options:
@@ -251,7 +263,6 @@ aggregations:
         fields:
           - "value: float"  # Requires 'value' field
       value_field: value
-      on_success: output
 
 sinks:
   output:
@@ -290,6 +301,7 @@ def test_aggregation_outgoing_edge_uses_output_schema():
     config_yaml = """
 source:
   plugin: csv
+  on_success: stats_input
   options:
     path: test.csv
     schema:
@@ -297,11 +309,12 @@ source:
       fields:
         - "value: float"
     on_validation_failure: discard
-    on_success: output
 
 aggregations:
   - name: stats
     plugin: batch_stats
+    input: stats_input
+    on_success: output
     trigger:
       count: 10
     options:
@@ -310,7 +323,6 @@ aggregations:
         fields:
           - "value: float"
       value_field: value
-      on_success: output
     # Outputs: count, sum, mean, etc. (dynamic schema)
 
 sinks:
@@ -364,19 +376,21 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     good_self_bad_compat_config = {
         "source": {
             "plugin": "csv",
+            "on_success": "source_out",
             "options": {
                 "path": "test.csv",
                 "schema": {"mode": "fixed", "fields": ["id: int"]},  # Only has 'id'
                 "on_validation_failure": "discard",
-                "on_success": "out",
             },
         },
         "transforms": [
             {
+                "name": "passthrough_0",
                 "plugin": "passthrough",
+                "input": "source_out",
+                "on_success": "out",
                 "options": {
                     "schema": {"mode": "fixed", "fields": ["id: int", "email: str"]},  # Requires 'email'!
-                    "on_success": "out",
                 },
             }
         ],
@@ -398,6 +412,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     with pytest.raises(ValueError, match=r"Missing fields.*email"):
         ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],

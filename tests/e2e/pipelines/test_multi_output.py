@@ -38,6 +38,7 @@ class TestMultiOutput:
         # Config-driven gate: route by category field
         category_gate = GateSettings(
             name="category_router",
+            input="source_out",
             condition="row['category'] == 'A'",
             routes={"true": "sink_a", "false": "sink_b"},
         )
@@ -88,6 +89,7 @@ class TestMultiOutput:
 
         category_gate = GateSettings(
             name="category_router",
+            input="source_out",
             condition="row['category'] == 'A'",
             routes={"true": "sink_a", "false": "sink_b"},
         )

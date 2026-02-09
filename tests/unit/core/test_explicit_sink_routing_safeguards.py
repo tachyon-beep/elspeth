@@ -21,9 +21,12 @@ import pytest
 
 from elspeth.contracts import RunStatus
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.core.config import SourceSettings, TransformSettings
+from elspeth.core.dag import WiredTransform
 from elspeth.plugins.base import BaseTransform
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -181,48 +184,69 @@ class TestOnSuccessConfigAlignment:
         assert transform.on_success == "my_sink"
 
     def test_config_on_success_parsed_into_transform(self) -> None:
-        """TransformDataConfig.on_success is accepted by Pydantic and validated."""
-        from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
+        """TransformSettings.on_success is accepted by Pydantic and validated.
 
-        cfg = TransformDataConfig(
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        Note: on_success was lifted from TransformDataConfig (options layer)
+        to TransformSettings (settings level) as part of Phase 3 DAG wiring.
+        """
+        cfg = TransformSettings(
+            name="test_transform",
+            plugin="passthrough",
+            input="source_out",
             on_success="output_sink",
         )
         assert cfg.on_success == "output_sink"
 
     def test_config_on_success_rejects_empty_string(self) -> None:
         """Empty on_success string is rejected by validator."""
-        from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
-
-        with pytest.raises(ValueError, match="on_success must be a sink name"):
-            TransformDataConfig(
-                schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        with pytest.raises(ValueError, match="on_success must be a connection name"):
+            TransformSettings(
+                name="test_transform",
+                plugin="passthrough",
+                input="source_out",
                 on_success="   ",
             )
 
     def test_config_on_success_none_is_valid_for_nonterminal(self) -> None:
         """None on_success is valid (non-terminal transform)."""
-        from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
-
-        cfg = TransformDataConfig(schema_config=SchemaConfig.from_dict({"mode": "observed"}))
+        cfg = TransformSettings(
+            name="test_transform",
+            plugin="passthrough",
+            input="source_out",
+        )
         assert cfg.on_success is None
 
     def test_dag_validates_terminal_transform_has_on_success(self) -> None:
-        """DAG construction fails if terminal transform has no on_success."""
+        """DAG construction fails if terminal transform has no on_success.
+
+        In the new WiredTransform model, on_success=None on the terminal
+        transform produces a dangling connection (no consumer, not a sink).
+        The DAG builder catches this as a dangling output connection.
+        """
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
-        source = ListSource([{"value": 1}], on_success="output")
+        source = ListSource([{"value": 1}], on_success="source_out")
         transform = _OnSuccessTracingTransform()
         # Deliberately NOT setting on_success — terminal transform without it
         sink = CollectSink(name="output")
 
-        with pytest.raises(GraphValidationError, match="on_success"):
+        source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
+        # Create WiredTransform with on_success=None (dangling — no route to sink)
+        wired = WiredTransform(
+            plugin=transform,
+            settings=TransformSettings(
+                name="tracer_0",
+                plugin=transform.name,
+                input="source_out",
+                on_success=None,  # Deliberately omitted
+            ),
+        )
+
+        with pytest.raises(GraphValidationError, match="Dangling output connections"):
             ExecutionGraph.from_plugin_instances(
                 source=source,
-                transforms=[transform],
+                source_settings=source_settings,
+                transforms=[wired],
                 sinks={"output": sink},
                 aggregations={},
                 gates=[],
@@ -233,24 +257,44 @@ class TestOnSuccessConfigAlignment:
 
         This test ensures that the production graph assembly path raises
         GraphValidationError when a terminal transform is missing on_success,
-        without relying on _set_terminal_on_success() to paper over the gap.
-        The test uses raw plugin instances — no fixture helpers that auto-set
-        on_success — to guarantee the production path catches omissions.
+        without relying on wire_transforms() to paper over the gap.
+        The test uses raw WiredTransform instances — no fixture helpers that
+        auto-set on_success — to guarantee the production path catches omissions.
         """
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
-        source = ListSource([{"x": 1}], on_success="out")
+        source = ListSource([{"x": 1}], on_success="source_out")
         # Create two transforms; terminal (last) has no on_success
         t1 = _OnSuccessTracingTransform()
-        # t1 is non-terminal: no on_success required
         t2 = _OnSuccessTracingTransform()
-        # t2 IS terminal but we deliberately omit on_success
         sink = CollectSink(name="out")
 
-        with pytest.raises(GraphValidationError, match="on_success"):
+        source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
+        wired_t1 = WiredTransform(
+            plugin=t1,
+            settings=TransformSettings(
+                name="tracer_0",
+                plugin=t1.name,
+                input="source_out",
+                on_success="conn_0_1",
+            ),
+        )
+        # t2 IS terminal but we deliberately omit on_success
+        wired_t2 = WiredTransform(
+            plugin=t2,
+            settings=TransformSettings(
+                name="tracer_1",
+                plugin=t2.name,
+                input="conn_0_1",
+                on_success=None,  # Deliberately omitted — should cause error
+            ),
+        )
+
+        with pytest.raises(GraphValidationError, match="Dangling output connections"):
             ExecutionGraph.from_plugin_instances(
                 source=source,
-                transforms=[t1, t2],
+                source_settings=source_settings,
+                transforms=[wired_t1, wired_t2],
                 sinks={"out": sink},
                 aggregations={},
                 gates=[],
@@ -258,15 +302,32 @@ class TestOnSuccessConfigAlignment:
 
     def test_multiple_sinks_routes_to_correct_one(self, payload_store) -> None:
         """With multiple sinks, rows route to the on_success-declared sink."""
+        from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-        source = ListSource([{"value": 1}], on_success="sink_b")
+        source = ListSource([{"value": 1}], on_success="source_out")
         transform = _OnSuccessTracingTransform()
         transform._on_success = "sink_b"
         sink_a = CollectSink(name="sink_a")
         sink_b = CollectSink(name="sink_b")
+
+        source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
+        wired = wire_transforms(
+            [transform],
+            source_connection="source_out",
+            final_sink="sink_b",
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            source_settings=source_settings,
+            transforms=wired,
+            sinks={"sink_a": sink_a, "sink_b": sink_b},
+            aggregations={},
+            gates=[],
+        )
 
         config = PipelineConfig(
             source=as_source(source),
@@ -275,7 +336,7 @@ class TestOnSuccessConfigAlignment:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
         assert len(sink_a.results) == 0

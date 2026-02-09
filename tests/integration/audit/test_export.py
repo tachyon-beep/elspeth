@@ -46,10 +46,10 @@ class TestLandscapeExport:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -167,10 +167,10 @@ class TestLandscapeExport:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -316,10 +316,10 @@ class TestSignedExportDeterminism:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "output",
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
-                    "on_success": "output",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -389,10 +389,10 @@ class TestSignedExportDeterminism:
             config = {
                 "source": {
                     "plugin": "csv",
+                    "on_success": "output",
                     "options": {
                         "path": str(input_csv),
                         "on_validation_failure": "discard",
-                        "on_success": "output",
                         "schema": {"mode": "observed"},
                     },
                 },

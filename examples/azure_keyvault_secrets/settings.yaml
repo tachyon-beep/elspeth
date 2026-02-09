@@ -7,13 +7,15 @@ secrets:
     ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: ./input/data.csv
-    on_success: output
 transforms:
-- plugin: passthrough
+- name: passthrough_0
+  plugin: passthrough
+  input: source_out
+  on_success: output
   options:
-    on_success: output
 sinks:
   output:
     plugin: csv

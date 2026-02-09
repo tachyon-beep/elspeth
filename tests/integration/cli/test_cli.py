@@ -33,10 +33,10 @@ class TestCLIIntegration:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "default",
                 "options": {
                     "path": str(sample_csv),
                     "on_validation_failure": "discard",
-                    "on_success": "default",
                     "schema": {"mode": "observed"},
                 },
             },
@@ -147,10 +147,10 @@ class TestSourceQuarantineRouting:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "default",
                 "options": {
                     "path": str(csv_with_invalid_rows),
                     "on_validation_failure": "quarantine",  # Route to quarantine sink
-                    "on_success": "default",
                     "schema": {
                         "mode": "fixed",
                         "fields": ["id: int", "name: str", "score: int"],
@@ -211,10 +211,10 @@ class TestSourceQuarantineRouting:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "default",
                 "options": {
                     "path": str(csv_with_invalid_rows),
                     "on_validation_failure": "discard",  # Intentionally drop
-                    "on_success": "default",
                     "schema": {
                         "mode": "fixed",
                         "fields": ["id: int", "name: str", "score: int"],
@@ -261,17 +261,21 @@ class TestTransformErrorSinkRouting:
         config = {
             "source": {
                 "plugin": "csv",
+                "on_success": "passthrough_input",
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
-                    "on_success": "default",
                     "schema": {"mode": "observed"},
                 },
             },
             "transforms": [
                 {
+                    "name": "passthrough_0",
                     "plugin": "passthrough",
-                    "options": {"on_error": "errors", "on_success": "default", "schema": {"mode": "observed"}},
+                    "input": "passthrough_input",
+                    "on_success": "default",
+                    "on_error": "errors",
+                    "options": {"schema": {"mode": "observed"}},
                 },
             ],
             "sinks": {

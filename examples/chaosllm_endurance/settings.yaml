@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/chaosllm_endurance/input.csv
     schema:
@@ -13,9 +14,12 @@ source:
       - 'cs2_symptoms: str'
       - 'cs2_history: str'
     on_validation_failure: discard
-    on_success: output
 transforms:
-- plugin: openrouter_multi_query_llm
+- name: openrouter_multi_query_llm_0
+  plugin: openrouter_multi_query_llm
+  input: source_out
+  on_success: output
+  on_error: quarantine
   options:
     api_key: fake-key-chaosllm-does-not-check
     base_url: http://127.0.0.1:8199/v1
@@ -117,10 +121,8 @@ transforms:
     pool_size: 30
     temperature: 0.0
     max_tokens: 300
-    on_error: quarantine
     schema:
       mode: observed
-    on_success: output
 sinks:
   output:
     plugin: csv

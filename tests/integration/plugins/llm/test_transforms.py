@@ -514,7 +514,6 @@ class TestOpenRouterLLMTransformIntegration:
                 "api_key": "test-api-key",
                 "base_url": f"{chaosllm_server.url}/v1",
                 "schema": DYNAMIC_SCHEMA,
-                "on_error": "discard",
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }
@@ -568,7 +567,6 @@ class TestOpenRouterLLMTransformIntegration:
                 "api_key": "test-api-key",
                 "base_url": f"{chaosllm_server.url}/v1",
                 "schema": DYNAMIC_SCHEMA,
-                "on_error": "discard",
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }

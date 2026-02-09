@@ -24,10 +24,9 @@ class TestKeywordFilterContract(TransformContractPropertyTestBase):
                 "fields": ["content"],
                 "blocked_patterns": [r"\btest\b"],
                 "schema": {"mode": "observed"},
-                "on_error": "quarantine_sink",
             }
         )
-        assert t.on_error is not None
+        t.on_error = "quarantine_sink"
         return t
 
     @pytest.fixture
@@ -43,10 +42,9 @@ class TestKeywordFilterErrorContract(TransformErrorContractTestBase):
                 "fields": ["content"],
                 "blocked_patterns": [r"\bblocked\b"],
                 "schema": {"mode": "observed"},
-                "on_error": "quarantine_sink",
             }
         )
-        assert t.on_error is not None
+        t.on_error = "quarantine_sink"
         return t
 
     @pytest.fixture

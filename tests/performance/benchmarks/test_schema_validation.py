@@ -27,27 +27,35 @@ def test_plugin_instantiation_performance() -> None:
     config_yaml = """
 source:
   plugin: csv
+  on_success: t0_in
   options:
     path: test.csv
     schema:
       mode: observed
     on_validation_failure: discard
-    on_success: output
 
 transforms:
   - plugin: passthrough
+    name: t0
+    input: t0_in
+    on_success: t1_in
     options:
       schema:
         mode: observed
   - plugin: passthrough
+    name: t1
+    input: t1_in
+    on_success: t2_in
     options:
       schema:
         mode: observed
   - plugin: passthrough
+    name: t2
+    input: t2_in
+    on_success: output
     options:
       schema:
         mode: observed
-      on_success: output
 
 sinks:
   output:
@@ -83,19 +91,21 @@ def test_graph_construction_performance() -> None:
     config_yaml = """
 source:
   plugin: csv
+  on_success: t0_in
   options:
     path: test.csv
     schema:
       mode: observed
     on_validation_failure: discard
-    on_success: output
 
 transforms:
   - plugin: passthrough
+    name: t0
+    input: t0_in
+    on_success: output
     options:
       schema:
         mode: observed
-      on_success: output
 
 sinks:
   output:
@@ -118,6 +128,7 @@ sinks:
         with benchmark_timer() as timing:
             graph = ExecutionGraph.from_plugin_instances(
                 source=plugins["source"],
+                source_settings=plugins["source_settings"],
                 transforms=plugins["transforms"],
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
@@ -140,23 +151,28 @@ def test_end_to_end_validation_performance() -> None:
     config_yaml = """
 source:
   plugin: csv
+  on_success: t0_in
   options:
     path: test.csv
     schema:
       mode: observed
     on_validation_failure: discard
-    on_success: output
 
 transforms:
   - plugin: passthrough
+    name: t0
+    input: t0_in
+    on_success: t1_in
     options:
       schema:
         mode: observed
   - plugin: passthrough
+    name: t1
+    input: t1_in
+    on_success: output
     options:
       schema:
         mode: observed
-      on_success: output
 
 sinks:
   output:
@@ -178,6 +194,7 @@ sinks:
             plugins = instantiate_plugins_from_config(config)
             graph = ExecutionGraph.from_plugin_instances(
                 source=plugins["source"],
+                source_settings=plugins["source_settings"],
                 transforms=plugins["transforms"],
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],

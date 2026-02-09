@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: deagg_in
   options:
     path: examples/deaggregation/input.csv
     schema:
@@ -10,15 +11,15 @@ source:
       - 'copies: int'
       - 'category: str'
     on_validation_failure: discard
-    on_success: output
 aggregations:
 - name: replicate_batch
   plugin: batch_replicate
+  input: deagg_in
+  on_success: output
   trigger:
     count: 3
   output_mode: transform
   options:
-    on_success: output
     schema:
       mode: observed
     copies_field: copies

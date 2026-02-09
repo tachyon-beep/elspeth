@@ -51,6 +51,9 @@ class GraphValidationError(Exception):
     pass
 
 
+_NODE_ID_MAX_LENGTH = 64  # Must match landscape.schema nodes_table.c.node_id (String(64))
+
+
 # Config stored on graph nodes varies by node type:
 # - Source/Transform/Sink: raw plugin config dict (arbitrary keys per plugin)
 # - Gate: {schema, routes, condition, fork_to?}
@@ -105,6 +108,13 @@ class WiredTransform:
 
     plugin: TransformProtocol
     settings: TransformSettings
+
+    def __post_init__(self) -> None:
+        """Ensure wiring metadata matches the instantiated plugin."""
+        if self.plugin.name != self.settings.plugin:
+            raise ValueError(
+                f"WiredTransform mismatch: settings.plugin='{self.settings.plugin}' but plugin instance name='{self.plugin.name}'."
+            )
 
 
 def _suggest_similar(name: str, candidates: list[str], max_distance: int = 3) -> list[str]:
@@ -344,10 +354,29 @@ class ExecutionGraph:
             raise KeyError(f"Node not found: {node_id}")
         return cast(NodeInfo, self._graph.nodes[node_id]["info"])
 
+    def _validate_route_resolution_map_complete(self) -> None:
+        """Ensure every declared gate route label resolves to a destination.
+
+        This is a construction-time safety check to prevent runtime failures
+        when a gate emits a declared label that is missing from
+        _route_resolution_map.
+        """
+        for node_id, attrs in self._graph.nodes(data=True):
+            info = cast(NodeInfo, attrs["info"])
+            if info.node_type != "gate":
+                continue
+
+            routes = cast(dict[str, str], info.config["routes"])
+            for route_label in routes:
+                key = (NodeID(node_id), route_label)
+                if key not in self._route_resolution_map:
+                    raise GraphValidationError(
+                        f"Gate '{info.plugin_name}' route label '{route_label}' has no destination in route resolution map. "
+                        "All declared route labels must resolve during graph construction."
+                    )
+
     def is_sink_node(self, node_id: NodeID) -> bool:
         """Check if a node is a sink node."""
-        if not self._graph.has_node(node_id):
-            return False
         return self.get_node_info(node_id).node_type == "sink"
 
     def get_first_transform_node(self) -> NodeID | None:
@@ -540,8 +569,18 @@ class ExecutionGraph:
 
             # Include sequence number for nodes that can have duplicates
             if sequence is not None:
-                return NodeID(f"{prefix}_{name}_{config_hash}_{sequence}")
-            return NodeID(f"{prefix}_{name}_{config_hash}")
+                generated = f"{prefix}_{name}_{config_hash}_{sequence}"
+            else:
+                generated = f"{prefix}_{name}_{config_hash}"
+
+            if len(generated) > _NODE_ID_MAX_LENGTH:
+                raise GraphValidationError(
+                    f"Generated node_id exceeds {_NODE_ID_MAX_LENGTH} characters: "
+                    f"'{generated}' (length={len(generated)}). "
+                    "Use shorter transform/gate/aggregation/source/sink names."
+                )
+
+            return NodeID(generated)
 
         def _sink_name_set() -> set[str]:
             return {str(name) for name in sink_ids}
@@ -640,7 +679,7 @@ class ExecutionGraph:
                         target_sink_id = sink_ids[SinkName(target)]
                         graph.add_edge(tid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
                         graph._route_label_map[(tid, target)] = route_label
-                        graph._route_resolution_map[(tid, route_label)] = RouteDestination.sink(target)
+                        graph._route_resolution_map[(tid, route_label)] = RouteDestination.sink(SinkName(target))
                     else:
                         gate_route_connections.append((tid, route_label, target))
 
@@ -708,7 +747,7 @@ class ExecutionGraph:
                     target_sink_id = sink_ids[SinkName(target)]
                     graph.add_edge(gid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
                     graph._route_label_map[(gid, target)] = route_label
-                    graph._route_resolution_map[(gid, route_label)] = RouteDestination.sink(target)
+                    graph._route_resolution_map[(gid, route_label)] = RouteDestination.sink(SinkName(target))
                 else:
                     gate_route_connections.append((gid, route_label, target))
 
@@ -775,6 +814,7 @@ class ExecutionGraph:
         # ===== CONNECT FORK GATES - EXPLICIT DESTINATIONS ONLY =====
         # CRITICAL: No fallback behavior. All fork branches must have explicit destinations.
         # This prevents silent configuration bugs (typos, missing destinations).
+        fork_branch_owner: dict[str, str] = {}
         for gate_entry in gate_entries:
             if gate_entry.fork_to:
                 branch_counts = Counter(gate_entry.fork_to)
@@ -784,6 +824,13 @@ class ExecutionGraph:
                         f"Gate '{gate_entry.name}' has duplicate fork branches: {duplicates}. Each fork branch name must be unique."
                     )
                 for branch_name in gate_entry.fork_to:
+                    if branch_name in fork_branch_owner:
+                        raise GraphValidationError(
+                            f"Fork branch '{branch_name}' is declared by multiple gates: "
+                            f"'{fork_branch_owner[branch_name]}' and '{gate_entry.name}'. "
+                            "Fork branch names must be globally unique across all gates."
+                        )
+                    fork_branch_owner[branch_name] = gate_entry.name
                     if BranchName(branch_name) in branch_to_coalesce:
                         # Explicit coalesce destination
                         coalesce_name = branch_to_coalesce[BranchName(branch_name)]
@@ -883,6 +930,16 @@ class ExecutionGraph:
                     )
 
         for gate_id, route_label, target in gate_route_connections:
+            # "continue" routes don't produce named connections — they're resolved at
+            # runtime by the processor to mean "proceed to the next processing node."
+            if target == "continue":
+                continue
+            # Multiple routes from the same gate may converge to the same target
+            # (e.g., {"true": "next_gate", "false": "next_gate"}). Only register
+            # the producer once — the connection is the same regardless of which
+            # route label was taken.
+            if target in producers and producers[target][0] == gate_id:
+                continue
             register_producer(target, gate_id, route_label, f"gate route '{route_label}' from '{gate_id}'")
 
         # ===== BUILD CONSUMER REGISTRY =====
@@ -946,6 +1003,10 @@ class ExecutionGraph:
                 )
             graph.get_node_info(gate_id).config["schema"] = upstream_schema
 
+        # Config gate schema resolution (pass 1): resolve gates whose upstream
+        # producer already has a schema. Gates downstream of coalesce nodes are
+        # deferred to pass 2 (after coalesce schema population).
+        deferred_config_gate_schemas: list[tuple[NodeID, str, str]] = []
         for gate_id, gate_name, input_connection in config_gate_schema_inputs:
             if input_connection not in producers:
                 suggestions = _suggest_similar(input_connection, sorted(producers.keys()))
@@ -955,8 +1016,11 @@ class ExecutionGraph:
                     f"Available connections: {sorted(producers.keys())}"
                 )
             producer_id, _producer_label = producers[input_connection]
-            upstream_schema = graph.get_node_info(producer_id).config["schema"]
-            graph.get_node_info(gate_id).config["schema"] = upstream_schema
+            if "schema" in graph.get_node_info(producer_id).config:
+                upstream_schema = graph.get_node_info(producer_id).config["schema"]
+                graph.get_node_info(gate_id).config["schema"] = upstream_schema
+            else:
+                deferred_config_gate_schemas.append((gate_id, gate_name, input_connection))
 
         # ===== MATCH PRODUCERS TO CONSUMERS =====
         gate_node_ids = {entry.node_id for entry in gate_entries}
@@ -981,15 +1045,37 @@ class ExecutionGraph:
                 graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
 
         # ===== RESOLVE DEFERRED GATE ROUTES =====
+        # Track which gates have "continue" route targets (for terminal gate validation).
+        gates_with_continue_routes: dict[NodeID, list[str]] = {}
         for gate_id, route_label, target in gate_route_connections:
             if target == "continue":
                 graph._route_resolution_map[(gate_id, route_label)] = RouteDestination.continue_()
+                gates_with_continue_routes.setdefault(gate_id, []).append(route_label)
                 continue
             if target not in consumers:
                 suggestions = _suggest_similar(target, sorted(consumers.keys()))
                 hint = f" Did you mean: {suggestions}?" if suggestions else ""
                 raise GraphValidationError(f"Gate route target '{target}' is neither a sink nor a known connection name.{hint}")
             graph._route_resolution_map[(gate_id, route_label)] = RouteDestination.processing_node(consumers[target])
+
+        # Validate: terminal gates must not have "continue" routes.
+        # A gate with "continue" routes must have a downstream processing node to
+        # continue to. If the gate has no outgoing edges to processing nodes
+        # (only sink edges or fork branches), "continue" is a dead-end.
+        if gates_with_continue_routes:
+            gates_with_downstream = {producers[conn][0] for conn in consumers if conn in producers and producers[conn][0] in gate_node_ids}
+            for gate_id, route_labels in gates_with_continue_routes.items():
+                if gate_id not in gates_with_downstream:
+                    gate_info = graph.get_node_info(gate_id)
+                    gate_name = gate_info.plugin_name
+                    raise GraphValidationError(
+                        f"Terminal gate '{gate_name}' has 'continue' route(s) ({route_labels}) "
+                        f"but there is no downstream processing node. "
+                        f"Terminal gates must route all paths to named sinks."
+                    )
+
+        # Ensure all declared gate route labels are resolvable before runtime.
+        graph._validate_route_resolution_map_complete()
 
         # ===== TERMINAL ROUTING (on_success -> sinks) =====
         for wired in transforms:
@@ -1130,6 +1216,21 @@ class ExecutionGraph:
             )
 
         pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
+
+        # ===== VALIDATE TERMINAL GATE "continue" ROUTES =====
+        # A "continue" route means "advance to the next processing node in
+        # pipeline order." If the gate is the last processing node, "continue"
+        # has nowhere to go — this is a configuration error.
+        for (gate_id, route_label), destination in graph._route_resolution_map.items():
+            if destination == RouteDestination.continue_():
+                gate_idx = pipeline_index.get(gate_id)
+                if gate_idx is not None and gate_idx == len(pipeline_nodes) - 1:
+                    gate_name = graph.get_node_info(gate_id).plugin_name
+                    raise GraphValidationError(
+                        f"Gate '{gate_name}' has a 'continue' route (label='{route_label}') but is the last "
+                        "processing node in the pipeline. Terminal gates must route all paths to named sinks."
+                    )
+
         coalesce_gate_index: dict[CoalesceName, int] = {}
         if coalesce_settings:
             for gate_entry in gate_entries:
@@ -1175,6 +1276,13 @@ class ExecutionGraph:
                     )
 
             graph.get_node_info(coalesce_id).config["schema"] = first_schema
+
+        # Config gate schema resolution (pass 2): resolve gates that were deferred
+        # because their upstream producer (e.g., coalesce) didn't have schema yet.
+        for gate_id, _gate_name, input_connection in deferred_config_gate_schemas:
+            producer_id, _producer_label = producers[input_connection]
+            upstream_schema = graph.get_node_info(producer_id).config["schema"]
+            graph.get_node_info(gate_id).config["schema"] = upstream_schema
 
         # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
         graph.validate_edge_compatibility()
@@ -1249,7 +1357,7 @@ class ExecutionGraph:
         result: dict[BranchName, SinkName] = {}
         sink_node_to_name: dict[NodeID, SinkName] = {nid: name for name, nid in self._sink_id_map.items()}
         for _from_id, to_id, _key, data in self._graph.edges(data=True, keys=True):
-            if data.get("mode") == RoutingMode.COPY and NodeID(to_id) in sink_node_to_name:
+            if data["mode"] == RoutingMode.COPY and NodeID(to_id) in sink_node_to_name:
                 result[BranchName(data["label"])] = sink_node_to_name[NodeID(to_id)]
         return result
 
@@ -1280,7 +1388,7 @@ class ExecutionGraph:
         # Invert the sink_id_map for reverse lookup
         sink_node_to_name: dict[NodeID, SinkName] = {node_id: sink_name for sink_name, node_id in self._sink_id_map.items()}
         for from_id, to_id, _key, data in self._graph.edges(data=True, keys=True):
-            if data.get("label") == "on_success" and data.get("mode") == RoutingMode.MOVE and NodeID(to_id) in sink_node_to_name:
+            if data["label"] == "on_success" and data["mode"] == RoutingMode.MOVE and NodeID(to_id) in sink_node_to_name:
                 result[NodeID(from_id)] = sink_node_to_name[NodeID(to_id)]
         return result
 

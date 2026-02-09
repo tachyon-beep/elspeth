@@ -344,6 +344,19 @@ class TestJSONExplodeConfiguration:
 
         assert JSONExplode.name == "json_explode"
 
+    def test_rejects_on_success_in_plugin_options(self) -> None:
+        """on_success must be configured at TransformSettings, not plugin options."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        with pytest.raises(PluginConfigError, match="does not accept 'on_success'"):
+            JSONExplode(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "array_field": "items",
+                    "on_success": "output",
+                }
+            )
+
 
 class TestJSONExplodeOutputSchema:
     """Tests for output schema behavior of shape-changing transforms.

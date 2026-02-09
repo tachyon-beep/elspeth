@@ -80,7 +80,6 @@ class TestFullAuditTrailWithContracts:
                 "schema": {"mode": "observed"},
                 "normalize_fields": True,
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = MockContext()
@@ -158,7 +157,6 @@ class TestFullAuditTrailWithContracts:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = MockContext()
@@ -223,7 +221,6 @@ class TestValidationErrorWithContractDetails:
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
         ctx = MockContext()
@@ -355,7 +352,6 @@ class TestContractSurvivesAuditRoundTrip:
                 "schema": {"mode": "observed"},
                 "normalize_fields": True,
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = MockContext()
@@ -579,7 +575,6 @@ class TestContractWithCheckpointRegistry:
                 "schema": {"mode": "observed"},
                 "normalize_fields": True,
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = MockContext()

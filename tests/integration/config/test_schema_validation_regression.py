@@ -28,6 +28,7 @@ def test_schema_validation_actually_works() -> None:
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: input.csv
     schema:
@@ -36,17 +37,18 @@ source:
         - "field_a: str"
         - "field_b: int"
     on_validation_failure: discard
-    on_success: output
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    input: source_out
+    on_success: output
+    plugin: passthrough
     options:
       schema:
         mode: fixed
         fields:
           - "field_a: str"
           - "field_b: int"
-      on_success: output
 
 sinks:
   output:
@@ -89,6 +91,7 @@ def test_compatible_schemas_still_pass() -> None:
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: input.csv
     schema:
@@ -97,17 +100,18 @@ source:
         - "field_a: str"
         - "field_b: int"
     on_validation_failure: discard
-    on_success: output
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    input: source_out
+    on_success: output
+    plugin: passthrough
     options:
       schema:
         mode: fixed
         fields:
           - "field_a: str"
           - "field_b: int"
-      on_success: output
 
 sinks:
   output:

@@ -1538,65 +1538,65 @@ allow_hits:
   reason: Optional coalesce terminal sink mapping - only terminal coalesce nodes carry on_success sink
   safety: Missing mapping intentionally falls back to previously resolved transform sink
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=87cb274cfe7da62e
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=e9a34bc4347e5a98
   owner: architecture
   reason: Framework-boundary type narrowing for mixed transform and gate plugin lists
   safety: Raises on incompatible plugin behavior; no silent fallback
   expires: '2026-03-09'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=b0755cbc09bc9289
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=356bc625c5cb172e
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
   safety: Missing metadata is handled as None; core schema enforcement still validates edges
   expires: '2026-03-09'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=913c90ffd207440d
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=51967bac358b82f8
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select aggregation plugins
   safety: Missing metadata is handled as None; aggregation schemas still validated via contracts
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=740107cc084b56bd
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=e4dc059227e7693c
   owner: architecture
   reason: Gate plugin exclusion for producer registration requires explicit type narrowing
   safety: Non-gate plugins continue through contract-validated path; mismatches fail loudly
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=e9d779f3f28d042e
+- key: core/dag.py:R8:ExecutionGraph:from_plugin_instances:fp=857b42815d9ba92d
+  owner: architecture
+  reason: setdefault used for route-label grouping while building gate continue-route diagnostics
+  safety: Grouping is deterministic and validated before runtime routing
+  expires: '2026-03-09'
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=a4b7b0f5e6ae08c1
   owner: architecture
   reason: Gate plugin exclusion for terminal on_success sink wiring requires explicit type narrowing
   safety: Routing config remains validated and errors are explicit
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=15895d0e0dfe3c9c
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=0634d69485262d05
   owner: architecture
   reason: Gate plugin exclusion for transform on_error divert-edge wiring requires explicit type narrowing
   safety: Only non-gate transforms are eligible for on_error; invalid use fails validation
   expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:get_terminal_sink_map:fp=e0f85497bde5622d
+- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=0bc3e187783ed99a
   owner: architecture
-  reason: dict.get() for optional edge data lookup in DAG traversal
-  safety: Crashes on type mismatch - no silent fallback
+  reason: Optional gate pipeline index lookup for coalesce provenance wiring
+  safety: Missing index paths are handled explicitly and fail graph validation when required
   expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:get_terminal_sink_map:fp=5a18bf378e86378d
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=70fb64f195563be5
   owner: architecture
-  reason: dict.get() for optional edge data lookup in DAG traversal
-  safety: Crashes on type mismatch - no silent fallback
+  reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
+  safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=b4826ab58d601f76
+- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=5703b5189a038d23
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Crashes on type mismatch - no silent fallback
+  reason: Runtime shape check before coercing schema dict to SchemaConfig
+  safety: Non-dict payloads are rejected and converted to explicit validation failures
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=1ebe327bebbc0ebb
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=ca467dfda4126ebd
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Crashes on type mismatch - no silent fallback
+  reason: Optional required_input_fields key supports transforms with implicit/no required field contract
+  safety: Missing key yields empty set; downstream schema checks still enforce compatibility
   expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=a3f5852c7b0bcebc
+- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=c6d2ea9acec9bc1c
   owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=0d87488eb0361588
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Crashes on type mismatch - no silent fallback
+  reason: Options payload shape check at config boundary before extracting nested required_input_fields
+  safety: Non-dict options are treated as no declared requirements and never silently coerced
   expires: '2026-03-09'
 - key: plugins/transforms/web_scrape.py:R1:WebScrapeTransform:__init__:fp=6b27daeff28c2216
   owner: architecture
@@ -1632,9 +1632,4 @@ allow_hits:
   owner: architecture
   reason: dict.get() correct - coalesce on_success mapping may not exist for non-terminal coalesce
   safety: Code reviewed - returns None which is checked immediately
-  expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:get_branch_to_sink_map:fp=71ce5fa63a6cd660
-  owner: architecture
-  reason: dict.get() correct - edge data may not have mode attribute
-  safety: Code reviewed - None comparison is the expected check
   expires: '2026-03-09'

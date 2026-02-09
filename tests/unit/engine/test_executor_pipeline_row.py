@@ -1065,6 +1065,7 @@ class TestAggregationExecutorPipelineRow:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
+            input="default",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1115,6 +1116,7 @@ class TestAggregationExecutorPipelineRow:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
+            input="default",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1160,6 +1162,7 @@ class TestAggregationExecutorPipelineRow:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
+            input="default",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1209,6 +1212,7 @@ class TestAggregationExecutorPipelineRow:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
+            input="default",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1269,6 +1273,7 @@ class TestAggregationExecutorPipelineRow:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
+            input="default",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1321,6 +1326,7 @@ class TestAggregationExecutorPipelineRow:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
+            input="default",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")
@@ -1382,6 +1388,7 @@ class TestAggregationExecutorPipelineRow:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
+            input="default",
             trigger=TriggerConfig(count=10),
         )
         node_id = NodeID("agg_001")

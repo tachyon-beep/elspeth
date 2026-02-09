@@ -151,7 +151,7 @@ class TestCheckpointVersionValidation:
         # The restore_from_checkpoint method expects _trigger_evaluators to exist for each node
         node_id = NodeID("test_node")
         trigger = TriggerConfig(count=10)
-        aggregation_settings = {node_id: AggregationSettings(name="test_agg", plugin="batch_stats", trigger=trigger)}
+        aggregation_settings = {node_id: AggregationSettings(name="test_agg", plugin="batch_stats", input="source_out", trigger=trigger)}
         executor = AggregationExecutor(
             recorder=None,  # type: ignore
             span_factory=span_factory,
@@ -203,6 +203,7 @@ class TestCheckpointVersionValidation:
             node_id: AggregationSettings(
                 name="test_agg",
                 plugin="batch_stats",
+                input="source_out",
                 trigger=TriggerConfig(count=10),
             )
         }

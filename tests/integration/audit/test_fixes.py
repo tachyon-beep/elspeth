@@ -46,7 +46,6 @@ class TestIntegrationAuditFixes:
             {
                 "path": "test.csv",
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": DYNAMIC_SCHEMA,
             }
         )  # type: ignore[call-arg]
@@ -178,7 +177,6 @@ class TestIntegrationAuditFixes:
             {
                 "path": "test.csv",
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": DYNAMIC_SCHEMA,
             }
         )  # type: ignore[call-arg]

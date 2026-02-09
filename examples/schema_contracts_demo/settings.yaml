@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/schema_contracts_demo/input.csv
     schema:
@@ -13,9 +14,10 @@ source:
       - 'notes_comments: str'
     normalize_fields: true
     on_validation_failure: discard
-    on_success: output
 transforms:
-- plugin: passthrough
+- name: passthrough_0
+  plugin: passthrough
+  input: source_out
   options:
     schema:
       mode: observed
@@ -48,6 +50,7 @@ sinks:
         - 'notes_comments: str'
 gates:
 - name: high_value_gate
+  input: passthrough_0
   condition: row['amount_usd'] >= 500
   routes:
     'true': high_value

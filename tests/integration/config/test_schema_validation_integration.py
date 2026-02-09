@@ -48,17 +48,20 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
     config = ElspethSettings(
         source=SourceSettings(
             plugin="csv",
+            on_success="source_out",
             options={
                 "path": str(csv_path),
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             },
         ),
         transforms=[
             TransformSettings(
+                name="passthrough_0",
                 plugin="passthrough",
-                options={"schema": {"mode": "observed"}, "on_success": "output"},
+                input="source_out",
+                on_success="output",
+                options={"schema": {"mode": "observed"}},
             ),
         ],
         sinks={
@@ -81,6 +84,7 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
 
     graph = ExecutionGraph.from_plugin_instances(
         source=plugins["source"],
+        source_settings=plugins["source_settings"],
         transforms=plugins["transforms"],
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
@@ -128,6 +132,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
     from typing import Any
 
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.results import TransformResult
     from tests.fixtures.base_classes import (
@@ -138,6 +143,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
         as_source,
         as_transform,
     )
+    from tests.fixtures.factories import wire_transforms
 
     # Define test plugins with STATIC class-level schemas
     # These are set at class definition time, not in __init__
@@ -153,7 +159,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
 
         name = "static_source"
         output_schema = StaticSchema  # Class-level static schema
-        on_success = "output"  # Route to output sink
+        on_success = "source_out"  # Route to first transform connection
 
         def __init__(self) -> None:
             super().__init__()
@@ -192,9 +198,13 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
     transform = StaticSchemaTransform()
     sink = StaticSchemaSink()
 
+    source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
+    wired = wire_transforms([as_transform(transform)], source_connection="source_out", final_sink="output")
+
     graph = ExecutionGraph.from_plugin_instances(
         source=as_source(source),
-        transforms=[as_transform(transform)],
+        source_settings=source_settings,
+        transforms=wired,
         sinks={"output": as_sink(sink)},
         aggregations={},
         gates=[],

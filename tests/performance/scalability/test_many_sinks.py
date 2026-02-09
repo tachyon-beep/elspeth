@@ -49,18 +49,25 @@ def _build_many_sinks_pipeline(
         sinks[f"sink_{i}"] = CollectSink(name=f"sink_{i}")
 
     # Create gate chain: each gate routes one bucket value to its sink.
-    # Rows not matching continue to the next gate.
+    # Rows not matching continue to the next gate via connection names.
+    # Last gate routes false to the default sink.
     gates: list[GateSettings] = []
     for i in range(num_sinks):
+        gate_input = "gate_chain_in" if i == 0 else f"gate_{i}_in"
+        if i < num_sinks - 1:
+            false_target = f"gate_{i + 1}_in"
+        else:
+            false_target = "default"
         gates.append(
             GateSettings(
                 name=f"route_{i}",
+                input=gate_input,
                 condition=f"row['bucket'] == {i}",
-                routes={"true": f"sink_{i}", "false": "continue"},
+                routes={"true": f"sink_{i}", "false": false_target},
             )
         )
 
-    source = ListSource(rows)
+    source = ListSource(rows, on_success="gate_chain_in")
 
     config = PipelineConfig(
         source=as_source(source),

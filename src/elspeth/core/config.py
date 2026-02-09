@@ -17,10 +17,40 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from elspeth.contracts.enums import OutputMode, RunMode
 
 # Reserved edge labels that cannot be used as route labels or fork branch names.
-# "continue" is used by the DAG builder for edges between sequential nodes.
+# "continue" is used for sequential edges and "on_success" is used for
+# terminal routing edges in the DAG builder.
 # Using these as user-defined labels would cause edge_map collisions in the orchestrator,
 # leading to routing events recorded against wrong edges (audit corruption).
-_RESERVED_EDGE_LABELS = frozenset({"continue"})
+_RESERVED_EDGE_LABELS = frozenset({"continue", "on_success"})
+
+# Names used in node_id generation must stay short enough to fit
+# landscape.schema nodes_table.c.node_id (String(64)).
+# Worst-case generated format overhead is ~25 chars:
+#   "{prefix}_{name}_{hash12}"
+# so keep {name} <= 38.
+_MAX_NODE_NAME_LENGTH = 38
+
+# Connection labels and route labels are engine-owned identifiers.
+# Keep them bounded to avoid unbounded memory/key growth.
+_MAX_CONNECTION_NAME_LENGTH = 64
+_MAX_ROUTE_LABEL_LENGTH = 64
+
+
+def _validate_max_length(value: str, *, field_label: str, max_length: int) -> str:
+    """Enforce bounded identifier length for routing/node names."""
+    if len(value) > max_length:
+        raise ValueError(f"{field_label} exceeds max length {max_length} (got {len(value)})")
+    return value
+
+
+def _validate_connection_or_sink_name(value: str, *, field_label: str) -> str:
+    """Validate user-supplied connection/sink identifiers used for routing."""
+    _validate_max_length(value, field_label=field_label, max_length=_MAX_CONNECTION_NAME_LENGTH)
+    if value in _RESERVED_EDGE_LABELS:
+        raise ValueError(f"{field_label} '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+    if value.startswith("__"):
+        raise ValueError(f"{field_label} '{value}' starts with '__', which is reserved for system edges")
+    return value
 
 
 class SecretsConfig(BaseModel):
@@ -288,6 +318,7 @@ class AggregationSettings(BaseModel):
         if not v or not v.strip():
             raise ValueError("Aggregation name must not be empty")
         v = v.strip()
+        _validate_max_length(v, field_label="Aggregation name", max_length=_MAX_NODE_NAME_LENGTH)
         if v in _RESERVED_EDGE_LABELS:
             raise ValueError(f"Aggregation name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
         if v.startswith("__"):
@@ -301,9 +332,7 @@ class AggregationSettings(BaseModel):
         if not v or not v.strip():
             raise ValueError("Aggregation input connection must not be empty")
         value = v.strip()
-        if value in _RESERVED_EDGE_LABELS:
-            raise ValueError(f"Aggregation input connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
-        return value
+        return _validate_connection_or_sink_name(value, field_label="Aggregation input connection name")
 
     @field_validator("on_success")
     @classmethod
@@ -314,9 +343,7 @@ class AggregationSettings(BaseModel):
         if v is None:
             return None
         value = v.strip()
-        if value in _RESERVED_EDGE_LABELS:
-            raise ValueError(f"Aggregation on_success connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
-        return value
+        return _validate_connection_or_sink_name(value, field_label="Aggregation on_success connection name")
 
     @field_validator("output_mode", mode="before")
     @classmethod
@@ -371,6 +398,7 @@ class GateSettings(BaseModel):
         if not v or not v.strip():
             raise ValueError("Gate name must not be empty")
         v = v.strip()
+        _validate_max_length(v, field_label="Gate name", max_length=_MAX_NODE_NAME_LENGTH)
         if v in _RESERVED_EDGE_LABELS:
             raise ValueError(f"Gate name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
         if v.startswith("__"):
@@ -384,9 +412,7 @@ class GateSettings(BaseModel):
         if not v or not v.strip():
             raise ValueError("Gate input connection must not be empty")
         value = v.strip()
-        if value in _RESERVED_EDGE_LABELS:
-            raise ValueError(f"Gate input connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
-        return value
+        return _validate_connection_or_sink_name(value, field_label="Gate input connection name")
 
     @field_validator("condition")
     @classmethod
@@ -424,6 +450,10 @@ class GateSettings(BaseModel):
             raise ValueError("routes must have at least one entry")
 
         for label, destination in v.items():
+            if not label:
+                raise ValueError("Route labels must not be empty")
+            _validate_max_length(label, field_label="Route label", max_length=_MAX_ROUTE_LABEL_LENGTH)
+
             # Check route label is not reserved
             if label in _RESERVED_EDGE_LABELS:
                 raise ValueError(f"Route label '{label}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
@@ -440,7 +470,10 @@ class GateSettings(BaseModel):
             # access to the actual sink definitions.
             if destination in ("continue", "fork"):
                 continue
-            # Any other string is assumed to be a sink name - validated later
+            _validate_connection_or_sink_name(
+                destination,
+                field_label=f"Route destination for label '{label}'",
+            )
         return v
 
     @field_validator("fork_to")
@@ -455,6 +488,10 @@ class GateSettings(BaseModel):
             return v
 
         for branch in v:
+            if not branch or not branch.strip():
+                raise ValueError("Fork branch names must not be empty")
+            branch = branch.strip()
+            _validate_max_length(branch, field_label="Fork branch name", max_length=_MAX_CONNECTION_NAME_LENGTH)
             if branch in _RESERVED_EDGE_LABELS:
                 raise ValueError(f"Fork branch '{branch}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
             if branch.startswith("__"):
@@ -579,6 +616,31 @@ class CoalesceSettings(BaseModel):
         description="Sink name for coalesce output. Required when coalesce is terminal (no downstream transforms).",
     )
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate coalesce name is not empty or reserved."""
+        if not v or not v.strip():
+            raise ValueError("Coalesce name must not be empty")
+        value = v.strip()
+        _validate_max_length(value, field_label="Coalesce name", max_length=_MAX_NODE_NAME_LENGTH)
+        if value in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Coalesce name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        if value.startswith("__"):
+            raise ValueError(f"Coalesce name '{value}' starts with '__', which is reserved for system edges")
+        return value
+
+    @field_validator("branches")
+    @classmethod
+    def validate_branch_names(cls, v: list[str]) -> list[str]:
+        """Ensure coalesce branch names are bounded and non-reserved."""
+        for branch in v:
+            if not branch or not branch.strip():
+                raise ValueError("Coalesce branch names must not be empty")
+            value = branch.strip()
+            _validate_connection_or_sink_name(value, field_label="Coalesce branch name")
+        return v
+
     @model_validator(mode="after")
     def validate_policy_requirements(self) -> "CoalesceSettings":
         """Validate policy-specific requirements."""
@@ -602,6 +664,17 @@ class CoalesceSettings(BaseModel):
                 f"Coalesce '{self.name}': select_branch '{self.select_branch}' must be one of the expected branches: {self.branches}"
             )
         return self
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str | None) -> str | None:
+        """Ensure on_success sink name is not empty or system-reserved."""
+        if v is None:
+            return None
+        if not v.strip():
+            raise ValueError("on_success must be a sink name or omitted entirely")
+        value = v.strip()
+        return _validate_connection_or_sink_name(value, field_label="Coalesce on_success sink name")
 
 
 class SourceSettings(BaseModel):
@@ -630,9 +703,7 @@ class SourceSettings(BaseModel):
         if not v or not v.strip():
             raise ValueError("Source on_success must be a connection name or sink name")
         value = v.strip()
-        if value in _RESERVED_EDGE_LABELS:
-            raise ValueError(f"Source on_success connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
-        return value
+        return _validate_connection_or_sink_name(value, field_label="Source on_success connection name")
 
 
 class TransformSettings(BaseModel):
@@ -678,6 +749,7 @@ class TransformSettings(BaseModel):
         if not v or not v.strip():
             raise ValueError("Transform name must not be empty")
         v = v.strip()
+        _validate_max_length(v, field_label="Transform name", max_length=_MAX_NODE_NAME_LENGTH)
         if v in _RESERVED_EDGE_LABELS:
             raise ValueError(f"Transform name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
         if v.startswith("__"):
@@ -691,9 +763,7 @@ class TransformSettings(BaseModel):
         if not v or not v.strip():
             raise ValueError("Transform input connection must not be empty")
         value = v.strip()
-        if value in _RESERVED_EDGE_LABELS:
-            raise ValueError(f"Transform input connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
-        return value
+        return _validate_connection_or_sink_name(value, field_label="Transform input connection name")
 
     @field_validator("on_success")
     @classmethod
@@ -704,9 +774,7 @@ class TransformSettings(BaseModel):
         if v is None:
             return None
         value = v.strip()
-        if value in _RESERVED_EDGE_LABELS:
-            raise ValueError(f"Transform on_success connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
-        return value
+        return _validate_connection_or_sink_name(value, field_label="Transform on_success connection name")
 
     @field_validator("on_error")
     @classmethod
@@ -714,7 +782,12 @@ class TransformSettings(BaseModel):
         """Ensure on_error is not empty string."""
         if v is not None and not v.strip():
             raise ValueError("on_error must be a sink name, 'discard', or omitted entirely")
-        return v.strip() if v else None
+        if v is None:
+            return None
+        value = v.strip()
+        if value == "discard":
+            return value
+        return _validate_connection_or_sink_name(value, field_label="Transform on_error sink name")
 
 
 class SinkSettings(BaseModel):
@@ -1225,6 +1298,15 @@ class ElspethSettings(BaseModel):
             # Provide helpful suggestions
             suggestions = [f"'{name}' -> '{name.lower()}'" for name in non_lowercase]
             raise ValueError(f"Sink names must be lowercase. Found: {non_lowercase}. Suggested fixes: {', '.join(suggestions)}")
+
+        for sink_name in v:
+            _validate_max_length(sink_name, field_label="Sink name", max_length=_MAX_NODE_NAME_LENGTH)
+            if sink_name in _RESERVED_EDGE_LABELS:
+                raise ValueError(
+                    f"Sink name '{sink_name}' is reserved. Reserved sink/edge labels: {sorted(_RESERVED_EDGE_LABELS)}"
+                )
+            if sink_name.startswith("__"):
+                raise ValueError(f"Sink name '{sink_name}' starts with '__', which is reserved for system edges")
         return v
 
 

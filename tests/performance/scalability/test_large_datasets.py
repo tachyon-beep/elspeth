@@ -85,14 +85,15 @@ class TestLargeDatasets:
         # Half the rows go to "high" sink, half continue to default
         rows = [{"id": i, "value": i} for i in range(1000)]
 
-        source = ListSource(rows)
+        source = ListSource(rows, on_success="gate_in")
         default_sink = CollectSink(name="default")
         high_sink = CollectSink(name="high")
 
         gate = GateSettings(
             name="threshold",
+            input="gate_in",
             condition="row['value'] >= 500",
-            routes={"true": "high", "false": "continue"},
+            routes={"true": "high", "false": "default"},
         )
 
         config = PipelineConfig(

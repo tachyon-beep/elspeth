@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: gate_in
   options:
     path: /app/pipeline/input.csv
     schema:
@@ -10,9 +11,9 @@ source:
       - 'amount: int'
       - 'category: str'
     on_validation_failure: discard
-    on_success: output
 gates:
 - name: amount_threshold
+  input: gate_in
   condition: row['amount'] > 1000
   routes:
     'true': high_values

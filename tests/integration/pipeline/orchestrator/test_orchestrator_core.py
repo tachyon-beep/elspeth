@@ -137,6 +137,7 @@ class TestOrchestrator:
         # Config-driven gate: routes values > 50 to "high" sink, else to "default"
         threshold_gate = GateSettings(
             name="threshold",
+            input="source_out",
             condition="row['value'] > 50",
             routes={"true": "high", "false": "default"},
         )
@@ -174,12 +175,14 @@ class TestOrchestrator:
 
         fork_gate = GateSettings(
             name="fork_gate",
+            input="transform_out",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "output"},
             fork_to=["path_a", "path_b"],
         )
         terminal_gate = GateSettings(
             name="terminal_gate",
+            input="merge_paths",
             condition="True",
             routes={"true": "output", "false": "output"},
         )
@@ -202,7 +205,7 @@ class TestOrchestrator:
         )
 
         settings = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "source_sink"}},
+            source={"plugin": "test", "on_success": "source_out", "options": {}},
             sinks={"output": {"plugin": "test"}, "source_sink": {"plugin": "test"}},
             gates=[fork_gate, terminal_gate],
             coalesce=[coalesce],

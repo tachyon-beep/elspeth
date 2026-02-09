@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: gate_in
   options:
     path: examples/audit_export/input.csv
     schema:
@@ -10,9 +11,9 @@ source:
       - 'amount: int'
       - 'category: str'
     on_validation_failure: discard
-    on_success: non_corporate
 gates:
 - name: category_router
+  input: gate_in
   condition: row['category'] == 'corporate'
   routes:
     'true': corporate

@@ -21,13 +21,14 @@ from hypothesis import strategies as st
 from sqlalchemy import text
 
 from elspeth.contracts import ArtifactDescriptor, SourceRow
-from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
+from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.base_classes import (
     _TestSchema,
     _TestSinkBase,
@@ -254,6 +255,7 @@ class TestForkCoalesceFlow:
         # Gate that forks ALL rows to two paths
         gate = GateSettings(
             name="fork_gate",
+            input="to_gate",
             condition="True",  # Always fork
             routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
@@ -278,7 +280,8 @@ class TestForkCoalesceFlow:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[as_transform(transform)],
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([as_transform(transform)], source_connection="source_out", final_sink="to_gate"),
             sinks={"default": as_sink(sink)},
             gates=[gate],
             aggregations={},
@@ -286,7 +289,7 @@ class TestForkCoalesceFlow:
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "default"}},
+            source={"plugin": "test", "on_success": "default", "options": {}},
             sinks={"default": {"plugin": "test"}},
             gates=[gate],
             coalesce=[coalesce],
@@ -348,6 +351,7 @@ class TestForkCoalesceFlow:
 
         gate = GateSettings(
             name="fork_gate",
+            input="to_gate",
             condition="True",
             routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
@@ -371,7 +375,8 @@ class TestForkCoalesceFlow:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[as_transform(transform)],
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([as_transform(transform)], source_connection="source_out", final_sink="to_gate"),
             sinks={"default": as_sink(sink)},
             gates=[gate],
             aggregations={},
@@ -379,7 +384,7 @@ class TestForkCoalesceFlow:
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "default"}},
+            source={"plugin": "test", "on_success": "default", "options": {}},
             sinks={"default": {"plugin": "test"}},
             gates=[gate],
             coalesce=[coalesce],
@@ -416,6 +421,7 @@ class TestForkCoalesceFlow:
 
         gate = GateSettings(
             name="fork_gate",
+            input="to_gate",
             condition="True",
             routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
@@ -439,7 +445,8 @@ class TestForkCoalesceFlow:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[as_transform(transform)],
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([as_transform(transform)], source_connection="source_out", final_sink="to_gate"),
             sinks={"default": as_sink(sink)},
             gates=[gate],
             aggregations={},
@@ -447,7 +454,7 @@ class TestForkCoalesceFlow:
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "default"}},
+            source={"plugin": "test", "on_success": "default", "options": {}},
             sinks={"default": {"plugin": "test"}},
             gates=[gate],
             coalesce=[coalesce],
@@ -481,6 +488,7 @@ class TestForkCoalesceEdgeCases:
 
         gate = GateSettings(
             name="fork_gate",
+            input="to_gate",
             condition="True",
             routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
@@ -504,7 +512,8 @@ class TestForkCoalesceEdgeCases:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[as_transform(transform)],
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([as_transform(transform)], source_connection="source_out", final_sink="to_gate"),
             sinks={"default": as_sink(sink)},
             gates=[gate],
             aggregations={},
@@ -512,7 +521,7 @@ class TestForkCoalesceEdgeCases:
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "default"}},
+            source={"plugin": "test", "on_success": "default", "options": {}},
             sinks={"default": {"plugin": "test"}},
             gates=[gate],
             coalesce=[coalesce],
@@ -540,6 +549,7 @@ class TestForkCoalesceEdgeCases:
 
         gate = GateSettings(
             name="fork_gate",
+            input="to_gate",
             condition="True",
             routes={"true": "fork", "false": "default"},
             fork_to=["path_a", "path_b"],
@@ -563,7 +573,8 @@ class TestForkCoalesceEdgeCases:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[as_transform(transform)],
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([as_transform(transform)], source_connection="source_out", final_sink="to_gate"),
             sinks={"default": as_sink(sink)},
             gates=[gate],
             aggregations={},
@@ -571,7 +582,7 @@ class TestForkCoalesceEdgeCases:
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test", "options": {"on_success": "default"}},
+            source={"plugin": "test", "on_success": "default", "options": {}},
             sinks={"default": {"plugin": "test"}},
             gates=[gate],
             coalesce=[coalesce],

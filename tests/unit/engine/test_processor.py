@@ -918,6 +918,35 @@ class TestProcessRowGateBranching:
         assert inherited_sinks == ["branch_sink", "branch_sink"]
         assert all(r.sink_name == "branch_sink" for r in completed)
 
+    def test_jump_target_terminal_coalesce_missing_on_success_mapping_raises_keyerror(self) -> None:
+        """Terminal coalesce reached via jump must have an on_success sink mapping."""
+        _db, recorder = _make_recorder()
+
+        source_node = NodeID("source-0")
+        router_node = NodeID("router-1")
+        coalesce_node = NodeID("coalesce::merge")
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            node_step_map={
+                source_node: 0,
+                router_node: 1,
+                coalesce_node: 2,
+            },
+            node_to_next={
+                source_node: router_node,
+                router_node: coalesce_node,
+                coalesce_node: None,
+            },
+            first_transform_node_id=router_node,
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            # Intentionally omit coalesce_on_success_map
+        )
+
+        with pytest.raises(KeyError, match="merge"):
+            processor._resolve_jump_target_on_success_sink(router_node)
+
 
 # =============================================================================
 # process_row: Multi-row output (deaggregation)
@@ -1654,6 +1683,35 @@ class TestMaybeCoalesceToken:
         assert result is not None
         assert result.outcome == RowOutcome.COALESCED
 
+    def test_coalesce_merged_at_terminal_missing_sink_mapping_raises_keyerror(self) -> None:
+        """Terminal coalesce merge without sink mapping is an internal bug."""
+        _, recorder = _make_recorder()
+        merged_token = make_token_info(data={"merged": True})
+        coalesce = Mock()
+        coalesce.accept.return_value = Mock(held=False, merged_token=merged_token)
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 3},
+            # Intentionally omit coalesce_on_success_map
+        )
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="token-1",
+            row_data=make_row({}),
+            branch_name="path_a",
+        )
+
+        with pytest.raises(KeyError, match="merge"):
+            processor._maybe_coalesce_token(
+                token,
+                current_node_id=NodeID("coalesce::merge"),
+                coalesce_node_id=NodeID("coalesce::merge"),
+                coalesce_name=CoalesceName("merge"),
+                child_items=[],
+            )
+
     def test_coalesce_merged_at_non_terminal_queues_work(self) -> None:
         """Merged at non-terminal step → child work item added, no result."""
         _, recorder = _make_recorder()
@@ -1828,6 +1886,38 @@ class TestNotifyCoalesceOfLostBranch:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COALESCED
+
+    def test_lost_branch_terminal_merge_missing_sink_mapping_raises_keyerror(self) -> None:
+        """Terminal coalesce merge from branch loss must have sink mapping."""
+        _, recorder = _make_recorder()
+        merged_token = make_token_info(data={"merged": True})
+        coalesce = Mock()
+        coalesce.notify_branch_lost.return_value = Mock(
+            merged_token=merged_token,
+            failure_reason=None,
+            consumed_tokens=[],
+        )
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            branch_to_coalesce={BranchName("path_a"): CoalesceName("merge")},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 5},
+            # Intentionally omit coalesce_on_success_map
+        )
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="token-1",
+            row_data=make_row({}),
+            branch_name="path_a",
+        )
+
+        with pytest.raises(KeyError, match="merge"):
+            processor._notify_coalesce_of_lost_branch(
+                token,
+                "quarantined:bad_value",
+                [],
+            )
 
     def test_lost_branch_triggers_nonterminal_merge_queues_work(self) -> None:
         """Branch loss triggers merge at non-terminal step → queues work."""
@@ -2259,3 +2349,41 @@ class TestCoalesceTraversalInvariant:
             coalesce_name=CoalesceName("merge"),
         )
         assert result is not None
+
+
+class TestTerminalWorkItemInvariant:
+    """Tests for current_node_id=None work-item validation."""
+
+    def test_none_current_node_without_sink_context_raises(self) -> None:
+        """None current_node_id must not default to source_on_success silently."""
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+        processor = _make_processor(recorder, source_on_success="source_sink")
+        token = make_token_info(data={"value": 1})
+
+        with pytest.raises(OrchestrationInvariantError, match="current_node_id=None"):
+            processor._process_single_token(
+                token=token,
+                transforms=[],
+                ctx=ctx,
+                current_node_id=None,
+            )
+
+    def test_none_current_node_with_inherited_sink_is_allowed(self) -> None:
+        """Explicit on_success_sink context allows terminal completion with None node."""
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+        processor = _make_processor(recorder, source_on_success="source_sink")
+        token = make_token_info(data={"value": 1})
+
+        result, _child_items = processor._process_single_token(
+            token=token,
+            transforms=[],
+            ctx=ctx,
+            current_node_id=None,
+            on_success_sink="terminal_sink",
+        )
+
+        assert result is not None
+        assert result.outcome == RowOutcome.COMPLETED
+        assert result.sink_name == "terminal_sink"

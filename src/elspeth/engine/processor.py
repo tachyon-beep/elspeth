@@ -335,9 +335,7 @@ class RowProcessor:
             next_node_id = self._resolve_next_node_for_processing(node_id)
             if next_node_id is None and node_id in self._coalesce_name_by_node_id:
                 coalesce_name = self._coalesce_name_by_node_id[node_id]
-                coalesce_sink = self._coalesce_on_success_map.get(coalesce_name)
-                if coalesce_sink is not None:
-                    resolved_sink = coalesce_sink
+                resolved_sink = self._coalesce_on_success_map[coalesce_name]
 
             node_id = next_node_id
 
@@ -1587,11 +1585,7 @@ class RowProcessor:
             if self._resolve_next_node_for_processing(coalesce_node_id) is None:
                 if coalesce_name is None:
                     raise OrchestrationInvariantError("Terminal coalesce outcome missing coalesce_name")
-                sink_name = self._coalesce_on_success_map.get(coalesce_name)
-                if sink_name is None:
-                    raise OrchestrationInvariantError(
-                        f"Terminal coalesce '{coalesce_name}' produced COALESCED outcome without on_success sink mapping"
-                    )
+                sink_name = self._coalesce_on_success_map[coalesce_name]
                 return (
                     True,
                     RowResult(
@@ -1687,11 +1681,7 @@ class RowProcessor:
 
         if outcome.merged_token is not None:
             if self._resolve_next_node_for_processing(coalesce_node_id) is None:
-                sink_name = self._coalesce_on_success_map.get(coalesce_name)
-                if sink_name is None:
-                    raise OrchestrationInvariantError(
-                        f"Terminal coalesce '{coalesce_name}' produced COALESCED outcome without on_success sink mapping"
-                    )
+                sink_name = self._coalesce_on_success_map[coalesce_name]
                 # Terminal coalesce — no downstream transforms.
                 # Do NOT emit TokenCompleted here: the merged token still
                 # needs to flow through the sink write for durable recording.
@@ -1794,7 +1784,9 @@ class RowProcessor:
             token: Token to process
             transforms: List of transform plugins
             ctx: Plugin context
-            current_node_id: Node ID to start processing from (or None for terminal completion)
+            current_node_id: Node ID to start processing from. None is valid only
+                for terminal work items that already have explicit sink context
+                (inherited on_success_sink or branch_to_sink mapping).
             coalesce_node_id: Node ID at which fork children should coalesce
             coalesce_name: Name of the coalesce point for merging
             on_success_sink: Inherited sink from parent (e.g. terminal deagg parent's on_success)
@@ -1808,16 +1800,25 @@ class RowProcessor:
         """
         current_token = token
         child_items: list[_WorkItem] = []
+
+        # current_node_id=None skips traversal loop entirely, so only allow it
+        # when sink routing is explicit (inherited sink or branch->sink map).
+        if current_node_id is None:
+            has_branch_sink = (
+                current_token.branch_name is not None
+                and BranchName(current_token.branch_name) in self._branch_to_sink
+            )
+            if on_success_sink is None and not has_branch_sink:
+                raise OrchestrationInvariantError(
+                    f"Token {token.token_id} has current_node_id=None without explicit terminal sink context. "
+                    "Expected inherited on_success_sink or branch_to_sink mapping."
+                )
+
         last_on_success_sink: str = on_success_sink if on_success_sink is not None else self._source_on_success
         if coalesce_name is not None and current_node_id is not None:
             coalesce_node_id_for_name = self._coalesce_node_ids.get(coalesce_name)
             if coalesce_node_id_for_name == current_node_id and self._resolve_next_node_for_processing(current_node_id) is None:
-                coalesce_sink = self._coalesce_on_success_map.get(coalesce_name)
-                if coalesce_sink is None:
-                    raise OrchestrationInvariantError(
-                        f"Terminal coalesce '{coalesce_name}' continuation is missing on_success sink mapping"
-                    )
-                last_on_success_sink = coalesce_sink
+                last_on_success_sink = self._coalesce_on_success_map[coalesce_name]
 
         # Invariant: tokens with coalesce metadata must not start downstream of their coalesce point.
         # A malformed work item starting past the coalesce node would silently skip coalesce handling

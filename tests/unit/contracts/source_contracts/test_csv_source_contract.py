@@ -37,14 +37,15 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
     @pytest.fixture
     def source(self, source_data: Path) -> SourceProtocol:
         """Create a CSVSource instance with dynamic schema."""
-        return CSVSource(
+        source = CSVSource(
             {
                 "path": str(source_data),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
+        source.on_success = "output"
+        return source
 
     # Additional CSVSource-specific contract tests
 
@@ -59,9 +60,9 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
                 "delimiter": "\t",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
+        source.on_success = "output"
         ctx = PluginContext(run_id="test", config={})
 
         rows = list(source.load(ctx))
@@ -88,9 +89,9 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
                 "path": str(empty_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
+        source.on_success = "output"
         ctx = PluginContext(run_id="test", config={})
 
         # Empty file returns no rows gracefully (no error)
@@ -107,9 +108,9 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
                 "path": str(header_only),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
+        source.on_success = "output"
         ctx = PluginContext(run_id="test", config={})
 
         rows = list(source.load(ctx))
@@ -133,7 +134,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
     @pytest.fixture
     def source(self, source_data_with_invalid: Path) -> SourceProtocol:
         """Create a CSVSource with strict schema that will quarantine bad rows."""
-        return CSVSource(
+        source = CSVSource(
             {
                 "path": str(source_data_with_invalid),
                 "schema": {
@@ -141,9 +142,10 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
                     "fields": ["id: int", "name: str"],
                 },
                 "on_validation_failure": "quarantine_sink",
-                "on_success": "output",
             }
         )
+        source.on_success = "output"
+        return source
 
     def test_invalid_rows_are_quarantined(self, source: SourceProtocol) -> None:
         """Contract: Invalid rows MUST be yielded as SourceRow.quarantined()."""
@@ -229,9 +231,9 @@ class TestCSVSourceDiscardContract:
                     "fields": ["id: int", "name: str"],
                 },
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
+        source.on_success = "output"
         ctx = PluginContext(
             run_id=run.run_id,
             config={},
@@ -262,9 +264,9 @@ class TestCSVSourceFileNotFoundContract:
                 "path": str(tmp_path / "nonexistent.csv"),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
+        source.on_success = "output"
         ctx = PluginContext(run_id="test", config={})
 
         with pytest.raises(FileNotFoundError):

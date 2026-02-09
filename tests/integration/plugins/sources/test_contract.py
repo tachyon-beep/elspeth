@@ -86,7 +86,6 @@ class TestSourceContractIntegration:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = make_test_context()
@@ -123,7 +122,6 @@ class TestSourceContractIntegration:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "normalize_fields": True,
             }
         )
@@ -168,7 +166,6 @@ class TestSourceContractIntegration:
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
         ctx = make_test_context()
@@ -208,7 +205,6 @@ class TestSourceContractIntegration:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = make_test_context()
@@ -254,7 +250,6 @@ class TestSourceContractIntegration:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = make_test_context()
@@ -298,7 +293,6 @@ class TestSourceContractIntegration:
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
         ctx = make_test_context()
@@ -325,7 +319,6 @@ class TestSourceContractIntegration:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = make_test_context()
@@ -359,7 +352,6 @@ class TestSourceContractIntegration:
                     "fields": ["id: int"],  # Only id declared
                 },
                 "on_validation_failure": "discard",
-                "on_success": "output",
             }
         )
         ctx = make_test_context()
@@ -415,7 +407,6 @@ class TestSourceContractIntegration:
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
         ctx = make_test_context()

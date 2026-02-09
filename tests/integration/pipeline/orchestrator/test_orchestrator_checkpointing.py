@@ -276,6 +276,7 @@ class TestOrchestratorCheckpointing:
 
         gate_config = GateSettings(
             name="split",
+            input="transform_out",
             condition="row['value'] % 2 == 1",
             routes={"true": "good", "false": "bad"},
         )

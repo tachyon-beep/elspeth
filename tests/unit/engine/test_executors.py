@@ -1057,6 +1057,7 @@ class TestAggregationExecutor:
         settings = AggregationSettings(
             name="test_agg",
             plugin="batch_stats",
+            input="default",
             trigger=TriggerConfig(count=count),
         )
         executor = AggregationExecutor(

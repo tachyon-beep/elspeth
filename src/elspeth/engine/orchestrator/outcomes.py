@@ -19,7 +19,7 @@ timeout continuations (lines 2124, 2139-2143 in the original).
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.types import CoalesceName, NodeID
@@ -60,14 +60,13 @@ def accumulate_row_outcomes(
         if result.outcome == RowOutcome.COMPLETED:
             counters.rows_succeeded += 1
             # RowResult.__post_init__ guarantees sink_name is set for COMPLETED
-            pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+            sink_name = cast(str, result.sink_name)
+            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.ROUTED:
             counters.rows_routed += 1
-            # GateExecutor contract: ROUTED outcome always has sink_name set
-            if result.sink_name is None:
-                raise RuntimeError("ROUTED outcome requires sink_name")
-            counters.routed_destinations[result.sink_name] += 1
-            pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
+            sink_name = cast(str, result.sink_name)
+            counters.routed_destinations[sink_name] += 1
+            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
         elif result.outcome == RowOutcome.FAILED:
             counters.rows_failed += 1
         elif result.outcome == RowOutcome.QUARANTINED:
@@ -81,11 +80,10 @@ def accumulate_row_outcomes(
         elif result.outcome == RowOutcome.COALESCED:
             # Merged token from coalesce - route to output sink
             # Use result.sink_name set by on_success routing
-            if result.sink_name is None:
-                raise RuntimeError("COALESCED outcome requires sink_name")
+            sink_name = cast(str, result.sink_name)
             counters.rows_coalesced += 1
             counters.rows_succeeded += 1
-            pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.EXPANDED:
             # Deaggregation parent token - children counted separately
             counters.rows_expanded += 1
