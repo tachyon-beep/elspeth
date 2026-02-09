@@ -300,7 +300,10 @@ class AggregationSettings(BaseModel):
         """Validate input connection name is not empty."""
         if not v or not v.strip():
             raise ValueError("Aggregation input connection must not be empty")
-        return v.strip()
+        value = v.strip()
+        if value in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Aggregation input connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        return value
 
     @field_validator("on_success")
     @classmethod
@@ -308,7 +311,12 @@ class AggregationSettings(BaseModel):
         """Ensure on_success is not empty string."""
         if v is not None and not v.strip():
             raise ValueError("on_success must be a connection name, sink name, or omitted entirely")
-        return v.strip() if v else None
+        if v is None:
+            return None
+        value = v.strip()
+        if value in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Aggregation on_success connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        return value
 
     @field_validator("output_mode", mode="before")
     @classmethod
@@ -375,7 +383,10 @@ class GateSettings(BaseModel):
         """Validate input connection name is not empty."""
         if not v or not v.strip():
             raise ValueError("Gate input connection must not be empty")
-        return v.strip()
+        value = v.strip()
+        if value in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Gate input connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        return value
 
     @field_validator("condition")
     @classmethod
@@ -618,7 +629,10 @@ class SourceSettings(BaseModel):
         """Ensure on_success is not empty."""
         if not v or not v.strip():
             raise ValueError("Source on_success must be a connection name or sink name")
-        return v.strip()
+        value = v.strip()
+        if value in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Source on_success connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        return value
 
 
 class TransformSettings(BaseModel):
@@ -676,7 +690,10 @@ class TransformSettings(BaseModel):
         """Validate input connection name is not empty."""
         if not v or not v.strip():
             raise ValueError("Transform input connection must not be empty")
-        return v.strip()
+        value = v.strip()
+        if value in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Transform input connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        return value
 
     @field_validator("on_success")
     @classmethod
@@ -684,7 +701,12 @@ class TransformSettings(BaseModel):
         """Ensure on_success is not empty string."""
         if v is not None and not v.strip():
             raise ValueError("on_success must be a connection name, sink name, or omitted entirely")
-        return v.strip() if v else None
+        if v is None:
+            return None
+        value = v.strip()
+        if value in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Transform on_success connection name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        return value
 
     @field_validator("on_error")
     @classmethod

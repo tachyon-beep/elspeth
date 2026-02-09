@@ -27,6 +27,7 @@ from elspeth.contracts import (
     RouteDestination,
     RouteDestinationKind,
     RoutingAction,
+    RoutingReason,
     RoutingSpec,
     SchemaContract,
     TokenInfo,
@@ -112,6 +113,16 @@ class GateOutcome:
 
     result: GateResult
     updated_token: TokenInfo
+    child_tokens: list[TokenInfo] = field(default_factory=list)
+    sink_name: str | None = None
+    next_node_id: NodeID | None = None
+
+
+@dataclass
+class _RouteDispatchOutcome:
+    """Internal routing dispatch result used by gate executors."""
+
+    action: RoutingAction
     child_tokens: list[TokenInfo] = field(default_factory=list)
     sink_name: str | None = None
     next_node_id: NodeID | None = None
@@ -560,6 +571,77 @@ class GateExecutor:
         self._edge_map = edge_map or {}
         self._route_resolution_map = route_resolution_map or {}
 
+    def _resolve_route_destination(self, *, node_id: str, route_label: str) -> RouteDestination:
+        """Resolve route label to concrete destination or fail closed."""
+        try:
+            return self._route_resolution_map[(NodeID(node_id), route_label)]
+        except KeyError:
+            raise MissingEdgeError(node_id=NodeID(node_id), label=route_label) from None
+
+    def _dispatch_resolved_destination(
+        self,
+        *,
+        state_id: str,
+        node_id: str,
+        route_label: str,
+        destination: RouteDestination,
+        token: TokenInfo,
+        ctx: PluginContext,
+        token_manager: "TokenManager | None",
+        reason: RoutingReason | None,
+        mode: RoutingMode,
+        fork_branches: list[str] | None,
+        continue_as_route: bool,
+    ) -> _RouteDispatchOutcome:
+        """Dispatch CONTINUE/FORK/SINK/PROCESSING_NODE destinations."""
+        if destination.kind == RouteDestinationKind.CONTINUE:
+            self._record_routing(
+                state_id=state_id,
+                node_id=node_id,
+                action=RoutingAction.route("continue", mode=mode, reason=reason),
+            )
+            continue_action = RoutingAction.route("continue", mode=mode, reason=reason)
+            if continue_as_route:
+                return _RouteDispatchOutcome(action=continue_action)
+            return _RouteDispatchOutcome(action=RoutingAction.continue_(reason=reason))
+
+        if destination.kind == RouteDestinationKind.FORK:
+            if fork_branches is None:
+                raise ValueError(f"Gate {node_id} route '{route_label}' resolved to fork but no fork branches are configured")
+            if token_manager is None:
+                raise RuntimeError(
+                    f"Gate {node_id} routes to fork but no TokenManager provided. "
+                    "Cannot create child tokens - audit integrity would be compromised."
+                )
+
+            action = RoutingAction.fork_to_paths(fork_branches, reason=reason)
+            self._record_routing(
+                state_id=state_id,
+                node_id=node_id,
+                action=action,
+            )
+            child_tokens, _fork_group_id = token_manager.fork_token(
+                parent_token=token,
+                branches=fork_branches,
+                node_id=NodeID(node_id),
+                run_id=ctx.run_id,
+                row_data=token.row_data,
+            )
+            return _RouteDispatchOutcome(action=action, child_tokens=child_tokens)
+
+        route_action = RoutingAction.route(route_label, mode=mode, reason=reason)
+        self._record_routing(
+            state_id=state_id,
+            node_id=node_id,
+            action=route_action,
+        )
+        if destination.kind == RouteDestinationKind.SINK:
+            return _RouteDispatchOutcome(action=route_action, sink_name=destination.sink_name)
+        if destination.kind == RouteDestinationKind.PROCESSING_NODE:
+            return _RouteDispatchOutcome(action=route_action, next_node_id=destination.next_node_id)
+
+        raise ValueError(f"Unsupported route destination kind '{destination.kind}' for gate {node_id}")
+
     def execute_gate(
         self,
         gate: GateProtocol,
@@ -667,41 +749,23 @@ class GateExecutor:
             elif action.kind == RoutingKind.ROUTE:
                 # Gate returned a route label - resolve via routes config
                 route_label = action.destinations[0]
-                destination = self._route_resolution_map.get((NodeID(gate.node_id), route_label))
-
-                if destination is None:
-                    # Label not in routes config - this is a configuration error
-                    raise MissingEdgeError(node_id=NodeID(gate.node_id), label=route_label)
-
-                if destination.kind == RouteDestinationKind.CONTINUE:
-                    # Route label resolves to "continue" - record routing event (AUD-002)
-                    # Preserve gate's reason and mode for full auditability
-                    self._record_routing(
-                        state_id=state.state_id,
-                        node_id=gate.node_id,
-                        action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
-                    )
-                elif destination.kind == RouteDestinationKind.SINK:
-                    # Route label resolves to a sink name
-                    sink_name = destination.sink_name
-                    # Record routing event using the route label to find the edge
-                    self._record_routing(
-                        state_id=state.state_id,
-                        node_id=gate.node_id,
-                        action=action,
-                    )
-                elif destination.kind == RouteDestinationKind.PROCESSING_NODE:
-                    next_node_id = destination.next_node_id
-                    self._record_routing(
-                        state_id=state.state_id,
-                        node_id=gate.node_id,
-                        action=action,
-                    )
-                else:
-                    raise ValueError(
-                        f"Gate {gate.node_id} route '{route_label}' resolved to unsupported destination kind "
-                        f"'{destination.kind}' for plugin gates"
-                    )
+                destination = self._resolve_route_destination(node_id=gate.node_id, route_label=route_label)
+                dispatch = self._dispatch_resolved_destination(
+                    state_id=state.state_id,
+                    node_id=gate.node_id,
+                    route_label=route_label,
+                    destination=destination,
+                    token=token,
+                    ctx=ctx,
+                    token_manager=token_manager,
+                    reason=action.reason,
+                    mode=action.mode,
+                    fork_branches=None,
+                    continue_as_route=True,
+                )
+                child_tokens = dispatch.child_tokens
+                sink_name = dispatch.sink_name
+                next_node_id = dispatch.next_node_id
 
             elif action.kind == RoutingKind.FORK_TO_PATHS:
                 if token_manager is None:
@@ -902,85 +966,32 @@ class GateExecutor:
                 f"Gate '{gate_config.name}' condition returned '{route_label}' which is not in routes: {list(gate_config.routes.keys())}"
             )
 
-        destination = self._route_resolution_map.get((NodeID(node_id), route_label))
-        if destination is None:
-            # Fallback for isolated unit tests that construct GateExecutor directly
-            raw_destination = gate_config.routes[route_label]
-            if raw_destination == "continue":
-                destination = RouteDestination.continue_()
-            elif raw_destination == "fork":
-                destination = RouteDestination.fork()
-            else:
-                destination = RouteDestination.sink(raw_destination)
-
         # Build routing action and process based on destination
+        action = RoutingAction.continue_(reason={"condition": gate_config.condition, "result": route_label})
         child_tokens: list[TokenInfo] = []
         sink_name: str | None = None
         next_node_id: NodeID | None = None
         reason: ConfigGateReason = {"condition": gate_config.condition, "result": route_label}
 
         try:
-            if destination.kind == RouteDestinationKind.CONTINUE:
-                # Continue to next node - record routing event (AUD-002)
-                # Use CONTINUE kind for GateResult, ROUTE for recording (matches edge label)
-                action = RoutingAction.continue_(reason=reason)
-                self._record_routing(
-                    state_id=state.state_id,
-                    node_id=node_id,
-                    action=RoutingAction.route("continue", mode=RoutingMode.MOVE, reason=reason),
-                )
-
-            elif destination.kind == RouteDestinationKind.FORK:
-                # Fork to multiple paths - fork_to guaranteed by GateSettings.validate_fork_consistency()
-                # Pydantic validation ensures fork_to is not None when routes include "fork"
-                assert gate_config.fork_to is not None, "Pydantic validation guarantees fork_to when routes include 'fork'"
-                fork_branches: list[str] = gate_config.fork_to
-
-                if token_manager is None:
-                    raise RuntimeError(
-                        f"Gate {node_id} routes to fork but no TokenManager provided. "
-                        "Cannot create child tokens - audit integrity would be compromised."
-                    )
-
-                action = RoutingAction.fork_to_paths(fork_branches, reason=reason)
-
-                # Record routing events for all paths
-                self._record_routing(
-                    state_id=state.state_id,
-                    node_id=node_id,
-                    action=action,
-                )
-
-                # Create child tokens (ATOMIC: also records parent FORKED outcome)
-                child_tokens, _fork_group_id = token_manager.fork_token(
-                    parent_token=token,
-                    branches=fork_branches,
-                    node_id=NodeID(node_id),
-                    run_id=ctx.run_id,
-                    row_data=token.row_data,
-                )
-
-            elif destination.kind == RouteDestinationKind.SINK:
-                # Route to a named sink
-                sink_name = destination.sink_name
-                action = RoutingAction.route(route_label, mode=RoutingMode.MOVE, reason=reason)
-
-                # Record routing event
-                self._record_routing(
-                    state_id=state.state_id,
-                    node_id=node_id,
-                    action=action,
-                )
-            elif destination.kind == RouteDestinationKind.PROCESSING_NODE:
-                next_node_id = destination.next_node_id
-                action = RoutingAction.route(route_label, mode=RoutingMode.MOVE, reason=reason)
-                self._record_routing(
-                    state_id=state.state_id,
-                    node_id=node_id,
-                    action=action,
-                )
-            else:
-                raise ValueError(f"Unsupported route destination kind '{destination.kind}' for config gate {node_id}")
+            destination = self._resolve_route_destination(node_id=node_id, route_label=route_label)
+            dispatch = self._dispatch_resolved_destination(
+                state_id=state.state_id,
+                node_id=node_id,
+                route_label=route_label,
+                destination=destination,
+                token=token,
+                ctx=ctx,
+                token_manager=token_manager,
+                reason=reason,
+                mode=RoutingMode.MOVE,
+                fork_branches=gate_config.fork_to,
+                continue_as_route=False,
+            )
+            action = dispatch.action
+            child_tokens = dispatch.child_tokens
+            sink_name = dispatch.sink_name
+            next_node_id = dispatch.next_node_id
 
         except (MissingEdgeError, RuntimeError, ValueError) as e:
             # Record failure before re-raising - ensures node_state is never left OPEN

@@ -779,9 +779,17 @@ class TestGateExecutor:
         """Boolean True condition evaluates to 'true' label."""
         recorder = _make_recorder()
         edge_map = {(NodeID("cg_1"), "continue"): "edge_cont"}
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
+        route_map = {(NodeID("cg_1"), "true"): RouteDestination.continue_()}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
         config = GateSettings(
             name="my_gate",
+            input="in_conn",
             condition="True",
             routes={"true": "continue", "false": "error_sink"},
         )
@@ -803,9 +811,17 @@ class TestGateExecutor:
         recorder = _make_recorder()
         # Edge map must have the route label that will be used for recording
         edge_map = {(NodeID("cg_1"), "false"): "edge_false"}
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
+        route_map = {(NodeID("cg_1"), "false"): RouteDestination.sink("error_sink")}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
         config = GateSettings(
             name="my_gate",
+            input="in_conn",
             condition="False",
             routes={"true": "continue", "false": "error_sink"},
         )
@@ -826,9 +842,17 @@ class TestGateExecutor:
         """String condition result used as route label directly."""
         recorder = _make_recorder()
         edge_map = {(NodeID("cg_1"), "continue"): "edge_cont"}
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
+        route_map = {(NodeID("cg_1"), "high"): RouteDestination.continue_()}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
         config = GateSettings(
             name="my_gate",
+            input="in_conn",
             condition="'high'",
             routes={"high": "continue", "low": "error_sink"},
         )
@@ -883,6 +907,7 @@ class TestGateExecutor:
         executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
         config = GateSettings(
             name="my_gate",
+            input="in_conn",
             condition="'unknown_label'",
             routes={"high": "continue", "low": "error_sink"},
         )
@@ -911,10 +936,18 @@ class TestGateExecutor:
             (NodeID("cg_1"), "path_b"): "edge_b",
             (NodeID("cg_1"), "continue"): "edge_cont",
         }
-        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
+        route_map = {(NodeID("cg_1"), "true"): RouteDestination.fork()}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
         # Boolean condition requires both true and false routes
         config = GateSettings(
             name="my_gate",
+            input="in_conn",
             condition="True",
             routes={"true": "fork", "false": "continue"},
             fork_to=["path_a", "path_b"],
@@ -940,6 +973,33 @@ class TestGateExecutor:
         assert len(outcome.child_tokens) == 2
         token_manager.fork_token.assert_called_once()
 
+    def test_config_gate_missing_route_resolution_fails_closed(self) -> None:
+        """Missing route resolution mapping raises MissingEdgeError (no fallback)."""
+        recorder = _make_recorder()
+        edge_map = {(NodeID("cg_1"), "continue"): "edge_cont"}
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="'high'",
+            routes={"high": "branch_conn"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        with pytest.raises(MissingEdgeError, match="cg_1"):
+            executor.execute_config_gate(
+                config,
+                "cg_1",
+                token,
+                ctx,
+            )
+
+        assert recorder.complete_node_state.call_count >= 1
+        last_call = recorder.complete_node_state.call_args_list[-1]
+        assert last_call[1]["status"] == NodeStateStatus.FAILED
+
     def test_config_gate_exception_records_failed_and_reraises(self) -> None:
         """Exception during config gate eval records FAILED and re-raises.
 
@@ -952,6 +1012,7 @@ class TestGateExecutor:
         # Syntactically valid but references a key that will cause evaluation error
         config = GateSettings(
             name="my_gate",
+            input="in_conn",
             condition="row['nonexistent_field'] > 0",
             routes={"true": "continue", "false": "continue"},
         )
