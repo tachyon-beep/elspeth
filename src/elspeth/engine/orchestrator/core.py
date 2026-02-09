@@ -102,7 +102,7 @@ from elspeth.engine.orchestrator.validation import (
     validate_source_quarantine_destination,
     validate_transform_error_sinks,
 )
-from elspeth.engine.processor import RowProcessor
+from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
@@ -111,7 +111,7 @@ if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint
     from elspeth.contracts.config.runtime import RuntimeCheckpointConfig, RuntimeConcurrencyConfig
     from elspeth.core.checkpoint import CheckpointManager
-    from elspeth.core.config import ElspethSettings
+    from elspeth.core.config import ElspethSettings, GateSettings
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
 
@@ -493,6 +493,41 @@ class Orchestrator:
                 coalesce_step_map[coalesce_name] = gate_idx + 1
 
         return coalesce_step_map
+
+    def _build_dag_traversal_context(
+        self,
+        graph: ExecutionGraph,
+        config: PipelineConfig,
+        config_gate_id_map: dict[GateName, NodeID],
+    ) -> DAGTraversalContext:
+        """Build traversal context for RowProcessor from graph + pipeline config."""
+        node_step_map = graph.build_step_map()
+        node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = {}
+
+        for transform in config.transforms:
+            node_id_raw = transform.node_id
+            if node_id_raw is None:
+                raise OrchestrationInvariantError(f"Transform '{transform.name}' missing node_id for traversal context")
+            node_to_plugin[NodeID(node_id_raw)] = transform
+
+        for gate in config.gates:
+            gate_node_id = config_gate_id_map[GateName(gate.name)]
+            node_to_plugin[gate_node_id] = gate
+
+        node_to_next: dict[NodeID, NodeID | None] = {}
+        source_id = graph.get_source()
+        if source_id is not None:
+            node_to_next[source_id] = graph.get_next_node(source_id)
+        for node_id in graph.get_pipeline_node_sequence():
+            node_to_next[node_id] = graph.get_next_node(node_id)
+
+        return DAGTraversalContext(
+            node_step_map=node_step_map,
+            node_to_plugin=node_to_plugin,
+            first_transform_node_id=graph.get_first_transform_node(),
+            node_to_next=node_to_next,
+            coalesce_node_map=graph.get_coalesce_id_map(),
+        )
 
     def run(
         self,
@@ -960,6 +995,7 @@ class Orchestrator:
         sink_id_map = graph.get_sink_id_map()
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
+        coalesce_id_map = graph.get_coalesce_id_map()
 
         # Assign node_ids to all plugins
         self._assign_plugin_node_ids(
@@ -1029,6 +1065,7 @@ class Orchestrator:
 
         # Compute coalesce step positions FROM GRAPH TOPOLOGY
         coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
+        traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
         coalesce_on_success_map: dict[CoalesceName, str] = {}
         if settings is not None and settings.coalesce:
             for coalesce_settings in settings.coalesce:
@@ -1047,12 +1084,10 @@ class Orchestrator:
             source_on_success=config.source.on_success,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
-            config_gates=config.gates,
-            config_gate_id_map=config_gate_id_map,
+            traversal=traversal,
             aggregation_settings=typed_aggregation_settings,
             retry_manager=retry_manager,
             coalesce_executor=coalesce_executor,
-            coalesce_node_ids=coalesce_id_map,
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
             coalesce_on_success_map=coalesce_on_success_map,
@@ -1903,6 +1938,7 @@ class Orchestrator:
 
         # Compute coalesce step positions FROM GRAPH TOPOLOGY (same as main run path)
         coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
+        traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
         coalesce_on_success_map: dict[CoalesceName, str] = {}
         if settings is not None and settings.coalesce:
             for coalesce_settings in settings.coalesce:
@@ -1924,12 +1960,10 @@ class Orchestrator:
             source_on_success=config.source.on_success,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
-            config_gates=config.gates,
-            config_gate_id_map=config_gate_id_map,
+            traversal=traversal,
             aggregation_settings=typed_aggregation_settings,
             retry_manager=retry_manager,
             coalesce_executor=coalesce_executor,
-            coalesce_node_ids=coalesce_id_map,
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
             coalesce_on_success_map=coalesce_on_success_map,

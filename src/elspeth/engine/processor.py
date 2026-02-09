@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.executors import GateOutcome
+    from elspeth.engine.orchestrator.types import RowPlugin
     from elspeth.telemetry import TelemetryManager
 
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
@@ -49,6 +50,17 @@ from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, Tran
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
 _SYNTHETIC_STEP_NODE_PREFIX = "__step__:"
+
+
+@dataclass(frozen=True, slots=True)
+class DAGTraversalContext:
+    """Precomputed DAG traversal data for the processor. Built by orchestrator."""
+
+    node_step_map: dict[NodeID, int]
+    node_to_plugin: dict[NodeID, RowPlugin | GateSettings]
+    first_transform_node_id: NodeID | None
+    node_to_next: dict[NodeID, NodeID | None]
+    coalesce_node_map: dict[CoalesceName, NodeID]
 
 
 @dataclass
@@ -79,8 +91,7 @@ class RowProcessor:
     Example:
         processor = RowProcessor(
             recorder, span_factory, run_id, source_node_id,
-            config_gates=[GateSettings(...)],
-            config_gate_id_map={"gate_name": "node_id"},
+            traversal=traversal_context,
         )
 
         result = processor.process_row(
@@ -101,12 +112,10 @@ class RowProcessor:
         source_on_success: str = "continue",
         edge_map: dict[tuple[NodeID, str], str] | None = None,
         route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
-        config_gates: list[GateSettings] | None = None,
-        config_gate_id_map: dict[GateName, NodeID] | None = None,
+        traversal: DAGTraversalContext,
         aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
         retry_manager: RetryManager | None = None,
         coalesce_executor: CoalesceExecutor | None = None,
-        coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
         branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
         coalesce_step_map: dict[CoalesceName, int] | None = None,
         coalesce_on_success_map: dict[CoalesceName, str] | None = None,
@@ -126,12 +135,10 @@ class RowProcessor:
             source_on_success: Source's on_success sink name for COMPLETED routing
             edge_map: Map of (node_id, label) -> edge_id
             route_resolution_map: Map of (node_id, label) -> "continue" | sink_name
-            config_gates: List of config-driven gate settings
-            config_gate_id_map: Map of gate name -> node_id for config gates
+            traversal: Precomputed DAG traversal context from orchestrator
             aggregation_settings: Map of node_id -> AggregationSettings for trigger evaluation
             retry_manager: Optional retry manager for transform execution
             coalesce_executor: Optional coalesce executor for fork/join operations
-            coalesce_node_ids: Map of coalesce_name -> node_id for coalesce points
             branch_to_coalesce: Map of branch_name -> coalesce_name for fork/join routing
             coalesce_step_map: Map of coalesce_name -> step position in pipeline
             coalesce_on_success_map: Map of coalesce_name -> terminal sink_name
@@ -149,13 +156,23 @@ class RowProcessor:
         self._run_id = run_id
         self._source_node_id: NodeID = source_node_id
         self._source_on_success: str = source_on_success
-        self._config_gates = config_gates or []
-        self._config_gate_id_map: dict[GateName, NodeID] = config_gate_id_map or {}
+        self._traversal = traversal
+        gate_entries: list[tuple[NodeID, GateSettings]] = sorted(
+            [(node_id, plugin) for node_id, plugin in traversal.node_to_plugin.items() if isinstance(plugin, GateSettings)],
+            key=lambda item: traversal.node_step_map[item[0]],
+        )
+        self._config_gates = [gate for _node_id, gate in gate_entries]
+        self._config_gate_id_map: dict[GateName, NodeID] = {GateName(gate.name): node_id for node_id, gate in gate_entries}
         self._retry_manager = retry_manager
         self._coalesce_executor = coalesce_executor
-        self._coalesce_node_ids: dict[CoalesceName, NodeID] = coalesce_node_ids or {}
+        self._coalesce_node_ids: dict[CoalesceName, NodeID] = dict(traversal.coalesce_node_map)
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
-        self._coalesce_step_map: dict[CoalesceName, int] = coalesce_step_map or {}
+        traversal_coalesce_steps: dict[CoalesceName, int] = {
+            coalesce_name: traversal.node_step_map[coalesce_node_id]
+            for coalesce_name, coalesce_node_id in self._coalesce_node_ids.items()
+            if coalesce_node_id in traversal.node_step_map
+        }
+        self._coalesce_step_map: dict[CoalesceName, int] = coalesce_step_map or traversal_coalesce_steps
         self._coalesce_step_by_node_id: dict[NodeID, int] = {
             self._coalesce_node_ids[coalesce_name]: step
             for coalesce_name, step in self._coalesce_step_map.items()

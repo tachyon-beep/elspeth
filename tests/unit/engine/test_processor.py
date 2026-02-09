@@ -35,7 +35,12 @@ from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from elspeth.engine.processor import MAX_WORK_QUEUE_ITERATIONS, RowProcessor, _WorkItem
+from elspeth.engine.processor import (
+    MAX_WORK_QUEUE_ITERATIONS,
+    DAGTraversalContext,
+    RowProcessor,
+    _WorkItem,
+)
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.clients.llm import LLMClientError
@@ -104,19 +109,34 @@ def _make_processor(
     telemetry_manager: Any = None,
 ) -> RowProcessor:
     """Create a RowProcessor with sensible defaults."""
+    coalesce_nodes = dict(coalesce_node_ids or {})
+    if coalesce_step_map:
+        for coalesce_name in coalesce_step_map:
+            coalesce_nodes.setdefault(coalesce_name, NodeID(f"coalesce::{coalesce_name}"))
+
+    traversal = DAGTraversalContext(
+        node_step_map={},
+        node_to_plugin={
+            config_gate_id_map[GateName(gate.name)]: gate
+            for gate in (config_gates or [])
+            if config_gate_id_map and GateName(gate.name) in config_gate_id_map
+        },
+        first_transform_node_id=None,
+        node_to_next={},
+        coalesce_node_map=coalesce_nodes,
+    )
+
     return RowProcessor(
         recorder=recorder,
         span_factory=SpanFactory(),  # No tracer — no-op spans
         run_id=run_id,
         source_node_id=NodeID(source_node_id),
+        traversal=traversal,
         edge_map=edge_map,
         route_resolution_map=route_resolution_map,
-        config_gates=config_gates,
-        config_gate_id_map=config_gate_id_map,
         aggregation_settings=aggregation_settings,
         retry_manager=retry_manager,
         coalesce_executor=coalesce_executor,
-        coalesce_node_ids=coalesce_node_ids,
         branch_to_coalesce=branch_to_coalesce,
         coalesce_step_map=coalesce_step_map,
         coalesce_on_success_map=coalesce_on_success_map,
@@ -1429,13 +1449,7 @@ class TestTelemetryEmission:
         _, recorder = _make_recorder()
 
         telemetry = Mock()
-        processor = RowProcessor(
-            recorder=recorder,
-            span_factory=SpanFactory(),
-            run_id="test-run",
-            source_node_id=NodeID("source-0"),
-            telemetry_manager=telemetry,
-        )
+        processor = _make_processor(recorder, telemetry_manager=telemetry)
 
         event = Mock()
         processor._emit_telemetry(event)

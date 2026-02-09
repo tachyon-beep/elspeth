@@ -7,6 +7,7 @@ import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
+from elspeth.engine.processor import DAGTraversalContext
 from tests.fixtures.factories import make_field, make_row, make_source_row
 
 
@@ -43,6 +44,16 @@ def _make_mock_span_factory() -> MagicMock:
     return span_factory
 
 
+def _empty_traversal() -> DAGTraversalContext:
+    return DAGTraversalContext(
+        node_step_map={},
+        node_to_plugin={},
+        first_transform_node_id=None,
+        node_to_next={},
+        coalesce_node_map={},
+    )
+
+
 class TestRowProcessorPipelineRow:
     """Tests for RowProcessor.process_row() with SourceRow."""
 
@@ -60,6 +71,7 @@ class TestRowProcessorPipelineRow:
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
+            traversal=_empty_traversal(),
         )
 
         source_row = make_source_row({"amount": 100}, contract=contract)
@@ -91,6 +103,7 @@ class TestRowProcessorPipelineRow:
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
+            traversal=_empty_traversal(),
         )
 
         source_row = make_source_row({"amount": 100}, contract=contract)
@@ -127,6 +140,7 @@ class TestRowProcessorPipelineRow:
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
+            traversal=_empty_traversal(),
         )
 
         # SourceRow without contract -- uses SourceRow.valid directly because
@@ -162,6 +176,7 @@ class TestRowProcessorExistingRow:
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
+            traversal=_empty_traversal(),
         )
 
         # PipelineRow for resume (row already exists in database)

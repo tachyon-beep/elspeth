@@ -116,7 +116,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.contracts.types import NodeID
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.processor import DAGTraversalContext, RowProcessor
         from elspeth.engine.spans import SpanFactory
 
         class DuckTypedTransform:
@@ -146,6 +146,13 @@ class TestProcessorRejectsDuckTypedPlugins:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
+            traversal=DAGTraversalContext(
+                node_step_map={},
+                node_to_plugin={},
+                first_transform_node_id=None,
+                node_to_next={},
+                coalesce_node_map={},
+            ),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -175,7 +182,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.contracts.types import NodeID
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.processor import DAGTraversalContext, RowProcessor
         from elspeth.engine.spans import SpanFactory
 
         class DuckTypedGate:
@@ -205,6 +212,13 @@ class TestProcessorRejectsDuckTypedPlugins:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
+            traversal=DAGTraversalContext(
+                node_step_map={},
+                node_to_plugin={},
+                first_transform_node_id=None,
+                node_to_next={},
+                coalesce_node_map={},
+            ),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})

@@ -23,7 +23,7 @@ from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from elspeth.engine.processor import RowProcessor
+from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
@@ -81,6 +81,16 @@ def _assert_output_token_distinct_from_inputs(
     )
 
 
+def _empty_traversal() -> DAGTraversalContext:
+    return DAGTraversalContext(
+        node_step_map={},
+        node_to_plugin={},
+        first_transform_node_id=None,
+        node_to_next={},
+        coalesce_node_map={},
+    )
+
+
 class SumTransform(BaseTransform):
     """Sums values in a batch, outputs single aggregated row."""
 
@@ -95,6 +105,7 @@ class SumTransform(BaseTransform):
     def __init__(self, node_id: str) -> None:
         super().__init__({"schema": {"mode": "observed"}})
         self.node_id = node_id
+        self._on_success = "output"
 
     def process(self, rows: list[dict[str, Any]] | PipelineRow, ctx: PluginContext) -> TransformResult:
         if isinstance(rows, list):
@@ -152,6 +163,7 @@ class TestBatchTokenIdentity:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            traversal=_empty_traversal(),
             aggregation_settings=aggregation_settings,
         )
 
@@ -243,6 +255,7 @@ class TestBatchTokenIdentity:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            traversal=_empty_traversal(),
             aggregation_settings=aggregation_settings,
         )
 
@@ -336,6 +349,7 @@ class TestBatchTokenIdentity:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            traversal=_empty_traversal(),
             aggregation_settings=aggregation_settings,
         )
 
