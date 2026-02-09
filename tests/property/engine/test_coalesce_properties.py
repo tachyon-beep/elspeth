@@ -102,7 +102,7 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
     mock_token_manager = MagicMock()
 
     # Make coalesce_tokens return a merged token
-    def mock_coalesce_tokens(parents, merged_data, step_in_pipeline):
+    def mock_coalesce_tokens(parents, merged_data, node_id):
         from elspeth.contracts import PipelineRow
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -129,11 +129,14 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
 
     mock_token_manager.coalesce_tokens.side_effect = mock_coalesce_tokens
 
+    step_resolver = lambda node_id: 0  # noqa: E731
+
     return CoalesceExecutor(
         recorder=mock_recorder,
         span_factory=mock_span_factory,
         token_manager=mock_token_manager,
         run_id="test-run",
+        step_resolver=step_resolver,
         clock=clock or MockClock(start=0.0),
     )
 
@@ -169,7 +172,7 @@ class TestRequireAllPolicyProperties:
                 branch_name=branch,
                 row_data={"field": i},
             )
-            outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            outcome = executor.accept(token, "test_coalesce")
             assert outcome.held is True, f"Should hold after {i + 1}/{len(branches)} branches"
             assert outcome.merged_token is None
 
@@ -180,7 +183,7 @@ class TestRequireAllPolicyProperties:
             branch_name=branches[-1],
             row_data={"field": len(branches) - 1},
         )
-        outcome = executor.accept(final_token, "test_coalesce", step_in_pipeline=0)
+        outcome = executor.accept(final_token, "test_coalesce")
 
         assert outcome.held is False, "Should merge when all branches arrive"
         assert outcome.merged_token is not None
@@ -212,10 +215,10 @@ class TestRequireAllPolicyProperties:
                 branch_name=branch,
                 row_data={"field": i},
             )
-            executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            executor.accept(token, "test_coalesce")
 
         # Flush pending - should fail, not merge
-        outcomes = executor.flush_pending(step_map={"test_coalesce": 0})
+        outcomes = executor.flush_pending()
 
         assert len(outcomes) == 1
         outcome = outcomes[0]
@@ -249,7 +252,7 @@ class TestFirstPolicyProperties:
             branch_name=branches[first_branch_idx],
             row_data={"value": 42},
         )
-        outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
+        outcome = executor.accept(token, "test_coalesce")
 
         assert outcome.held is False, "first policy should merge immediately"
         assert outcome.merged_token is not None
@@ -289,7 +292,7 @@ class TestQuorumPolicyProperties:
                 branch_name=branches[i],
                 row_data={"field": i},
             )
-            outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            outcome = executor.accept(token, "test_coalesce")
             assert outcome.held is True, f"Should hold at {i + 1} branches (quorum={quorum_count})"
 
         # Send quorum-th branch - should merge
@@ -299,7 +302,7 @@ class TestQuorumPolicyProperties:
             branch_name=branches[quorum_count - 1],
             row_data={"field": quorum_count - 1},
         )
-        outcome = executor.accept(quorum_token, "test_coalesce", step_in_pipeline=0)
+        outcome = executor.accept(quorum_token, "test_coalesce")
 
         assert outcome.held is False, "Should merge when quorum is met"
         assert outcome.merged_token is not None
@@ -337,10 +340,10 @@ class TestQuorumPolicyProperties:
                 branch_name=branches[i],
                 row_data={"field": i},
             )
-            executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            executor.accept(token, "test_coalesce")
 
         # Flush - should fail
-        outcomes = executor.flush_pending(step_map={"test_coalesce": 0})
+        outcomes = executor.flush_pending()
 
         assert len(outcomes) == 1
         assert outcomes[0].failure_reason == "quorum_not_met"
@@ -378,7 +381,7 @@ class TestBestEffortPolicyProperties:
                 branch_name=branches[i],
                 row_data={"field": i},
             )
-            outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            outcome = executor.accept(token, "test_coalesce")
             # All should be held (best_effort waits for timeout or all branches)
             assert outcome.held is True, "Should hold when not all branches arrived"
 
@@ -386,7 +389,7 @@ class TestBestEffortPolicyProperties:
         clock.advance(11.0)
 
         # Check timeouts - should merge
-        outcomes = executor.check_timeouts("test_coalesce", step_in_pipeline=0)
+        outcomes = executor.check_timeouts("test_coalesce")
 
         assert len(outcomes) == 1
         assert outcomes[0].merged_token is not None
@@ -424,7 +427,7 @@ class TestLateArrivalProperties:
                 branch_name=branch,
                 row_data={"field": i},
             )
-            executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            executor.accept(token, "test_coalesce")
 
         # Now send a "late" token for same row_id (simulating duplicate/retry)
         late_token = make_token(
@@ -433,7 +436,7 @@ class TestLateArrivalProperties:
             branch_name=branches[0],
             row_data={"field": "late"},
         )
-        outcome = executor.accept(late_token, "test_coalesce", step_in_pipeline=0)
+        outcome = executor.accept(late_token, "test_coalesce")
 
         assert outcome.held is False
         assert outcome.failure_reason == "late_arrival_after_merge"
@@ -463,7 +466,7 @@ class TestLateArrivalProperties:
                 branch_name=branch,
                 row_data={"field": i},
             )
-            executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            executor.accept(token, "test_coalesce")
 
         # Send multiple late arrivals
         for i in range(num_late):
@@ -473,7 +476,7 @@ class TestLateArrivalProperties:
                 branch_name=branches[i % len(branches)],
                 row_data={"field": f"late-{i}"},
             )
-            outcome = executor.accept(late_token, "test_coalesce", step_in_pipeline=0)
+            outcome = executor.accept(late_token, "test_coalesce")
 
             assert outcome.failure_reason == "late_arrival_after_merge", f"Late arrival {i} should fail consistently"
 
@@ -511,7 +514,7 @@ class TestMemoryBoundedProperties:
                     branch_name=branch,
                     row_data={"value": row_num},
                 )
-                executor.accept(token, "test_coalesce", step_in_pipeline=0)
+                executor.accept(token, "test_coalesce")
 
         # Verify bounded
         assert len(executor._completed_keys) <= 100, f"_completed_keys has {len(executor._completed_keys)} entries, should be <= 100"
@@ -540,7 +543,7 @@ class TestMemoryBoundedProperties:
                     branch_name=branch,
                     row_data={"value": row_num},
                 )
-                executor.accept(token, "test_coalesce", step_in_pipeline=0)
+                executor.accept(token, "test_coalesce")
 
         # Most recent 10 should be retained
         for row_num in range(10, 20):
@@ -582,8 +585,8 @@ class TestMergeDataProperties:
         token_a = make_token("t-a", "row-001", "branch_a", data_a)
         token_b = make_token("t-b", "row-001", "branch_b", data_b)
 
-        executor.accept(token_a, "test_coalesce", step_in_pipeline=0)
-        outcome = executor.accept(token_b, "test_coalesce", step_in_pipeline=0)
+        executor.accept(token_a, "test_coalesce")
+        outcome = executor.accept(token_b, "test_coalesce")
 
         assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
@@ -613,8 +616,8 @@ class TestMergeDataProperties:
         token_a = make_token("t-a", "row-001", "branch_a", data_a)
         token_b = make_token("t-b", "row-001", "branch_b", data_b)
 
-        executor.accept(token_a, "test_coalesce", step_in_pipeline=0)
-        outcome = executor.accept(token_b, "test_coalesce", step_in_pipeline=0)
+        executor.accept(token_a, "test_coalesce")
+        outcome = executor.accept(token_b, "test_coalesce")
 
         assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
@@ -643,8 +646,8 @@ class TestMergeDataProperties:
         token_selected = make_token("t-sel", "row-001", "selected_branch", data_selected)
         token_other = make_token("t-oth", "row-001", "other_branch", data_other)
 
-        executor.accept(token_selected, "test_coalesce", step_in_pipeline=0)
-        outcome = executor.accept(token_other, "test_coalesce", step_in_pipeline=0)
+        executor.accept(token_selected, "test_coalesce")
+        outcome = executor.accept(token_other, "test_coalesce")
 
         assert outcome.merged_token is not None
         merged_data = outcome.merged_token.row_data
@@ -687,7 +690,7 @@ class TestTokenConservationProperties:
                 row_data={"field": i},
             )
             sent_tokens.append(token)
-            outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            outcome = executor.accept(token, "test_coalesce")
 
         # Outcome from last accept has the merge result
         assert len(outcome.consumed_tokens) == len(branches)
@@ -722,7 +725,7 @@ class TestCoalesceMetadataProperties:
         row_id = "row-001"
         for i, branch in enumerate(branches):
             token = make_token(f"token-{i}", row_id, branch, {"field": i})
-            outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            outcome = executor.accept(token, "test_coalesce")
 
         metadata = outcome.coalesce_metadata
         assert metadata is not None
@@ -751,7 +754,7 @@ class TestCoalesceMetadataProperties:
         for i, branch in enumerate(branches):
             clock.advance(1.0)  # 1 second between each
             token = make_token(f"token-{i}", row_id, branch, {"field": i})
-            outcome = executor.accept(token, "test_coalesce", step_in_pipeline=0)
+            outcome = executor.accept(token, "test_coalesce")
 
         assert outcome.coalesce_metadata is not None
         arrival_order = outcome.coalesce_metadata["arrival_order"]

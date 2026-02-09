@@ -11,8 +11,21 @@ import pytest
 
 from elspeth.contracts import NodeID, RoutingAction, RoutingKind, TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.types import StepResolver
 from elspeth.engine.executors import GateExecutor, GateOutcome, MissingEdgeError
 from elspeth.testing import make_pipeline_row
+
+
+def _make_step_resolver(step_map: dict[str, int] | None = None) -> StepResolver:
+    """Create a step resolver for testing that returns a fixed step or uses a map."""
+    _map = {NodeID(k): v for k, v in (step_map or {}).items()}
+
+    def resolve(node_id: NodeID) -> int:
+        if node_id in _map:
+            return _map[node_id]
+        return 1  # Default step for tests
+
+    return resolve
 
 
 class TestGateExecutorRoutingBehavior:
@@ -47,6 +60,7 @@ class TestGateExecutorRoutingBehavior:
         return GateExecutor(
             recorder=recorder,
             span_factory=span_factory,
+            step_resolver=_make_step_resolver(),
             edge_map=typed_edge_map or {},
             route_resolution_map=typed_route_map or {},
         )
@@ -90,7 +104,6 @@ class TestGateExecutorRoutingBehavior:
             gate=gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=1,
         )
 
         assert isinstance(outcome, GateOutcome)
@@ -120,7 +133,6 @@ class TestGateExecutorRoutingBehavior:
             gate=gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=1,
         )
 
         assert outcome.sink_name == "high_value_sink"
@@ -147,7 +159,6 @@ class TestGateExecutorRoutingBehavior:
             gate=gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=1,
         )
 
         # "continue" is special - no sink routing
@@ -194,7 +205,6 @@ class TestGateExecutorRoutingBehavior:
             gate=gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=1,
             token_manager=token_manager,
         )
 
@@ -227,7 +237,6 @@ class TestGateExecutorRoutingBehavior:
                 gate=gate,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=1,
                 token_manager=None,  # No token manager
             )
 
@@ -252,7 +261,6 @@ class TestGateExecutorRoutingBehavior:
                 gate=gate,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=1,
             )
 
 

@@ -536,6 +536,22 @@ class Orchestrator:
         branch_to_coalesce: dict[BranchName, CoalesceName] = graph.get_branch_to_coalesce_map()
         coalesce_node_map: dict[CoalesceName, NodeID] = graph.get_coalesce_id_map()
 
+        # Build traversal context BEFORE CoalesceExecutor/TokenManager so that
+        # node_step_map is available for the step_resolver closure they require.
+        traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
+
+        # Build step_resolver: resolves NodeID -> 1-indexed audit step position.
+        # Matches RowProcessor._resolve_audit_step_for_node exactly.
+        node_step_map = dict(traversal.node_step_map)
+        _source_id = source_id
+
+        def step_resolver(node_id: NodeID) -> int:
+            if node_id in node_step_map:
+                return node_step_map[node_id]
+            if node_id == _source_id:
+                return 0
+            raise OrchestrationInvariantError(f"Node ID '{node_id}' missing from traversal step map")
+
         coalesce_executor: CoalesceExecutor | None = None
 
         if coalesce_node_map:
@@ -547,20 +563,19 @@ class Orchestrator:
                     "Coalesce settings are required when the pipeline has fork/join patterns."
                 )
 
-            token_manager = TokenManager(recorder)
+            token_manager = TokenManager(recorder, step_resolver=step_resolver)
             coalesce_executor = CoalesceExecutor(
                 recorder=recorder,
                 span_factory=self._span_factory,
                 token_manager=token_manager,
                 run_id=run_id,
+                step_resolver=step_resolver,
                 clock=self._clock,
             )
 
             for coalesce_settings_entry in settings.coalesce:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings_entry.name)]
                 coalesce_executor.register_coalesce(coalesce_settings_entry, coalesce_node_id)
-
-        traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
 
         # Derive coalesce on_success from graph's terminal sink map (graph-authoritative),
         # falling back to settings for non-terminal coalesce nodes.

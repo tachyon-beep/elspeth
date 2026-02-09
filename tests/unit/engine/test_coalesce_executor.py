@@ -82,7 +82,7 @@ def _make_executor(clock=None):
     span_factory = MagicMock()
     token_manager = MagicMock()
 
-    def coalesce_tokens_impl(parents, merged_data, step_in_pipeline):
+    def coalesce_tokens_impl(parents, merged_data, node_id):
         return TokenInfo(
             row_id=parents[0].row_id,
             token_id=f"merged_{uuid4().hex[:8]}",
@@ -95,7 +95,10 @@ def _make_executor(clock=None):
     if clock is None:
         clock = MockClock(start=100.0)
 
-    executor = CoalesceExecutor(recorder, span_factory, token_manager, "run_1", clock=clock)
+    def step_resolver(node_id: str) -> int:
+        return 5
+
+    executor = CoalesceExecutor(recorder, span_factory, token_manager, "run_1", step_resolver=step_resolver, clock=clock)
     return executor, recorder, token_manager, clock
 
 
@@ -190,7 +193,7 @@ class TestAcceptBasics:
         executor, *_ = _make_executor()
         token = _make_token(branch_name="a")
         with pytest.raises(ValueError, match="not registered"):
-            executor.accept(token, "nonexistent", step_in_pipeline=0)
+            executor.accept(token, "nonexistent")
 
     def test_token_without_branch_raises(self):
         executor, *_ = _make_executor()
@@ -202,29 +205,29 @@ class TestAcceptBasics:
             branch_name=None,
         )
         with pytest.raises(ValueError, match="no branch_name"):
-            executor.accept(token, "merge", step_in_pipeline=0)
+            executor.accept(token, "merge")
 
     def test_unexpected_branch_raises(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(branches=["a", "b"]), "node_1")
         token = _make_token(branch_name="c")
         with pytest.raises(ValueError, match="not in expected branches"):
-            executor.accept(token, "merge", step_in_pipeline=0)
+            executor.accept(token, "merge")
 
     def test_duplicate_arrival_raises(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
         t1 = _make_token(branch_name="a", token_id="tok_1")
         t2 = _make_token(branch_name="a", token_id="tok_2")
-        executor.accept(t1, "merge", step_in_pipeline=0)
+        executor.accept(t1, "merge")
         with pytest.raises(ValueError, match="Duplicate arrival"):
-            executor.accept(t2, "merge", step_in_pipeline=0)
+            executor.accept(t2, "merge")
 
     def test_first_token_held(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
         token = _make_token(branch_name="a")
-        outcome = executor.accept(token, "merge", step_in_pipeline=0)
+        outcome = executor.accept(token, "merge")
         assert outcome.held is True
         assert outcome.merged_token is None
 
@@ -232,7 +235,7 @@ class TestAcceptBasics:
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(name="my_merge"), "node_1")
         token = _make_token(branch_name="a")
-        outcome = executor.accept(token, "my_merge", step_in_pipeline=0)
+        outcome = executor.accept(token, "my_merge")
         assert outcome.coalesce_name == "my_merge"
 
 
@@ -252,17 +255,17 @@ class TestRequireAllPolicy:
 
     def test_two_branches_first_held_second_merges(self):
         executor, _, _, _ = self._setup()
-        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        o2 = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        o2 = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         assert o1.held is True
         assert o2.held is False
         assert o2.merged_token is not None
 
     def test_three_branches(self):
         executor, _, _, _ = self._setup(branches=["a", "b", "c"])
-        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        o2 = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
-        o3 = executor.accept(_make_token(branch_name="c", token_id="t3"), "merge", 0)
+        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        o2 = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+        o3 = executor.accept(_make_token(branch_name="c", token_id="t3"), "merge")
         assert o1.held is True
         assert o2.held is True
         assert o3.held is False
@@ -270,8 +273,8 @@ class TestRequireAllPolicy:
 
     def test_merged_token_in_outcome(self):
         executor, _, _, _ = self._setup()
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         assert o.merged_token is not None
         assert o.merged_token.row_id == "row_1"
         assert o.merged_token.join_group_id is not None
@@ -280,15 +283,15 @@ class TestRequireAllPolicy:
         executor, _, _, _ = self._setup()
         t1 = _make_token(branch_name="a", token_id="t1")
         t2 = _make_token(branch_name="b", token_id="t2")
-        executor.accept(t1, "merge", 0)
-        o = executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
         consumed_ids = {t.token_id for t in o.consumed_tokens}
         assert consumed_ids == {"t1", "t2"}
 
     def test_coalesce_metadata(self):
         executor, _, _, _ = self._setup()
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         md = o.coalesce_metadata
         assert md["policy"] == "require_all"
         assert md["merge_strategy"] == "union"
@@ -297,23 +300,23 @@ class TestRequireAllPolicy:
 
     def test_audit_begin_node_state_for_each_token(self):
         executor, recorder, _, _ = self._setup()
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 5)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 5)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         # begin_node_state called once per accepted token
         assert recorder.begin_node_state.call_count == 2
 
     def test_audit_complete_node_state_completed(self):
         executor, recorder, _, _ = self._setup()
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         # On merge, each consumed token's state is completed with COMPLETED
         completed_calls = [c for c in recorder.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
         assert len(completed_calls) == 2
 
     def test_audit_record_token_outcome_coalesced(self):
         executor, recorder, _, _ = self._setup()
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         outcome_calls = recorder.record_token_outcome.call_args_list
         assert len(outcome_calls) == 2
         for c in outcome_calls:
@@ -323,11 +326,11 @@ class TestRequireAllPolicy:
         executor, _, tm, _ = self._setup()
         t1 = _make_token(branch_name="a", token_id="t1")
         t2 = _make_token(branch_name="b", token_id="t2")
-        executor.accept(t1, "merge", 7)
-        executor.accept(t2, "merge", 7)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         tm.coalesce_tokens.assert_called_once()
         kw = tm.coalesce_tokens.call_args.kwargs
-        assert kw["step_in_pipeline"] == 7
+        assert kw["node_id"] == "node_1"
         parent_ids = {p.token_id for p in kw["parents"]}
         assert parent_ids == {"t1", "t2"}
 
@@ -343,7 +346,7 @@ class TestFirstPolicy:
         s = _settings(policy="first")
         executor.register_coalesce(s, "node_1")
         t = _make_token(branch_name="a", token_id="t1")
-        o = executor.accept(t, "merge", 0)
+        o = executor.accept(t, "merge")
         assert o.held is False
         assert o.merged_token is not None
 
@@ -352,7 +355,7 @@ class TestFirstPolicy:
         s = _settings(policy="first")
         executor.register_coalesce(s, "node_1")
         t = _make_token(branch_name="a", token_id="t1")
-        o = executor.accept(t, "merge", 0)
+        o = executor.accept(t, "merge")
         assert len(o.consumed_tokens) == 1
         assert o.consumed_tokens[0].token_id == "t1"
 
@@ -360,8 +363,8 @@ class TestFirstPolicy:
         executor, _, _, _ = _make_executor()
         s = _settings(policy="first")
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         assert o.held is False
         assert o.failure_reason == "late_arrival_after_merge"
 
@@ -376,8 +379,8 @@ class TestQuorumPolicy:
         executor, _, _, _ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="quorum", quorum_count=2)
         executor.register_coalesce(s, "node_1")
-        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        o2 = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        o2 = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         assert o1.held is True
         assert o2.held is False
         assert o2.merged_token is not None
@@ -386,16 +389,16 @@ class TestQuorumPolicy:
         executor, _, _, _ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="quorum", quorum_count=2)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
-        o = executor.accept(_make_token(branch_name="c", token_id="t3"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
+        o = executor.accept(_make_token(branch_name="c", token_id="t3"), "merge")
         assert o.failure_reason == "late_arrival_after_merge"
 
     def test_quorum_of_one_triggers_like_first(self):
         executor, _, _, _ = _make_executor()
         s = _settings(branches=["a", "b"], policy="quorum", quorum_count=1)
         executor.register_coalesce(s, "node_1")
-        o = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        o = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         assert o.held is False
         assert o.merged_token is not None
 
@@ -411,7 +414,7 @@ class TestBestEffortPolicy:
         executor, _, _, _ = _make_executor()
         s = _settings(policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
-        o = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        o = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         assert o.held is True
 
     def test_merges_when_all_accounted_for(self):
@@ -419,9 +422,9 @@ class TestBestEffortPolicy:
         executor, _, _, _ = _make_executor()
         s = _settings(branches=["a", "b"], policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         # Notify branch b lost
-        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
         assert result is not None
         assert result.merged_token is not None
 
@@ -430,8 +433,8 @@ class TestBestEffortPolicy:
         executor, _, _, _ = _make_executor()
         s = _settings(branches=["a", "b"], policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
-        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        o2 = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        o2 = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         assert o1.held is True
         assert o2.held is False
         assert o2.merged_token is not None
@@ -446,22 +449,22 @@ class TestLateArrival:
     def test_late_arrival_outcome(self):
         executor, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         # A new token with same row_id arriving at same coalesce is a late arrival
         late_token = _make_token(branch_name="a", token_id="t_late", row_id="row_1")
-        o = executor.accept(late_token, "merge", 0)
+        o = executor.accept(late_token, "merge")
         assert o.held is False
         assert o.failure_reason == "late_arrival_after_merge"
 
     def test_late_arrival_records_failed_state(self):
         executor, recorder, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         recorder.reset_mock()
         late = _make_token(branch_name="a", token_id="t_late", row_id="row_1")
-        executor.accept(late, "merge", 0)
+        executor.accept(late, "merge")
         # Should begin + complete with FAILED
         recorder.begin_node_state.assert_called_once()
         recorder.complete_node_state.assert_called_once()
@@ -471,20 +474,20 @@ class TestLateArrival:
     def test_late_arrival_consumed_tokens(self):
         executor, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         late = _make_token(branch_name="a", token_id="t_late", row_id="row_1")
-        o = executor.accept(late, "merge", 0)
+        o = executor.accept(late, "merge")
         assert len(o.consumed_tokens) == 1
         assert o.consumed_tokens[0].token_id == "t_late"
 
     def test_late_arrival_metadata_has_policy(self):
         executor, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         late = _make_token(branch_name="a", token_id="t_late", row_id="row_1")
-        o = executor.accept(late, "merge", 0)
+        o = executor.accept(late, "merge")
         assert o.coalesce_metadata["policy"] == "require_all"
         assert "reason" in o.coalesce_metadata
 
@@ -500,8 +503,8 @@ class TestUnionMerge:
         executor.register_coalesce(_settings(merge="union"), "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1})
         t2 = _make_token(branch_name="b", token_id="t2", data={"y": 2})
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         d = merged_data.to_dict()
         assert d["x"] == 1
@@ -512,8 +515,8 @@ class TestUnionMerge:
         executor.register_coalesce(_settings(branches=["a", "b"], merge="union"), "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
         t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         assert merged_data.to_dict()["shared"] == "from_b"
 
@@ -522,8 +525,8 @@ class TestUnionMerge:
         executor.register_coalesce(_settings(branches=["a", "b"], merge="union"), "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"shared": "from_a"})
         t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
-        executor.accept(t1, "merge", 0)
-        o = executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
         assert "union_field_collisions" in o.coalesce_metadata
         assert "shared" in o.coalesce_metadata["union_field_collisions"]
 
@@ -533,8 +536,8 @@ class TestUnionMerge:
         executor.register_coalesce(_settings(merge="union"), "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1})
         t2 = _make_token(branch_name="b", token_id="t2", data={"y": 2})
-        executor.accept(t1, "merge", 0)
-        o = executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
         assert "union_field_collisions" not in o.coalesce_metadata
 
     def test_collision_tracks_all_contributing_branches(self):
@@ -545,9 +548,9 @@ class TestUnionMerge:
         t1 = _make_token(branch_name="a", token_id="t1", data={"f": 1})
         t2 = _make_token(branch_name="b", token_id="t2", data={"f": 2})
         t3 = _make_token(branch_name="c", token_id="t3", data={"f": 3})
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
-        o = executor.accept(t3, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
+        o = executor.accept(t3, "merge")
         collision_branches = o.coalesce_metadata["union_field_collisions"]["f"]
         assert "a" in collision_branches
         assert "b" in collision_branches
@@ -565,8 +568,8 @@ class TestNestedMerge:
         executor.register_coalesce(_settings(merge="nested"), "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1})
         t2 = _make_token(branch_name="b", token_id="t2", data={"y": 2})
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         d = merged_data.to_dict()
         assert d["a"] == {"x": 1}
@@ -580,7 +583,7 @@ class TestNestedMerge:
             "node_1",
         )
         t = _make_token(branch_name="a", token_id="t1", data={"x": 1})
-        executor.accept(t, "merge", 0)
+        executor.accept(t, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         d = merged_data.to_dict()
         assert "a" in d
@@ -592,8 +595,8 @@ class TestNestedMerge:
         executor.register_coalesce(_settings(merge="nested"), "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1, "y": 2})
         t2 = _make_token(branch_name="b", token_id="t2", data={"z": 3})
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         d = merged_data.to_dict()
         assert d["a"]["x"] == 1
@@ -613,8 +616,8 @@ class TestSelectMerge:
         executor.register_coalesce(s, "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"x": 10})
         t2 = _make_token(branch_name="b", token_id="t2", data={"y": 20})
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         d = merged_data.to_dict()
         assert d == {"x": 10}
@@ -633,8 +636,8 @@ class TestSelectMerge:
         executor.register_coalesce(s, "node_1")
         t1 = _make_token(branch_name="a", token_id="t1")
         t2 = _make_token(branch_name="b", token_id="t2")
-        executor.accept(t1, "merge", 0)
-        o = executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        o = executor.accept(t2, "merge")
         assert o.failure_reason == "select_branch_not_arrived"
         assert o.outcomes_recorded is True
 
@@ -645,8 +648,8 @@ class TestSelectMerge:
         executor.register_coalesce(s, "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"a_val": 1})
         t2 = _make_token(branch_name="b", token_id="t2", data={"b_val": 2})
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         d = merged_data.to_dict()
         assert d == {"b_val": 2}
@@ -662,26 +665,26 @@ class TestCheckTimeouts:
     def test_no_timeout_configured_returns_empty(self):
         executor, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(policy="require_all"), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        results = executor.check_timeouts("merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        results = executor.check_timeouts("merge")
         assert results == []
 
     def test_not_expired_returns_empty(self):
         executor, _, _, clock = _make_executor()
         s = _settings(policy="best_effort", timeout_seconds=10.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(5.0)  # Only 5s of 10s timeout
-        results = executor.check_timeouts("merge", 0)
+        results = executor.check_timeouts("merge")
         assert results == []
 
     def test_best_effort_expired_merges(self):
         executor, _, _, clock = _make_executor()
         s = _settings(policy="best_effort", timeout_seconds=10.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(11.0)
-        results = executor.check_timeouts("merge", 0)
+        results = executor.check_timeouts("merge")
         assert len(results) == 1
         assert results[0].merged_token is not None
 
@@ -690,10 +693,10 @@ class TestCheckTimeouts:
         executor, _, _, clock = _make_executor()
         s = _settings(policy="best_effort", timeout_seconds=10.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         assert ("merge", "row_1") in executor._pending
         clock.advance(11.0)
-        executor.check_timeouts("merge", 0)
+        executor.check_timeouts("merge")
         assert ("merge", "row_1") not in executor._pending
 
     def test_quorum_expired_quorum_not_met_fails(self):
@@ -705,9 +708,9 @@ class TestCheckTimeouts:
             timeout_seconds=10.0,
         )
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(11.0)
-        results = executor.check_timeouts("merge", 0)
+        results = executor.check_timeouts("merge")
         assert len(results) == 1
         assert results[0].failure_reason == "quorum_not_met_at_timeout"
         assert results[0].outcomes_recorded is True
@@ -716,9 +719,9 @@ class TestCheckTimeouts:
         executor, _, _, clock = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(6.0)
-        results = executor.check_timeouts("merge", 0)
+        results = executor.check_timeouts("merge")
         assert len(results) == 1
         assert results[0].failure_reason == "incomplete_branches"
         assert results[0].outcomes_recorded is True
@@ -728,27 +731,27 @@ class TestCheckTimeouts:
         s = _settings(policy="best_effort", timeout_seconds=10.0)
         executor.register_coalesce(s, "node_1")
         # First row arrives at t=100
-        executor.accept(_make_token(branch_name="a", token_id="t1", row_id="row_1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1", row_id="row_1"), "merge")
         clock.advance(8.0)  # t=108
         # Second row arrives at t=108
-        executor.accept(_make_token(branch_name="a", token_id="t2", row_id="row_2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t2", row_id="row_2"), "merge")
         clock.advance(3.0)  # t=111 -- row_1 expired (11s > 10s), row_2 not (3s < 10s)
-        results = executor.check_timeouts("merge", 0)
+        results = executor.check_timeouts("merge")
         assert len(results) == 1  # Only row_1 expired
 
     def test_unregistered_coalesce_raises(self):
         executor, *_ = _make_executor()
         with pytest.raises(ValueError, match="not registered"):
-            executor.check_timeouts("ghost", 0)
+            executor.check_timeouts("ghost")
 
     def test_exact_timeout_boundary_triggers(self):
         """Timeout check fires when elapsed == timeout_seconds."""
         executor, _, _, clock = _make_executor()
         s = _settings(policy="best_effort", timeout_seconds=10.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(10.0)  # Exactly 10s
-        results = executor.check_timeouts("merge", 0)
+        results = executor.check_timeouts("merge")
         assert len(results) == 1
         assert results[0].merged_token is not None
 
@@ -763,8 +766,8 @@ class TestFlushPending:
         executor, _, _, _ = _make_executor()
         s = _settings(policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        results = executor.flush_pending({"merge": 0})
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        results = executor.flush_pending()
         assert len(results) == 1
         assert results[0].merged_token is not None
 
@@ -773,9 +776,9 @@ class TestFlushPending:
         executor, _, _, _ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         # Don't report any losses; flush should merge what's there
-        results = executor.flush_pending({"merge": 0})
+        results = executor.flush_pending()
         assert len(results) == 1
         assert results[0].merged_token is not None
 
@@ -788,8 +791,8 @@ class TestFlushPending:
             timeout_seconds=60.0,
         )
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        results = executor.flush_pending({"merge": 0})
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        results = executor.flush_pending()
         assert len(results) == 1
         assert results[0].failure_reason == "quorum_not_met"
 
@@ -797,8 +800,8 @@ class TestFlushPending:
         executor, _, _, _ = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        results = executor.flush_pending({"merge": 0})
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        results = executor.flush_pending()
         assert len(results) == 1
         assert results[0].failure_reason == "incomplete_branches"
 
@@ -816,16 +819,16 @@ class TestFlushPending:
             pending_state_ids={"a": "state_fake"},
         )
         with pytest.raises(RuntimeError, match="Invariant violation"):
-            executor.flush_pending({"merge": 0})
+            executor.flush_pending()
 
     def test_flush_clears_completed_keys(self):
         executor, _, _, _ = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         assert len(executor._completed_keys) == 1
-        executor.flush_pending({"merge": 0})
+        executor.flush_pending()
         assert len(executor._completed_keys) == 0
 
     def test_flush_no_pending_returns_empty(self):
@@ -833,7 +836,7 @@ class TestFlushPending:
         executor, _, _, _ = _make_executor()
         s = _settings(policy="require_all")
         executor.register_coalesce(s, "node_1")
-        results = executor.flush_pending({"merge": 0})
+        results = executor.flush_pending()
         assert results == []
 
     def test_flush_multiple_pending_rows(self):
@@ -841,9 +844,9 @@ class TestFlushPending:
         executor, _, _, _ = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1", row_id="r1"), "merge", 0)
-        executor.accept(_make_token(branch_name="a", token_id="t2", row_id="r2"), "merge", 0)
-        results = executor.flush_pending({"merge": 0})
+        executor.accept(_make_token(branch_name="a", token_id="t1", row_id="r1"), "merge")
+        executor.accept(_make_token(branch_name="a", token_id="t2", row_id="r2"), "merge")
+        results = executor.flush_pending()
         assert len(results) == 2
         for r in results:
             assert r.failure_reason == "incomplete_branches"
@@ -858,19 +861,19 @@ class TestNotifyBranchLost:
     def test_unregistered_coalesce_raises(self):
         executor, *_ = _make_executor()
         with pytest.raises(ValueError, match="not registered"):
-            executor.notify_branch_lost("ghost", "row_1", "a", "reason", 0)
+            executor.notify_branch_lost("ghost", "row_1", "a", "reason")
 
     def test_unknown_branch_raises(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(branches=["a", "b"]), "node_1")
         with pytest.raises(ValueError, match="not in expected branches"):
-            executor.notify_branch_lost("merge", "row_1", "c", "reason", 0)
+            executor.notify_branch_lost("merge", "row_1", "c", "reason")
 
     def test_require_all_any_loss_fails(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(branches=["a", "b"], policy="require_all"), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
         assert result is not None
         assert result.failure_reason is not None
         assert "branch_lost" in result.failure_reason
@@ -879,7 +882,7 @@ class TestNotifyBranchLost:
         """require_all: branch loss even before any arrivals triggers failure."""
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(branches=["a", "b"], policy="require_all"), "node_1")
-        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
         assert result is not None
         assert "branch_lost" in result.failure_reason
 
@@ -887,9 +890,9 @@ class TestNotifyBranchLost:
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b"], policy="quorum", quorum_count=2)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         # 2 branches, quorum=2, one lost -> max_possible=1 < quorum=2 -> fail
-        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
         assert result is not None
         assert "quorum_impossible" in result.failure_reason
 
@@ -897,17 +900,17 @@ class TestNotifyBranchLost:
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="quorum", quorum_count=2)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         # Loss of c -> max_possible = 3-1=2 >= quorum_count=2. arrived=1 < 2. None.
-        result = executor.notify_branch_lost("merge", "row_1", "c", "error_routed", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "c", "error_routed")
         assert result is None
 
     def test_best_effort_all_accounted_with_arrivals_merges(self):
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b"], policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
         assert result is not None
         assert result.merged_token is not None
 
@@ -916,8 +919,8 @@ class TestNotifyBranchLost:
         s = _settings(branches=["a", "b"], policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
         # Both lost, no arrivals
-        executor.notify_branch_lost("merge", "row_1", "a", "error_routed", 0)
-        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed", 0)
+        executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_routed")
         assert result is not None
         assert result.failure_reason == "all_branches_lost"
 
@@ -926,29 +929,29 @@ class TestNotifyBranchLost:
         s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
         # One lost, two remaining
-        result = executor.notify_branch_lost("merge", "row_1", "a", "error_routed", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
         assert result is None
 
     def test_first_policy_returns_none(self):
         executor, *_ = _make_executor()
         s = _settings(policy="first")
         executor.register_coalesce(s, "node_1")
-        result = executor.notify_branch_lost("merge", "row_1", "a", "error_routed", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
         assert result is None
 
     def test_branch_arrived_then_lost_raises(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         with pytest.raises(ValueError, match="already arrived"):
-            executor.notify_branch_lost("merge", "row_1", "a", "error_routed", 0)
+            executor.notify_branch_lost("merge", "row_1", "a", "error_routed")
 
     def test_branch_lost_before_any_arrivals(self):
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
         # No accept() yet; notify loss creates pending entry
-        result = executor.notify_branch_lost("merge", "row_1", "a", "upstream_error", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "a", "upstream_error")
         # 3 branches, 1 lost, 0 arrived -> accounted=1 < 3 -> still waiting
         assert result is None
         # Verify pending entry was created
@@ -957,10 +960,10 @@ class TestNotifyBranchLost:
     def test_already_completed_returns_none(self):
         executor, *_ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         # Key is now completed
-        result = executor.notify_branch_lost("merge", "row_1", "a", "error", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "a", "error")
         assert result is None
 
     def test_duplicate_branch_loss_raises(self):
@@ -968,9 +971,9 @@ class TestNotifyBranchLost:
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="best_effort", timeout_seconds=60.0)
         executor.register_coalesce(s, "node_1")
-        executor.notify_branch_lost("merge", "row_1", "a", "first_reason", 0)
+        executor.notify_branch_lost("merge", "row_1", "a", "first_reason")
         # Second loss notification for same branch updates the reason
-        result = executor.notify_branch_lost("merge", "row_1", "b", "second_reason", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "b", "second_reason")
         # 3 branches, 2 lost, 0 arrived -> accounted=2 < 3 -> still waiting
         assert result is None
 
@@ -1030,9 +1033,9 @@ class TestContractHandling:
         bad_row.contract = None
         bad_row.to_dict.return_value = {"amount": 2}
         t2 = TokenInfo(row_id="row_1", token_id="t2", row_data=bad_row, branch_name="b")
-        executor.accept(t1, "merge", 0)
+        executor.accept(t1, "merge")
         with pytest.raises(ValueError, match="has no contract"):
-            executor.accept(t2, "merge", 0)
+            executor.accept(t2, "merge")
 
     def test_union_contracts_merged(self):
         """Union merge should merge contracts from all branches."""
@@ -1050,8 +1053,8 @@ class TestContractHandling:
         )
         t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1}, contract=c_a)
         t2 = _make_token(branch_name="b", token_id="t2", data={"y": "hi"}, contract=c_b)
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         mc = merged_data.contract
         assert mc.get_field("x") is not None
@@ -1063,8 +1066,8 @@ class TestContractHandling:
         executor.register_coalesce(_settings(merge="nested"), "node_1")
         t1 = _make_token(branch_name="a", token_id="t1", data={"x": 1})
         t2 = _make_token(branch_name="b", token_id="t2", data={"y": 2})
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         mc = merged_data.contract
         assert mc.mode == "FIXED"
@@ -1092,8 +1095,8 @@ class TestContractHandling:
         )
         t1 = _make_token(branch_name="a", token_id="t1", data={"chosen": "yes"}, contract=c_a)
         t2 = _make_token(branch_name="b", token_id="t2", data={"ignored": 0}, contract=c_b)
-        executor.accept(t1, "merge", 0)
-        executor.accept(t2, "merge", 0)
+        executor.accept(t1, "merge")
+        executor.accept(t2, "merge")
         merged_data = tm.coalesce_tokens.call_args.kwargs["merged_data"]
         assert merged_data.contract is c_a
 
@@ -1113,9 +1116,9 @@ class TestContractHandling:
         )
         t1 = _make_token(branch_name="a", token_id="t1", data={"value": 1}, contract=c_a)
         t2 = _make_token(branch_name="b", token_id="t2", data={"value": "x"}, contract=c_b)
-        executor.accept(t1, "merge", 0)
+        executor.accept(t1, "merge")
         with pytest.raises(OrchestrationInvariantError, match="Contract merge failed"):
-            executor.accept(t2, "merge", 0)
+            executor.accept(t2, "merge")
 
 
 # ===========================================================================
@@ -1129,7 +1132,7 @@ class TestAuditTrailDetails:
         executor, recorder, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
         t = _make_token(branch_name="a", token_id="t1", data={"amount": 42})
-        executor.accept(t, "merge", step_in_pipeline=5)
+        executor.accept(t, "merge")
         kw = recorder.begin_node_state.call_args.kwargs
         assert kw["token_id"] == "t1"
         assert kw["run_id"] == "run_1"
@@ -1140,7 +1143,7 @@ class TestAuditTrailDetails:
         """begin_node_state should use the node_id from register_coalesce."""
         executor, recorder, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "coalesce_node_42")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         kw = recorder.begin_node_state.call_args.kwargs
         assert kw["node_id"] == "coalesce_node_42"
 
@@ -1148,9 +1151,9 @@ class TestAuditTrailDetails:
         """Completed node states should have a non-negative duration_ms."""
         executor, recorder, _, clock = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(0.5)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         calls = recorder.complete_node_state.call_args_list
         durations = [c.kwargs["duration_ms"] for c in calls if c.kwargs.get("status") == NodeStateStatus.COMPLETED]
         assert len(durations) == 2
@@ -1162,8 +1165,8 @@ class TestAuditTrailDetails:
         """Completed node states should include coalesce_context in context_after."""
         executor, recorder, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         for c in recorder.complete_node_state.call_args_list:
             if c.kwargs.get("status") == NodeStateStatus.COMPLETED:
                 ctx = c.kwargs.get("context_after", {})
@@ -1173,8 +1176,8 @@ class TestAuditTrailDetails:
         """Completed node states have output_data with merged_into token ID."""
         executor, recorder, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         for c in recorder.complete_node_state.call_args_list:
             if c.kwargs.get("status") == NodeStateStatus.COMPLETED:
                 output = c.kwargs.get("output_data", {})
@@ -1185,8 +1188,8 @@ class TestAuditTrailDetails:
         """Token outcomes should include join_group_id from merged token."""
         executor, recorder, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         for c in recorder.record_token_outcome.call_args_list:
             assert c.kwargs["join_group_id"] is not None
 
@@ -1194,8 +1197,8 @@ class TestAuditTrailDetails:
         """Token outcomes should reference the original consumed token IDs."""
         executor, recorder, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         token_ids = {c.kwargs["token_id"] for c in recorder.record_token_outcome.call_args_list}
         assert token_ids == {"t1", "t2"}
 
@@ -1203,9 +1206,9 @@ class TestAuditTrailDetails:
         """Coalesce metadata should include arrival_order with offset_ms."""
         executor, _, _, clock = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(0.2)
-        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         arrival_order = o.coalesce_metadata["arrival_order"]
         assert len(arrival_order) == 2
         assert arrival_order[0]["branch"] == "a"
@@ -1217,17 +1220,17 @@ class TestAuditTrailDetails:
         """Coalesce metadata should include total wait_duration_ms."""
         executor, _, _, clock = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(1.5)
-        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         assert o.coalesce_metadata["wait_duration_ms"] == pytest.approx(1500.0)
 
     def test_merge_metadata_branches_lost_empty_when_none_lost(self):
         """Branches_lost in metadata should be empty dict when all arrived."""
         executor, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         assert o.coalesce_metadata["branches_lost"] == {}
 
 
@@ -1243,14 +1246,14 @@ class TestDefaultClock:
 
         recorder = MagicMock()
         recorder.begin_node_state.side_effect = lambda **kw: Mock(state_id="s1")
-        executor = CoalesceExecutor(recorder, MagicMock(), MagicMock(), "run_1", clock=None)
+        executor = CoalesceExecutor(recorder, MagicMock(), MagicMock(), "run_1", step_resolver=lambda n: 0, clock=None)
         assert executor._clock is DEFAULT_CLOCK
 
     def test_uses_injected_clock(self):
         clock = MockClock(start=42.0)
         recorder = MagicMock()
         recorder.begin_node_state.side_effect = lambda **kw: Mock(state_id="s1")
-        executor = CoalesceExecutor(recorder, MagicMock(), MagicMock(), "run_1", clock=clock)
+        executor = CoalesceExecutor(recorder, MagicMock(), MagicMock(), "run_1", step_resolver=lambda n: 0, clock=clock)
         assert executor._clock is clock
 
 
@@ -1264,16 +1267,16 @@ class TestMultiRowIsolation:
         """Tokens for different row_ids are tracked independently."""
         executor, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
-        o1 = executor.accept(_make_token(row_id="r1", branch_name="a", token_id="t1"), "merge", 0)
-        o2 = executor.accept(_make_token(row_id="r2", branch_name="a", token_id="t2"), "merge", 0)
+        o1 = executor.accept(_make_token(row_id="r1", branch_name="a", token_id="t1"), "merge")
+        o2 = executor.accept(_make_token(row_id="r2", branch_name="a", token_id="t2"), "merge")
         assert o1.held is True
         assert o2.held is True
         # Complete r1
-        o3 = executor.accept(_make_token(row_id="r1", branch_name="b", token_id="t3"), "merge", 0)
+        o3 = executor.accept(_make_token(row_id="r1", branch_name="b", token_id="t3"), "merge")
         assert o3.held is False
         assert o3.merged_token is not None
         # r2 still pending
-        o4 = executor.accept(_make_token(row_id="r2", branch_name="b", token_id="t4"), "merge", 0)
+        o4 = executor.accept(_make_token(row_id="r2", branch_name="b", token_id="t4"), "merge")
         assert o4.held is False
         assert o4.merged_token is not None
 
@@ -1284,8 +1287,8 @@ class TestMultiRowIsolation:
         s2 = _settings(name="m2", branches=["x", "y"])
         executor.register_coalesce(s1, "n1")
         executor.register_coalesce(s2, "n2")
-        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "m1", 0)
-        o2 = executor.accept(_make_token(branch_name="x", token_id="t2"), "m2", 0)
+        o1 = executor.accept(_make_token(branch_name="a", token_id="t1"), "m1")
+        o2 = executor.accept(_make_token(branch_name="x", token_id="t2"), "m2")
         assert o1.held is True
         assert o2.held is True
 
@@ -1300,9 +1303,9 @@ class TestFailPendingDetails:
         executor, recorder, _, clock = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(6.0)
-        executor.check_timeouts("merge", 0)
+        executor.check_timeouts("merge")
         # Check that complete_node_state was called with FAILED
         fail_calls = [c for c in recorder.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED]
         assert len(fail_calls) == 1
@@ -1311,9 +1314,9 @@ class TestFailPendingDetails:
         executor, recorder, _, clock = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(6.0)
-        executor.check_timeouts("merge", 0)
+        executor.check_timeouts("merge")
         outcome_calls = recorder.record_token_outcome.call_args_list
         assert len(outcome_calls) == 1
         assert outcome_calls[0].kwargs["outcome"] == RowOutcome.FAILED
@@ -1322,9 +1325,9 @@ class TestFailPendingDetails:
         executor, _, _, clock = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(6.0)
-        results = executor.check_timeouts("merge", 0)
+        results = executor.check_timeouts("merge")
         md = results[0].coalesce_metadata
         assert md["policy"] == "require_all"
         assert set(md["expected_branches"]) == {"a", "b"}
@@ -1333,19 +1336,19 @@ class TestFailPendingDetails:
         executor, _, _, clock = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         assert ("merge", "row_1") in executor._pending
         clock.advance(6.0)
-        executor.check_timeouts("merge", 0)
+        executor.check_timeouts("merge")
         assert ("merge", "row_1") not in executor._pending
 
     def test_failure_marks_key_completed(self):
         executor, _, _, clock = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(6.0)
-        executor.check_timeouts("merge", 0)
+        executor.check_timeouts("merge")
         assert ("merge", "row_1") in executor._completed_keys
 
     def test_failure_metadata_includes_lost_branches(self):
@@ -1353,7 +1356,7 @@ class TestFailPendingDetails:
         s = _settings(branches=["a", "b"], policy="require_all")
         executor.register_coalesce(s, "node_1")
         # Loss of b triggers require_all failure
-        result = executor.notify_branch_lost("merge", "row_1", "b", "upstream_fail", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "b", "upstream_fail")
         assert "branches_lost" in result.coalesce_metadata
         assert "b" in result.coalesce_metadata["branches_lost"]
 
@@ -1361,18 +1364,18 @@ class TestFailPendingDetails:
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="quorum", quorum_count=3)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         # Loss of b -> max_possible=2 < quorum=3 -> fail
-        result = executor.notify_branch_lost("merge", "row_1", "b", "error", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error")
         assert result.coalesce_metadata["quorum_required"] == 3
 
     def test_require_all_timeout_metadata_has_timeout_seconds(self):
         executor, _, _, clock = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=8.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(9.0)
-        results = executor.check_timeouts("merge", 0)
+        results = executor.check_timeouts("merge")
         assert results[0].coalesce_metadata["timeout_seconds"] == 8.0
 
     def test_failure_error_hash_is_deterministic(self):
@@ -1380,9 +1383,9 @@ class TestFailPendingDetails:
         executor, recorder, _, clock = _make_executor()
         s = _settings(policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(6.0)
-        executor.check_timeouts("merge", 0)
+        executor.check_timeouts("merge")
         # record_token_outcome should have been called with an error_hash
         kw = recorder.record_token_outcome.call_args.kwargs
         assert "error_hash" in kw
@@ -1394,8 +1397,8 @@ class TestFailPendingDetails:
         executor, *_ = _make_executor()
         s = _settings(branches=["a", "b", "c"], policy="require_all", timeout_seconds=5.0)
         executor.register_coalesce(s, "node_1")
-        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge", 0)
-        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge", 0)
+        executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         # require_all needs c, loss of c -> fail
-        result = executor.notify_branch_lost("merge", "row_1", "c", "error", 0)
+        result = executor.notify_branch_lost("merge", "row_1", "c", "error")
         assert set(result.coalesce_metadata["branches_arrived"]) == {"a", "b"}

@@ -38,7 +38,7 @@ from elspeth.contracts.enums import (
 )
 from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
@@ -125,12 +125,11 @@ class TransformExecutor:
     5. Emit OpenTelemetry span
 
     Example:
-        executor = TransformExecutor(recorder, span_factory)
+        executor = TransformExecutor(recorder, span_factory, step_resolver)
         result, updated_token, error_sink = executor.execute_transform(
             transform=my_transform,
             token=token,
             ctx=ctx,
-            step_in_pipeline=1,
         )
     """
 
@@ -138,6 +137,7 @@ class TransformExecutor:
         self,
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
+        step_resolver: StepResolver,
         max_workers: int | None = None,
         error_edge_ids: dict[NodeID, str] | None = None,
     ) -> None:
@@ -146,6 +146,7 @@ class TransformExecutor:
         Args:
             recorder: Landscape recorder for audit trail
             span_factory: Span factory for tracing
+            step_resolver: Resolves NodeID to 1-indexed audit step position
             max_workers: Maximum concurrent workers (None = no limit)
             error_edge_ids: Map of transform node_id -> DIVERT edge_id for error routing.
                            Built by the processor from the edge_map using error_edge_label().
@@ -153,6 +154,7 @@ class TransformExecutor:
         """
         self._recorder = recorder
         self._spans = span_factory
+        self._step_resolver = step_resolver
         self._max_workers = max_workers
         self._error_edge_ids = error_edge_ids or {}
 
@@ -191,7 +193,6 @@ class TransformExecutor:
         transform: TransformProtocol,
         token: TokenInfo,
         ctx: PluginContext,
-        step_in_pipeline: int,
         attempt: int = 0,
     ) -> tuple[TransformResult, TokenInfo, str | None]:
         """Execute a transform with full audit recording and error routing.
@@ -212,11 +213,13 @@ class TransformExecutor:
         - RuntimeError if transform errors without on_error config
         - Exceptions are BUGS and propagate (not routed)
 
+        The step position in the DAG is resolved internally via StepResolver
+        using transform.node_id, rather than being passed as a parameter.
+
         Args:
             transform: Transform plugin to execute
             token: Current token with row data
             ctx: Plugin context
-            step_in_pipeline: Current position in DAG (Orchestrator is authority)
             attempt: Attempt number for retry tracking (0-indexed, default 0)
 
         Returns:
@@ -233,6 +236,9 @@ class TransformExecutor:
         if transform.node_id is None:
             raise OrchestrationInvariantError(f"Transform '{transform.name}' executed without node_id - orchestrator bug")
 
+        # Resolve step position from node_id (injected StepResolver)
+        step = self._step_resolver(NodeID(transform.node_id))
+
         # Extract dict from PipelineRow for hashing and Landscape recording
         # Landscape stores raw dicts, not PipelineRow objects
         input_dict = token.row_data.to_dict()
@@ -243,7 +249,7 @@ class TransformExecutor:
             token_id=token.token_id,
             node_id=transform.node_id,
             run_id=ctx.run_id,
-            step_index=step_in_pipeline,
+            step_index=step,
             input_data=input_dict,
             attempt=attempt,
         )
@@ -519,12 +525,11 @@ class GateExecutor:
     NOT stored in node_states.status.
 
     Example:
-        executor = GateExecutor(recorder, span_factory, edge_map)
+        executor = GateExecutor(recorder, span_factory, step_resolver, edge_map)
         outcome = executor.execute_gate(
             gate=my_gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=2,
             token_manager=manager,  # Required for fork_to_paths
         )
     """
@@ -533,6 +538,7 @@ class GateExecutor:
         self,
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
+        step_resolver: StepResolver,
         edge_map: dict[tuple[NodeID, str], str] | None = None,
         route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
     ) -> None:
@@ -541,11 +547,13 @@ class GateExecutor:
         Args:
             recorder: Landscape recorder for audit trail
             span_factory: Span factory for tracing
+            step_resolver: Resolves NodeID to 1-indexed audit step position
             edge_map: Maps (node_id, label) -> edge_id for routing
             route_resolution_map: Maps (node_id, label) -> "continue" | sink_name
         """
         self._recorder = recorder
         self._spans = span_factory
+        self._step_resolver = step_resolver
         self._edge_map = edge_map or {}
         self._route_resolution_map = route_resolution_map or {}
 
@@ -554,16 +562,17 @@ class GateExecutor:
         gate: GateProtocol,
         token: TokenInfo,
         ctx: PluginContext,
-        step_in_pipeline: int,
         token_manager: "TokenManager | None" = None,
     ) -> GateOutcome:
         """Execute a gate with full audit recording.
+
+        The step position in the DAG is resolved internally via StepResolver
+        using gate.node_id, rather than being passed as a parameter.
 
         Args:
             gate: Gate plugin to execute
             token: Current token with row data
             ctx: Plugin context (includes run_id for atomic fork outcome recording)
-            step_in_pipeline: Current position in DAG (Orchestrator is authority)
             token_manager: TokenManager for fork operations (required for fork_to_paths)
 
         Returns:
@@ -576,6 +585,9 @@ class GateExecutor:
         if gate.node_id is None:
             raise OrchestrationInvariantError(f"Gate '{gate.name}' executed without node_id - orchestrator bug")
 
+        # Resolve step position from node_id (injected StepResolver)
+        step = self._step_resolver(NodeID(gate.node_id))
+
         # Extract dict from PipelineRow for hashing and Landscape recording
         # Landscape stores raw dicts, not PipelineRow objects
         input_dict = token.row_data.to_dict()
@@ -586,7 +598,7 @@ class GateExecutor:
             token_id=token.token_id,
             node_id=gate.node_id,
             run_id=ctx.run_id,
-            step_index=step_in_pipeline,
+            step_index=step,
             input_data=input_dict,
         )
 
@@ -702,7 +714,7 @@ class GateExecutor:
                 child_tokens, _fork_group_id = token_manager.fork_token(
                     parent_token=token,
                     branches=list(action.destinations),
-                    step_in_pipeline=step_in_pipeline,
+                    node_id=NodeID(gate.node_id),
                     run_id=ctx.run_id,
                     row_data=fork_row,
                 )
@@ -764,7 +776,6 @@ class GateExecutor:
         node_id: str,
         token: TokenInfo,
         ctx: PluginContext,
-        step_in_pipeline: int,
         token_manager: "TokenManager | None" = None,
     ) -> GateOutcome:
         """Execute a config-driven gate using ExpressionParser.
@@ -779,12 +790,14 @@ class GateExecutor:
         - If condition returns a boolean, it's converted to "true"/"false" label
         - The label is then looked up in gate_config.routes to get the destination
 
+        The step position in the DAG is resolved internally via StepResolver
+        using node_id, rather than being passed as a parameter.
+
         Args:
             gate_config: Gate configuration with condition and routes
             node_id: Node ID assigned by orchestrator
             token: Current token with row data
             ctx: Plugin context
-            step_in_pipeline: Current position in DAG (Orchestrator is authority)
             token_manager: TokenManager for fork operations (required for fork destinations)
 
         Returns:
@@ -795,6 +808,9 @@ class GateExecutor:
             ValueError: If condition result doesn't match any route label
             RuntimeError: If fork destination without token_manager
         """
+        # Resolve step position from node_id (injected StepResolver)
+        step = self._step_resolver(NodeID(node_id))
+
         # Extract dict from PipelineRow for hashing and Landscape recording
         # Landscape stores raw dicts, not PipelineRow objects
         input_dict = token.row_data.to_dict()
@@ -805,7 +821,7 @@ class GateExecutor:
             token_id=token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
-            step_index=step_in_pipeline,
+            step_index=step,
             input_data=input_dict,
         )
 
@@ -912,7 +928,7 @@ class GateExecutor:
                 child_tokens, _fork_group_id = token_manager.fork_token(
                     parent_token=token,
                     branches=fork_branches,
-                    step_in_pipeline=step_in_pipeline,
+                    node_id=NodeID(node_id),
                     run_id=ctx.run_id,
                     row_data=token.row_data,
                 )
@@ -1027,10 +1043,10 @@ class AggregationExecutor:
     NOT stored in node_states.status (which is always "completed" for successful accepts).
 
     Example:
-        executor = AggregationExecutor(recorder, span_factory, run_id)
+        executor = AggregationExecutor(recorder, span_factory, step_resolver, run_id)
 
         # Accept rows into batch
-        result = executor.accept(aggregation, token, ctx, step_in_pipeline)
+        result = executor.buffer_row(node_id, token)
         # Engine uses TriggerEvaluator to decide when to flush (WP-06)
     """
 
@@ -1038,6 +1054,7 @@ class AggregationExecutor:
         self,
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
+        step_resolver: StepResolver,
         run_id: str,
         *,
         aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
@@ -1048,6 +1065,7 @@ class AggregationExecutor:
         Args:
             recorder: Landscape recorder for audit trail
             span_factory: Span factory for tracing
+            step_resolver: Resolves NodeID to 1-indexed audit step position
             run_id: Run identifier for batch creation
             aggregation_settings: Map of node_id -> AggregationSettings for trigger evaluation
             clock: Optional clock for time access. Defaults to system clock.
@@ -1055,6 +1073,7 @@ class AggregationExecutor:
         """
         self._recorder = recorder
         self._spans = span_factory
+        self._step_resolver = step_resolver
         self._run_id = run_id
         self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._member_counts: dict[str, int] = {}  # batch_id -> count for ordinals
@@ -1208,7 +1227,6 @@ class AggregationExecutor:
         node_id: NodeID,
         transform: BatchTransformProtocol,
         ctx: PluginContext,
-        step_in_pipeline: int,
         trigger_type: TriggerType,
     ) -> tuple[TransformResult, list[TokenInfo], str]:
         """Execute a batch flush with full audit recording.
@@ -1220,11 +1238,13 @@ class AggregationExecutor:
         4. Transitions batch to "completed" or "failed"
         5. Resets batch_id for next batch
 
+        The step position in the DAG is resolved internally via StepResolver
+        using node_id, rather than being passed as a parameter.
+
         Args:
             node_id: Aggregation node ID
             transform: Batch-aware transform plugin (must implement BatchTransformProtocol)
             ctx: Plugin context
-            step_in_pipeline: Current position in DAG
             trigger_type: What triggered the flush (COUNT, TIMEOUT, END_OF_SOURCE, etc.)
 
         Returns:
@@ -1297,11 +1317,15 @@ class AggregationExecutor:
         # Compute input hash AFTER wrapping (must match what begin_node_state records)
         # See: P2-2026-01-21-aggregation-input-hash-mismatch
         input_hash = stable_hash(batch_input)
+
+        # Resolve step position from node_id (injected StepResolver)
+        step = self._step_resolver(node_id)
+
         state = self._recorder.begin_node_state(
             token_id=representative_token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
-            step_index=step_in_pipeline,
+            step_index=step,
             input_data=batch_input,
             attempt=0,
         )

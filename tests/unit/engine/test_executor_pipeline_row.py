@@ -17,7 +17,20 @@ import pytest
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID, StepResolver
 from tests.fixtures.factories import make_field, make_row
+
+
+def _make_step_resolver(step_map: dict[str, int] | None = None) -> StepResolver:
+    """Create a step resolver for testing that returns a fixed step or uses a map."""
+    _map = {NodeID(k): v for k, v in (step_map or {}).items()}
+
+    def resolve(node_id: NodeID) -> int:
+        if node_id in _map:
+            return _map[node_id]
+        return 1  # Default step for tests
+
+    return resolve
 
 
 def _make_contract():
@@ -98,7 +111,7 @@ class TestTransformExecutorPipelineRow:
         mock_span_factory.transform_span.return_value = nullcontext()
 
         # Create executor
-        executor = TransformExecutor(mock_recorder, mock_span_factory)
+        executor = TransformExecutor(mock_recorder, mock_span_factory, _make_step_resolver())
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -108,7 +121,6 @@ class TestTransformExecutorPipelineRow:
             transform=mock_transform,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify PipelineRow was passed to transform.process()
@@ -152,7 +164,7 @@ class TestTransformExecutorPipelineRow:
         mock_span_factory.transform_span.return_value = nullcontext()
 
         # Create executor
-        executor = TransformExecutor(mock_recorder, mock_span_factory)
+        executor = TransformExecutor(mock_recorder, mock_span_factory, _make_step_resolver())
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -162,7 +174,6 @@ class TestTransformExecutorPipelineRow:
             transform=mock_transform,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify dict was passed to begin_node_state (for Landscape recording)
@@ -213,7 +224,7 @@ class TestTransformExecutorPipelineRow:
         mock_span_factory.transform_span.return_value = nullcontext()
 
         # Create executor
-        executor = TransformExecutor(mock_recorder, mock_span_factory)
+        executor = TransformExecutor(mock_recorder, mock_span_factory, _make_step_resolver())
 
         # Create context - initially no contract
         ctx = PluginContext(run_id="run_001", config={})
@@ -224,7 +235,6 @@ class TestTransformExecutorPipelineRow:
             transform=mock_transform,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify ctx.contract was set from token.row_data.contract
@@ -266,7 +276,7 @@ class TestTransformExecutorPipelineRow:
         mock_span_factory.transform_span.return_value = nullcontext()
 
         # Create executor
-        executor = TransformExecutor(mock_recorder, mock_span_factory)
+        executor = TransformExecutor(mock_recorder, mock_span_factory, _make_step_resolver())
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -276,7 +286,6 @@ class TestTransformExecutorPipelineRow:
             transform=mock_transform,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify updated token has PipelineRow with output contract
@@ -318,7 +327,7 @@ class TestTransformExecutorPipelineRow:
         mock_span_factory.transform_span.return_value = nullcontext()
 
         # Create executor
-        executor = TransformExecutor(mock_recorder, mock_span_factory)
+        executor = TransformExecutor(mock_recorder, mock_span_factory, _make_step_resolver())
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -328,7 +337,6 @@ class TestTransformExecutorPipelineRow:
             transform=mock_transform,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify token is unchanged on error
@@ -369,7 +377,7 @@ class TestTransformExecutorPipelineRow:
         mock_span_factory.transform_span.return_value = nullcontext()
 
         # Create executor
-        executor = TransformExecutor(mock_recorder, mock_span_factory)
+        executor = TransformExecutor(mock_recorder, mock_span_factory, _make_step_resolver())
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -382,7 +390,6 @@ class TestTransformExecutorPipelineRow:
                 transform=mock_transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
             # First call should be for input hash - should receive dict
@@ -429,7 +436,7 @@ class TestGateExecutorPipelineRow:
 
         # Create executor with edge_map for continue routing
         edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
-        executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
+        executor = GateExecutor(mock_recorder, mock_span_factory, _make_step_resolver(), edge_map=edge_map)
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -439,7 +446,6 @@ class TestGateExecutorPipelineRow:
             gate=mock_gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify PipelineRow was passed to gate.evaluate()
@@ -492,7 +498,7 @@ class TestGateExecutorPipelineRow:
 
         # Create executor with edge_map for continue routing
         edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
-        executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
+        executor = GateExecutor(mock_recorder, mock_span_factory, _make_step_resolver(), edge_map=edge_map)
 
         # Create context - initially no contract
         ctx = PluginContext(run_id="run_001", config={})
@@ -503,7 +509,6 @@ class TestGateExecutorPipelineRow:
             gate=mock_gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify ctx.contract was set from token.row_data.contract
@@ -546,7 +551,7 @@ class TestGateExecutorPipelineRow:
 
         # Create executor with edge_map for continue routing
         edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
-        executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
+        executor = GateExecutor(mock_recorder, mock_span_factory, _make_step_resolver(), edge_map=edge_map)
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -556,7 +561,6 @@ class TestGateExecutorPipelineRow:
             gate=mock_gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify dict was passed to begin_node_state (for Landscape recording)
@@ -603,7 +607,7 @@ class TestGateExecutorPipelineRow:
 
         # Create executor with edge_map for continue routing
         edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
-        executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
+        executor = GateExecutor(mock_recorder, mock_span_factory, _make_step_resolver(), edge_map=edge_map)
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -613,7 +617,6 @@ class TestGateExecutorPipelineRow:
             gate=mock_gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify updated token has PipelineRow with output contract
@@ -658,7 +661,7 @@ class TestGateExecutorPipelineRow:
 
         # Create executor with edge_map for continue routing
         edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
-        executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
+        executor = GateExecutor(mock_recorder, mock_span_factory, _make_step_resolver(), edge_map=edge_map)
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -668,7 +671,6 @@ class TestGateExecutorPipelineRow:
             gate=mock_gate,
             token=token,
             ctx=ctx,
-            step_in_pipeline=0,
         )
 
         # Verify updated token uses input contract as fallback
@@ -711,7 +713,7 @@ class TestGateExecutorPipelineRow:
 
         # Create executor with edge_map
         edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
-        executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
+        executor = GateExecutor(mock_recorder, mock_span_factory, _make_step_resolver(), edge_map=edge_map)
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -724,7 +726,6 @@ class TestGateExecutorPipelineRow:
                 gate=mock_gate,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
             # First call should be for input hash - should receive dict
@@ -767,7 +768,7 @@ class TestGateExecutorPipelineRow:
 
         # Create executor with edge_map
         edge_map = {(NodeID("gate_001"), "continue"): "edge_001"}
-        executor = GateExecutor(mock_recorder, mock_span_factory, edge_map=edge_map)
+        executor = GateExecutor(mock_recorder, mock_span_factory, _make_step_resolver(), edge_map=edge_map)
 
         # Create context
         ctx = PluginContext(run_id="run_001", config={})
@@ -783,7 +784,6 @@ class TestGateExecutorPipelineRow:
                     gate=mock_gate,
                     token=token,
                     ctx=ctx,
-                    step_in_pipeline=0,
                 )
 
             # Verify error message is clear
@@ -1085,6 +1085,7 @@ class TestAggregationExecutorPipelineRow:
         executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )
@@ -1134,6 +1135,7 @@ class TestAggregationExecutorPipelineRow:
         executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )
@@ -1178,6 +1180,7 @@ class TestAggregationExecutorPipelineRow:
         executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )
@@ -1226,6 +1229,7 @@ class TestAggregationExecutorPipelineRow:
         executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )
@@ -1285,6 +1289,7 @@ class TestAggregationExecutorPipelineRow:
         executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )
@@ -1336,6 +1341,7 @@ class TestAggregationExecutorPipelineRow:
         executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )
@@ -1348,6 +1354,7 @@ class TestAggregationExecutorPipelineRow:
         new_executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )
@@ -1395,6 +1402,7 @@ class TestAggregationExecutorPipelineRow:
         executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )
@@ -1407,6 +1415,7 @@ class TestAggregationExecutorPipelineRow:
         new_executor = AggregationExecutor(
             mock_recorder,
             mock_span_factory,
+            _make_step_resolver(),
             run_id="run_001",
             aggregation_settings={node_id: agg_settings},
         )

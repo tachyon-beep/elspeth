@@ -166,6 +166,7 @@ def _make_mock_transform(
     node_id: str = "transform-1",
     name: str = "test-transform",
     on_error: str | None = "discard",
+    on_success: str | None = None,
     is_batch_aware: bool = False,
     creates_tokens: bool = False,
     result: TransformResult | None = None,
@@ -175,6 +176,7 @@ def _make_mock_transform(
     transform.node_id = node_id
     transform.name = name
     transform.on_error = on_error
+    transform.on_success = on_success
     transform.is_batch_aware = is_batch_aware
     transform.creates_tokens = creates_tokens
     if result is not None:
@@ -447,7 +449,7 @@ class TestProcessRowSingleTransform:
         )
 
         # side_effect receives the real token and returns it with the desired result
-        def executor_side_effect(*, transform, token, ctx, step_in_pipeline, attempt=0):
+        def executor_side_effect(*, transform, token, ctx, attempt=0):
             return (success_result, token, None)
 
         with patch.object(
@@ -477,7 +479,7 @@ class TestProcessRowSingleTransform:
             retryable=False,
         )
 
-        def executor_side_effect(*, transform, token, ctx, step_in_pipeline, attempt=0):
+        def executor_side_effect(*, transform, token, ctx, attempt=0):
             return (error_result, token, "discard")
 
         with patch.object(
@@ -507,7 +509,7 @@ class TestProcessRowSingleTransform:
             retryable=False,
         )
 
-        def executor_side_effect(*, transform, token, ctx, step_in_pipeline, attempt=0):
+        def executor_side_effect(*, transform, token, ctx, attempt=0):
             return (error_result, token, "errors")
 
         with patch.object(
@@ -585,7 +587,7 @@ class TestProcessRowMultiRowOutput:
             node_to_plugin={transform_node: transform},
         )
 
-        def executor_side_effect(*, transform, token, ctx, step_in_pipeline, attempt=0):
+        def executor_side_effect(*, transform, token, ctx, attempt=0):
             return (multi_result, token, None)
 
         with patch.object(
@@ -632,7 +634,7 @@ class TestProcessRowMultiRowOutput:
             node_to_plugin={transform_node: transform},
         )
 
-        def executor_side_effect(*, transform, token, ctx, step_in_pipeline, attempt=0):
+        def executor_side_effect(*, transform, token, ctx, attempt=0):
             return (multi_result, token, None)
 
         with (
@@ -881,7 +883,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
             mock_exec.assert_called_once()
             assert result.status == "success"
@@ -904,7 +905,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
 
         assert result.status == "error"
@@ -930,7 +930,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
 
     def test_non_retryable_llm_error_reraises(self) -> None:
@@ -953,7 +952,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
 
     def test_transient_connection_error_with_on_error(self) -> None:
@@ -972,7 +970,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
 
         assert result.status == "error"
@@ -994,7 +991,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
 
         assert result.status == "error"
@@ -1019,7 +1015,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
 
     def test_retryable_llm_error_with_named_error_sink_returns_error_sink(self) -> None:
@@ -1043,7 +1038,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
 
         assert result.status == "error"
@@ -1073,7 +1067,6 @@ class TestExecuteTransformNoRetry:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step=1,
             )
 
 
@@ -1107,7 +1100,6 @@ class TestExecuteTransformWithRetry:
             transform=transform,
             token=token,
             ctx=ctx,
-            step=1,
         )
 
         retry_manager.execute_with_retry.assert_called_once()
@@ -1135,7 +1127,6 @@ class TestExecuteTransformWithRetry:
             transform=transform,
             token=token,
             ctx=ctx,
-            step=1,
         )
 
         # Extract the is_retryable callback from the call
@@ -1624,3 +1615,280 @@ class TestTelemetryEmission:
         event = Mock()
         processor._emit_telemetry(event)
         telemetry.handle_event.assert_called_once_with(event)
+
+
+# =============================================================================
+# Regression: hscm.1 — Terminal deaggregation children inherit correct sink
+# =============================================================================
+
+
+class TestTerminalDeaggregationSinkRouting:
+    """Regression tests for hscm.1: terminal deagg children must inherit the
+    terminal transform's on_success sink, not source_on_success."""
+
+    def test_terminal_deagg_children_use_transform_on_success_not_source(self) -> None:
+        """Children of a terminal multi-row transform must route to transform's on_success."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        contract = _make_contract()
+        output_rows = [
+            make_row({"value": 1}, contract=contract),
+            make_row({"value": 2}, contract=contract),
+        ]
+        multi_result = TransformResult.success_multi(
+            output_rows,
+            success_reason={"action": "expand"},
+        )
+
+        # Key: transform on_success != source_on_success
+        transform = _make_mock_transform(
+            creates_tokens=True,
+            on_success="transform_sink",
+        )
+        source_node = NodeID("source-0")
+        transform_node = NodeID(transform.node_id)
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            node_step_map={source_node: 0, transform_node: 1},
+            node_to_next={source_node: transform_node, transform_node: None},
+            first_transform_node_id=transform_node,
+            node_to_plugin={transform_node: transform},
+        )
+
+        def executor_side_effect(*, transform, token, ctx, attempt=0):
+            return (multi_result, token, None)
+
+        with patch.object(
+            processor._transform_executor,
+            "execute_transform",
+            side_effect=executor_side_effect,
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        # Parent should be EXPANDED (no sink_name)
+        expanded = [r for r in results if r.outcome == RowOutcome.EXPANDED]
+        assert len(expanded) == 1
+
+        # Children should be COMPLETED with transform's on_success sink
+        completed = [r for r in results if r.outcome == RowOutcome.COMPLETED]
+        assert len(completed) == 2
+        for r in completed:
+            assert r.sink_name == "transform_sink", (
+                f"Expected 'transform_sink' but got '{r.sink_name}'. "
+                f"Terminal deagg children must inherit the transform's on_success, "
+                f"not source_on_success."
+            )
+
+    def test_mid_chain_deagg_children_process_through_remaining_transforms(self) -> None:
+        """Mid-chain multi-row expansion: children continue to downstream transforms."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        contract = _make_contract()
+        output_rows = [
+            make_row({"value": 10}, contract=contract),
+            make_row({"value": 20}, contract=contract),
+        ]
+        multi_result = TransformResult.success_multi(
+            output_rows,
+            success_reason={"action": "expand"},
+        )
+        single_result = TransformResult.success(
+            make_row({"value": 99}, contract=contract),
+            success_reason={"action": "passthrough"},
+        )
+
+        # First transform expands, second is terminal
+        expander = _make_mock_transform(
+            node_id="expander-1",
+            name="expander",
+            creates_tokens=True,
+            on_success=None,  # mid-chain, no on_success needed
+        )
+        terminal = _make_mock_transform(
+            node_id="terminal-2",
+            name="terminal",
+            creates_tokens=False,
+            on_success="final_sink",
+        )
+
+        source_node = NodeID("source-0")
+        expander_node = NodeID("expander-1")
+        terminal_node = NodeID("terminal-2")
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            node_step_map={source_node: 0, expander_node: 1, terminal_node: 2},
+            node_to_next={source_node: expander_node, expander_node: terminal_node, terminal_node: None},
+            first_transform_node_id=expander_node,
+            node_to_plugin={expander_node: expander, terminal_node: terminal},
+        )
+
+        call_count = 0
+
+        def executor_side_effect(*, transform, token, ctx, attempt=0):
+            nonlocal call_count
+            call_count += 1
+            if transform.name == "expander":
+                return (multi_result, token, None)
+            return (single_result, token, None)
+
+        with patch.object(
+            processor._transform_executor,
+            "execute_transform",
+            side_effect=executor_side_effect,
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[expander, terminal],
+                ctx=ctx,
+            )
+
+        # Should have 1 EXPANDED + 2 COMPLETED (children processed through terminal)
+        completed = [r for r in results if r.outcome == RowOutcome.COMPLETED]
+        assert len(completed) == 2
+        for r in completed:
+            assert r.sink_name == "final_sink"
+
+
+# =============================================================================
+# Regression: hscm.2 — Coalesce traversal invariant check
+# =============================================================================
+
+
+class TestCoalesceTraversalInvariant:
+    """Regression tests for hscm.2: tokens with coalesce metadata must not
+    start processing downstream of their coalesce point."""
+
+    def test_work_item_downstream_of_coalesce_raises_invariant_error(self) -> None:
+        """A work item starting past the coalesce node must raise OrchestrationInvariantError."""
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        # Build DAG: source → transform → coalesce → downstream
+        source_node = NodeID("source-0")
+        transform_node = NodeID("transform-1")
+        coalesce_node = NodeID("coalesce-2")
+        downstream_node = NodeID("downstream-3")
+
+        # Register coalesce node for FK constraints
+        recorder.register_node(
+            run_id="test-run",
+            plugin_name="coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0",
+            config={},
+            node_id="coalesce-2",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="test-run",
+            plugin_name="downstream",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="downstream-3",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        transform = _make_mock_transform(
+            node_id="downstream-3",
+            name="downstream",
+            on_success="output",
+        )
+
+        processor = _make_processor(
+            recorder,
+            node_step_map={
+                source_node: 0,
+                transform_node: 1,
+                coalesce_node: 2,
+                downstream_node: 3,
+            },
+            node_to_next={
+                source_node: transform_node,
+                transform_node: coalesce_node,
+                coalesce_node: downstream_node,
+                downstream_node: None,
+            },
+            first_transform_node_id=transform_node,
+            node_to_plugin={downstream_node: transform},
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            coalesce_on_success_map={CoalesceName("merge"): "output"},
+        )
+
+        # Create a malformed work item starting PAST the coalesce node
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok-1",
+            row_data=make_row({"value": 1}),
+            branch_name="path_a",
+        )
+        with pytest.raises(OrchestrationInvariantError, match="downstream of coalesce"):
+            processor._process_single_token(
+                token=token,
+                transforms=[transform],
+                ctx=ctx,
+                current_node_id=downstream_node,  # step 3 > coalesce step 2
+                coalesce_node_id=coalesce_node,
+                coalesce_name=CoalesceName("merge"),
+            )
+
+    def test_work_item_at_coalesce_does_not_raise(self) -> None:
+        """A work item starting exactly at the coalesce node should not raise."""
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        source_node = NodeID("source-0")
+        coalesce_node = NodeID("coalesce-1")
+
+        recorder.register_node(
+            run_id="test-run",
+            plugin_name="coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0",
+            config={},
+            node_id="coalesce-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="output",
+            node_step_map={source_node: 0, coalesce_node: 1},
+            node_to_next={source_node: coalesce_node, coalesce_node: None},
+            first_transform_node_id=coalesce_node,
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            coalesce_on_success_map={CoalesceName("merge"): "output"},
+        )
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok-1",
+            row_data=make_row({"value": 1}),
+            branch_name="path_a",
+        )
+        # Should not raise — at coalesce node, not past it.
+        # Without coalesce_executor, coalesce handling is skipped (returns False, None)
+        # and the token completes normally. The invariant check only validates
+        # traversal ordering, not coalesce executor presence.
+        result, _ = processor._process_single_token(
+            token=token,
+            transforms=[],
+            ctx=ctx,
+            current_node_id=coalesce_node,
+            coalesce_node_id=coalesce_node,
+            coalesce_name=CoalesceName("merge"),
+        )
+        assert result is not None

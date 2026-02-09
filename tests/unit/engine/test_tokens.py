@@ -7,8 +7,21 @@ import pytest
 
 from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.testing import make_field
 from tests.unit.engine.conftest import DYNAMIC_SCHEMA
+
+
+def _make_step_resolver(step_map: dict[str, int] | None = None) -> StepResolver:
+    """Create a step resolver for testing that returns a fixed step or uses a map."""
+    _map = {NodeID(k): v for k, v in (step_map or {}).items()}
+
+    def resolve(node_id: NodeID) -> int:
+        if node_id in _map:
+            return _map[node_id]
+        return 1  # Default step for tests
+
+    return resolve
 
 
 def _make_observed_contract(*field_names: str) -> SchemaContract:
@@ -48,7 +61,7 @@ def _make_manager_context() -> tuple[Any, Any, str, str]:
         config={},
         schema_config=DYNAMIC_SCHEMA,
     )
-    manager = TokenManager(recorder)
+    manager = TokenManager(recorder, step_resolver=_make_step_resolver())
     return manager, recorder, run.run_id, source.node_id
 
 
@@ -71,7 +84,7 @@ class TestTokenManager:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         token_info = manager.create_initial_token(
             run_id=run.run_id,
@@ -101,7 +114,7 @@ class TestTokenManager:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -112,7 +125,7 @@ class TestTokenManager:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["stats", "classifier"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
@@ -138,7 +151,7 @@ class TestTokenManager:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         token_info = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -173,7 +186,7 @@ class TestTokenManagerCoalesce:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         initial = manager.create_initial_token(
             run_id=run.run_id,
@@ -185,7 +198,7 @@ class TestTokenManagerCoalesce:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["stats", "classifier"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
@@ -201,7 +214,7 @@ class TestTokenManagerCoalesce:
         merged = manager.coalesce_tokens(
             parents=[stats_token, classifier_token],
             merged_data=_make_pipeline_row({"value": 42, "mean": 10.5, "label": "A"}),
-            step_in_pipeline=3,
+            node_id=NodeID("coalesce_node"),
         )
 
         assert merged.token_id is not None
@@ -229,7 +242,7 @@ class TestTokenManagerForkIsolation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         initial = manager.create_initial_token(
             run_id=run.run_id,
@@ -241,7 +254,7 @@ class TestTokenManagerForkIsolation:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["branch_a", "branch_b"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
@@ -272,7 +285,7 @@ class TestTokenManagerForkIsolation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -284,7 +297,7 @@ class TestTokenManagerForkIsolation:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["a", "b"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
             row_data=custom_data,
         )
@@ -315,7 +328,7 @@ class TestTokenManagerExpandIsolation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         parent = manager.create_initial_token(
             run_id=run.run_id,
@@ -333,7 +346,7 @@ class TestTokenManagerExpandIsolation:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=_make_observed_contract(*expanded_rows[0].keys()),
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
@@ -364,7 +377,7 @@ class TestTokenManagerExpandIsolation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         parent = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -382,7 +395,7 @@ class TestTokenManagerExpandIsolation:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=_make_observed_contract(*expanded_rows[0].keys()),
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
@@ -410,7 +423,7 @@ class TestTokenManagerExpandIsolation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         parent = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -427,7 +440,7 @@ class TestTokenManagerExpandIsolation:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=_make_observed_contract(*expanded_rows[0].keys()),
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
@@ -457,7 +470,7 @@ class TestTokenManagerEdgeCases:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -468,7 +481,7 @@ class TestTokenManagerEdgeCases:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["branch_a"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
             row_data=_make_pipeline_row({"value": 42, "forked": True}),
         )
@@ -491,7 +504,7 @@ class TestTokenManagerEdgeCases:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -502,7 +515,7 @@ class TestTokenManagerEdgeCases:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["my_branch"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
@@ -529,7 +542,7 @@ class TestTokenManagerEdgeCases:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -540,7 +553,7 @@ class TestTokenManagerEdgeCases:
         forked_children, fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["stats_branch"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
         forked_token = forked_children[0]
@@ -575,7 +588,7 @@ class TestTokenManagerEdgeCases:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         parent = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -587,7 +600,7 @@ class TestTokenManagerEdgeCases:
             parent_token=parent,
             expanded_rows=[{"id": 1}, {"id": 2}],
             output_contract=_make_observed_contract("id"),
-            step_in_pipeline=2,
+            node_id=NodeID("expand_node"),
             run_id=run.run_id,
         )
         expanded_token = expanded_children[0]
@@ -617,7 +630,7 @@ class TestTokenManagerEdgeCases:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
         initial = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -628,14 +641,14 @@ class TestTokenManagerEdgeCases:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["a", "b"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
         merged = manager.coalesce_tokens(
             parents=children,
             merged_data=_make_pipeline_row({"value": 42, "merged": True}),
-            step_in_pipeline=3,
+            node_id=NodeID("coalesce_node"),
         )
 
         assert merged.join_group_id is not None
@@ -663,7 +676,7 @@ class TestTokenManagerEdgeCases:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         token1 = manager.create_initial_token(
             run_id=run.run_id,
@@ -701,7 +714,7 @@ class TestTokenManagerStepInPipeline:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver({"fork_gate": 2}))
         initial = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -712,7 +725,7 @@ class TestTokenManagerStepInPipeline:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["a", "b"],
-            step_in_pipeline=2,
+            node_id=NodeID("fork_gate"),
             run_id=run.run_id,
         )
 
@@ -739,7 +752,7 @@ class TestTokenManagerStepInPipeline:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver({"gate_node": 1, "coalesce_node": 3}))
         initial = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -750,14 +763,14 @@ class TestTokenManagerStepInPipeline:
         children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["a", "b"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
 
         merged = manager.coalesce_tokens(
             parents=children,
             merged_data=_make_pipeline_row({"value": 42, "merged": True}),
-            step_in_pipeline=3,
+            node_id=NodeID("coalesce_node"),
         )
 
         merged_token = recorder.get_token(merged.token_id)
@@ -784,7 +797,7 @@ class TestTokenManagerExpand:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         parent = manager.create_initial_token(
             run_id=run.run_id,
@@ -803,7 +816,7 @@ class TestTokenManagerExpand:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=_make_observed_contract(*expanded_rows[0].keys()),
-            step_in_pipeline=2,
+            node_id=NodeID("expand_node"),
             run_id=run.run_id,
         )
 
@@ -840,7 +853,7 @@ class TestTokenManagerExpand:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         initial = manager.create_initial_token(
             run_id=run.run_id,
@@ -852,7 +865,7 @@ class TestTokenManagerExpand:
         forked, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["stats_branch"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id=run.run_id,
         )
         parent = forked[0]
@@ -861,7 +874,7 @@ class TestTokenManagerExpand:
             parent_token=parent,
             expanded_rows=[{"a": 1}, {"a": 2}],
             output_contract=_make_observed_contract("a"),
-            step_in_pipeline=2,
+            node_id=NodeID("expand_node"),
             run_id=run.run_id,
         )
 
@@ -883,7 +896,7 @@ class TestTokenManagerExpand:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver({"expand_node": 5}))
         parent = manager.create_initial_token(
             run_id=run.run_id,
             source_node_id=source.node_id,
@@ -895,7 +908,7 @@ class TestTokenManagerExpand:
             parent_token=parent,
             expanded_rows=[{"a": 1}, {"a": 2}],
             output_contract=_make_observed_contract("a"),
-            step_in_pipeline=5,
+            node_id=NodeID("expand_node"),
             run_id=run.run_id,
         )
 
@@ -1003,6 +1016,6 @@ class TestTokenManagerBoundaryPaths:
                 parent_token=parent,
                 expanded_rows=[{"value": 1}],
                 output_contract=unlocked_contract,
-                step_in_pipeline=1,
+                node_id=NodeID("expand_node"),
                 run_id=run_id,
             )

@@ -33,7 +33,7 @@ from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
 from elspeth.engine.executors import (
     AggregationExecutor,
@@ -148,6 +148,18 @@ def _make_sink(
     return sink
 
 
+def _make_step_resolver(step_map: dict[str, int] | None = None) -> StepResolver:
+    """Create a step resolver for testing that returns a fixed step or uses a map."""
+    _map = {NodeID(k): v for k, v in (step_map or {}).items()}
+
+    def resolve(node_id: NodeID) -> int:
+        if node_id in _map:
+            return _map[node_id]
+        return 1  # Default step for tests
+
+    return resolve
+
+
 def _make_ctx(run_id: str = "test-run") -> MagicMock:
     """Create a PluginContext for testing."""
     from elspeth.contracts.plugin_context import PluginContext
@@ -221,20 +233,20 @@ class TestTransformExecutor:
     def test_no_node_id_raises_orchestration_invariant_error(self) -> None:
         """Transform without node_id must raise OrchestrationInvariantError."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(node_id=None)
         token = _make_token()
         ctx = _make_ctx()
 
         with pytest.raises(OrchestrationInvariantError, match="without node_id"):
-            executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+            executor.execute_transform(transform, token, ctx)
 
     # --- Success path ---
 
     def test_successful_transform_returns_result_token_none(self) -> None:
         """Successful transform returns (result, updated_token, None)."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         contract = _make_contract()
         token = _make_token(contract=contract)
         transform = _make_transform()
@@ -248,7 +260,6 @@ class TestTransformExecutor:
             transform,
             token,
             ctx,
-            step_in_pipeline=0,
         )
 
         assert result.status == "success"
@@ -258,7 +269,7 @@ class TestTransformExecutor:
     def test_begin_node_state_called_with_correct_args(self) -> None:
         """Recorder.begin_node_state called with token_id, node_id, run_id, step, dict input."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver({"node_1": 3}))
         contract = _make_contract()
         token = _make_token(contract=contract)
         transform = _make_transform()
@@ -268,7 +279,7 @@ class TestTransformExecutor:
         )
         ctx = _make_ctx()
 
-        executor.execute_transform(transform, token, ctx, step_in_pipeline=3, attempt=2)
+        executor.execute_transform(transform, token, ctx, attempt=2)
 
         recorder.begin_node_state.assert_called_once()
         kwargs = recorder.begin_node_state.call_args[1]
@@ -282,7 +293,7 @@ class TestTransformExecutor:
     def test_complete_node_state_called_completed_on_success(self) -> None:
         """On success, complete_node_state is called with COMPLETED status."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         contract = _make_contract()
         token = _make_token(contract=contract)
         transform = _make_transform()
@@ -292,7 +303,7 @@ class TestTransformExecutor:
         )
         ctx = _make_ctx()
 
-        executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+        executor.execute_transform(transform, token, ctx)
 
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
@@ -302,7 +313,7 @@ class TestTransformExecutor:
     def test_result_has_audit_fields_populated(self) -> None:
         """Result has input_hash, output_hash, duration_ms populated by executor."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         contract = _make_contract()
         token = _make_token(contract=contract)
         transform = _make_transform()
@@ -316,7 +327,6 @@ class TestTransformExecutor:
             transform,
             token,
             ctx,
-            step_in_pipeline=0,
         )
 
         assert result.input_hash is not None
@@ -327,7 +337,7 @@ class TestTransformExecutor:
     def test_updated_token_has_new_row_data(self) -> None:
         """Updated token has row_data from the result, preserving lineage."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         contract = _make_contract()
         token = _make_token(data={"value": "original"}, contract=contract)
         transform = _make_transform()
@@ -341,7 +351,6 @@ class TestTransformExecutor:
             transform,
             token,
             ctx,
-            step_in_pipeline=0,
         )
 
         assert updated_token.row_data["value"] == "modified"
@@ -352,7 +361,7 @@ class TestTransformExecutor:
     def test_ctx_state_id_set_for_external_call_recording(self) -> None:
         """ctx.state_id and ctx.node_id are set before transform.process()."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         contract = _make_contract()
         token = _make_token(contract=contract)
 
@@ -372,7 +381,7 @@ class TestTransformExecutor:
         transform.process = capturing_process
         ctx = _make_ctx()
 
-        executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+        executor.execute_transform(transform, token, ctx)
 
         assert captured_state_id == "state_001"
         assert captured_node_id == "node_1"
@@ -383,7 +392,7 @@ class TestTransformExecutor:
         """Error result with on_error=sink_name returns that as error_sink."""
         recorder = _make_recorder()
         edge_ids = {NodeID("node_1"): "divert_edge_1"}
-        executor = TransformExecutor(recorder, _make_span_factory(), error_edge_ids=edge_ids)
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids)
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "bad_data"},
@@ -395,7 +404,6 @@ class TestTransformExecutor:
             transform,
             token,
             ctx,
-            step_in_pipeline=0,
         )
 
         assert result.status == "error"
@@ -406,7 +414,7 @@ class TestTransformExecutor:
     def test_error_result_with_on_error_discard_returns_discard(self) -> None:
         """Error result with on_error='discard' returns 'discard'."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "bad_data"},
@@ -418,7 +426,6 @@ class TestTransformExecutor:
             transform,
             token,
             ctx,
-            step_in_pipeline=0,
         )
 
         assert error_sink == "discard"
@@ -426,7 +433,7 @@ class TestTransformExecutor:
     def test_error_result_without_on_error_raises_runtime_error(self) -> None:
         """Error result with on_error=None raises RuntimeError."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error=None)
         transform.process.return_value = TransformResult.error(
             reason={"reason": "bad_data"},
@@ -435,12 +442,12 @@ class TestTransformExecutor:
         ctx = _make_ctx()
 
         with pytest.raises(RuntimeError, match="no on_error"):
-            executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+            executor.execute_transform(transform, token, ctx)
 
     def test_error_path_records_failed_state(self) -> None:
         """Error result records FAILED node_state."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "bad_data"},
@@ -448,7 +455,7 @@ class TestTransformExecutor:
         token = _make_token()
         ctx = _make_ctx()
 
-        executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+        executor.execute_transform(transform, token, ctx)
 
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
@@ -457,7 +464,7 @@ class TestTransformExecutor:
     def test_error_path_records_transform_error(self) -> None:
         """Error result calls ctx.record_transform_error."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "bad_data"},
@@ -466,7 +473,7 @@ class TestTransformExecutor:
         ctx = _make_ctx()
         ctx.record_transform_error = MagicMock()
 
-        executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+        executor.execute_transform(transform, token, ctx)
 
         ctx.record_transform_error.assert_called_once()
 
@@ -474,7 +481,7 @@ class TestTransformExecutor:
         """Non-discard error routing records a DIVERT routing_event."""
         recorder = _make_recorder()
         edge_ids = {NodeID("node_1"): "divert_edge_1"}
-        executor = TransformExecutor(recorder, _make_span_factory(), error_edge_ids=edge_ids)
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids)
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "bad_data"},
@@ -482,7 +489,7 @@ class TestTransformExecutor:
         token = _make_token()
         ctx = _make_ctx()
 
-        executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+        executor.execute_transform(transform, token, ctx)
 
         recorder.record_routing_event.assert_called_once()
         kwargs = recorder.record_routing_event.call_args[1]
@@ -493,7 +500,7 @@ class TestTransformExecutor:
         """Non-discard error without DIVERT edge raises OrchestrationInvariantError."""
         recorder = _make_recorder()
         # No error_edge_ids registered
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "bad_data"},
@@ -502,21 +509,21 @@ class TestTransformExecutor:
         ctx = _make_ctx()
 
         with pytest.raises(OrchestrationInvariantError, match="DIVERT edge"):
-            executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+            executor.execute_transform(transform, token, ctx)
 
     # --- Exception path ---
 
     def test_exception_from_process_records_failed_and_reraises(self) -> None:
         """Exception from transform.process() records FAILED and re-raises."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform()
         transform.process.side_effect = ValueError("plugin bug")
         token = _make_token()
         ctx = _make_ctx()
 
         with pytest.raises(ValueError, match="plugin bug"):
-            executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+            executor.execute_transform(transform, token, ctx)
 
         recorder.complete_node_state.assert_called_once()
         kwargs = recorder.complete_node_state.call_args[1]
@@ -526,14 +533,14 @@ class TestTransformExecutor:
     def test_exception_path_captures_duration(self) -> None:
         """Duration is captured even when exception is raised."""
         recorder = _make_recorder()
-        executor = TransformExecutor(recorder, _make_span_factory())
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform()
         transform.process.side_effect = RuntimeError("crash")
         token = _make_token()
         ctx = _make_ctx()
 
         with pytest.raises(RuntimeError):
-            executor.execute_transform(transform, token, ctx, step_in_pipeline=0)
+            executor.execute_transform(transform, token, ctx)
 
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["duration_ms"] >= 0
@@ -551,19 +558,19 @@ class TestGateExecutor:
 
     def test_no_node_id_raises_orchestration_invariant_error(self) -> None:
         gate = _make_gate(node_id=None)
-        executor = GateExecutor(_make_recorder(), _make_span_factory())
+        executor = GateExecutor(_make_recorder(), _make_span_factory(), _make_step_resolver())
         token = _make_token()
         ctx = _make_ctx()
 
         with pytest.raises(OrchestrationInvariantError, match="without node_id"):
-            executor.execute_gate(gate, token, ctx, step_in_pipeline=0)
+            executor.execute_gate(gate, token, ctx)
 
     def test_continue_action_records_routing_and_updates_token(self) -> None:
         """CONTINUE action records routing and returns updated token."""
         recorder = _make_recorder()
         contract = _make_contract()
         edge_map = {(NodeID("gate_1"), "continue"): "edge_cont"}
-        executor = GateExecutor(recorder, _make_span_factory(), edge_map=edge_map)
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         gate = _make_gate()
         gate.evaluate.return_value = GateResult(
             row={"value": "test"},
@@ -573,7 +580,7 @@ class TestGateExecutor:
         token = _make_token(contract=contract)
         ctx = _make_ctx()
 
-        outcome = executor.execute_gate(gate, token, ctx, step_in_pipeline=0)
+        outcome = executor.execute_gate(gate, token, ctx)
 
         assert outcome.sink_name is None
         assert outcome.child_tokens == []
@@ -590,6 +597,7 @@ class TestGateExecutor:
         executor = GateExecutor(
             recorder,
             _make_span_factory(),
+            _make_step_resolver(),
             edge_map=edge_map,
             route_resolution_map=route_map,
         )
@@ -602,7 +610,7 @@ class TestGateExecutor:
         token = _make_token(contract=contract)
         ctx = _make_ctx()
 
-        outcome = executor.execute_gate(gate, token, ctx, step_in_pipeline=0)
+        outcome = executor.execute_gate(gate, token, ctx)
 
         assert outcome.sink_name is None
 
@@ -615,6 +623,7 @@ class TestGateExecutor:
         executor = GateExecutor(
             recorder,
             _make_span_factory(),
+            _make_step_resolver(),
             edge_map=edge_map,
             route_resolution_map=route_map,
         )
@@ -627,7 +636,7 @@ class TestGateExecutor:
         token = _make_token(contract=contract)
         ctx = _make_ctx()
 
-        outcome = executor.execute_gate(gate, token, ctx, step_in_pipeline=0)
+        outcome = executor.execute_gate(gate, token, ctx)
 
         assert outcome.sink_name == "quarantine"
 
@@ -636,7 +645,7 @@ class TestGateExecutor:
         recorder = _make_recorder()
         contract = _make_contract()
         # Empty resolution map -> unknown label
-        executor = GateExecutor(recorder, _make_span_factory())
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
         gate = _make_gate()
         gate.evaluate.return_value = GateResult(
             row={"value": "test"},
@@ -647,7 +656,7 @@ class TestGateExecutor:
         ctx = _make_ctx()
 
         with pytest.raises(MissingEdgeError):
-            executor.execute_gate(gate, token, ctx, step_in_pipeline=0)
+            executor.execute_gate(gate, token, ctx)
 
         # Node state should still be closed (FAILED)
         assert recorder.complete_node_state.call_count >= 1
@@ -662,7 +671,7 @@ class TestGateExecutor:
             (NodeID("gate_1"), "path_a"): "edge_a",
             (NodeID("gate_1"), "path_b"): "edge_b",
         }
-        executor = GateExecutor(recorder, _make_span_factory(), edge_map=edge_map)
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         gate = _make_gate()
         gate.evaluate.return_value = GateResult(
             row={"value": "test"},
@@ -682,7 +691,6 @@ class TestGateExecutor:
             gate,
             token,
             ctx,
-            step_in_pipeline=0,
             token_manager=token_manager,
         )
 
@@ -697,7 +705,7 @@ class TestGateExecutor:
             (NodeID("gate_1"), "path_a"): "edge_a",
             (NodeID("gate_1"), "path_b"): "edge_b",
         }
-        executor = GateExecutor(recorder, _make_span_factory(), edge_map=edge_map)
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         gate = _make_gate()
         gate.evaluate.return_value = GateResult(
             row={"value": "test"},
@@ -708,19 +716,19 @@ class TestGateExecutor:
         ctx = _make_ctx()
 
         with pytest.raises(RuntimeError, match="no TokenManager"):
-            executor.execute_gate(gate, token, ctx, step_in_pipeline=0, token_manager=None)
+            executor.execute_gate(gate, token, ctx, token_manager=None)
 
     def test_exception_from_evaluate_records_failed_and_reraises(self) -> None:
         """Exception from gate.evaluate() records FAILED and re-raises."""
         recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory())
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
         gate = _make_gate()
         gate.evaluate.side_effect = RuntimeError("gate bug")
         token = _make_token()
         ctx = _make_ctx()
 
         with pytest.raises(RuntimeError, match="gate bug"):
-            executor.execute_gate(gate, token, ctx, step_in_pipeline=0)
+            executor.execute_gate(gate, token, ctx)
 
         recorder.complete_node_state.assert_called_once()
         assert recorder.complete_node_state.call_args[1]["status"] == NodeStateStatus.FAILED
@@ -730,7 +738,7 @@ class TestGateExecutor:
         recorder = _make_recorder()
         contract = _make_contract()
         edge_map = {(NodeID("gate_1"), "continue"): "edge_cont"}
-        executor = GateExecutor(recorder, _make_span_factory(), edge_map=edge_map)
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         gate = _make_gate()
         gate.evaluate.return_value = GateResult(
             row={"value": "test"},
@@ -740,7 +748,7 @@ class TestGateExecutor:
         token = _make_token(contract=contract)
         ctx = _make_ctx()
 
-        outcome = executor.execute_gate(gate, token, ctx, step_in_pipeline=0)
+        outcome = executor.execute_gate(gate, token, ctx)
 
         assert outcome.result.input_hash is not None
         assert outcome.result.output_hash is not None
@@ -753,7 +761,7 @@ class TestGateExecutor:
         """Boolean True condition evaluates to 'true' label."""
         recorder = _make_recorder()
         edge_map = {(NodeID("cg_1"), "continue"): "edge_cont"}
-        executor = GateExecutor(recorder, _make_span_factory(), edge_map=edge_map)
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         config = GateSettings(
             name="my_gate",
             condition="True",
@@ -768,7 +776,6 @@ class TestGateExecutor:
             "cg_1",
             token,
             ctx,
-            step_in_pipeline=0,
         )
 
         assert outcome.sink_name is None  # "continue" means no sink
@@ -778,7 +785,7 @@ class TestGateExecutor:
         recorder = _make_recorder()
         # Edge map must have the route label that will be used for recording
         edge_map = {(NodeID("cg_1"), "false"): "edge_false"}
-        executor = GateExecutor(recorder, _make_span_factory(), edge_map=edge_map)
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         config = GateSettings(
             name="my_gate",
             condition="False",
@@ -793,7 +800,6 @@ class TestGateExecutor:
             "cg_1",
             token,
             ctx,
-            step_in_pipeline=0,
         )
 
         assert outcome.sink_name == "error_sink"
@@ -802,7 +808,7 @@ class TestGateExecutor:
         """String condition result used as route label directly."""
         recorder = _make_recorder()
         edge_map = {(NodeID("cg_1"), "continue"): "edge_cont"}
-        executor = GateExecutor(recorder, _make_span_factory(), edge_map=edge_map)
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         config = GateSettings(
             name="my_gate",
             condition="'high'",
@@ -817,7 +823,6 @@ class TestGateExecutor:
             "cg_1",
             token,
             ctx,
-            step_in_pipeline=0,
         )
 
         assert outcome.sink_name is None
@@ -825,7 +830,7 @@ class TestGateExecutor:
     def test_config_gate_unknown_route_label_raises_value_error(self) -> None:
         """Unknown route label raises ValueError with FAILED state recorded."""
         recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory())
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
         config = GateSettings(
             name="my_gate",
             condition="'unknown_label'",
@@ -841,7 +846,6 @@ class TestGateExecutor:
                 "cg_1",
                 token,
                 ctx,
-                step_in_pipeline=0,
             )
 
         # Verify FAILED state was recorded before raising
@@ -857,7 +861,7 @@ class TestGateExecutor:
             (NodeID("cg_1"), "path_b"): "edge_b",
             (NodeID("cg_1"), "continue"): "edge_cont",
         }
-        executor = GateExecutor(recorder, _make_span_factory(), edge_map=edge_map)
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver(), edge_map=edge_map)
         # Boolean condition requires both true and false routes
         config = GateSettings(
             name="my_gate",
@@ -880,7 +884,6 @@ class TestGateExecutor:
             "cg_1",
             token,
             ctx,
-            step_in_pipeline=0,
             token_manager=token_manager,
         )
 
@@ -895,7 +898,7 @@ class TestGateExecutor:
         (e.g., accessing a non-existent field on the row data via a runtime error).
         """
         recorder = _make_recorder()
-        executor = GateExecutor(recorder, _make_span_factory())
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
         # Syntactically valid but references a key that will cause evaluation error
         config = GateSettings(
             name="my_gate",
@@ -914,7 +917,6 @@ class TestGateExecutor:
                 "cg_1",
                 token,
                 ctx,
-                step_in_pipeline=0,
             )
 
         assert recorder.complete_node_state.call_count >= 1
@@ -949,6 +951,7 @@ class TestAggregationExecutor:
         executor = AggregationExecutor(
             recorder,
             span_factory,
+            _make_step_resolver(),
             run_id="test-run",
             aggregation_settings={nid: settings},
         )
@@ -1098,7 +1101,7 @@ class TestAggregationExecutor:
         ctx = _make_ctx()
 
         with pytest.raises(RuntimeError, match="No batch exists"):
-            executor.execute_flush(nid, transform, ctx, 0, TriggerType.COUNT)
+            executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
     def test_execute_flush_empty_buffer_raises_runtime_error(self) -> None:
         """Flushing with empty buffer raises RuntimeError.
@@ -1135,7 +1138,6 @@ class TestAggregationExecutor:
             nid,
             transform,
             ctx,
-            0,
             TriggerType.COUNT,
         )
 
@@ -1166,7 +1168,6 @@ class TestAggregationExecutor:
             nid,
             transform,
             ctx,
-            0,
             TriggerType.COUNT,
         )
 
@@ -1190,7 +1191,7 @@ class TestAggregationExecutor:
         ctx = _make_ctx()
 
         with pytest.raises(RuntimeError, match="transform crash"):
-            executor.execute_flush(nid, transform, ctx, 0, TriggerType.COUNT)
+            executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
         # Verify batch marked failed
         failed_calls = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
@@ -1211,7 +1212,7 @@ class TestAggregationExecutor:
         )
         ctx = _make_ctx()
 
-        executor.execute_flush(nid, transform, ctx, 0, TriggerType.COUNT)
+        executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
 
         # Batch ID should be None after flush
         assert executor.get_batch_id(nid) is None

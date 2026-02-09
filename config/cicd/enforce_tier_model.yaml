@@ -136,7 +136,7 @@ allow_hits:
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion
   expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:fp=201686a0f89ee0a3
+- key: engine/executors.py:R4:SinkExecutor:write:fp=4be78a9d4f0792e0
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
@@ -206,92 +206,92 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:fp=52906cd002ae2775
+- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:fp=c1ad500f635ad682
   owner: architecture
   reason: hasattr for feature detection
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:fp=1887f62f9cbff678
+- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:fp=f68fc7b8e360cf8b
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=7ca704465d0c2661
+- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=e711468401abe36c
   owner: architecture
   reason: hasattr for feature detection
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=3c2fc1b9b9bf76c6
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=9c956f237fce1c2b
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=f90bccc331c84a40
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=e8b231cd58c4df77
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=54c52809564ace0e
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=67bf3817f3df0cb0
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=53b05808daecec9e
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=e36295234743eaf2
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=413111018c707c54
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=a1befe8d9300fbdb
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=00745130c0fe339a
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=df528197efa7e749
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=1888089faaecfe0a
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=9431cd190b340190
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=0c505357d01d10fb
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=e6faee5146ff8ae8
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=57f6b998f618a29b
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=9aaa432748927044
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=d428978c93102fa2
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=5a49ecd95312f3f9
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=e51db81b7a4d271e
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=055d18b525d8c7c6
   owner: P2-2026-02-02
   reason: Pattern is .get() followed by explicit None check raising RuntimeError
   safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=a65001cca6850efe
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=1a08d6d57ecc6643
   owner: P2-2026-02-02
   reason: Version check for checkpoint format - None from missing key triggers ValueError
   safety: ValueError raised for missing or wrong version - explicit validation pattern
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=38f4b68e63998042
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=c07a99daf081a74f
   owner: P2-2026-02-02
   reason: Testing/inspection method that needs to work with partial setups; returns None if no batch exists
   safety: Documented as "primarily for testing" - production uses checkpoint state
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=8627e66761644859
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=b49088cad68ab01b
   owner: P2-2026-02-02
   reason: Checkpoint recovery lookup - returns None if no state was restored for node
   safety: Designed API contract - None is valid return for nodes without restored state
   expires: null
-- key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=22da0f93e716feaf
+- key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=5b1a9922a63d6986
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1081,17 +1081,17 @@ allow_hits:
   reason: Sentinel class definition in except ImportError — not a runtime error handler
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
   expires: null
-- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=4107d16f9b5cfad7
+- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=df8982be68bcf389
   owner: bugfix
   reason: Configuration validation - checking if route label exists in route_resolution_map (line shift from PipelineRow migration)
   safety: Returns None which is explicitly handled - raises MissingEdgeError with proper node_state completion
   expires: null
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=d653bcd4e15d02a2
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=136d431ba7065684
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Code reviewed - legitimate pattern; else branch handles unexpected types via str() conversion
   expires: '2026-05-02'
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=e8e81319208e59ea
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=b51f61e09ac458e9
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Code reviewed - legitimate pattern; else branch handles unexpected types via str() conversion
@@ -1241,7 +1241,7 @@ allow_hits:
   reason: JSON Schema "format" field is optional per spec - external data at trust boundary
   safety: Missing format defaults to None, falls through to plain str return - correct behavior
   expires: null
-- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=9d7a59ec5d3f6186
+- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=dcd7d270154917c7
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check converts PipelineRow to dict for audit trail consistency
@@ -1488,102 +1488,77 @@ allow_hits:
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
   safety: TypeError raised if wrong URL type - explicit failure, not masking
   expires: null
-- key: engine/processor.py:R5:RowProcessor:__init__:fp=fc130db3adf7190d
-  owner: architecture
-  reason: Type dispatch - separating GateSettings from transform plugins in node_to_plugin map
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
-- key: engine/processor.py:R6:RowProcessor:_initialize_active_pipeline_maps:fp=637ac123bf547be2
-  owner: architecture
-  reason: Graceful handling of missing attributes during pipeline map initialization
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_resolve_next_node_for_processing:fp=b7cf158bc0d488b9
-  owner: architecture
-  reason: dict.get() correct - node may have no next node (terminal position), returns None
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=4e5532b712e2abd2
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=47a0196e71e29d50
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=80946f69eb236d7b
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=e56821a3017410f0
   owner: architecture
   reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_maybe_coalesce_token:fp=8e0ecb9e8eb2c14d
+- key: engine/processor.py:R1:RowProcessor:_maybe_coalesce_token:fp=e1db0af62f64394b
   owner: architecture
   reason: dict.get() correct - not all coalesce names have step mappings
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_maybe_coalesce_token:fp=3f1a147031ccb69e
-  owner: architecture
-  reason: dict.get() correct - coalesce on_success mapping may not exist for non-terminal coalesce
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=59e92a29a515030c
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=6c09422f0f46edf2
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=a85eef04b076c8c5
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=27537e3737cef1b1
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=b37f89000fd3cd73
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=3594633bf948c37f
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=9246433061039d88
-  owner: architecture
-  reason: dict.get() correct - not all branch names have coalesce point mapping
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=aa17b9403ffdc97e
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=9457306d0e2a606f
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=386bb71f0b30ddfd
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=d789a3cfa6506cc4
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=01f7266267c82541
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=1ad256858f8fe665
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=2532f096f72099ff
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=1d601d0b3b288e1b
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: core/dag.py:R5:_validate_on_success_routing:fp=be6900ed343e3869
+- key: core/dag.py:R5:_validate_on_success_routing:fp=99416567b1607b99
   owner: architecture
   reason: Type checking - validates on_success routing by checking node type at trust boundary
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=e084ff9676da02d1
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=f66c2a55797f89d9
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=aa1724dba4d08bd9
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=7949976767f00e8f
   owner: architecture
   reason: getattr for optional attribute access on plugin protocol
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=e8e158c60d112c80
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=dee7b3ffb3ea7e5c
   owner: architecture
   reason: getattr for optional attribute access on plugin protocol
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=bf82127d2d6a603e
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=4db1b0aa532f1d94
   owner: architecture
   reason: Framework-boundary type narrowing — transforms list contains both TransformProtocol and GateProtocol instances
   safety: Crashes on type mismatch - no silent fallback
@@ -1623,23 +1598,38 @@ allow_hits:
   reason: User YAML config boundary - http_config is parsed from pipeline settings
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=b18698450a32af4d
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=7c5419575b2202aa
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=6847588e0ba57e86
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=4a489b468313543b
   owner: architecture
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=cf1ec2dfa264abd3
+- key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=2d1ec064511f75a9
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=b99e6bee5e64dbcf
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=c230ca496c8b9f48
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-09'
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=fc91829c85679540
+  owner: architecture
+  reason: dict.get() correct - coalesce node_id mapping may not exist for non-coalesce tokens
+  safety: Code reviewed - returns None which is checked immediately
+  expires: '2026-03-09'
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=a3c40dede83cb2c0
+  owner: architecture
+  reason: dict.get() correct - coalesce on_success mapping may not exist for non-terminal coalesce
+  safety: Code reviewed - returns None which is checked immediately
+  expires: '2026-03-09'
+- key: core/dag.py:R1:ExecutionGraph:get_branch_to_sink_map:fp=71ce5fa63a6cd660
+  owner: architecture
+  reason: dict.get() correct - edge data may not have mode attribute
+  safety: Code reviewed - None comparison is the expected check
   expires: '2026-03-09'

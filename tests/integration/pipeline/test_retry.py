@@ -223,7 +223,8 @@ class TestRetryAuditTrail:
         transform.node_id = node_id
 
         # Create transform executor
-        transform_executor = TransformExecutor(recorder, span_factory)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
         # Create retry manager with 3 attempts (enough to succeed)
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
@@ -241,7 +242,6 @@ class TestRetryAuditTrail:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=1,
                 attempt=attempt,
             )
 
@@ -323,7 +323,8 @@ class TestRetryAuditTrail:
         transform.node_id = node_id
 
         # Create transform executor
-        transform_executor = TransformExecutor(recorder, span_factory)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
         # Create retry manager with only 2 attempts
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
@@ -340,7 +341,6 @@ class TestRetryAuditTrail:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=1,
                 attempt=attempt,
             )
 
@@ -426,7 +426,8 @@ class TestRetryAuditTrail:
         transform.node_id = node_id
 
         # Create transform executor
-        transform_executor = TransformExecutor(recorder, span_factory)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
         ctx = PluginContext(run_id=run_id, config={})
 
@@ -435,7 +436,6 @@ class TestRetryAuditTrail:
             transform=transform,
             token=token,
             ctx=ctx,
-            step_in_pipeline=1,
             attempt=0,
         )
 

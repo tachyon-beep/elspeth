@@ -210,6 +210,7 @@ from elspeth.contracts.types import (
     GateName,
     NodeID,
     SinkName,
+    StepResolver,
 )
 from elspeth.contracts.url import (
     SENSITIVE_PARAMS,
@@ -318,6 +319,7 @@ __all__ = [  # Grouped by category for readability
     "GateName",
     "NodeID",
     "SinkName",
+    "StepResolver",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
     "ExceptionResult",

@@ -130,7 +130,8 @@ def recorder(tmp_path) -> LandscapeRecorder:
 def executor(recorder: LandscapeRecorder) -> TransformExecutor:
     """Create TransformExecutor for testing."""
     spans = SpanFactory()
-    return TransformExecutor(recorder, spans)
+    step_resolver = lambda node_id: 0  # noqa: E731
+    return TransformExecutor(recorder, spans, step_resolver)
 
 
 @pytest.fixture
@@ -235,7 +236,6 @@ class TestMultiQueryIntegration:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
             # Should succeed
@@ -335,7 +335,6 @@ class TestMultiQueryIntegration:
                     transform=transform,
                     token=token,
                     ctx=ctx,
-                    step_in_pipeline=0,
                 )
                 results.append(result)
 

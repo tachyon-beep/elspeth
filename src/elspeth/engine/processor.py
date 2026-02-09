@@ -70,6 +70,7 @@ class _WorkItem:
     current_node_id: NodeID | None
     coalesce_node_id: NodeID | None = None
     coalesce_name: CoalesceName | None = None  # Name of the coalesce point (if any)
+    on_success_sink: str | None = None  # Inherited sink for terminal children (deagg)
 
 
 class RowProcessor:
@@ -178,16 +179,26 @@ class RowProcessor:
                 error_edge_ids[node_id] = edge_id
         self._error_edge_ids = error_edge_ids
 
-        self._token_manager = TokenManager(recorder, payload_store=payload_store)
+        self._token_manager = TokenManager(
+            recorder,
+            step_resolver=self._resolve_audit_step_for_node,
+            payload_store=payload_store,
+        )
         self._transform_executor = TransformExecutor(
             recorder,
             span_factory,
+            self._resolve_audit_step_for_node,
             max_workers=max_workers,
             error_edge_ids=error_edge_ids,
         )
-        self._gate_executor = GateExecutor(recorder, span_factory, edge_map, route_resolution_map)
+        self._gate_executor = GateExecutor(recorder, span_factory, self._resolve_audit_step_for_node, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(
-            recorder, span_factory, run_id, aggregation_settings=aggregation_settings, clock=self._clock
+            recorder,
+            span_factory,
+            self._resolve_audit_step_for_node,
+            run_id,
+            aggregation_settings=aggregation_settings,
+            clock=self._clock,
         )
         self._telemetry_manager = telemetry_manager
 
@@ -208,6 +219,7 @@ class RowProcessor:
         current_node_id: NodeID | None,
         coalesce_name: CoalesceName | None = None,
         coalesce_node_id: NodeID | None = None,
+        on_success_sink: str | None = None,
     ) -> _WorkItem:
         """Create node-id based work item."""
         resolved_coalesce_node_id = coalesce_node_id
@@ -219,6 +231,7 @@ class RowProcessor:
             current_node_id=current_node_id,
             coalesce_node_id=resolved_coalesce_node_id,
             coalesce_name=coalesce_name,
+            on_success_sink=on_success_sink,
         )
 
     def resolve_node_step(self, node_id: NodeID) -> int:
@@ -267,6 +280,7 @@ class RowProcessor:
         token: TokenInfo,
         current_node_id: NodeID,
         coalesce_name: CoalesceName | None = None,
+        on_success_sink: str | None = None,
     ) -> _WorkItem:
         """Create child work item that continues after current node or resumes at coalesce."""
         if coalesce_name is not None:
@@ -276,11 +290,13 @@ class RowProcessor:
                 current_node_id=coalesce_node_id,
                 coalesce_name=coalesce_name,
                 coalesce_node_id=coalesce_node_id,
+                on_success_sink=on_success_sink,
             )
 
         return self._create_work_item(
             token=token,
             current_node_id=self._resolve_continuation_node_for_work_item(current_node_id),
+            on_success_sink=on_success_sink,
         )
 
     def _emit_telemetry(self, event: TelemetryEvent) -> None:
@@ -509,16 +525,11 @@ class RowProcessor:
         settings = self._aggregation_settings[node_id]
         output_mode = settings.output_mode
 
-        # Use node-based audit step resolution to preserve numbering while
-        # decoupling timeout flush traversal from positional indexing.
-        audit_step = self._resolve_audit_step_for_node(node_id)
-
         # Execute flush with the specified trigger type
         result, buffered_tokens, _batch_id = self._aggregation_executor.execute_flush(
             node_id=node_id,
             transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
             ctx=ctx,
-            step_in_pipeline=audit_step,
             trigger_type=trigger_type,
         )
 
@@ -711,7 +722,7 @@ class RowProcessor:
                     parent_token=buffered_tokens[0],
                     expanded_rows=[row.to_dict() for row in output_rows],
                     output_contract=output_contract,
-                    step_in_pipeline=audit_step,
+                    node_id=node_id,
                     run_id=self._run_id,
                     record_parent_outcome=False,
                 )
@@ -759,7 +770,6 @@ class RowProcessor:
         transform: TransformProtocol,
         current_token: TokenInfo,
         ctx: PluginContext,
-        step: int,
         child_items: list[_WorkItem],
         coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
@@ -794,7 +804,6 @@ class RowProcessor:
             transform: The batch-aware transform
             current_token: Current row token
             ctx: Plugin context
-            step: Pipeline step number
             child_items: Work items to return with result
             coalesce_node_id: Node ID at which fork children should coalesce (optional)
             coalesce_name: Name of the coalesce point for merging (optional)
@@ -829,7 +838,6 @@ class RowProcessor:
                 node_id=node_id,
                 transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
                 ctx=ctx,
-                step_in_pipeline=step,
                 trigger_type=trigger_type,
             )
 
@@ -1040,7 +1048,7 @@ class RowProcessor:
                     parent_token=current_token,
                     expanded_rows=[row.to_dict() for row in output_rows],
                     output_contract=output_contract,
-                    step_in_pipeline=step,
+                    node_id=node_id,
                     run_id=self._run_id,
                     record_parent_outcome=False,
                 )
@@ -1161,7 +1169,6 @@ class RowProcessor:
         transform: Any,
         token: TokenInfo,
         ctx: PluginContext,
-        step: int,
     ) -> tuple[TransformResult, TokenInfo, str | None]:
         """Execute transform with optional retry for transient failures.
 
@@ -1178,7 +1185,6 @@ class RowProcessor:
             transform: Transform to execute
             token: Current token
             ctx: Plugin context
-            step: Pipeline step index
 
         Returns:
             Tuple of (TransformResult, updated TokenInfo, error_sink)
@@ -1192,7 +1198,6 @@ class RowProcessor:
                     transform=transform,
                     token=token,
                     ctx=ctx,
-                    step_in_pipeline=step,
                     attempt=0,
                 )
             except LLMClientError as e:
@@ -1302,7 +1307,6 @@ class RowProcessor:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=step,
                 attempt=attempt,
             )
 
@@ -1499,12 +1503,9 @@ class RowProcessor:
         ):
             return False, None
 
-        coalesce_step = self.resolve_node_step(coalesce_node_id)
-
         coalesce_outcome = self._coalesce_executor.accept(
             token=current_token,
             coalesce_name=coalesce_name,
-            step_in_pipeline=coalesce_step,
         )
 
         if coalesce_outcome.held:
@@ -1602,13 +1603,11 @@ class RowProcessor:
         coalesce_node_id = self._coalesce_node_ids.get(coalesce_name)
         if coalesce_node_id is None:
             raise OrchestrationInvariantError(f"Coalesce node_id missing for coalesce '{coalesce_name}' during branch-loss handling")
-        coalesce_step = self.resolve_node_step(coalesce_node_id)
         outcome = self._coalesce_executor.notify_branch_lost(
             coalesce_name=coalesce_name,
             row_id=current_token.row_id,
             lost_branch=current_token.branch_name,
             reason=reason,
-            step_in_pipeline=coalesce_step,
         )
 
         if outcome is None:
@@ -1694,6 +1693,7 @@ class RowProcessor:
                     current_node_id=item.current_node_id,
                     coalesce_node_id=item.coalesce_node_id,
                     coalesce_name=item.coalesce_name,
+                    on_success_sink=item.on_success_sink,
                 )
 
                 if result is not None:
@@ -1714,6 +1714,7 @@ class RowProcessor:
         current_node_id: NodeID | None,
         coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
+        on_success_sink: str | None = None,
     ) -> tuple[RowResult | list[RowResult] | None, list[_WorkItem]]:
         """Process a single token through processing nodes starting at node_id.
 
@@ -1724,6 +1725,7 @@ class RowProcessor:
             current_node_id: Node ID to start processing from (or None for terminal completion)
             coalesce_node_id: Node ID at which fork children should coalesce
             coalesce_name: Name of the coalesce point for merging
+            on_success_sink: Inherited sink from parent (e.g. terminal deagg parent's on_success)
 
         Returns:
             Tuple of (RowResult or list of RowResults or None if held for coalesce,
@@ -1734,7 +1736,7 @@ class RowProcessor:
         """
         current_token = token
         child_items: list[_WorkItem] = []
-        last_on_success_sink: str = self._source_on_success
+        last_on_success_sink: str = on_success_sink if on_success_sink is not None else self._source_on_success
         if coalesce_name is not None and current_node_id is not None:
             coalesce_node_id_for_name = self._coalesce_node_ids.get(coalesce_name)
             if coalesce_node_id_for_name == current_node_id and self._resolve_next_node_for_processing(current_node_id) is None:
@@ -1744,6 +1746,26 @@ class RowProcessor:
                         f"Terminal coalesce '{coalesce_name}' continuation is missing on_success sink mapping"
                     )
                 last_on_success_sink = coalesce_sink
+
+        # Invariant: tokens with coalesce metadata must not start downstream of their coalesce point.
+        # A malformed work item starting past the coalesce node would silently skip coalesce handling
+        # because _maybe_coalesce_token only triggers on exact node equality.
+        if (
+            coalesce_node_id is not None
+            and current_node_id is not None
+            and coalesce_name is not None
+            and current_node_id != coalesce_node_id
+            and current_node_id in self._node_step_map
+            and coalesce_node_id in self._node_step_map
+        ):
+            current_step = self._node_step_map[current_node_id]
+            coalesce_step = self._node_step_map[coalesce_node_id]
+            if current_step > coalesce_step:
+                raise OrchestrationInvariantError(
+                    f"Token {token.token_id} started at node '{current_node_id}' (step {current_step}), "
+                    f"which is downstream of coalesce '{coalesce_name}' (step {coalesce_step}). "
+                    f"Work items with coalesce metadata must start at or before the coalesce point."
+                )
 
         node_id: NodeID | None = current_node_id
         max_inner_iterations = len(self._node_to_next) + 1
@@ -1772,8 +1794,6 @@ class RowProcessor:
                 node_id = next_node_id
                 continue
 
-            step = self._resolve_audit_step_for_node(node_id)
-
             # Type-safe plugin detection using protocols (supports protocol-only plugins)
             if isinstance(plugin, GateProtocol):
                 gate_plugin = plugin
@@ -1781,7 +1801,6 @@ class RowProcessor:
                     gate=gate_plugin,
                     token=current_token,
                     ctx=ctx,
-                    step_in_pipeline=step,
                     token_manager=self._token_manager,
                 )
                 current_token = outcome.updated_token
@@ -1852,7 +1871,6 @@ class RowProcessor:
                         transform=row_transform,
                         current_token=current_token,
                         ctx=ctx,
-                        step=step,
                         child_items=child_items,
                         coalesce_node_id=coalesce_node_id,
                         coalesce_name=coalesce_name,
@@ -1864,7 +1882,6 @@ class RowProcessor:
                         transform=row_transform,
                         token=current_token,
                         ctx=ctx,
-                        step=step,
                     )
                     # Emit TransformCompleted telemetry AFTER Landscape recording succeeds
                     # (Landscape recording happens inside _execute_transform_with_retry)
@@ -1977,11 +1994,13 @@ class RowProcessor:
                         parent_token=current_token,
                         expanded_rows=[r.to_dict() for r in transform_result.rows],
                         output_contract=output_contract,
-                        step_in_pipeline=step,
+                        node_id=node_id,
                         run_id=self._run_id,
                     )
 
-                    # Queue each child for continued processing
+                    # Queue each child for continued processing.
+                    # Pass last_on_success_sink so terminal children inherit the
+                    # expanding transform's sink instead of defaulting to source_on_success.
                     for child_token in child_tokens:
                         child_coalesce_name = coalesce_name if coalesce_name is not None and child_token.branch_name is not None else None
                         child_items.append(
@@ -1989,6 +2008,7 @@ class RowProcessor:
                                 token=child_token,
                                 current_node_id=node_id,
                                 coalesce_name=child_coalesce_name,
+                                on_success_sink=last_on_success_sink,
                             )
                         )
 
@@ -2012,7 +2032,6 @@ class RowProcessor:
                     node_id=node_id,
                     token=current_token,
                     ctx=ctx,
-                    step_in_pipeline=step,
                     token_manager=self._token_manager,
                 )
                 current_token = outcome.updated_token

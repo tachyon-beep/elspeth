@@ -126,10 +126,8 @@ def handle_coalesce_timeouts(
     for coalesce_name_str in coalesce_executor.get_registered_names():
         coalesce_name = CoalesceName(coalesce_name_str)
         coalesce_node_id = coalesce_node_map[coalesce_name]
-        coalesce_step = processor.resolve_node_step(coalesce_node_id)
         timed_out = coalesce_executor.check_timeouts(
             coalesce_name=coalesce_name_str,
-            step_in_pipeline=coalesce_step,
         )
         for outcome in timed_out:
             if outcome.merged_token is not None:
@@ -182,9 +180,7 @@ def flush_coalesce_pending(
         counters: Mutable ExecutionCounters to update
         pending_tokens: Dict of sink_name -> tokens to append results to
     """
-    # Convert CoalesceName -> str for CoalesceExecutor API
-    flush_step_map = {str(name): processor.resolve_node_step(node_id) for name, node_id in coalesce_node_map.items()}
-    pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
+    pending_outcomes = coalesce_executor.flush_pending()
 
     # Handle any merged tokens from flush
     for outcome in pending_outcomes:

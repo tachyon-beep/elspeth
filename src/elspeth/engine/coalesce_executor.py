@@ -15,6 +15,7 @@ from elspeth.contracts import TokenInfo
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.clock import DEFAULT_CLOCK
@@ -72,14 +73,14 @@ class CoalesceExecutor:
     - Records audit trail via LandscapeRecorder
 
     Example:
-        executor = CoalesceExecutor(recorder, span_factory, token_manager, run_id)
+        executor = CoalesceExecutor(recorder, span_factory, token_manager, run_id, step_resolver)
 
         # Configure coalesce point
         executor.register_coalesce(settings, node_id)
 
         # Accept tokens as they arrive
         for token in arriving_tokens:
-            outcome = executor.accept(token, "coalesce_name", step_in_pipeline)
+            outcome = executor.accept(token, "coalesce_name")
             if outcome.merged_token:
                 # Merged token continues through pipeline
                 work_queue.append(outcome.merged_token)
@@ -91,6 +92,7 @@ class CoalesceExecutor:
         span_factory: SpanFactory,
         token_manager: "TokenManager",
         run_id: str,
+        step_resolver: StepResolver,
         clock: "Clock | None" = None,
     ) -> None:
         """Initialize executor.
@@ -100,6 +102,9 @@ class CoalesceExecutor:
             span_factory: Span factory for tracing
             token_manager: TokenManager for creating merged tokens
             run_id: Run identifier for audit context
+            step_resolver: Resolves NodeID to 1-indexed audit step position.
+                           Injected at construction to eliminate step_in_pipeline
+                           threading through public method signatures.
             clock: Optional clock for time access. Defaults to system clock.
                    Inject MockClock for deterministic testing.
         """
@@ -107,12 +112,13 @@ class CoalesceExecutor:
         self._spans = span_factory
         self._token_manager = token_manager
         self._run_id = run_id
+        self._step_resolver = step_resolver
         self._clock = clock if clock is not None else DEFAULT_CLOCK
 
         # Coalesce configuration: name -> settings
         self._settings: dict[str, CoalesceSettings] = {}
         # Node IDs: coalesce_name -> node_id
-        self._node_ids: dict[str, str] = {}
+        self._node_ids: dict[str, NodeID] = {}
         # Pending tokens: (coalesce_name, row_id) -> _PendingCoalesce
         self._pending: dict[tuple[str, str], _PendingCoalesce] = {}
         # Completed coalesces: tracks keys that have already merged/failed
@@ -129,7 +135,7 @@ class CoalesceExecutor:
     def register_coalesce(
         self,
         settings: CoalesceSettings,
-        node_id: str,
+        node_id: NodeID,
     ) -> None:
         """Register a coalesce point.
 
@@ -170,17 +176,18 @@ class CoalesceExecutor:
         self,
         token: TokenInfo,
         coalesce_name: str,
-        step_in_pipeline: int,
     ) -> CoalesceOutcome:
         """Accept a token at a coalesce point.
 
         If merge conditions are met, returns the merged token.
         Otherwise, holds the token and returns held=True.
 
+        Step position is resolved internally via the injected StepResolver
+        from the coalesce point's registered node_id.
+
         Args:
             token: Token arriving at coalesce point (must have branch_name)
             coalesce_name: Name of the coalesce configuration
-            step_in_pipeline: Current position in DAG
 
         Returns:
             CoalesceOutcome indicating whether token was held or merged
@@ -196,6 +203,7 @@ class CoalesceExecutor:
 
         settings = self._settings[coalesce_name]
         node_id = self._node_ids[coalesce_name]
+        step = self._step_resolver(node_id)
 
         # Validate branch is expected
         if token.branch_name not in settings.branches:
@@ -215,7 +223,7 @@ class CoalesceExecutor:
                 token_id=token.token_id,
                 node_id=node_id,
                 run_id=self._run_id,
-                step_index=step_in_pipeline,
+                step_index=step,
                 input_data=token.row_data.to_dict(),  # Recorder expects dict
             )
             self._recorder.complete_node_state(
@@ -267,7 +275,7 @@ class CoalesceExecutor:
             token_id=token.token_id,
             node_id=node_id,
             run_id=self._run_id,
-            step_index=step_in_pipeline,
+            step_index=step,
             input_data=token.row_data.to_dict(),  # Recorder expects dict
         )
         pending.pending_state_ids[token.branch_name] = state.state_id
@@ -278,7 +286,7 @@ class CoalesceExecutor:
                 settings=settings,
                 node_id=node_id,
                 pending=pending,
-                step_in_pipeline=step_in_pipeline,
+                step=step,
                 key=key,
                 coalesce_name=coalesce_name,
             )
@@ -318,7 +326,7 @@ class CoalesceExecutor:
         self,
         settings: CoalesceSettings,
         key: tuple[str, str],
-        step_in_pipeline: int,
+        step: int,
         failure_reason: str,
     ) -> CoalesceOutcome:
         """Fail all arrived tokens in a pending coalesce and clean up.
@@ -329,7 +337,7 @@ class CoalesceExecutor:
         Args:
             settings: Coalesce settings for metadata
             key: (coalesce_name, row_id) tuple
-            step_in_pipeline: Step index for audit
+            step: Resolved audit step index for the coalesce node
             failure_reason: Machine-readable failure reason string
 
         Returns:
@@ -385,9 +393,9 @@ class CoalesceExecutor:
     def _execute_merge(
         self,
         settings: CoalesceSettings,
-        node_id: str,
+        node_id: NodeID,
         pending: _PendingCoalesce,
-        step_in_pipeline: int,
+        step: int,
         key: tuple[str, str],
         coalesce_name: str,
     ) -> CoalesceOutcome:
@@ -554,7 +562,7 @@ class CoalesceExecutor:
         merged_token = self._token_manager.coalesce_tokens(
             parents=consumed_tokens,
             merged_data=merged_data,
-            step_in_pipeline=step_in_pipeline,
+            node_id=node_id,
         )
 
         # Build audit metadata BEFORE completing node states (Bug l4h fix)
@@ -685,16 +693,17 @@ class CoalesceExecutor:
     def check_timeouts(
         self,
         coalesce_name: str,
-        step_in_pipeline: int,
     ) -> list[CoalesceOutcome]:
         """Check for timed-out pending coalesces and merge them.
 
         For best_effort policy, merges whatever has arrived when timeout expires.
         For quorum policy with timeout, merges if quorum met when timeout expires.
 
+        Step position is resolved internally via the injected StepResolver
+        from the coalesce point's registered node_id.
+
         Args:
             coalesce_name: Name of the coalesce configuration
-            step_in_pipeline: Current position in DAG
 
         Returns:
             List of CoalesceOutcomes for any merges triggered by timeout
@@ -704,6 +713,7 @@ class CoalesceExecutor:
 
         settings = self._settings[coalesce_name]
         node_id = self._node_ids[coalesce_name]
+        step = self._step_resolver(node_id)
 
         if settings.timeout_seconds is None:
             return []
@@ -731,7 +741,7 @@ class CoalesceExecutor:
                     settings=settings,
                     node_id=node_id,
                     pending=pending,
-                    step_in_pipeline=step_in_pipeline,
+                    step=step,
                     key=key,
                     coalesce_name=coalesce_name,
                 )
@@ -748,7 +758,7 @@ class CoalesceExecutor:
                         settings=settings,
                         node_id=node_id,
                         pending=pending,
-                        step_in_pipeline=step_in_pipeline,
+                        step=step,
                         key=key,
                         coalesce_name=coalesce_name,
                     )
@@ -759,7 +769,7 @@ class CoalesceExecutor:
                         self._fail_pending(
                             settings,
                             key,
-                            step_in_pipeline,
+                            step,
                             failure_reason="quorum_not_met_at_timeout",
                         )
                     )
@@ -772,17 +782,14 @@ class CoalesceExecutor:
                     self._fail_pending(
                         settings,
                         key,
-                        step_in_pipeline,
+                        step,
                         failure_reason="incomplete_branches",
                     )
                 )
 
         return results
 
-    def flush_pending(
-        self,
-        step_map: dict[str, int],
-    ) -> list[CoalesceOutcome]:
+    def flush_pending(self) -> list[CoalesceOutcome]:
         """Flush all pending coalesces (called at end-of-source or shutdown).
 
         For best_effort policy: merges whatever arrived.
@@ -790,8 +797,8 @@ class CoalesceExecutor:
         For require_all policy: returns failure (never partial merge).
         For first policy: should never have pending (merges immediately).
 
-        Args:
-            step_map: Map of coalesce_name -> step_in_pipeline for audit trail
+        Step positions are resolved internally via the injected StepResolver
+        from each coalesce point's registered node_id.
 
         Returns:
             List of CoalesceOutcomes for all pending coalesces
@@ -804,7 +811,7 @@ class CoalesceExecutor:
             settings = self._settings[coalesce_name]
             node_id = self._node_ids[coalesce_name]
             pending = self._pending[key]
-            step_in_pipeline = step_map[coalesce_name]
+            step = self._step_resolver(node_id)
 
             if settings.policy == "best_effort":
                 # Merge whatever arrived (or fail if nothing arrived)
@@ -813,7 +820,7 @@ class CoalesceExecutor:
                         settings=settings,
                         node_id=node_id,
                         pending=pending,
-                        step_in_pipeline=step_in_pipeline,
+                        step=step,
                         key=key,
                         coalesce_name=coalesce_name,
                     )
@@ -824,7 +831,7 @@ class CoalesceExecutor:
                         self._fail_pending(
                             settings,
                             key,
-                            step_in_pipeline,
+                            step,
                             failure_reason="all_branches_lost",
                         )
                     )
@@ -839,7 +846,7 @@ class CoalesceExecutor:
                         settings=settings,
                         node_id=node_id,
                         pending=pending,
-                        step_in_pipeline=step_in_pipeline,
+                        step=step,
                         key=key,
                         coalesce_name=coalesce_name,
                     )
@@ -850,7 +857,7 @@ class CoalesceExecutor:
                         self._fail_pending(
                             settings,
                             key,
-                            step_in_pipeline,
+                            step,
                             failure_reason="quorum_not_met",
                         )
                     )
@@ -861,7 +868,7 @@ class CoalesceExecutor:
                     self._fail_pending(
                         settings,
                         key,
-                        step_in_pipeline,
+                        step,
                         failure_reason="incomplete_branches",
                     )
                 )
@@ -888,7 +895,6 @@ class CoalesceExecutor:
         row_id: str,
         lost_branch: str,
         reason: str,
-        step_in_pipeline: int,
     ) -> CoalesceOutcome | None:
         """Notify that a branch was error-routed and will never arrive.
 
@@ -901,12 +907,14 @@ class CoalesceExecutor:
         work item at a time, so there is no concurrency within a single row's
         fork/coalesce lifecycle.
 
+        Step position is resolved internally via the injected StepResolver
+        from the coalesce point's registered node_id.
+
         Args:
             coalesce_name: Name of the coalesce configuration
             row_id: Source row ID (correlates forked tokens)
             lost_branch: Name of the branch that was error-routed
             reason: Machine-readable reason for the loss
-            step_in_pipeline: Step index of the coalesce point
 
         Returns:
             CoalesceOutcome if merge/failure triggered, None if still waiting.
@@ -921,6 +929,8 @@ class CoalesceExecutor:
             return None
 
         settings = self._settings[coalesce_name]
+        node_id = self._node_ids[coalesce_name]
+        step = self._step_resolver(node_id)
 
         # Validate branch is expected
         if lost_branch not in settings.branches:
@@ -936,7 +946,7 @@ class CoalesceExecutor:
                 pending_state_ids={},
                 lost_branches={lost_branch: reason},
             )
-            return self._evaluate_after_loss(settings, key, step_in_pipeline)
+            return self._evaluate_after_loss(settings, key, step)
 
         pending = self._pending[key]
 
@@ -950,13 +960,13 @@ class CoalesceExecutor:
 
         # Record the loss and re-evaluate
         pending.lost_branches[lost_branch] = reason
-        return self._evaluate_after_loss(settings, key, step_in_pipeline)
+        return self._evaluate_after_loss(settings, key, step)
 
     def _evaluate_after_loss(
         self,
         settings: CoalesceSettings,
         key: tuple[str, str],
-        step_in_pipeline: int,
+        step: int,
     ) -> CoalesceOutcome | None:
         """Re-evaluate merge conditions after a branch loss notification.
 
@@ -969,7 +979,7 @@ class CoalesceExecutor:
         Args:
             settings: Coalesce settings for the affected point
             key: (coalesce_name, row_id) tuple
-            step_in_pipeline: Step index of the coalesce point
+            step: Resolved audit step index for the coalesce node
 
         Returns:
             CoalesceOutcome if merge/failure triggered, None if still waiting.
@@ -984,7 +994,7 @@ class CoalesceExecutor:
             return self._fail_pending(
                 settings,
                 key,
-                step_in_pipeline,
+                step,
                 failure_reason=f"branch_lost:{','.join(sorted(pending.lost_branches.keys()))}",
             )
 
@@ -999,13 +1009,13 @@ class CoalesceExecutor:
                 return self._fail_pending(
                     settings,
                     key,
-                    step_in_pipeline,
+                    step,
                     failure_reason=f"quorum_impossible:need={settings.quorum_count},max_possible={max_possible}",
                 )
             # Check if arrived count already meets quorum
             if arrived_count >= settings.quorum_count:
                 node_id = self._node_ids[settings.name]
-                return self._execute_merge(settings, node_id, pending, step_in_pipeline, key, settings.name)
+                return self._execute_merge(settings, node_id, pending, step, key, settings.name)
             return None  # Still waiting
 
         elif settings.policy == "best_effort":
@@ -1013,11 +1023,11 @@ class CoalesceExecutor:
             if arrived_count + lost_count >= total_branches:
                 if arrived_count > 0:
                     node_id = self._node_ids[settings.name]
-                    return self._execute_merge(settings, node_id, pending, step_in_pipeline, key, settings.name)
+                    return self._execute_merge(settings, node_id, pending, step, key, settings.name)
                 return self._fail_pending(
                     settings,
                     key,
-                    step_in_pipeline,
+                    step,
                     failure_reason="all_branches_lost",
                 )
             return None  # Still waiting for remaining branches

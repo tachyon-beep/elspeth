@@ -374,7 +374,8 @@ class TestOpenRouterLLMTransformIntegration:
     def executor(self, recorder: LandscapeRecorder) -> TransformExecutor:
         """Create TransformExecutor for testing."""
         spans = SpanFactory()
-        return TransformExecutor(recorder, spans)
+        step_resolver = lambda node_id: 0  # noqa: E731
+        return TransformExecutor(recorder, spans, step_resolver)
 
     @pytest.fixture
     def run_id(self, recorder: LandscapeRecorder) -> str:
@@ -471,7 +472,6 @@ class TestOpenRouterLLMTransformIntegration:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
         # Verify result
@@ -537,7 +537,6 @@ class TestOpenRouterLLMTransformIntegration:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
         assert "500" in str(exc_info.value)
@@ -592,7 +591,6 @@ class TestOpenRouterLLMTransformIntegration:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
         assert "429" in str(exc_info.value)
