@@ -112,6 +112,10 @@ class WebScrapeTransform(BaseTransform):
         # Parse and validate config
         cfg = WebScrapeConfig.from_dict(options)
 
+        # Routing config
+        self._on_error = cfg.on_error
+        self._on_success = cfg.on_success
+
         # Required fields
         self._url_field = cfg.url_field
         self._content_field = cfg.content_field

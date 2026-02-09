@@ -67,6 +67,27 @@ def mock_ctx(payload_store):
     return ctx
 
 
+def test_web_scrape_wires_on_success_and_on_error() -> None:
+    """WebScrapeTransform should expose routing config from TransformDataConfig."""
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "on_success": "output",
+            "on_error": "errors",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Unit testing web scrape transform",
+            },
+        }
+    )
+
+    assert transform.on_success == "output"
+    assert transform.on_error == "errors"
+
+
 @respx.mock
 def test_web_scrape_success_markdown(mock_ctx):
     """Successful scrape should enrich row with content and fingerprint."""
