@@ -299,7 +299,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_node_map=node_map,
             processor=processor,
             config_transforms=[Mock(), Mock()],
-
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
@@ -333,7 +332,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_node_map=node_map,
             processor=processor,
             config_transforms=transforms,
-
             config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
@@ -372,7 +370,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_node_map=node_map,
             processor=processor,
             config_transforms=transforms,
-
             config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
@@ -406,7 +403,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_node_map=node_map,
             processor=processor,
             config_transforms=[Mock(), Mock()],
-
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
@@ -453,7 +449,6 @@ class TestFlushCoalescePending:
             coalesce_node_map=node_map,
             processor=processor,
             config_transforms=transforms,
-
             config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
@@ -496,7 +491,6 @@ class TestFlushCoalescePending:
             coalesce_node_map=node_map,
             processor=processor,
             config_transforms=transforms,
-
             config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
@@ -533,7 +527,6 @@ class TestFlushCoalescePending:
             coalesce_node_map={},
             processor=Mock(),
             config_transforms=[],
-
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
@@ -555,7 +548,6 @@ class TestFlushCoalescePending:
             coalesce_node_map={},
             processor=Mock(),
             config_transforms=[],
-
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,

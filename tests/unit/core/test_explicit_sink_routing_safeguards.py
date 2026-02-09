@@ -228,6 +228,34 @@ class TestOnSuccessConfigAlignment:
                 gates=[],
             )
 
+    def test_production_path_rejects_missing_on_success_without_helper(self) -> None:
+        """Verify from_plugin_instances() catches missing on_success independently of test helpers.
+
+        This test ensures that the production graph assembly path raises
+        GraphValidationError when a terminal transform is missing on_success,
+        without relying on _set_terminal_on_success() to paper over the gap.
+        The test uses raw plugin instances — no fixture helpers that auto-set
+        on_success — to guarantee the production path catches omissions.
+        """
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        source = ListSource([{"x": 1}], on_success="out")
+        # Create two transforms; terminal (last) has no on_success
+        t1 = _OnSuccessTracingTransform()
+        # t1 is non-terminal: no on_success required
+        t2 = _OnSuccessTracingTransform()
+        # t2 IS terminal but we deliberately omit on_success
+        sink = CollectSink(name="out")
+
+        with pytest.raises(GraphValidationError, match="on_success"):
+            ExecutionGraph.from_plugin_instances(
+                source=source,
+                transforms=[t1, t2],
+                sinks={"out": sink},
+                aggregations={},
+                gates=[],
+            )
+
     def test_multiple_sinks_routes_to_correct_one(self, payload_store) -> None:
         """With multiple sinks, rows route to the on_success-declared sink."""
         from elspeth.core.landscape import LandscapeDB

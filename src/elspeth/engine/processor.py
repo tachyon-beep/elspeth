@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.contracts.types import BranchName, CoalesceName, NodeID
+from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName
 
 if TYPE_CHECKING:
     from elspeth.contracts.events import TelemetryEvent
@@ -108,7 +108,7 @@ class RowProcessor:
         run_id: str,
         source_node_id: NodeID,
         *,
-        source_on_success: str = "continue",
+        source_on_success: str,
         edge_map: dict[tuple[NodeID, str], str] | None = None,
         route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
         traversal: DAGTraversalContext,
@@ -116,6 +116,7 @@ class RowProcessor:
         retry_manager: RetryManager | None = None,
         coalesce_executor: CoalesceExecutor | None = None,
         branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
+        branch_to_sink: dict[BranchName, SinkName] | None = None,
         coalesce_on_success_map: dict[CoalesceName, str] | None = None,
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
         payload_store: PayloadStore | None = None,
@@ -162,6 +163,7 @@ class RowProcessor:
         self._coalesce_executor = coalesce_executor
         self._coalesce_node_ids: dict[CoalesceName, NodeID] = dict(traversal.coalesce_node_map)
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
+        self._branch_to_sink: dict[BranchName, SinkName] = branch_to_sink or {}
         self._coalesce_on_success_map: dict[CoalesceName, str] = coalesce_on_success_map or {}
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
         self._clock = clock if clock is not None else DEFAULT_CLOCK
@@ -2072,16 +2074,15 @@ class RowProcessor:
 
             node_id = next_node_id
 
-        # Determine sink name: fork children targeting direct sinks use their
-        # branch_name as the sink (the DAG created edges from gate -> sink using
-        # the branch_name as the label, with RoutingMode.COPY). Non-fork tokens
-        # use the last transform's on_success or the source's on_success.
+        # Determine sink name from explicit routing maps. Fork children
+        # targeting direct sinks are resolved via _branch_to_sink (built from
+        # DAG COPY edges at construction time). Non-fork tokens use the last
+        # transform's on_success or the source's on_success.
         effective_sink = last_on_success_sink
         if current_token.branch_name is not None:
             branch = BranchName(current_token.branch_name)
-            if branch not in self._branch_to_coalesce:
-                # Fork child targeting a direct sink (not a coalesce branch)
-                effective_sink = current_token.branch_name
+            if branch in self._branch_to_sink:
+                effective_sink = self._branch_to_sink[branch]
 
         if not effective_sink or not effective_sink.strip():
             raise OrchestrationInvariantError(

@@ -73,6 +73,7 @@ class TestRowProcessorPipelineRow:
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
+            source_on_success="default",
             traversal=_empty_traversal(),
         )
 
@@ -105,6 +106,7 @@ class TestRowProcessorPipelineRow:
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
+            source_on_success="default",
             traversal=_empty_traversal(),
         )
 
@@ -142,6 +144,7 @@ class TestRowProcessorPipelineRow:
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
+            source_on_success="default",
             traversal=_empty_traversal(),
         )
 
@@ -178,6 +181,7 @@ class TestRowProcessorExistingRow:
             span_factory=span_factory,
             run_id="run_001",
             source_node_id=NodeID("source_001"),
+            source_on_success="default",
             traversal=_empty_traversal(),
         )
 

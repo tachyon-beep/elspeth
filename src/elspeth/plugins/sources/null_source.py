@@ -52,25 +52,29 @@ class NullSource(BaseSource):
     output_schema: type[PluginSchema] = NullSourceSchema
     # NullSource yields no rows, so it never quarantines - but set to satisfy protocol
     _on_validation_failure: str = "discard"
-    on_success: str = "continue"
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize NullSource.
 
         Args:
-            config: Configuration dict. NullSource requires no specific config,
-                but BaseSource expects schema config. If not provided, defaults
-                to dynamic schema since NullSource never validates rows anyway.
+            config: Configuration dict. Must include 'on_success' with the
+                original source's sink name. NullSource requires no other
+                specific config, but BaseSource expects schema config. If
+                not provided, defaults to dynamic schema since NullSource
+                never validates rows anyway.
+
+        Raises:
+            ValueError: If 'on_success' is not provided in config.
         """
+        if "on_success" not in config:
+            raise ValueError("NullSource requires 'on_success' in config. Pass the original source's on_success sink name.")
         config_copy = dict(config)
         if "schema" not in config_copy:
             config_copy["schema"] = {"mode": "observed"}
         super().__init__(config_copy)
         # Set _schema_class to satisfy protocol, but resume will use stored schema from audit trail
         self._schema_class = NullSourceSchema
-        # Read on_success from config if provided (overrides class default)
-        if "on_success" in config:
-            self.on_success = config["on_success"]
+        self.on_success: str = config["on_success"]
 
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Yield no rows.

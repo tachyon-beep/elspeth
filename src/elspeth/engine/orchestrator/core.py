@@ -455,30 +455,6 @@ class Orchestrator:
                 continue
             sink.node_id = sink_id_map[sink_name_typed]
 
-    def _compute_coalesce_node_map(
-        self,
-        graph: ExecutionGraph,
-        settings: ElspethSettings | None,
-    ) -> dict[CoalesceName, NodeID]:
-        """Compute configured coalesce_name -> node_id map from graph topology.
-
-        Args:
-            graph: The execution graph (provides coalesce node IDs)
-            settings: Elspeth settings (may be None)
-
-        Returns:
-            Dict mapping configured coalesce names to graph node IDs.
-        """
-        coalesce_node_map: dict[CoalesceName, NodeID] = {}
-        if settings is not None and settings.coalesce:
-            graph_coalesce_map = graph.get_coalesce_id_map()
-
-            for cs in settings.coalesce:
-                coalesce_name = CoalesceName(cs.name)
-                coalesce_node_map[coalesce_name] = graph_coalesce_map[coalesce_name]
-
-        return coalesce_node_map
-
     def _build_dag_traversal_context(
         self,
         graph: ExecutionGraph,
@@ -554,13 +530,24 @@ class Orchestrator:
         if settings is not None:
             retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
 
+        # Derive coalesce routing from graph topology unconditionally.
+        # If the graph has coalesce nodes, the processor needs branch_to_coalesce
+        # regardless of whether settings is available.
+        branch_to_coalesce: dict[BranchName, CoalesceName] = graph.get_branch_to_coalesce_map()
+        coalesce_node_map: dict[CoalesceName, NodeID] = graph.get_coalesce_id_map()
+
         coalesce_executor: CoalesceExecutor | None = None
-        branch_to_coalesce: dict[BranchName, CoalesceName] = {}
 
-        if settings is not None and settings.coalesce:
-            branch_to_coalesce = graph.get_branch_to_coalesce_map()
+        if coalesce_node_map:
+            # Graph has coalesce nodes — settings.coalesce is required for
+            # CoalesceExecutor registration (merge policy, timeout, etc.)
+            if settings is None or not settings.coalesce:
+                raise OrchestrationInvariantError(
+                    "Graph contains coalesce nodes but settings.coalesce is missing. "
+                    "Coalesce settings are required when the pipeline has fork/join patterns."
+                )
+
             token_manager = TokenManager(recorder)
-
             coalesce_executor = CoalesceExecutor(
                 recorder=recorder,
                 span_factory=self._span_factory,
@@ -569,18 +556,25 @@ class Orchestrator:
                 clock=self._clock,
             )
 
-            for coalesce_settings in settings.coalesce:
-                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
-                coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
+            for coalesce_settings_entry in settings.coalesce:
+                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings_entry.name)]
+                coalesce_executor.register_coalesce(coalesce_settings_entry, coalesce_node_id)
 
-        coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
         traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
-        coalesce_on_success_map: dict[CoalesceName, str] = {}
-        if settings is not None and settings.coalesce:
-            for coalesce_settings in settings.coalesce:
-                if coalesce_settings.on_success is not None:
-                    coalesce_on_success_map[CoalesceName(coalesce_settings.name)] = coalesce_settings.on_success
 
+        # Derive coalesce on_success from graph's terminal sink map (graph-authoritative),
+        # falling back to settings for non-terminal coalesce nodes.
+        terminal_sink_map = graph.get_terminal_sink_map()
+        coalesce_on_success_map: dict[CoalesceName, str] = {}
+        for cname, cnode_id in coalesce_node_map.items():
+            if cnode_id in terminal_sink_map:
+                coalesce_on_success_map[cname] = terminal_sink_map[cnode_id]
+            elif settings is not None and settings.coalesce:
+                for coalesce_settings_entry in settings.coalesce:
+                    if CoalesceName(coalesce_settings_entry.name) == cname and coalesce_settings_entry.on_success is not None:
+                        coalesce_on_success_map[cname] = coalesce_settings_entry.on_success
+
+        branch_to_sink = graph.get_branch_to_sink_map()
         typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
 
         processor = RowProcessor(
@@ -596,6 +590,7 @@ class Orchestrator:
             retry_manager=retry_manager,
             coalesce_executor=coalesce_executor,
             branch_to_coalesce=branch_to_coalesce,
+            branch_to_sink=branch_to_sink,
             coalesce_on_success_map=coalesce_on_success_map,
             restored_aggregation_state=restored_aggregation_state,
             payload_store=payload_store,

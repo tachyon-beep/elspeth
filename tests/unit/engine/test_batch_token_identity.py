@@ -164,6 +164,7 @@ class TestBatchTokenIdentity:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            source_on_success="default",
             traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )
@@ -255,6 +256,7 @@ class TestBatchTokenIdentity:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            source_on_success="default",
             traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )
@@ -348,6 +350,7 @@ class TestBatchTokenIdentity:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            source_on_success="default",
             traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )

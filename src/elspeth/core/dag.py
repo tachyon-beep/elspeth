@@ -933,8 +933,8 @@ class ExecutionGraph:
         # Structural next-node map: each pipeline node maps to its successor (None for terminal).
         # Replaces positional arithmetic (step+1==len, idx+1<len) with direct lookup.
         next_in_pipeline: dict[NodeID, NodeID | None] = {}
-        for idx, node_id in enumerate(pipeline_nodes):
-            next_in_pipeline[node_id] = pipeline_nodes[idx + 1] if idx + 1 < len(pipeline_nodes) else None
+        for idx, nid in enumerate(pipeline_nodes):
+            next_in_pipeline[nid] = pipeline_nodes[idx + 1] if idx + 1 < len(pipeline_nodes) else None
         coalesce_gate_index: dict[CoalesceName, int] = {}
         if coalesce_settings:
             for gate_entry in gate_entries:
@@ -1158,6 +1158,24 @@ class ExecutionGraph:
             Branches not in this map route to the output sink.
         """
         return dict(self._branch_to_coalesce)
+
+    def get_branch_to_sink_map(self) -> dict[BranchName, SinkName]:
+        """Get fork branches that route directly to sinks (not to coalesce).
+
+        Scans COPY-mode edges from gate nodes to sink nodes to build the
+        mapping. Branches that route to coalesce nodes are excluded — they
+        are handled by the coalesce executor, not terminal sink routing.
+
+        Returns:
+            Dict mapping branch names to their target sink names.
+            Empty dict if no fork-to-sink branches exist.
+        """
+        result: dict[BranchName, SinkName] = {}
+        sink_node_to_name: dict[NodeID, SinkName] = {nid: name for name, nid in self._sink_id_map.items()}
+        for _from_id, to_id, _key, data in self._graph.edges(data=True, keys=True):
+            if data.get("mode") == RoutingMode.COPY and NodeID(to_id) in sink_node_to_name:
+                result[BranchName(data["label"])] = sink_node_to_name[NodeID(to_id)]
+        return result
 
     def get_coalesce_gate_index(self) -> dict[CoalesceName, int]:
         """Get coalesce_name -> producing gate pipeline index mapping.

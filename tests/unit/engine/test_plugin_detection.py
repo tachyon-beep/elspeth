@@ -166,6 +166,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
+            source_on_success="default",
             traversal=_single_node_traversal(duck_node_id, duck),
         )
 
@@ -227,6 +228,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
+            source_on_success="default",
             traversal=_single_node_traversal(duck_node_id, duck),
         )
 

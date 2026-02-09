@@ -1383,10 +1383,18 @@ def _resolve_resume_null_source_on_success(
     source: SourceProtocol,
     sinks: dict[str, SinkProtocol],
 ) -> str:
-    """Resolve a valid on_success sink for NullSource in resume mode."""
+    """Resolve a valid on_success sink for NullSource in resume mode.
+
+    Raises:
+        typer.Exit: If source.on_success doesn't match any available sink.
+    """
     if source.on_success in sinks:
         return source.on_success
-    return next(iter(sinks))
+    typer.echo(
+        f"Source on_success '{source.on_success}' not in available sinks: {sorted(sinks.keys())}. Cannot resume with mismatched config.",
+        err=True,
+    )
+    raise typer.Exit(1)
 
 
 def _build_resume_graphs(

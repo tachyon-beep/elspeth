@@ -64,6 +64,7 @@ def _make_processor(
         span_factory=SpanFactory(),
         run_id=run_id,
         source_node_id=source_node_id,
+        source_on_success="default",
         traversal=traversal,
         coalesce_executor=coalesce_executor,
     )

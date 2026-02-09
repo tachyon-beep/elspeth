@@ -94,7 +94,7 @@ def _make_processor(
     *,
     run_id: str = "test-run",
     source_node_id: str = "source-0",
-    source_on_success: str = "continue",
+    source_on_success: str = "default",
     edge_map: dict[tuple[NodeID, str], str] | None = None,
     route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
     config_gates: list[GateSettings] | None = None,

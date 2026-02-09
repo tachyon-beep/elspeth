@@ -97,6 +97,7 @@ class TestConcurrencyConfigInRowProcessor:
                 span_factory=span_factory,
                 run_id="test-run",
                 source_node_id=NodeID("source-1"),
+                source_on_success="default",
                 traversal=DAGTraversalContext(
                     node_step_map={},
                     node_to_plugin={},
@@ -123,6 +124,7 @@ class TestConcurrencyConfigInRowProcessor:
                 span_factory=span_factory,
                 run_id="test-run",
                 source_node_id=NodeID("source-1"),
+                source_on_success="default",
                 traversal=DAGTraversalContext(
                     node_step_map={},
                     node_to_plugin={},
