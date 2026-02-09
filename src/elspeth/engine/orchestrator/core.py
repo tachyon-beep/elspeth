@@ -114,6 +114,7 @@ if TYPE_CHECKING:
     from elspeth.core.config import ElspethSettings, GateSettings
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
+    from elspeth.engine.coalesce_executor import CoalesceExecutor
 
 
 class Orchestrator:
@@ -511,6 +512,92 @@ class Orchestrator:
             node_to_next=node_to_next,
             coalesce_node_map=graph.get_coalesce_id_map(),
         )
+
+    def _build_processor(
+        self,
+        *,
+        graph: ExecutionGraph,
+        config: PipelineConfig,
+        settings: ElspethSettings | None,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_id: NodeID,
+        edge_map: dict[tuple[NodeID, str], str],
+        route_resolution_map: dict[tuple[NodeID, str], str] | None,
+        config_gate_id_map: dict[GateName, NodeID],
+        coalesce_id_map: dict[CoalesceName, NodeID],
+        payload_store: PayloadStore,
+        restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
+    ) -> tuple[RowProcessor, dict[CoalesceName, NodeID], CoalesceExecutor | None]:
+        """Build a RowProcessor with all supporting infrastructure.
+
+        Constructs the retry manager, coalesce executor, traversal context,
+        and coalesce routing maps, then assembles a RowProcessor. Used by
+        both the main run path and the resume path.
+
+        Returns:
+            Tuple of (processor, coalesce_node_map, coalesce_executor).
+        """
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        retry_manager: RetryManager | None = None
+        if settings is not None:
+            retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
+
+        coalesce_executor: CoalesceExecutor | None = None
+        branch_to_coalesce: dict[BranchName, CoalesceName] = {}
+
+        if settings is not None and settings.coalesce:
+            branch_to_coalesce = graph.get_branch_to_coalesce_map()
+            token_manager = TokenManager(recorder)
+
+            coalesce_executor = CoalesceExecutor(
+                recorder=recorder,
+                span_factory=self._span_factory,
+                token_manager=token_manager,
+                run_id=run_id,
+                clock=self._clock,
+            )
+
+            for coalesce_settings in settings.coalesce:
+                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
+                coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
+
+        coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
+        coalesce_step_map = {coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1 for coalesce_name in coalesce_node_map}
+        traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
+        coalesce_on_success_map: dict[CoalesceName, str] = {}
+        if settings is not None and settings.coalesce:
+            for coalesce_settings in settings.coalesce:
+                if coalesce_settings.on_success is not None:
+                    coalesce_on_success_map[CoalesceName(coalesce_settings.name)] = coalesce_settings.on_success
+
+        typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=self._span_factory,
+            run_id=run_id,
+            source_node_id=source_id,
+            source_on_success=config.source.on_success,
+            edge_map=edge_map,
+            route_resolution_map=route_resolution_map,
+            traversal=traversal,
+            aggregation_settings=typed_aggregation_settings,
+            retry_manager=retry_manager,
+            coalesce_executor=coalesce_executor,
+            branch_to_coalesce=branch_to_coalesce,
+            coalesce_step_map=coalesce_step_map,
+            coalesce_on_success_map=coalesce_on_success_map,
+            restored_aggregation_state=restored_aggregation_state,
+            payload_store=payload_store,
+            clock=self._clock,
+            max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
+            telemetry_manager=self._telemetry,
+        )
+
+        return processor, coalesce_node_map, coalesce_executor
 
     def run(
         self,
@@ -1015,71 +1102,18 @@ class Orchestrator:
         for sink in config.sinks.values():
             sink.on_start(ctx)
 
-        # Create retry manager from settings if available
-        retry_manager: RetryManager | None = None
-        if settings is not None:
-            retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
-
-        # Create coalesce executor if config has coalesce settings
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
-
-        coalesce_executor: CoalesceExecutor | None = None
-        branch_to_coalesce: dict[BranchName, CoalesceName] = {}
-
-        if settings is not None and settings.coalesce:
-            branch_to_coalesce = graph.get_branch_to_coalesce_map()
-            token_manager = TokenManager(recorder)
-
-            coalesce_executor = CoalesceExecutor(
-                recorder=recorder,
-                span_factory=self._span_factory,
-                token_manager=token_manager,
-                run_id=run_id,
-                clock=self._clock,
-            )
-
-            # Register each coalesce point
-            # Direct access: graph was built from same settings, so all coalesce names
-            # must exist in map. KeyError here indicates a bug in graph construction.
-            for coalesce_settings in settings.coalesce:
-                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
-                coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
-
-        # Compute coalesce node mapping from graph topology.
-        coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
-        # Transitional compatibility: outcomes/coalesce APIs still use step indexes.
-        coalesce_step_map = {coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1 for coalesce_name in coalesce_node_map}
-        traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
-        coalesce_on_success_map: dict[CoalesceName, str] = {}
-        if settings is not None and settings.coalesce:
-            for coalesce_settings in settings.coalesce:
-                if coalesce_settings.on_success is not None:
-                    coalesce_on_success_map[CoalesceName(coalesce_settings.name)] = coalesce_settings.on_success
-
-        # Convert aggregation_settings keys from str to NodeID
-        typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
-
-        # Create processor with config gates info
-        processor = RowProcessor(
+        processor, coalesce_node_map, coalesce_executor = self._build_processor(
+            graph=graph,
+            config=config,
+            settings=settings,
             recorder=recorder,
-            span_factory=self._span_factory,
             run_id=run_id,
-            source_node_id=source_id,
-            source_on_success=config.source.on_success,
+            source_id=source_id,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
-            traversal=traversal,
-            aggregation_settings=typed_aggregation_settings,
-            retry_manager=retry_manager,
-            coalesce_executor=coalesce_executor,
-            branch_to_coalesce=branch_to_coalesce,
-            coalesce_step_map=coalesce_step_map,
-            coalesce_on_success_map=coalesce_on_success_map,
+            config_gate_id_map=config_gate_id_map,
+            coalesce_id_map=coalesce_id_map,
             payload_store=payload_store,
-            clock=self._clock,
-            max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
-            telemetry_manager=self._telemetry,
         )
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
@@ -1891,72 +1925,19 @@ class Orchestrator:
         for sink in config.sinks.values():
             sink.on_start(ctx)
 
-        # Create retry manager from settings if available
-        retry_manager: RetryManager | None = None
-        if settings is not None:
-            retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
-
-        # Create coalesce executor if config has coalesce settings
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
-
-        coalesce_executor: CoalesceExecutor | None = None
-        branch_to_coalesce: dict[BranchName, CoalesceName] = {}
-
-        if settings is not None and settings.coalesce:
-            branch_to_coalesce = graph.get_branch_to_coalesce_map()
-            token_manager = TokenManager(recorder)
-
-            coalesce_executor = CoalesceExecutor(
-                recorder=recorder,
-                span_factory=self._span_factory,
-                token_manager=token_manager,
-                run_id=run_id,
-                clock=self._clock,
-            )
-
-            for coalesce_settings in settings.coalesce:
-                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
-                coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
-
-        # Compute coalesce node mapping from graph topology (same as main run path).
-        coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
-        # Transitional compatibility: outcomes/coalesce APIs still use step indexes.
-        coalesce_step_map = {coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1 for coalesce_name in coalesce_node_map}
-        traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
-        coalesce_on_success_map: dict[CoalesceName, str] = {}
-        if settings is not None and settings.coalesce:
-            for coalesce_settings in settings.coalesce:
-                if coalesce_settings.on_success is not None:
-                    coalesce_on_success_map[CoalesceName(coalesce_settings.name)] = coalesce_settings.on_success
-
-        # Convert aggregation_settings keys from str to NodeID
-        typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
-
-        # Convert restored_aggregation_state keys from str to NodeID
-        typed_restored_state: dict[NodeID, dict[str, Any]] = {NodeID(k): v for k, v in restored_aggregation_state.items()}
-
-        # Create processor with restored aggregation state
-        processor = RowProcessor(
+        processor, coalesce_node_map, coalesce_executor = self._build_processor(
+            graph=graph,
+            config=config,
+            settings=settings,
             recorder=recorder,
-            span_factory=self._span_factory,
             run_id=run_id,
-            source_node_id=source_id,
-            source_on_success=config.source.on_success,
+            source_id=source_id,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
-            traversal=traversal,
-            aggregation_settings=typed_aggregation_settings,
-            retry_manager=retry_manager,
-            coalesce_executor=coalesce_executor,
-            branch_to_coalesce=branch_to_coalesce,
-            coalesce_step_map=coalesce_step_map,
-            coalesce_on_success_map=coalesce_on_success_map,
-            restored_aggregation_state=typed_restored_state,
+            config_gate_id_map=config_gate_id_map,
+            coalesce_id_map=coalesce_id_map,
             payload_store=payload_store,
-            clock=self._clock,
-            max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
-            telemetry_manager=self._telemetry,
+            restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()},
         )
 
         # Process rows - Buffer TOKENS
