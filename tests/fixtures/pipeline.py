@@ -13,12 +13,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource
 
 if TYPE_CHECKING:
+    from elspeth.core.config import AggregationSettings, GateSettings
+    from elspeth.core.dag import WiredTransform
     from elspeth.engine.orchestrator import PipelineConfig
 
 
@@ -47,18 +51,25 @@ def build_linear_pipeline(
     Returns:
         (source, transforms, sinks_dict, graph)
     """
-    source = ListSource(source_data, name=source_name, on_success=sink_name)
     transforms = transforms or []
+    source_connection = f"{source_name}_out"
+    source_on_success = source_connection if transforms else sink_name
+    source = ListSource(source_data, name=source_name, on_success=source_on_success)
+    source_settings = SourceSettings(plugin=source.name, on_success=source_on_success, options={})
+    wired_transforms = wire_transforms(
+        transforms,
+        source_connection=source_connection,
+        final_sink=sink_name,
+    )
+
     if sink is None:
         sink = CollectSink(sink_name)
     sinks = {sink_name: sink}
 
-    # Set on_success on the terminal transform (last non-gate transform)
-    _set_terminal_on_success(transforms, sink_name)
-
     graph = ExecutionGraph.from_plugin_instances(
         source=source,
-        transforms=transforms,
+        source_settings=source_settings,
+        transforms=wired_transforms,
         sinks=sinks,
         aggregations={},
         gates=[],
@@ -68,7 +79,7 @@ def build_linear_pipeline(
 
 def build_fork_pipeline(
     source_data: list[dict[str, Any]],
-    gate: Any,
+    gate: GateSettings,
     branch_transforms: dict[str, list[Any]],
     sinks: dict[str, CollectSink] | None = None,
     *,
@@ -80,18 +91,33 @@ def build_fork_pipeline(
 
     Uses ExecutionGraph.from_plugin_instances() for production-path fidelity.
     """
-    source = ListSource(source_data, name=source_name, on_success=sink_name)
+    source_connection = f"{source_name}_out"
+    source = ListSource(source_data, name=source_name, on_success=source_connection)
+    source_settings = SourceSettings(plugin=source.name, on_success=source_connection, options={})
 
     all_transforms: list[Any] = []
-    for branch_list in branch_transforms.values():
+    all_wired_transforms: list[WiredTransform] = []
+    for branch_name, branch_list in branch_transforms.items():
         all_transforms.extend(branch_list)
+        if not branch_list:
+            continue
+        branch_names = [f"{branch_name}_{idx}" for idx, _ in enumerate(branch_list)]
+        all_wired_transforms.extend(
+            wire_transforms(
+                branch_list,
+                source_connection=branch_name,
+                final_sink=sink_name,
+                names=branch_names,
+            )
+        )
 
     if sinks is None:
         sinks = {sink_name: CollectSink(sink_name)}
 
     graph = ExecutionGraph.from_plugin_instances(
         source=source,
-        transforms=all_transforms,
+        source_settings=source_settings,
+        transforms=all_wired_transforms,
         sinks=sinks,
         aggregations={},
         gates=[gate],
@@ -114,7 +140,14 @@ def build_aggregation_pipeline(
 
     Uses ExecutionGraph.from_plugin_instances() for production-path fidelity.
     """
-    source = ListSource(source_data, name=source_name, on_success=sink_name)
+    source_connection = aggregation_settings.input
+    source = ListSource(source_data, name=source_name, on_success=source_connection)
+    source_settings = SourceSettings(plugin=source.name, on_success=source_connection, options={})
+
+    if aggregation_settings.on_success is None:
+        aggregation_settings = aggregation_settings.model_copy(update={"on_success": sink_name})
+    _set_transform_routing(aggregation_transform, on_success=aggregation_settings.on_success)
+
     if sink is None:
         sink = CollectSink(sink_name)
     sinks = {sink_name: sink}
@@ -122,6 +155,7 @@ def build_aggregation_pipeline(
 
     graph = ExecutionGraph.from_plugin_instances(
         source=source,
+        source_settings=source_settings,
         transforms=[],
         sinks=sinks,
         aggregations=aggregations,
@@ -138,7 +172,6 @@ def build_production_graph(
     Replaces tests/engine/orchestrator_test_helpers.build_production_graph.
     Uses ExecutionGraph.from_plugin_instances() — the real assembly path.
     """
-    from elspeth.core.config import AggregationSettings
     from elspeth.plugins.protocols import TransformProtocol
     from tests.fixtures.base_classes import _TestTransformBase
 
@@ -148,6 +181,33 @@ def build_production_graph(
     for transform in config.transforms:
         if isinstance(transform, TransformProtocol):
             row_transforms.append(transform)
+
+    default_sink = next(iter(config.sinks.keys()))
+    if row_transforms:
+        source_on_success = "source_out"
+        final_destination = default_sink
+    else:
+        source_on_success = default_sink
+        final_destination = default_sink
+
+    if config.gates:
+        first_gate_input = config.gates[0].input
+        final_destination = first_gate_input
+        if not row_transforms:
+            source_on_success = first_gate_input
+    elif config.aggregation_settings:
+        first_aggregation_input = next(iter(config.aggregation_settings.values())).input
+        final_destination = first_aggregation_input
+        if not row_transforms:
+            source_on_success = first_aggregation_input
+
+    config.source.on_success = source_on_success
+    source_settings = SourceSettings(plugin=config.source.name, on_success=source_on_success, options={})
+    wired_row_transforms = wire_transforms(
+        row_transforms,
+        source_connection=source_on_success,
+        final_sink=final_destination,
+    )
 
     for agg_name, agg_settings in config.aggregation_settings.items():
 
@@ -160,17 +220,15 @@ def build_production_graph(
                 return TransformResult.success(row, success_reason={"action": "test"})
 
         agg_transform = _AggTransform()
-        # Propagate on_success from aggregation options to the transform instance
-        # (production code does this during plugin instantiation; test infrastructure
-        # must replicate the wiring since it creates transforms directly)
-        on_success = agg_settings.options.get("on_success")
-        if on_success:
-            agg_transform._on_success = on_success
+        if agg_settings.on_success is None:
+            agg_settings = agg_settings.model_copy(update={"on_success": default_sink})
+        _set_transform_routing(agg_transform, on_success=agg_settings.on_success)
         aggregations[agg_name] = (agg_transform, agg_settings)  # type: ignore[assignment]
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=row_transforms,
+        source_settings=source_settings,
+        transforms=wired_row_transforms,
         sinks=config.sinks,
         aggregations=aggregations,
         gates=list(config.gates),
@@ -178,16 +236,9 @@ def build_production_graph(
     )
 
 
-def _set_terminal_on_success(transforms: list[Any], sink_name: str) -> None:
-    """Set on_success on the terminal transform in a linear pipeline.
-
-    The terminal transform is the last non-gate transform in the list.
-    This is a test helper — production code sets on_success via config.
-    """
-    from elspeth.plugins.protocols import GateProtocol
-
-    # Find the last non-gate transform
-    for i in range(len(transforms) - 1, -1, -1):
-        if not isinstance(transforms[i], GateProtocol):
-            transforms[i]._on_success = sink_name
-            return
+def _set_transform_routing(transform: Any, *, on_success: str | None) -> None:
+    """Set on_success for test transforms with protocol-compatible fallback."""
+    try:
+        transform.on_success = on_success
+    except AttributeError:
+        transform._on_success = on_success

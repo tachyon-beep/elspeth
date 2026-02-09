@@ -95,8 +95,23 @@ class PassTransform(BaseTransform):
     input_schema = _TestSchema
     output_schema = _TestSchema
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        input_connection: str | None = None,
+        on_success: str | None = None,
+        on_error: str | None = None,
+    ) -> None:
         super().__init__({"schema": {"mode": "observed"}})
+        if name is not None:
+            self.name = name
+        if input_connection is not None:
+            self.input = input_connection
+        if on_success is not None:
+            self._on_success = on_success
+        if on_error is not None:
+            self._on_error = on_error
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -110,8 +125,21 @@ class FailTransform(BaseTransform):
     output_schema = _TestSchema
     _on_error = "discard"
 
-    def __init__(self, error_reason: str = "always_fail") -> None:
+    def __init__(
+        self,
+        error_reason: str = "always_fail",
+        *,
+        name: str | None = None,
+        input_connection: str | None = None,
+        on_error: str | None = None,
+    ) -> None:
         super().__init__({"schema": {"mode": "observed"}})
+        if name is not None:
+            self.name = name
+        if input_connection is not None:
+            self.input = input_connection
+        if on_error is not None:
+            self._on_error = on_error
         self._error_reason = error_reason
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -126,8 +154,23 @@ class ConditionalErrorTransform(BaseTransform):
     output_schema = _TestSchema
     _on_error = "discard"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        input_connection: str | None = None,
+        on_success: str | None = None,
+        on_error: str | None = None,
+    ) -> None:
         super().__init__({"schema": {"mode": "observed"}})
+        if name is not None:
+            self.name = name
+        if input_connection is not None:
+            self.input = input_connection
+        if on_success is not None:
+            self._on_success = on_success
+        if on_error is not None:
+            self._on_error = on_error
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if row["fail"]:
@@ -142,8 +185,23 @@ class CountingTransform(BaseTransform):
     input_schema = _TestSchema
     output_schema = _TestSchema
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        input_connection: str | None = None,
+        on_success: str | None = None,
+        on_error: str | None = None,
+    ) -> None:
         super().__init__({"schema": {"mode": "observed"}})
+        if name is not None:
+            self.name = name
+        if input_connection is not None:
+            self.input = input_connection
+        if on_success is not None:
+            self._on_success = on_success
+        if on_error is not None:
+            self._on_error = on_error
         self.call_count = 0
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -158,8 +216,24 @@ class SlowTransform(BaseTransform):
     input_schema = _TestSchema
     output_schema = _TestSchema
 
-    def __init__(self, delay_seconds: float = 0.1) -> None:
+    def __init__(
+        self,
+        delay_seconds: float = 0.1,
+        *,
+        name: str | None = None,
+        input_connection: str | None = None,
+        on_success: str | None = None,
+        on_error: str | None = None,
+    ) -> None:
         super().__init__({"schema": {"mode": "observed"}})
+        if name is not None:
+            self.name = name
+        if input_connection is not None:
+            self.input = input_connection
+        if on_success is not None:
+            self._on_success = on_success
+        if on_error is not None:
+            self._on_error = on_error
         self._delay = delay_seconds
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -177,8 +251,24 @@ class ErrorOnNthTransform(BaseTransform):
     output_schema = _TestSchema
     _on_error = "discard"
 
-    def __init__(self, error_on: int = 1) -> None:
+    def __init__(
+        self,
+        error_on: int = 1,
+        *,
+        name: str | None = None,
+        input_connection: str | None = None,
+        on_success: str | None = None,
+        on_error: str | None = None,
+    ) -> None:
         super().__init__({"schema": {"mode": "observed"}})
+        if name is not None:
+            self.name = name
+        if input_connection is not None:
+            self.input = input_connection
+        if on_success is not None:
+            self._on_success = on_success
+        if on_error is not None:
+            self._on_error = on_error
         self._error_on = error_on
         self._call_count = 0
 

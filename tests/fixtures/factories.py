@@ -19,7 +19,8 @@ from uuid import uuid4
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
-    from elspeth.core.dag import ExecutionGraph
+    from elspeth.core.dag import ExecutionGraph, WiredTransform
+    from elspeth.plugins.protocols import TransformProtocol
 
 # --- Re-export all production factories for single-import convenience ---
 from elspeth.testing import (  # noqa: F401
@@ -199,6 +200,64 @@ def make_graph_fork(
     graph.add_edge(coalesce_name, sink, label="continue")
 
     return graph
+
+
+def _set_transform_routing(
+    transform: TransformProtocol,
+    *,
+    on_success: str | None,
+    on_error: str | None,
+) -> None:
+    """Set routing fields on test transforms with protocol-compatible fallback."""
+    try:
+        transform.on_success = on_success
+    except AttributeError:
+        transform._on_success = on_success
+
+    try:
+        transform.on_error = on_error
+    except AttributeError:
+        transform._on_error = on_error
+
+
+def wire_transforms(
+    transforms: list[TransformProtocol],
+    *,
+    source_connection: str = "source_out",
+    final_sink: str = "output",
+    names: list[str] | None = None,
+) -> list[WiredTransform]:
+    """Create WiredTransform entries with deterministic sequential wiring.
+
+    This is a test helper that mirrors production config-driven routing:
+    source_connection -> t0 -> t1 -> ... -> tN -> final_sink.
+    """
+    from elspeth.core.config import TransformSettings
+    from elspeth.core.dag import WiredTransform
+
+    if names is not None and len(names) != len(transforms):
+        raise ValueError(f"names length ({len(names)}) must match transforms length ({len(transforms)})")
+
+    wired: list[WiredTransform] = []
+    total = len(transforms)
+    for index, transform in enumerate(transforms):
+        input_connection = source_connection if index == 0 else f"conn_{index - 1}_{index}"
+        on_success = final_sink if index == total - 1 else f"conn_{index}_{index + 1}"
+        node_name = names[index] if names is not None else f"{transform.name}_{index}"
+        on_error = getattr(transform, "on_error", None)
+
+        settings = TransformSettings(
+            name=node_name,
+            plugin=transform.name,
+            input=input_connection,
+            on_success=on_success,
+            on_error=on_error,
+            options={},
+        )
+        _set_transform_routing(transform, on_success=on_success, on_error=on_error)
+        wired.append(WiredTransform(plugin=transform, settings=settings))
+
+    return wired
 
 
 # =============================================================================
