@@ -99,6 +99,7 @@ def _make_processor(
     coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
     branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
     coalesce_step_map: dict[CoalesceName, int] | None = None,
+    coalesce_on_success_map: dict[CoalesceName, str] | None = None,
     restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
     telemetry_manager: Any = None,
 ) -> RowProcessor:
@@ -118,6 +119,7 @@ def _make_processor(
         coalesce_node_ids=coalesce_node_ids,
         branch_to_coalesce=branch_to_coalesce,
         coalesce_step_map=coalesce_step_map,
+        coalesce_on_success_map=coalesce_on_success_map,
         restored_aggregation_state=restored_aggregation_state,
         telemetry_manager=telemetry_manager,
     )
@@ -662,14 +664,14 @@ class TestDrainWorkQueueIterationGuard:
         # Mock _process_single_token to always produce more work
         def infinite_loop_producer(token, transforms, ctx, start_step, **kwargs):
             new_token = make_token_info(data={"value": 1})
-            return (None, [_WorkItem(token=new_token, start_step=0)])
+            return (None, [_WorkItem(token=new_token, current_node_id=NodeID("source-0"))])
 
         with (
             patch.object(processor, "_process_single_token", side_effect=infinite_loop_producer),
             pytest.raises(RuntimeError, match=r"exceeded.*iterations"),
         ):
             processor._drain_work_queue(
-                _WorkItem(token=token, start_step=0),
+                _WorkItem(token=token, current_node_id=NodeID("source-0")),
                 transforms=[],
                 ctx=ctx,
             )
@@ -1091,7 +1093,11 @@ class TestMaybeCoalesceToken:
         merged_token = make_token_info(data={"merged": True})
         coalesce = Mock()
         coalesce.accept.return_value = Mock(held=False, merged_token=merged_token)
-        processor = _make_processor(recorder, coalesce_executor=coalesce)
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            coalesce_on_success_map={CoalesceName("merge"): "output"},
+        )
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
@@ -1139,7 +1145,7 @@ class TestMaybeCoalesceToken:
         assert handled is True
         assert result is None
         assert len(child_items) == 1
-        assert child_items[0].start_step == 2
+        assert processor._node_id_to_step(child_items[0].current_node_id) == 2
 
 
 # =============================================================================
@@ -1266,6 +1272,7 @@ class TestNotifyCoalesceOfLostBranch:
             coalesce_executor=coalesce,
             branch_to_coalesce={BranchName("path_a"): CoalesceName("merge")},
             coalesce_step_map={CoalesceName("merge"): 5},
+            coalesce_on_success_map={CoalesceName("merge"): "output"},
         )
         token = TokenInfo(
             row_id="row-1",
@@ -1317,7 +1324,7 @@ class TestNotifyCoalesceOfLostBranch:
 
         assert results == []
         assert len(child_items) == 1
-        assert child_items[0].start_step == 3
+        assert processor._node_id_to_step(child_items[0].current_node_id) == 3
 
 
 # =============================================================================

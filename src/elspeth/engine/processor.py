@@ -48,6 +48,7 @@ from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, Tran
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
+_SYNTHETIC_STEP_NODE_PREFIX = "__step__:"
 
 
 @dataclass
@@ -55,8 +56,8 @@ class _WorkItem:
     """Item in the work queue for DAG processing."""
 
     token: TokenInfo
-    start_step: int  # Which step in transforms to start from (0-indexed)
-    coalesce_at_step: int | None = None  # Step at which to coalesce (if any)
+    current_node_id: NodeID
+    coalesce_node_id: NodeID | None = None
     coalesce_name: CoalesceName | None = None  # Name of the coalesce point (if any)
 
 
@@ -155,9 +156,16 @@ class RowProcessor:
         self._coalesce_node_ids: dict[CoalesceName, NodeID] = coalesce_node_ids or {}
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
         self._coalesce_step_map: dict[CoalesceName, int] = coalesce_step_map or {}
+        self._coalesce_step_by_node_id: dict[NodeID, int] = {
+            self._coalesce_node_ids[coalesce_name]: step
+            for coalesce_name, step in self._coalesce_step_map.items()
+            if coalesce_name in self._coalesce_node_ids
+        }
         self._coalesce_on_success_map: dict[CoalesceName, str] = coalesce_on_success_map or {}
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
         self._clock = clock if clock is not None else DEFAULT_CLOCK
+        self._active_step_to_node: dict[int, NodeID] = {}
+        self._active_node_to_step: dict[NodeID, int] = {}
 
         # Build error edge map: transform node_id -> DIVERT edge_id.
         # Scans edge_map for __error_N__ labels (created by dag.py for transforms
@@ -191,6 +199,86 @@ class RowProcessor:
     def token_manager(self) -> TokenManager:
         """Expose token manager for orchestrator to create tokens for quarantined rows."""
         return self._token_manager
+
+    def _initialize_active_pipeline_maps(self, transforms: list[Any]) -> None:
+        """Build active step/node maps for the current processing call."""
+        step_to_node: dict[int, NodeID] = {}
+
+        for step, transform in enumerate(transforms):
+            try:
+                node_id_raw = transform.node_id
+            except AttributeError:
+                step_to_node[step] = NodeID(f"{_SYNTHETIC_STEP_NODE_PREFIX}{step}")
+                continue
+            if node_id_raw is None:
+                raise OrchestrationInvariantError(f"Transform '{transform.name}' missing node_id during work item conversion")
+            step_to_node[step] = NodeID(node_id_raw)
+
+        base_step = len(transforms)
+        for offset, gate in enumerate(self._config_gates):
+            step_to_node[base_step + offset] = self._config_gate_id_map[GateName(gate.name)]
+
+        self._active_step_to_node = step_to_node
+        self._active_node_to_step = {node_id: step for step, node_id in step_to_node.items()}
+
+    def _step_to_node_id(self, step: int) -> NodeID:
+        """Convert positional step index to current processing node ID."""
+        if step in self._active_step_to_node:
+            return self._active_step_to_node[step]
+        if self._active_step_to_node and step == len(self._active_step_to_node):
+            # One-past-end continuation sentinel (e.g., deaggregation at terminal node).
+            return NodeID(f"{_SYNTHETIC_STEP_NODE_PREFIX}{step}")
+        if not self._active_step_to_node:
+            # Source-only pipelines still enter _process_single_token with step 0.
+            if step == 0:
+                return self._source_node_id
+            # Direct unit tests call helpers without full traversal context.
+            return NodeID(f"{_SYNTHETIC_STEP_NODE_PREFIX}{step}")
+        raise OrchestrationInvariantError(f"Step index {step} is out of range for active pipeline maps")
+
+    def _node_id_to_step(self, node_id: NodeID) -> int:
+        """Convert node ID from _WorkItem back to legacy positional step index."""
+        if node_id in self._active_node_to_step:
+            return self._active_node_to_step[node_id]
+        if node_id in self._coalesce_step_by_node_id:
+            return self._coalesce_step_by_node_id[node_id]
+        node_text = str(node_id)
+        if node_text.startswith(_SYNTHETIC_STEP_NODE_PREFIX):
+            return int(node_text.split(":", 1)[1])
+        if node_id == self._source_node_id and not self._active_node_to_step:
+            return 0
+        raise OrchestrationInvariantError(f"Node ID '{node_id}' cannot be mapped to a positional step index")
+
+    def _create_work_item(
+        self,
+        *,
+        token: TokenInfo,
+        start_step: int,
+        coalesce_at_step: int | None = None,
+        coalesce_name: CoalesceName | None = None,
+    ) -> _WorkItem:
+        """Create node-id based work item from legacy step/coalesce metadata."""
+        coalesce_node_id: NodeID | None = None
+        if coalesce_name is not None:
+            coalesce_node_id = self._coalesce_node_ids[coalesce_name]
+
+        if coalesce_node_id is not None and coalesce_at_step is not None and start_step == coalesce_at_step:
+            current_node_id = coalesce_node_id
+        else:
+            current_node_id = self._step_to_node_id(start_step)
+
+        return _WorkItem(
+            token=token,
+            current_node_id=current_node_id,
+            coalesce_node_id=coalesce_node_id,
+            coalesce_name=coalesce_name,
+        )
+
+    def resolve_work_item_steps(self, work_item: _WorkItem) -> tuple[int, int | None]:
+        """Convert a node-id work item to legacy positional step metadata."""
+        start_step = self._node_id_to_step(work_item.current_node_id)
+        coalesce_at_step = self._node_id_to_step(work_item.coalesce_node_id) if work_item.coalesce_node_id is not None else None
+        return start_step, coalesce_at_step
 
     def _emit_telemetry(self, event: TelemetryEvent) -> None:
         """Emit telemetry event if manager is configured.
@@ -595,9 +683,9 @@ class RowProcessor:
                     # Queue for remaining transforms with coalesce metadata
                     # NOTE: start_step is set to current 0-indexed position.
                     child_items.append(
-                        _WorkItem(
+                        self._create_work_item(
                             token=updated_token,
-                            start_step=step,  # 0-indexed current position
+                            start_step=step,
                             coalesce_at_step=coalesce_at_step,
                             coalesce_name=coalesce_name,
                         )
@@ -674,9 +762,9 @@ class RowProcessor:
                     # NOTE: start_step is set to current 0-indexed position.
                     for token in expanded_tokens:
                         child_items.append(
-                            _WorkItem(
+                            self._create_work_item(
                                 token=token,
-                                start_step=step,  # 0-indexed current position
+                                start_step=step,
                                 coalesce_at_step=coalesce_at_step,
                                 coalesce_name=coalesce_name,
                             )
@@ -917,7 +1005,7 @@ class RowProcessor:
                         # Update token, preserving all lineage metadata
                         updated_token = token.with_updated_data(enriched_data)
                         child_items.append(
-                            _WorkItem(
+                            self._create_work_item(
                                 token=updated_token,
                                 start_step=continuation_start,
                                 coalesce_at_step=coalesce_at_step,
@@ -1036,7 +1124,7 @@ class RowProcessor:
                     continuation_start = coalesce_at_step if coalesce_at_step is not None else step
                     for token in expanded_tokens:
                         child_items.append(
-                            _WorkItem(
+                            self._create_work_item(
                                 token=token,
                                 start_step=continuation_start,
                                 coalesce_at_step=coalesce_at_step,
@@ -1325,8 +1413,9 @@ class RowProcessor:
             duration_ms=0,
         )
 
+        self._initialize_active_pipeline_maps(transforms)
         return self._drain_work_queue(
-            _WorkItem(
+            self._create_work_item(
                 token=token,
                 start_step=0,
                 coalesce_at_step=coalesce_at_step,
@@ -1387,8 +1476,9 @@ class RowProcessor:
             duration_ms=0,
         )
 
+        self._initialize_active_pipeline_maps(transforms)
         return self._drain_work_queue(
-            _WorkItem(
+            self._create_work_item(
                 token=token,
                 start_step=0,
                 coalesce_at_step=coalesce_at_step,
@@ -1412,8 +1502,9 @@ class RowProcessor:
 
         Used for mid-pipeline coalesce merges that must continue processing.
         """
+        self._initialize_active_pipeline_maps(transforms)
         return self._drain_work_queue(
-            _WorkItem(
+            self._create_work_item(
                 token=token,
                 start_step=start_step,
                 coalesce_at_step=coalesce_at_step,
@@ -1471,7 +1562,7 @@ class RowProcessor:
                 )
 
             child_items.append(
-                _WorkItem(
+                self._create_work_item(
                     token=coalesce_outcome.merged_token,
                     start_step=coalesce_at_step,
                 )
@@ -1573,7 +1664,7 @@ class RowProcessor:
                 ]
             # Non-terminal — resume merged token at coalesce step
             child_items.append(
-                _WorkItem(
+                self._create_work_item(
                     token=outcome.merged_token,
                     start_step=coalesce_step,
                 )
@@ -1614,6 +1705,7 @@ class RowProcessor:
         may produce child work items (from forks, expansions, etc.) which are
         appended to the queue.
         """
+        self._initialize_active_pipeline_maps(transforms)
         work_queue: deque[_WorkItem] = deque([initial_item])
         results: list[RowResult] = []
         iterations = 0
@@ -1625,12 +1717,14 @@ class RowProcessor:
                     raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
 
                 item = work_queue.popleft()
+                start_step = self._node_id_to_step(item.current_node_id)
+                coalesce_at_step = self._node_id_to_step(item.coalesce_node_id) if item.coalesce_node_id is not None else None
                 result, child_items = self._process_single_token(
                     token=item.token,
                     transforms=transforms,
                     ctx=ctx,
-                    start_step=item.start_step,
-                    coalesce_at_step=item.coalesce_at_step,
+                    start_step=start_step,
+                    coalesce_at_step=coalesce_at_step,
                     coalesce_name=item.coalesce_name,
                 )
 
@@ -1744,7 +1838,7 @@ class RowProcessor:
 
                         # Children skip directly to coalesce step (or next step if no coalesce)
                         child_items.append(
-                            _WorkItem(
+                            self._create_work_item(
                                 token=child_token,
                                 start_step=child_coalesce_step if child_coalesce_step is not None else next_step,
                                 coalesce_at_step=child_coalesce_step,
@@ -1925,7 +2019,7 @@ class RowProcessor:
                     next_step = start_step + step_offset + 1
                     for child_token in child_tokens:
                         child_items.append(
-                            _WorkItem(
+                            self._create_work_item(
                                 token=child_token,
                                 start_step=next_step,
                                 coalesce_at_step=coalesce_at_step,
@@ -2022,7 +2116,7 @@ class RowProcessor:
 
                     # Children skip directly to coalesce step (or next config gate if no coalesce)
                     child_items.append(
-                        _WorkItem(
+                        self._create_work_item(
                             token=child_token,
                             start_step=cfg_coalesce_step if cfg_coalesce_step is not None else len(transforms) + next_config_step,
                             coalesce_at_step=cfg_coalesce_step,
