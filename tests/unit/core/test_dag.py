@@ -1,54 +1,73 @@
 # tests/core/test_dag.py
 """Tests for DAG validation and operations."""
 
+from typing import Any
+
 import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow
 
 
-def _apply_explicit_success_routing(settings: object) -> object:
+def _apply_explicit_success_routing(settings: Any) -> Any:
     """Inject explicit on_success routing for legacy test fixtures.
 
     These tests historically relied on `default_sink`. This helper migrates
     fixture settings to explicit sink routing before plugin instantiation.
+    The mutation is applied to a deep copy to avoid test-to-test bleed.
     """
-    sinks = settings.sinks
+    routed_settings = settings.model_copy(deep=True)
+
+    sinks = routed_settings.sinks
     if not sinks:
-        return settings
+        return routed_settings
     sink_name = next(iter(sinks.keys()))
 
-    source_options = settings.source.options
+    source_options = routed_settings.source.options
     source_options.setdefault("on_success", sink_name)
 
-    if settings.transforms and not settings.gates and not settings.coalesce and not settings.aggregations:
-        terminal_options = settings.transforms[-1].options
+    if routed_settings.transforms and not routed_settings.gates and not routed_settings.coalesce and not routed_settings.aggregations:
+        terminal_options = routed_settings.transforms[-1].options
         terminal_options.setdefault("on_success", sink_name)
 
-    if settings.aggregations and not settings.gates and not settings.coalesce and not settings.transforms:
-        terminal_options = settings.aggregations[-1].options
+    if routed_settings.aggregations and not routed_settings.gates and not routed_settings.coalesce and not routed_settings.transforms:
+        terminal_options = routed_settings.aggregations[-1].options
         terminal_options.setdefault("on_success", sink_name)
 
-    if settings.coalesce and settings.gates:
+    if routed_settings.coalesce and routed_settings.gates:
         branch_to_gate_idx: dict[str, int] = {}
-        for gate_idx, gate in enumerate(settings.gates):
+        for gate_idx, gate in enumerate(routed_settings.gates):
             if gate.fork_to:
                 for branch in gate.fork_to:
                     branch_to_gate_idx[branch] = gate_idx
 
-        for coalesce_cfg in settings.coalesce:
+        updated_coalesce = []
+        for coalesce_cfg in routed_settings.coalesce:
             produced_idxs = [branch_to_gate_idx[b] for b in coalesce_cfg.branches if b in branch_to_gate_idx]
-            if produced_idxs and max(produced_idxs) == len(settings.gates) - 1 and coalesce_cfg.on_success is None:
-                object.__setattr__(coalesce_cfg, "on_success", sink_name)
+            if produced_idxs and max(produced_idxs) == len(routed_settings.gates) - 1 and coalesce_cfg.on_success is None:
+                updated_coalesce.append(coalesce_cfg.model_copy(update={"on_success": sink_name}))
+            else:
+                updated_coalesce.append(coalesce_cfg)
 
-    return settings
+        routed_settings = routed_settings.model_copy(update={"coalesce": updated_coalesce})
+
+    return routed_settings
 
 
-def instantiate_plugins_from_config(settings: object) -> dict[str, object]:
-    """Centralized test factory wrapper for plugin instantiation."""
+def instantiate_plugins_from_config_raw(settings: Any) -> dict[str, object]:
+    """Instantiate plugins without any test-time routing injection."""
     from elspeth.cli_helpers import instantiate_plugins_from_config as _real_instantiate
 
+    return _real_instantiate(settings)
+
+
+def instantiate_plugins_from_config(settings: Any) -> dict[str, object]:
+    """Centralized test factory wrapper for plugin instantiation."""
     routed_settings = _apply_explicit_success_routing(settings)
-    return _real_instantiate(routed_settings)
+    # Backward-compat for existing tests that pass settings.coalesce directly
+    # into from_plugin_instances() after calling this helper.
+    if routed_settings.coalesce != settings.coalesce:
+        object.__setattr__(settings, "coalesce", routed_settings.coalesce)
+    return instantiate_plugins_from_config_raw(routed_settings)
 
 
 class TestDAGBuilder:
@@ -796,6 +815,188 @@ class TestExecutionGraphFromConfig:
         field_mapper_idx = next(i for i, n in enumerate(order) if "field_mapper" in n)
         assert passthrough_idx < field_mapper_idx
 
+    def test_terminal_transform_missing_on_success_raises(self, plugin_manager) -> None:
+        """Terminal transform must declare on_success (no test-time injection)."""
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"terminal transform.*no 'on_success'"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_non_terminal_transform_with_on_success_raises(self, plugin_manager) -> None:
+        """Only the terminal transform may declare on_success (no test-time injection)."""
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                TransformSettings(
+                    plugin="passthrough",
+                    options={"schema": {"mode": "observed"}, "on_success": "output"},
+                ),
+                TransformSettings(
+                    plugin="passthrough",
+                    options={"schema": {"mode": "observed"}, "on_success": "output"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"not the terminal transform"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_terminal_transform_on_success_unknown_sink_raises(self, plugin_manager) -> None:
+        """Terminal transform on_success must reference a configured sink."""
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                TransformSettings(
+                    plugin="passthrough",
+                    options={"schema": {"mode": "observed"}, "on_success": "nowhere"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"unknown sink 'nowhere'"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_terminal_transform_with_valid_on_success_passes(self, plugin_manager) -> None:
+        """Terminal transform with valid on_success builds successfully."""
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                TransformSettings(
+                    plugin="passthrough",
+                    options={"schema": {"mode": "observed"}, "on_success": "output"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+    def test_non_terminal_without_on_success_and_terminal_with_on_success_passes(self, plugin_manager) -> None:
+        """Non-terminal transform omitted on_success, terminal declares it."""
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
+                TransformSettings(
+                    plugin="field_mapper",
+                    options={"schema": {"mode": "observed"}, "on_success": "output"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
     def test_transform_before_aggregation_not_treated_as_terminal(self, plugin_manager) -> None:
         """A transform before an aggregation is non-terminal and must not require on_success."""
         from elspeth.core.config import (
@@ -1021,13 +1222,13 @@ class TestExecutionGraphFromConfig:
         assert transform_map[0] != transform_map[1]
 
     def test_get_terminal_sink_map_for_source_only(self, plugin_manager) -> None:
-        """Source-only graph exposes terminal sink mapping."""
+        """Source-only graph exposes terminal sink mapping (no test-time injection)."""
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
             SourceSettings,
         )
-        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
             source=SourceSettings(
@@ -1035,6 +1236,7 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
+                    "on_success": "results",
                     "schema": {"mode": "observed"},
                 },
             ),
@@ -1044,7 +1246,7 @@ class TestExecutionGraphFromConfig:
             },
         )
 
-        plugins = instantiate_plugins_from_config(config)
+        plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
             transforms=plugins["transforms"],
@@ -1057,6 +1259,30 @@ class TestExecutionGraphFromConfig:
         source_node = graph.get_source()
         assert source_node is not None
         assert terminal_map[source_node] == "results"
+
+        bad_config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "missing_sink",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+            },
+        )
+        bad_plugins = instantiate_plugins_from_config_raw(bad_config)
+        with pytest.raises(GraphValidationError, match=r"Source 'csv' on_success references unknown sink 'missing_sink'"):
+            ExecutionGraph.from_plugin_instances(
+                source=bad_plugins["source"],
+                transforms=bad_plugins["transforms"],
+                sinks=bad_plugins["sinks"],
+                aggregations=bad_plugins["aggregations"],
+                gates=list(bad_config.gates),
+            )
 
 
 class TestExecutionGraphRouteMapping:
