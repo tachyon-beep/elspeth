@@ -236,6 +236,8 @@ class ExecutionGraph:
         self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
         self._route_resolution_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, label) -> sink_name | "continue"
         self._coalesce_gate_index: dict[CoalesceName, int] = {}  # coalesce_name -> gate pipeline index
+        self._pipeline_nodes: list[NodeID] = []  # Ordered processing nodes (no source/sinks)
+        self._node_step_map: dict[NodeID, int] = {}  # node_id -> audit step (source=0)
 
     @property
     def node_count(self) -> int:
@@ -443,6 +445,82 @@ class ExecutionGraph:
         if not self._graph.has_node(node_id):
             raise KeyError(f"Node not found: {node_id}")
         return cast(NodeInfo, self._graph.nodes[node_id]["info"])
+
+    def is_sink_node(self, node_id: NodeID) -> bool:
+        """Check if a node is a sink node."""
+        if not self._graph.has_node(node_id):
+            return False
+        return self.get_node_info(node_id).node_type == "sink"
+
+    def get_first_transform_node(self) -> NodeID | None:
+        """Get the first processing node after source via continue edge.
+
+        Returns:
+            Node ID of the first processing node (transform/gate/aggregation),
+            or None for source-only pipelines.
+        """
+        source_id = self.get_source()
+        if source_id is None:
+            return None
+        return self.get_next_node(source_id)
+
+    def get_next_node(self, node_id: NodeID) -> NodeID | None:
+        """Follow the continue MOVE edge to the next processing node.
+
+        Returns:
+            Next processing node ID, or None if node is terminal.
+        """
+        next_nodes: list[NodeID] = []
+        for _from_id, to_id, edge_key, edge_data in self._graph.out_edges(node_id, keys=True, data=True):
+            if edge_key != "continue":
+                continue
+            if edge_data["mode"] != RoutingMode.MOVE:
+                continue
+            next_node_id = NodeID(to_id)
+            if self.is_sink_node(next_node_id):
+                continue
+            next_nodes.append(next_node_id)
+
+        if len(next_nodes) > 1:
+            raise GraphValidationError(
+                f"Node '{node_id}' has multiple continue MOVE edges to processing nodes: {sorted(next_nodes)}"
+            )
+        if len(next_nodes) == 1:
+            return next_nodes[0]
+        return None
+
+    def get_pipeline_node_sequence(self) -> list[NodeID]:
+        """Get ordered processing nodes in pipeline traversal order."""
+        if self._pipeline_nodes:
+            return list(self._pipeline_nodes)
+
+        sequence: list[NodeID] = []
+        visited: set[NodeID] = set()
+        current = self.get_first_transform_node()
+        while current is not None:
+            if current in visited:
+                raise GraphValidationError(f"Cycle detected while building pipeline node sequence at node '{current}'")
+            sequence.append(current)
+            visited.add(current)
+            current = self.get_next_node(current)
+        return sequence
+
+    def build_step_map(self) -> dict[NodeID, int]:
+        """Build node -> audit step map (source=0, processing nodes start at 1)."""
+        source_id = self.get_source()
+        if source_id is None:
+            return {}
+
+        step_map: dict[NodeID, int] = {source_id: 0}
+        for idx, node_id in enumerate(self.get_pipeline_node_sequence(), start=1):
+            step_map[node_id] = idx
+
+        self._node_step_map = dict(step_map)
+        return dict(step_map)
+
+    def get_inverse_transform_id_map(self) -> dict[NodeID, int]:
+        """Get inverse mapping of transform node ID -> transform index."""
+        return {node_id: index for index, node_id in self._transform_id_map.items()}
 
     def get_nodes(self) -> list[NodeInfo]:
         """Get all nodes as NodeInfo objects.
@@ -1029,6 +1107,10 @@ class ExecutionGraph:
 
         # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
         graph.validate_edge_compatibility()
+
+        # Step maps and node sequence support node_id-based processor traversal.
+        graph._pipeline_nodes = list(pipeline_nodes)
+        graph._node_step_map = graph.build_step_map()
 
         return graph
 

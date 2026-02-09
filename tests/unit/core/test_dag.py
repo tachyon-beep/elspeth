@@ -1221,6 +1221,112 @@ class TestExecutionGraphFromConfig:
         assert 1 in transform_map  # field_mapper
         assert transform_map[0] != transform_map[1]
 
+    def test_pipeline_traversal_methods_linear(self, plugin_manager) -> None:
+        """Traversal helpers should follow continue edges over processing nodes."""
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
+                TransformSettings(plugin="field_mapper", options={"schema": {"mode": "observed"}}),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        sequence = graph.get_pipeline_node_sequence()
+        assert len(sequence) == 2
+        assert graph.get_first_transform_node() == sequence[0]
+        assert graph.get_next_node(sequence[0]) == sequence[1]
+        assert graph.get_next_node(sequence[1]) is None
+
+    def test_build_step_map_matches_positional_scheme(self, plugin_manager) -> None:
+        """Step numbering must match legacy positional indexing."""
+        from elspeth.contracts.types import GateName
+        from elspeth.core.config import (
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
+                TransformSettings(plugin="field_mapper", options={"schema": {"mode": "observed"}}),
+            ],
+            gates=[
+                GateSettings(name="g1", condition="True", routes={"true": "continue", "false": "continue"}),
+                GateSettings(name="g2", condition="True", routes={"true": "output", "false": "output"}),
+            ],
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+        )
+
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        step_map = graph.build_step_map()
+        source_id = graph.get_source()
+        assert source_id is not None
+        assert step_map[source_id] == 0
+
+        transform_map = graph.get_transform_id_map()
+        assert step_map[transform_map[0]] == 1
+        assert step_map[transform_map[1]] == 2
+        assert step_map[transform_map[2]] == 3
+
+        config_gate_map = graph.get_config_gate_id_map()
+        assert step_map[config_gate_map[GateName("g1")]] == 4
+        assert step_map[config_gate_map[GateName("g2")]] == 5
+
+        inverse_transform_map = graph.get_inverse_transform_id_map()
+        assert inverse_transform_map[transform_map[0]] == 0
+        assert inverse_transform_map[transform_map[1]] == 1
+        assert inverse_transform_map[transform_map[2]] == 2
+
+        sink_id = graph.get_sink_id_map()["output"]
+        assert graph.is_sink_node(sink_id) is True
+        assert graph.is_sink_node(transform_map[0]) is False
+
     def test_get_terminal_sink_map_for_source_only(self, plugin_manager) -> None:
         """Source-only graph exposes terminal sink mapping (no test-time injection)."""
         from elspeth.core.config import (
