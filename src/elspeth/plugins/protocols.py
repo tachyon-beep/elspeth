@@ -205,16 +205,14 @@ class TransformProtocol(Protocol):
     transforms_adds_fields: bool
 
     # Error routing configuration (WP-11.99b)
-    # Transforms extending TransformDataConfig set this from config.
+    # Injected by cli_helpers.py bridge from TransformSettings.on_error.
     # None means: transform doesn't return errors, OR errors are bugs.
-    @property
-    def on_error(self) -> str | None: ...
+    on_error: str | None
 
-    # Success routing configuration
-    # Terminal transforms (last in chain) set this to the output sink name.
+    # Success routing configuration (Phase 3: lifted from options to settings)
+    # Injected by cli_helpers.py bridge from TransformSettings.on_success.
     # None means: non-terminal (more transforms follow in the pipeline).
-    @property
-    def on_success(self) -> str | None: ...
+    on_success: str | None
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
@@ -313,12 +311,12 @@ class BatchTransformProtocol(Protocol):
     creates_tokens: bool
 
     # Error routing configuration (WP-11.99b)
-    @property
-    def on_error(self) -> str | None: ...
+    # Injected by cli_helpers.py bridge from AggregationSettings/TransformSettings.
+    on_error: str | None
 
-    # Success routing configuration
-    @property
-    def on_success(self) -> str | None: ...
+    # Success routing configuration (Phase 3: lifted from options to settings)
+    # Injected by cli_helpers.py bridge from AggregationSettings.on_success.
+    on_success: str | None
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""

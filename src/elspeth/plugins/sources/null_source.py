@@ -63,18 +63,14 @@ class NullSource(BaseSource):
                 not provided, defaults to dynamic schema since NullSource
                 never validates rows anyway.
 
-        Raises:
-            ValueError: If 'on_success' is not provided in config.
         """
-        if "on_success" not in config:
-            raise ValueError("NullSource requires 'on_success' in config. Pass the original source's on_success sink name.")
         config_copy = dict(config)
         if "schema" not in config_copy:
             config_copy["schema"] = {"mode": "observed"}
         super().__init__(config_copy)
         # Set _schema_class to satisfy protocol, but resume will use stored schema from audit trail
         self._schema_class = NullSourceSchema
-        self.on_success: str = config["on_success"]
+        # on_success is injected by the caller (cli.py resume path or instantiation bridge)
 
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Yield no rows.

@@ -101,10 +101,20 @@ class BaseTransform(ABC):
         """Error routing destination for this transform."""
         return self._on_error
 
+    @on_error.setter
+    def on_error(self, value: str | None) -> None:
+        """Set error routing destination (injected by instantiation bridge)."""
+        self._on_error = value
+
     @property
     def on_success(self) -> str | None:
         """Success routing destination for this transform."""
         return self._on_success
+
+    @on_success.setter
+    def on_success(self, value: str | None) -> None:
+        """Set success routing destination (injected by instantiation bridge)."""
+        self._on_success = value
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.

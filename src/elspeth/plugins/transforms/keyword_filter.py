@@ -116,8 +116,6 @@ class KeywordFilter(BaseTransform):
 
         cfg = KeywordFilterConfig.from_dict(config)
         self._fields = cfg.fields
-        self._on_error = cfg.on_error
-        self._on_success = cfg.on_success
 
         # Compile patterns at init - fail fast on invalid regex
         # Validate for ReDoS-prone constructs before compiling

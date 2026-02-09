@@ -76,8 +76,6 @@ class Truncate(BaseTransform):
         self._fields = cfg.fields
         self._suffix = cfg.suffix
         self._strict = cfg.strict
-        self._on_error: str | None = cfg.on_error
-        self._on_success: str | None = cfg.on_success
 
         # Validate suffix length doesn't exceed any max length
         suffix_len = len(self._suffix)

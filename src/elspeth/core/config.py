@@ -262,6 +262,11 @@ class AggregationSettings(BaseModel):
 
     name: str = Field(description="Aggregation identifier (unique within pipeline)")
     plugin: str = Field(description="Plugin name to instantiate")
+    input: str = Field(description="Named input connection (must match an upstream on_success value)")
+    on_success: str | None = Field(
+        default=None,
+        description="Connection name or sink name for aggregation output",
+    )
     trigger: TriggerConfig = Field(description="When to flush the batch")
     output_mode: OutputMode = Field(
         default=OutputMode.TRANSFORM,
@@ -275,6 +280,35 @@ class AggregationSettings(BaseModel):
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate aggregation name is not empty or reserved."""
+        if not v or not v.strip():
+            raise ValueError("Aggregation name must not be empty")
+        v = v.strip()
+        if v in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Aggregation name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        if v.startswith("__"):
+            raise ValueError(f"Aggregation name '{v}' starts with '__', which is reserved for system edges")
+        return v
+
+    @field_validator("input")
+    @classmethod
+    def validate_input(cls, v: str) -> str:
+        """Validate input connection name is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Aggregation input connection must not be empty")
+        return v.strip()
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str | None) -> str | None:
+        """Ensure on_success is not empty string."""
+        if v is not None and not v.strip():
+            raise ValueError("on_success must be a connection name, sink name, or omitted entirely")
+        return v.strip() if v else None
 
     @field_validator("output_mode", mode="before")
     @classmethod
@@ -314,12 +348,34 @@ class GateSettings(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Gate identifier (unique within pipeline)")
+    input: str = Field(description="Named input connection (must match an upstream on_success value)")
     condition: str = Field(description="Expression to evaluate (validated by ExpressionParser)")
-    routes: dict[str, str] = Field(description="Maps route labels to destinations ('continue' or sink name)")
+    routes: dict[str, str] = Field(description="Maps route labels to destinations (connection name, sink name, or 'fork')")
     fork_to: list[str] | None = Field(
         default=None,
         description="List of paths for fork operations",
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate gate name is not empty or reserved."""
+        if not v or not v.strip():
+            raise ValueError("Gate name must not be empty")
+        v = v.strip()
+        if v in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Gate name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        if v.startswith("__"):
+            raise ValueError(f"Gate name '{v}' starts with '__', which is reserved for system edges")
+        return v
+
+    @field_validator("input")
+    @classmethod
+    def validate_input(cls, v: str) -> str:
+        """Validate input connection name is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Gate input connection must not be empty")
+        return v.strip()
 
     @field_validator("condition")
     @classmethod
@@ -538,15 +594,31 @@ class CoalesceSettings(BaseModel):
 
 
 class SourceSettings(BaseModel):
-    """Source plugin configuration per architecture."""
+    """Source plugin configuration per architecture.
+
+    Phase 3 addition: on_success lifted from SourceDataConfig (options layer)
+    to settings level (3a3f-A). Source must declare where valid rows go.
+    """
 
     model_config = {"frozen": True, "extra": "forbid"}
 
     plugin: str = Field(description="Plugin name (csv_local, json, http_poll, etc.)")
+    on_success: str = Field(
+        ...,  # Required - no default
+        description="Connection name or sink name for rows that pass source validation",
+    )
     options: dict[str, Any] = Field(
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str) -> str:
+        """Ensure on_success is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Source on_success must be a connection name or sink name")
+        return v.strip()
 
 
 class TransformSettings(BaseModel):
@@ -554,15 +626,73 @@ class TransformSettings(BaseModel):
 
     Note: Gate routing is now config-driven only (see GateSettings).
     Plugin-based gates were removed - use the gates: section instead.
+
+    Phase 3 additions (declarative DAG wiring):
+        name: User-facing wiring label. Drives node IDs in the DAG and
+            appears in Landscape audit records. Must be unique across all
+            processing nodes (transforms, gates, aggregations, coalesce).
+        input: Named input connection. Declares which upstream node's
+            on_success output feeds this transform. Matched by the DAG
+            builder to create explicit edges (no positional inference).
+        on_success: Lifted from options layer (3a3f-A). Sink name or
+            connection name for successfully processed rows.
+        on_error: Lifted from options layer alongside on_success.
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
 
+    name: str = Field(description="Unique identifier for this transform (drives node IDs and audit records)")
     plugin: str = Field(description="Plugin name")
+    input: str = Field(description="Named input connection (must match an upstream on_success value)")
+    on_success: str | None = Field(
+        default=None,
+        description="Connection name or sink name for successfully processed rows",
+    )
+    on_error: str | None = Field(
+        default=None,
+        description="Sink name for rows that cannot be processed, or 'discard'",
+    )
     options: dict[str, Any] = Field(
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate transform name is not empty or reserved."""
+        if not v or not v.strip():
+            raise ValueError("Transform name must not be empty")
+        v = v.strip()
+        if v in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Transform name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        if v.startswith("__"):
+            raise ValueError(f"Transform name '{v}' starts with '__', which is reserved for system edges")
+        return v
+
+    @field_validator("input")
+    @classmethod
+    def validate_input(cls, v: str) -> str:
+        """Validate input connection name is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Transform input connection must not be empty")
+        return v.strip()
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str | None) -> str | None:
+        """Ensure on_success is not empty string."""
+        if v is not None and not v.strip():
+            raise ValueError("on_success must be a connection name, sink name, or omitted entirely")
+        return v.strip() if v else None
+
+    @field_validator("on_error")
+    @classmethod
+    def validate_on_error(cls, v: str | None) -> str | None:
+        """Ensure on_error is not empty string."""
+        if v is not None and not v.strip():
+            raise ValueError("on_error must be a sink name, 'discard', or omitted entirely")
+        return v.strip() if v else None
 
 
 class SinkSettings(BaseModel):
@@ -999,6 +1129,44 @@ class ElspethSettings(BaseModel):
         duplicates = [name for name in names if names.count(name) > 1]
         if duplicates:
             raise ValueError(f"Duplicate coalesce name(s): {set(duplicates)}")
+        return self
+
+    @model_validator(mode="after")
+    def validate_unique_transform_names(self) -> "ElspethSettings":
+        """Ensure transform names are unique."""
+        names = [t.name for t in self.transforms]
+        duplicates = [name for name in names if names.count(name) > 1]
+        if duplicates:
+            raise ValueError(f"Duplicate transform name(s): {set(duplicates)}")
+        return self
+
+    @model_validator(mode="after")
+    def validate_globally_unique_node_names(self) -> "ElspethSettings":
+        """Ensure all processing node names are unique across types.
+
+        Node names become node IDs in the DAG and appear in audit records.
+        A name collision between a transform and a gate (for example) would
+        create ambiguous audit entries and routing errors.
+        """
+        all_names: list[tuple[str, str]] = []
+        for t in self.transforms:
+            all_names.append((t.name, "transform"))
+        for g in self.gates:
+            all_names.append((g.name, "gate"))
+        for a in self.aggregations:
+            all_names.append((a.name, "aggregation"))
+        for c in self.coalesce:
+            all_names.append((c.name, "coalesce"))
+
+        seen: dict[str, str] = {}
+        for name, node_type in all_names:
+            if name in seen:
+                raise ValueError(
+                    f"Node name '{name}' is used by both {seen[name]} and {node_type}. "
+                    f"All processing node names must be unique across transforms, gates, "
+                    f"aggregations, and coalesce nodes."
+                )
+            seen[name] = node_type
         return self
 
     @model_validator(mode="after")

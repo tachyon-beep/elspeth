@@ -186,7 +186,7 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: cli_helpers.py:R2:instantiate_plugins_from_config:fp=fd01cc3b45761df9
+- key: cli_helpers.py:R2:instantiate_plugins_from_config:fp=52a988ba93203814
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
@@ -1593,7 +1593,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: plugins/transforms/web_scrape.py:R1:WebScrapeTransform:__init__:fp=aad7709a0d9887f5
+- key: plugins/transforms/web_scrape.py:R1:WebScrapeTransform:__init__:fp=6b27daeff28c2216
   owner: architecture
   reason: User YAML config boundary - http_config is parsed from pipeline settings
   safety: Crashes on type mismatch - no silent fallback

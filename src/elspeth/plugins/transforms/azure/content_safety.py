@@ -187,8 +187,6 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         self._api_key = cfg.api_key
         self._fields = cfg.fields
         self._thresholds = cfg.thresholds
-        self._on_error = cfg.on_error
-        self._on_success = cfg.on_success
         self._pool_size = cfg.pool_size
         self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
 

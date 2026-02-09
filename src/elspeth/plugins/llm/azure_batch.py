@@ -166,10 +166,6 @@ class AzureBatchLLMTransform(BaseTransform):
         self._poll_interval = cfg.poll_interval_seconds
         self._max_wait_hours = cfg.max_wait_hours
 
-        # Error routing - required for TransformResult.error() to work
-        self._on_error = cfg.on_error
-        self._on_success = cfg.on_success
-
         # Schema from config (TransformDataConfig guarantees schema_config is not None)
         schema_config = cfg.schema_config
         schema = create_schema_from_config(

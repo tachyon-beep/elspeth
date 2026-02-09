@@ -34,12 +34,18 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
     # Instantiate source (raises on unknown plugin)
     source_cls = manager.get_source_by_name(config.source.plugin)
     source = source_cls(dict(config.source.options))
+    # Bridge: inject on_success from settings level (lifted from options)
+    source.on_success = config.source.on_success
 
     # Instantiate transforms
     transforms = []
     for plugin_config in config.transforms:
         transform_cls = manager.get_transform_by_name(plugin_config.plugin)
-        transforms.append(transform_cls(dict(plugin_config.options)))
+        transform = transform_cls(dict(plugin_config.options))
+        # Bridge: inject routing from settings level (lifted from options)
+        transform.on_success = plugin_config.on_success
+        transform.on_error = plugin_config.on_error
+        transforms.append(transform)
 
     # Instantiate aggregations
     # Aggregations REQUIRE batch-aware transforms (is_batch_aware=True).
@@ -49,6 +55,8 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
     for agg_config in config.aggregations:
         transform_cls = manager.get_transform_by_name(agg_config.plugin)
         transform = transform_cls(dict(agg_config.options))
+        # Bridge: inject routing from settings level (lifted from options)
+        transform.on_success = agg_config.on_success
 
         # Validate batch-aware requirement (fail-fast before graph construction)
         if not getattr(transform, "is_batch_aware", False):

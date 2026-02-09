@@ -1427,8 +1427,10 @@ def _build_resume_graphs(
 
     # Execution graph uses NullSource — resume data comes from stored payloads
     null_source_on_success = _resolve_resume_null_source_on_success(plugins["source"], plugins["sinks"])
+    null_source = NullSource({})
+    null_source.on_success = null_source_on_success
     execution_graph = ExecutionGraph.from_plugin_instances(
-        source=NullSource({"on_success": null_source_on_success}),
+        source=null_source,
         transforms=plugins["transforms"],
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
@@ -1668,7 +1670,8 @@ def resume(
 
         # Override source with NullSource for resume (data comes from payloads)
         null_source_on_success = _resolve_resume_null_source_on_success(plugins["source"], resume_sinks)
-        null_source = NullSource({"on_success": null_source_on_success})
+        null_source = NullSource({})
+        null_source.on_success = null_source_on_success
         resume_plugins = {
             **plugins,
             "source": null_source,

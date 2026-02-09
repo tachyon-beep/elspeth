@@ -52,8 +52,6 @@ class PassThrough(BaseTransform):
         super().__init__(config)
         cfg = PassThroughConfig.from_dict(config)
         self._validate_input = cfg.validate_input
-        self._on_error: str | None = cfg.on_error
-        self._on_success: str | None = cfg.on_success
 
         self._schema_config = cfg.schema_config
 

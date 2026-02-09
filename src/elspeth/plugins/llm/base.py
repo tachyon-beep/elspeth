@@ -231,8 +231,6 @@ class BaseLLMTransform(BaseTransform):
         self._temperature = cfg.temperature
         self._max_tokens = cfg.max_tokens
         self._response_field = cfg.response_field
-        self._on_error = cfg.on_error
-        self._on_success = cfg.on_success
 
         # Schema from config (TransformDataConfig guarantees schema_config is not None)
         schema_config = cfg.schema_config
