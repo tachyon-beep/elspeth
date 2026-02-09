@@ -20,7 +20,8 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
     Returns:
         Dict with keys:
             - source: SourceProtocol instance
-            - transforms: list[TransformProtocol] (row_plugins only)
+            - source_settings: SourceSettings
+            - transforms: list[WiredTransform] (row_plugins only)
             - sinks: dict[str, SinkProtocol]
             - aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]]
 
@@ -28,6 +29,7 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
         ValueError: If config references unknown plugins (raised by PluginManager)
     """
     from elspeth.cli import _get_plugin_manager
+    from elspeth.core.dag import WiredTransform
 
     manager = _get_plugin_manager()
 
@@ -38,14 +40,14 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
     source.on_success = config.source.on_success
 
     # Instantiate transforms
-    transforms = []
+    transforms: list[WiredTransform] = []
     for plugin_config in config.transforms:
         transform_cls = manager.get_transform_by_name(plugin_config.plugin)
         transform = transform_cls(dict(plugin_config.options))
         # Bridge: inject routing from settings level (lifted from options)
         transform.on_success = plugin_config.on_success
         transform.on_error = plugin_config.on_error
-        transforms.append(transform)
+        transforms.append(WiredTransform(plugin=transform, settings=plugin_config))
 
     # Instantiate aggregations
     # Aggregations REQUIRE batch-aware transforms (is_batch_aware=True).
@@ -59,7 +61,7 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
         transform.on_success = agg_config.on_success
 
         # Validate batch-aware requirement (fail-fast before graph construction)
-        if not getattr(transform, "is_batch_aware", False):
+        if not transform.is_batch_aware:
             raise ValueError(
                 f"Aggregation '{agg_config.name}' uses transform '{agg_config.plugin}' "
                 f"which has is_batch_aware=False. Aggregations require batch-aware "
@@ -78,6 +80,7 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
 
     return {
         "source": source,
+        "source_settings": config.source,
         "transforms": transforms,
         "sinks": sinks,
         "aggregations": aggregations,

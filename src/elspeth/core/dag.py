@@ -29,7 +29,13 @@ from elspeth.contracts.types import (
 
 if TYPE_CHECKING:
     from elspeth.contracts import PluginSchema
-    from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
+    from elspeth.core.config import (
+        AggregationSettings,
+        CoalesceSettings,
+        GateSettings,
+        SourceSettings,
+        TransformSettings,
+    )
     from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
@@ -87,130 +93,20 @@ class _GateEntry:
     routes: dict[str, str]
 
 
-def _validate_on_success_routing(
-    transforms: list[TransformProtocol],
-    transform_ids: dict[int, NodeID],
-    sink_ids: dict[SinkName, NodeID],
-    next_in_pipeline: dict[NodeID, NodeID | None],
-    graph: ExecutionGraph,
-) -> None:
-    """Validate and wire on_success routing for terminal transforms.
+@dataclass(frozen=True, slots=True)
+class WiredTransform:
+    """Pair a transform plugin instance with its wiring settings."""
 
-    Terminal transforms (no downstream processing node) MUST declare on_success
-    to explicitly route completed rows to a sink. Non-terminal transforms MUST
-    NOT have on_success set.
-
-    Terminality is determined structurally: a node is terminal when
-    ``next_in_pipeline[node_id] is None`` (no downstream processing node).
-
-    Args:
-        transforms: Ordered list of transform instances (includes plugin gates)
-        transform_ids: Mapping from transform index to node ID
-        sink_ids: Mapping from sink name to node ID
-        next_in_pipeline: Maps each pipeline node to its successor (None for terminal)
-        graph: The graph being constructed
-
-    Raises:
-        GraphValidationError: If terminal transform lacks on_success,
-            non-terminal has on_success, or on_success references unknown sink.
-    """
-    from elspeth.plugins.protocols import GateProtocol
-
-    # Source-only and source+aggregation pipelines have no transform-level
-    # on_success validation. Source/coalesce routing is handled by callers.
-    if not transforms:
-        return
-
-    for i, transform in enumerate(transforms):
-        # Skip plugin gates — they route via routes dict, not on_success
-        if isinstance(transform, GateProtocol):
-            continue
-
-        transform_node_id = transform_ids[i]
-        is_terminal = next_in_pipeline[transform_node_id] is None
-
-        on_success = transform.on_success
-
-        if is_terminal:
-            # Terminal transform MUST have on_success
-            if on_success is None:
-                raise GraphValidationError(
-                    f"Transform '{transform.name}' (index {i}) is the terminal transform "
-                    f"but has no 'on_success' configured. Terminal transforms must specify "
-                    f"which sink to route completed rows to.\n"
-                    f"Add 'on_success: <sink_name>' to the transform's options.\n"
-                    f"Available sinks: {sorted(sink_ids.keys())}"
-                )
-            if SinkName(on_success) not in sink_ids:
-                raise GraphValidationError(
-                    f"Transform '{transform.name}' (index {i}) on_success references "
-                    f"unknown sink '{on_success}'. "
-                    f"Available sinks: {sorted(sink_ids.keys())}"
-                )
-            # Wire terminal transform to its on_success sink
-            graph.add_edge(
-                transform_ids[i],
-                sink_ids[SinkName(on_success)],
-                label="on_success",
-                mode=RoutingMode.MOVE,
-            )
-        else:
-            # Non-terminal transform MUST NOT have on_success
-            if on_success is not None:
-                raise GraphValidationError(
-                    f"Transform '{transform.name}' (index {i}) has 'on_success' set to "
-                    f"'{on_success}', but it is not the terminal transform. "
-                    f"Only the last transform in the pipeline should declare on_success. "
-                    f"Remove 'on_success' from this transform's options."
-                )
+    plugin: TransformProtocol
+    settings: TransformSettings
 
 
-def _validate_aggregation_on_success_routing(
-    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
-    aggregation_ids: dict[AggregationName, NodeID],
-    sink_ids: dict[SinkName, NodeID],
-    next_in_pipeline: dict[NodeID, NodeID | None],
-    graph: ExecutionGraph,
-) -> None:
-    """Validate and wire on_success routing for aggregation nodes.
+def _suggest_similar(name: str, candidates: list[str], max_distance: int = 3) -> list[str]:
+    """Suggest similar names for wiring validation errors."""
+    import difflib
 
-    Terminal aggregations (no downstream processing node) MUST declare
-    on_success on their plugin config. Non-terminal aggregations MUST NOT
-    have on_success set.
-    """
-    if not aggregations:
-        return
-
-    for agg_name, (transform, _agg_settings) in aggregations.items():
-        agg_id = aggregation_ids[AggregationName(agg_name)]
-        is_terminal = next_in_pipeline[agg_id] is None
-        on_success = transform.on_success
-
-        if is_terminal:
-            if on_success is None:
-                raise GraphValidationError(
-                    f"Aggregation '{agg_name}' is terminal but has no 'on_success' configured. "
-                    f"Terminal aggregations must specify which sink to route completed rows to.\n"
-                    f"Add 'on_success: <sink_name>' to the aggregation transform options.\n"
-                    f"Available sinks: {sorted(sink_ids.keys())}"
-                )
-            if SinkName(on_success) not in sink_ids:
-                raise GraphValidationError(
-                    f"Aggregation '{agg_name}' on_success references unknown sink '{on_success}'. "
-                    f"Available sinks: {sorted(sink_ids.keys())}"
-                )
-            graph.add_edge(
-                agg_id,
-                sink_ids[SinkName(on_success)],
-                label="on_success",
-                mode=RoutingMode.MOVE,
-            )
-        elif on_success is not None:
-            raise GraphValidationError(
-                f"Aggregation '{agg_name}' has 'on_success' set to '{on_success}', "
-                f"but it is not terminal. Only the last processing node in the pipeline "
-                f"should declare on_success. Remove 'on_success' from this aggregation's options."
-            )
+    del max_distance  # Reserved for future distance-based matcher.
+    return difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
 
 
 class ExecutionGraph:
@@ -561,7 +457,8 @@ class ExecutionGraph:
     def from_plugin_instances(
         cls,
         source: SourceProtocol,
-        transforms: list[TransformProtocol],
+        source_settings: SourceSettings,
+        transforms: list[WiredTransform],
         sinks: dict[str, SinkProtocol],
         aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
         gates: list[GateSettings],
@@ -577,7 +474,8 @@ class ExecutionGraph:
 
         Args:
             source: Instantiated source plugin
-            transforms: Instantiated transforms (row_plugins only, NOT aggregations)
+            source_settings: Source settings (wiring metadata)
+            transforms: Wired transforms (plugin instance + settings metadata)
             sinks: Dict of sink_name -> instantiated sink
             aggregations: Dict of agg_name -> (transform_instance, AggregationSettings)
             gates: Config-driven gate settings
@@ -628,7 +526,10 @@ class ExecutionGraph:
                 return NodeID(f"{prefix}_{name}_{config_hash}_{sequence}")
             return NodeID(f"{prefix}_{name}_{config_hash}")
 
-        # Add source - extract schema from instance
+        def _sink_name_set() -> set[str]:
+            return {str(name) for name in sink_ids}
+
+        # Add source
         source_config = source.config
         source_id = node_id("source", source.name, source_config)
         graph.add_node(
@@ -655,18 +556,20 @@ class ExecutionGraph:
 
         graph._sink_id_map = dict(sink_ids)
 
-        # Build transform chain (includes plugin gates)
-        transform_ids: dict[int, NodeID] = {}
+        # Build transforms (including plugin gates)
+        transform_ids_by_name: dict[str, NodeID] = {}
+        transform_ids_by_seq: dict[int, NodeID] = {}
         gate_entries: list[_GateEntry] = []
-        pipeline_nodes: list[NodeID] = []
-        prev_node_id = source_id
+        gate_route_connections: list[tuple[NodeID, str, str]] = []
+        plugin_gate_schema_inputs: list[tuple[NodeID, str, str, object | None]] = []
 
-        for i, transform in enumerate(transforms):
+        for seq, wired in enumerate(transforms):
+            transform = wired.plugin
             transform_config = transform.config
             is_gate = isinstance(transform, GateProtocol)
-            # Include sequence to prevent ID collisions when configs are identical
-            tid = node_id("transform", transform.name, transform_config, sequence=i)
-            transform_ids[i] = tid
+            tid = node_id("transform", wired.settings.name, transform_config)
+            transform_ids_by_name[wired.settings.name] = tid
+            transform_ids_by_seq[seq] = tid
 
             node_config = dict(transform_config)
             node_type = "gate" if is_gate else "transform"
@@ -674,13 +577,11 @@ class ExecutionGraph:
             if is_gate:
                 # Type narrowing: we know it's a GateProtocol from isinstance check
                 gate = cast(GateProtocol, transform)
-                upstream_schema = graph.get_node_info(prev_node_id).config["schema"]
-                if "schema" in node_config and node_config["schema"] != upstream_schema:
-                    raise GraphValidationError(
-                        f"Gate '{gate.name}' declares schema config that differs from upstream. "
-                        f"Upstream schema config: {upstream_schema}, gate schema config: {node_config['schema']}"
-                    )
-                node_config["schema"] = upstream_schema
+                if "schema" in node_config:  # noqa: SIM401
+                    declared_schema = node_config["schema"]
+                else:
+                    declared_schema = None
+                plugin_gate_schema_inputs.append((tid, gate.name, wired.settings.input, declared_schema))
                 node_config["routes"] = dict(gate.routes)
                 if gate.fork_to is not None:
                     node_config["fork_to"] = list(gate.fork_to)
@@ -699,10 +600,6 @@ class ExecutionGraph:
                 output_schema_config=output_schema_config,
             )
 
-            graph.add_edge(prev_node_id, tid, label="continue", mode=RoutingMode.MOVE)
-            prev_node_id = tid
-            pipeline_nodes.append(tid)
-
             if is_gate:
                 # Type narrowing: we know it's a GateProtocol from isinstance check
                 gate = cast(GateProtocol, transform)
@@ -715,26 +612,24 @@ class ExecutionGraph:
                     )
                 )
 
-                # Gate routes to sinks via route labels
+                # Gate routes to sinks via route labels; connection-name routes are deferred.
                 for route_label, target in gate.routes.items():
-                    if target == "continue":
-                        graph._route_resolution_map[(tid, route_label)] = "continue"
-                    elif target == "fork":
+                    if target == "fork":
                         raise GraphValidationError(
                             f"Gate '{transform.name}' route '{route_label}' resolves to 'fork'. "
                             "Plugin gates must use RoutingAction.fork_to_paths() for forks."
                         )
-                    else:
-                        if SinkName(target) not in sink_ids:
-                            raise GraphValidationError(f"Gate '{transform.name}' route '{route_label}' references unknown sink '{target}'")
+                    if SinkName(target) in sink_ids:
                         target_sink_id = sink_ids[SinkName(target)]
                         graph.add_edge(tid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
                         graph._route_label_map[(tid, target)] = route_label
                         graph._route_resolution_map[(tid, route_label)] = target
+                    else:
+                        gate_route_connections.append((tid, route_label, target))
 
-        graph._transform_id_map = transform_ids
+        graph._transform_id_map = transform_ids_by_seq
 
-        # Build aggregations - dual schemas
+        # Build aggregations
         aggregation_ids: dict[AggregationName, NodeID] = {}
         for agg_name, (transform, agg_config) in aggregations.items():
             transform_config = transform.config
@@ -761,20 +656,16 @@ class ExecutionGraph:
                 output_schema_config=agg_output_schema_config,
             )
 
-            graph.add_edge(prev_node_id, aid, label="continue", mode=RoutingMode.MOVE)
-            prev_node_id = aid
-            pipeline_nodes.append(aid)
-
         graph._aggregation_id_map = aggregation_ids
 
-        # Build gates (config-driven, no instances)
+        # Build config gates (no plugin instances)
         config_gate_ids: dict[GateName, NodeID] = {}
+        config_gate_schema_inputs: list[tuple[NodeID, str, str]] = []
 
         for gate_config in gates:
             gate_node_config = {
                 "condition": gate_config.condition,
                 "routes": dict(gate_config.routes),
-                "schema": graph.get_node_info(prev_node_id).config["schema"],
             }
             if gate_config.fork_to:
                 gate_node_config["fork_to"] = list(gate_config.fork_to)
@@ -789,24 +680,20 @@ class ExecutionGraph:
                 config=gate_node_config,
             )
 
-            graph.add_edge(prev_node_id, gid, label="continue", mode=RoutingMode.MOVE)
-            prev_node_id = gid  # Advance chain to this gate
-            pipeline_nodes.append(gid)
+            config_gate_schema_inputs.append((gid, gate_config.name, gate_config.input))
 
-            # Gate routes to sinks
+            # Gate routes to sinks; connection-name routes are deferred.
             for route_label, target in gate_config.routes.items():
-                if target == "continue":
-                    graph._route_resolution_map[(gid, route_label)] = "continue"
-                elif target == "fork":
+                if target == "fork":
                     # Fork is a special routing mode - handled by fork_to branches
                     graph._route_resolution_map[(gid, route_label)] = "fork"
-                else:
-                    if SinkName(target) not in sink_ids:
-                        raise GraphValidationError(f"Gate '{gate_config.name}' route '{route_label}' references unknown sink '{target}'")
+                elif SinkName(target) in sink_ids:
                     target_sink_id = sink_ids[SinkName(target)]
                     graph.add_edge(gid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
                     graph._route_label_map[(gid, target)] = route_label
                     graph._route_resolution_map[(gid, route_label)] = target
+                else:
+                    gate_route_connections.append((gid, route_label, target))
 
             gate_entries.append(
                 _GateEntry(
@@ -927,66 +814,245 @@ class ExecutionGraph:
                         f"{sorted([b for b, c in branch_to_coalesce.items() if c == coalesce_name])}"
                     )
 
-        # ===== COMPUTE COALESCE INSERTION POINTS =====
-        # Coalesce continues after the latest gate that produces any of its branches.
-        pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
-        # Structural next-node map: each pipeline node maps to its successor (None for terminal).
-        # Replaces positional arithmetic (step+1==len, idx+1<len) with direct lookup.
-        next_in_pipeline: dict[NodeID, NodeID | None] = {}
-        for idx, nid in enumerate(pipeline_nodes):
-            next_in_pipeline[nid] = pipeline_nodes[idx + 1] if idx + 1 < len(pipeline_nodes) else None
-        coalesce_gate_index: dict[CoalesceName, int] = {}
+        # ===== BUILD PRODUCER REGISTRY =====
+        producers: dict[str, tuple[NodeID, str]] = {}
+        producer_desc: dict[str, str] = {}
+
+        def register_producer(connection_name: str, node_id: NodeID, label: str, description: str) -> None:
+            if connection_name in producers:
+                existing_node, _existing_label = producers[connection_name]
+                raise GraphValidationError(
+                    f"Duplicate producer for connection '{connection_name}': "
+                    f"{producer_desc[connection_name]} ({existing_node}) and {description} ({node_id})."
+                )
+            producers[connection_name] = (node_id, label)
+            producer_desc[connection_name] = description
+
+        source_on_success = source_settings.on_success
+        if SinkName(source_on_success) not in sink_ids:
+            register_producer(
+                source_on_success,
+                source_id,
+                "continue",
+                f"source '{source.name}'",
+            )
+
+        for wired in transforms:
+            if isinstance(wired.plugin, GateProtocol):
+                continue
+            tid = transform_ids_by_name[wired.settings.name]
+            on_success = wired.settings.on_success
+            if on_success is None:
+                register_producer(wired.settings.name, tid, "continue", f"transform '{wired.settings.name}'")
+            elif SinkName(on_success) not in sink_ids:
+                register_producer(on_success, tid, "continue", f"transform '{wired.settings.name}'")
+
+        for agg_name, (_transform, agg_settings) in aggregations.items():
+            aid = aggregation_ids[AggregationName(agg_name)]
+            if agg_settings.on_success is None:
+                register_producer(agg_settings.name, aid, "continue", f"aggregation '{agg_settings.name}'")
+            elif SinkName(agg_settings.on_success) not in sink_ids:
+                register_producer(agg_settings.on_success, aid, "continue", f"aggregation '{agg_settings.name}'")
+
         if coalesce_settings:
-            for gate_entry in gate_entries:
-                if gate_entry.fork_to:
-                    gate_idx = pipeline_index[gate_entry.node_id]
-                    for branch_name in gate_entry.fork_to:
-                        branch_key = BranchName(branch_name)
-                        if branch_key in branch_to_coalesce:
-                            coalesce_name = branch_to_coalesce[branch_key]
-                            if coalesce_name in coalesce_gate_index:
-                                existing = coalesce_gate_index[coalesce_name]
-                                if gate_idx > existing:
-                                    coalesce_gate_index[coalesce_name] = gate_idx
-                            else:
-                                coalesce_gate_index[coalesce_name] = gate_idx
-
-            for coalesce_name in coalesce_ids:
-                if coalesce_name not in coalesce_gate_index:
-                    raise GraphValidationError(
-                        f"Coalesce '{coalesce_name}' has no producing gate. This should have been caught by branch validation."
+            for coalesce_config in coalesce_settings:
+                if coalesce_config.on_success is None:
+                    coalesce_id = coalesce_ids[CoalesceName(coalesce_config.name)]
+                    register_producer(
+                        coalesce_config.name,
+                        coalesce_id,
+                        "continue",
+                        f"coalesce '{coalesce_config.name}'",
                     )
 
-        # Store for external access
-        graph._coalesce_gate_index = coalesce_gate_index
+        for gate_id, route_label, target in gate_route_connections:
+            register_producer(target, gate_id, route_label, f"gate route '{route_label}' from '{gate_id}'")
 
-        # ===== CONNECT GATE CONTINUE ROUTES =====
-        # Handle continue routes for BOTH plugin gates and config gates.
-        for gate_entry in gate_entries:
-            # Check if ANY route resolves to "continue"
-            has_continue_route = any(target == "continue" for target in gate_entry.routes.values())
+        # ===== BUILD CONSUMER REGISTRY =====
+        consumers: dict[str, NodeID] = {}
+        consumer_desc: dict[str, str] = {}
 
-            if has_continue_route:
-                next_node_id = next_in_pipeline[gate_entry.node_id]
-                if next_node_id is None:
-                    # Terminal gate with "continue" route is a configuration error.
-                    # Gates must route to named sinks — use explicit route targets.
+        def register_consumer(connection_name: str, node_id: NodeID, description: str) -> None:
+            if connection_name in consumers:
+                raise GraphValidationError(
+                    f"Duplicate consumer for connection '{connection_name}': "
+                    f"{consumer_desc[connection_name]} ({consumers[connection_name]}) and {description} ({node_id}). "
+                    "Use a gate for fan-out."
+                )
+            consumers[connection_name] = node_id
+            consumer_desc[connection_name] = description
+
+        for wired in transforms:
+            register_consumer(
+                wired.settings.input,
+                transform_ids_by_name[wired.settings.name],
+                f"transform '{wired.settings.name}'",
+            )
+
+        for agg_name, (_transform, agg_settings) in aggregations.items():
+            register_consumer(
+                agg_settings.input,
+                aggregation_ids[AggregationName(agg_name)],
+                f"aggregation '{agg_settings.name}'",
+            )
+
+        for gate_settings in gates:
+            register_consumer(
+                gate_settings.input,
+                config_gate_ids[GateName(gate_settings.name)],
+                f"gate '{gate_settings.name}'",
+            )
+
+        # ===== VALIDATE DISJOINT NAMESPACES =====
+        connection_names = set(producers.keys()) | set(consumers.keys())
+        overlap = connection_names & _sink_name_set()
+        if overlap:
+            raise GraphValidationError(
+                f"Connection names overlap with sink names: {sorted(overlap)}. Connection names and sink names must be disjoint."
+            )
+
+        # Resolve gate schema from explicit input connection.
+        for gate_id, gate_name, input_connection, declared_schema in plugin_gate_schema_inputs:
+            if input_connection not in producers:
+                suggestions = _suggest_similar(input_connection, sorted(producers.keys()))
+                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                raise GraphValidationError(
+                    f"Gate '{gate_name}' input '{input_connection}' has no producer.{hint}\n"
+                    f"Available connections: {sorted(producers.keys())}"
+                )
+            producer_id, _producer_label = producers[input_connection]
+            upstream_schema = graph.get_node_info(producer_id).config["schema"]
+            if declared_schema is not None and declared_schema != upstream_schema:
+                raise GraphValidationError(
+                    f"Gate '{gate_name}' declares schema config that differs from upstream. "
+                    f"Upstream schema config: {upstream_schema}, gate schema config: {declared_schema}"
+                )
+            graph.get_node_info(gate_id).config["schema"] = upstream_schema
+
+        for gate_id, gate_name, input_connection in config_gate_schema_inputs:
+            if input_connection not in producers:
+                suggestions = _suggest_similar(input_connection, sorted(producers.keys()))
+                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                raise GraphValidationError(
+                    f"Gate '{gate_name}' input '{input_connection}' has no producer.{hint}\n"
+                    f"Available connections: {sorted(producers.keys())}"
+                )
+            producer_id, _producer_label = producers[input_connection]
+            upstream_schema = graph.get_node_info(producer_id).config["schema"]
+            graph.get_node_info(gate_id).config["schema"] = upstream_schema
+
+        # ===== MATCH PRODUCERS TO CONSUMERS =====
+        gate_node_ids = {entry.node_id for entry in gate_entries}
+        gate_continue_destinations: dict[NodeID, NodeID] = {}
+
+        for connection_name, consumer_id in consumers.items():
+            if connection_name not in producers:
+                suggestions = _suggest_similar(connection_name, sorted(producers.keys()))
+                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                raise GraphValidationError(
+                    f"No producer for connection '{connection_name}'.{hint}\nAvailable connections: {sorted(producers.keys())}"
+                )
+
+            producer_id, producer_label = producers[connection_name]
+            if producer_id in gate_node_ids and producer_label != "continue":
+                # Preserve existing processor behavior: route labels resolve to "continue"
+                # and gates emit a single continue edge to downstream processing.
+                if producer_id in gate_continue_destinations:
+                    existing_consumer = gate_continue_destinations[producer_id]
+                    if existing_consumer != consumer_id:
+                        raise GraphValidationError(
+                            f"Gate '{producer_id}' routes multiple labels to different processing connections. "
+                            "Current executor supports at most one downstream processing destination per gate."
+                        )
+                else:
+                    graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
+                    gate_continue_destinations[producer_id] = consumer_id
+            else:
+                graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
+
+        # ===== RESOLVE DEFERRED GATE ROUTES =====
+        for gate_id, route_label, target in gate_route_connections:
+            if target not in consumers:
+                suggestions = _suggest_similar(target, sorted(consumers.keys()))
+                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                raise GraphValidationError(f"Gate route target '{target}' is neither a sink nor a known connection name.{hint}")
+            graph._route_resolution_map[(gate_id, route_label)] = "continue"
+
+        # ===== TERMINAL ROUTING (on_success -> sinks) =====
+        for wired in transforms:
+            if isinstance(wired.plugin, GateProtocol):
+                continue
+            on_success = wired.settings.on_success
+            if on_success is None:
+                continue
+            tid = transform_ids_by_name[wired.settings.name]
+            if SinkName(on_success) in sink_ids:
+                graph.add_edge(tid, sink_ids[SinkName(on_success)], label="on_success", mode=RoutingMode.MOVE)
+            elif on_success not in consumers:
+                suggestions = _suggest_similar(on_success, sorted(consumers.keys()))
+                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                raise GraphValidationError(
+                    f"Transform '{wired.settings.name}' on_success '{on_success}' is neither a sink nor a known connection.{hint}"
+                )
+
+        for agg_name, (_transform, agg_settings) in aggregations.items():
+            on_success = agg_settings.on_success
+            if on_success is None:
+                continue
+            aid = aggregation_ids[AggregationName(agg_name)]
+            if SinkName(on_success) in sink_ids:
+                graph.add_edge(aid, sink_ids[SinkName(on_success)], label="on_success", mode=RoutingMode.MOVE)
+            elif on_success not in consumers:
+                suggestions = _suggest_similar(on_success, sorted(consumers.keys()))
+                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                raise GraphValidationError(
+                    f"Aggregation '{agg_settings.name}' on_success '{on_success}' is neither a sink nor a known connection.{hint}"
+                )
+
+        if coalesce_settings:
+            for coalesce_config in coalesce_settings:
+                if coalesce_config.on_success is None:
+                    continue
+                if coalesce_config.on_success in consumers:
                     raise GraphValidationError(
-                        f"Gate '{gate_entry.name}' has 'continue' route but is the last node "
-                        f"in the pipeline. Terminal gates must route all paths to named sinks. "
-                        f"Replace 'continue' with a sink name. "
-                        f"Available sinks: {sorted(sink_ids.keys())}"
+                        f"Coalesce '{coalesce_config.name}' has on_success='{coalesce_config.on_success}'. "
+                        "Coalesce on_success must point to a sink when configured."
                     )
+                on_success_sink = SinkName(coalesce_config.on_success)
+                if on_success_sink not in sink_ids:
+                    raise GraphValidationError(
+                        f"Coalesce '{coalesce_config.name}' on_success references unknown sink "
+                        f"'{coalesce_config.on_success}'. Available sinks: {sorted(sink_ids.keys())}"
+                    )
+                graph.add_edge(
+                    coalesce_ids[CoalesceName(coalesce_config.name)],
+                    sink_ids[on_success_sink],
+                    label="on_success",
+                    mode=RoutingMode.MOVE,
+                )
 
-                if not graph._graph.has_edge(gate_entry.node_id, next_node_id, key="continue"):
-                    graph.add_edge(gate_entry.node_id, next_node_id, label="continue", mode=RoutingMode.MOVE)
+        if SinkName(source_on_success) in sink_ids:
+            # For source-only pipelines, create direct source -> sink edge.
+            if not transforms and not gates and not aggregations:
+                graph.add_edge(
+                    source_id,
+                    sink_ids[SinkName(source_on_success)],
+                    label="on_success",
+                    mode=RoutingMode.MOVE,
+                )
+        elif source_on_success not in consumers:
+            suggestions = _suggest_similar(source_on_success, sorted(consumers.keys()))
+            hint = f" Did you mean: {suggestions}?" if suggestions else ""
+            raise GraphValidationError(
+                f"Source '{source.name}' on_success '{source_on_success}' is neither a sink nor a known connection.{hint}"
+            )
 
-        # ===== CONNECT TERMINAL TRANSFORMS TO on_success SINKS =====
-        # Terminal transforms (last in chain before sinks) must declare on_success.
-        # This replaces the old default_sink fallback with explicit routing.
-        # Non-terminal transforms MUST NOT have on_success set.
-        _validate_on_success_routing(transforms, transform_ids, sink_ids, next_in_pipeline, graph)
-        _validate_aggregation_on_success_routing(aggregations, aggregation_ids, sink_ids, next_in_pipeline, graph)
+        dangling_connections = sorted(set(producers.keys()) - set(consumers.keys()))
+        if dangling_connections:
+            raise GraphValidationError(
+                f"Dangling output connections with no consumer: {dangling_connections}. "
+                "Every produced connection must be consumed or routed to a sink."
+            )
 
         # ===== ADD DIVERT EDGES (quarantine/error sinks) =====
         # Divert edges represent error/quarantine data flows that bypass the
@@ -1009,75 +1075,72 @@ class ExecutionGraph:
                 mode=RoutingMode.DIVERT,
             )
 
-        # Source on_success edge — validates source output routing
-        source_on_success = SinkName(source.on_success)
-        if source_on_success not in sink_ids:
-            raise GraphValidationError(
-                f"Source '{source.name}' on_success references unknown sink "
-                f"'{source.on_success}'. "
-                f"Available sinks: {sorted(sink_ids.keys())}"
-            )
-        # For source-only pipelines (no transforms/gates/aggregations), create direct edge
-        if not transforms and not gates and not aggregations:
-            graph.add_edge(
-                source_id,
-                sink_ids[source_on_success],
-                label="on_success",
-                mode=RoutingMode.MOVE,
-            )
-
         # Transform error edges
         # GateProtocol does NOT define _on_error, so skip gates.
         # The isinstance check is framework-boundary type narrowing — the
         # transforms list contains both TransformProtocol and GateProtocol
-        # instances (see dag.py:456 where is_gate = isinstance(transform, GateProtocol)).
-        for i, transform in enumerate(transforms):
-            if isinstance(transform, GateProtocol):
+        # instances.
+        for wired in transforms:
+            if isinstance(wired.plugin, GateProtocol):
                 continue
-            on_error = transform.on_error
+            on_error = wired.settings.on_error
             if on_error is not None and on_error != "discard" and SinkName(on_error) in sink_ids:
                 graph.add_edge(
-                    transform_ids[i],
+                    transform_ids_by_name[wired.settings.name],
                     sink_ids[SinkName(on_error)],
-                    label=error_edge_label(i),
+                    label=error_edge_label(wired.settings.name),
                     mode=RoutingMode.DIVERT,
                 )
 
-        # ===== CONNECT COALESCE TO NEXT NODE =====
-        if coalesce_settings:
-            for coalesce_config in coalesce_settings:
-                coalesce_name = CoalesceName(coalesce_config.name)
-                coalesce_id = coalesce_ids[coalesce_name]
-                # Coalesce continues after its producing fork gate.
-                gate_idx = coalesce_gate_index[coalesce_name]
-                producing_gate_node = pipeline_nodes[gate_idx]
-                coalesce_next = next_in_pipeline[producing_gate_node]
+        # ===== PIPELINE ORDERING (TOPOLOGICAL) =====
+        processing_node_ids: set[NodeID] = set()
+        processing_node_ids.update(transform_ids_by_name.values())
+        processing_node_ids.update(aggregation_ids.values())
+        processing_node_ids.update(config_gate_ids.values())
+        processing_node_ids.update(coalesce_ids.values())
 
-                if coalesce_next is not None:
-                    # Non-terminal coalesce: continue to next pipeline node
-                    if coalesce_config.on_success is not None:
-                        raise GraphValidationError(
-                            f"Coalesce '{coalesce_config.name}' has 'on_success' set to "
-                            f"'{coalesce_config.on_success}', but it is not terminal. "
-                            "Only terminal coalesce nodes may declare on_success."
-                        )
-                    graph.add_edge(coalesce_id, coalesce_next, label="continue", mode=RoutingMode.MOVE)
-                else:
-                    # Terminal coalesce: must have on_success
-                    if coalesce_config.on_success is None:
-                        raise GraphValidationError(
-                            f"Coalesce '{coalesce_config.name}' is the terminal node but has no "
-                            f"'on_success' configured. Terminal coalesce must specify which sink "
-                            f"to route merged output to. Available sinks: {sorted(sink_ids.keys())}"
-                        )
-                    on_success_sink = SinkName(coalesce_config.on_success)
-                    if on_success_sink not in sink_ids:
-                        raise GraphValidationError(
-                            f"Coalesce '{coalesce_config.name}' on_success references unknown "
-                            f"sink '{coalesce_config.on_success}'. "
-                            f"Available sinks: {sorted(sink_ids.keys())}"
-                        )
-                    graph.add_edge(coalesce_id, sink_ids[on_success_sink], label="on_success", mode=RoutingMode.MOVE)
+        topo_order = [NodeID(node_id) for node_id in nx.topological_sort(graph._graph)]
+        pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
+
+        expected_yaml_nodes: list[NodeID] = []
+        expected_yaml_nodes.extend(transform_ids_by_seq[idx] for idx in sorted(transform_ids_by_seq))
+        expected_yaml_nodes.extend(aggregation_ids[AggregationName(agg_name)] for agg_name in aggregations)
+        expected_yaml_nodes.extend(config_gate_ids[GateName(gate_settings.name)] for gate_settings in gates)
+        expected_yaml_set = set(expected_yaml_nodes)
+        topo_yaml_nodes = [node_id for node_id in pipeline_nodes if node_id in expected_yaml_set]
+
+        if topo_yaml_nodes != expected_yaml_nodes:
+            raise GraphValidationError(
+                "YAML declaration order does not match graph topological order. "
+                f"Expected processing order: {expected_yaml_nodes}. "
+                f"Topological order: {topo_yaml_nodes}."
+            )
+
+        pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
+        coalesce_gate_index: dict[CoalesceName, int] = {}
+        if coalesce_settings:
+            for gate_entry in gate_entries:
+                if gate_entry.fork_to is None:
+                    continue
+                gate_idx = pipeline_index[gate_entry.node_id]
+                for branch_name in gate_entry.fork_to:
+                    branch_key = BranchName(branch_name)
+                    if branch_key not in branch_to_coalesce:
+                        continue
+                    coalesce_name = branch_to_coalesce[branch_key]
+                    if coalesce_name in coalesce_gate_index:  # noqa: SIM401
+                        existing_idx = coalesce_gate_index[coalesce_name]
+                    else:
+                        existing_idx = None
+                    if existing_idx is None or gate_idx > existing_idx:
+                        coalesce_gate_index[coalesce_name] = gate_idx
+
+            for coalesce_name in coalesce_ids:
+                if coalesce_name not in coalesce_gate_index:
+                    raise GraphValidationError(
+                        f"Coalesce '{coalesce_name}' has no producing gate. This should have been caught by branch validation."
+                    )
+        graph._coalesce_gate_index = coalesce_gate_index
 
         # ===== POPULATE COALESCE SCHEMA CONFIG =====
         # Coalesce nodes are structural pass-throughs; record the upstream schema

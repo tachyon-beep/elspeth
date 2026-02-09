@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 from elspeth import __version__
 from elspeth.contracts import ExecutionResult
-from elspeth.core.config import ElspethSettings, load_settings, resolve_config
+from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
 from elspeth.testing.chaosllm.cli import app as chaosllm_app
@@ -414,6 +414,7 @@ def run(
     try:
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=execution_sinks,
             aggregations=plugins["aggregations"],
@@ -705,7 +706,7 @@ def _execute_pipeline_with_instances(
     sinks: dict[str, SinkProtocol] = plugins["sinks"]
 
     # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[RowPlugin] = list(plugins["transforms"])
+    transforms: list[RowPlugin] = [wired.plugin for wired in plugins["transforms"]]
 
     # Add aggregation transforms with node_id attached
     agg_id_map = graph.get_aggregation_id_map()
@@ -972,6 +973,7 @@ def validate(
     try:
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
@@ -1294,7 +1296,7 @@ def _execute_resume_with_instances(
     sinks: dict[str, SinkProtocol] = plugins["sinks"]
 
     # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[RowPlugin] = list(plugins["transforms"])
+    transforms: list[RowPlugin] = [wired.plugin for wired in plugins["transforms"]]
 
     # Add aggregation transforms with node_id attached
     agg_id_map = graph.get_aggregation_id_map()
@@ -1417,6 +1419,7 @@ def _build_resume_graphs(
     # computed during the original run
     validation_graph = ExecutionGraph.from_plugin_instances(
         source=plugins["source"],
+        source_settings=plugins["source_settings"],
         transforms=plugins["transforms"],
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
@@ -1429,8 +1432,10 @@ def _build_resume_graphs(
     null_source_on_success = _resolve_resume_null_source_on_success(plugins["source"], plugins["sinks"])
     null_source = NullSource({})
     null_source.on_success = null_source_on_success
+    null_source_settings = SourceSettings(plugin="null", on_success=null_source_on_success)
     execution_graph = ExecutionGraph.from_plugin_instances(
         source=null_source,
+        source_settings=null_source_settings,
         transforms=plugins["transforms"],
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
