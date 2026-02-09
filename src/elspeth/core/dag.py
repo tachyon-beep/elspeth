@@ -16,7 +16,13 @@ from typing import TYPE_CHECKING, Any, cast
 import networkx as nx
 from networkx import MultiDiGraph
 
-from elspeth.contracts import EdgeInfo, RoutingMode, check_compatibility, error_edge_label
+from elspeth.contracts import (
+    EdgeInfo,
+    RouteDestination,
+    RoutingMode,
+    check_compatibility,
+    error_edge_label,
+)
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import (
     AggregationName,
@@ -126,7 +132,7 @@ class ExecutionGraph:
         self._coalesce_id_map: dict[CoalesceName, NodeID] = {}  # coalesce_name -> node_id
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = {}  # branch_name -> coalesce_name
         self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
-        self._route_resolution_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, label) -> sink_name | "continue"
+        self._route_resolution_map: dict[tuple[NodeID, str], RouteDestination] = {}
         self._coalesce_gate_index: dict[CoalesceName, int] = {}  # coalesce_name -> gate pipeline index
         self._pipeline_nodes: list[NodeID] = []  # Ordered processing nodes (no source/sinks)
         self._node_step_map: dict[NodeID, int] = {}  # node_id -> audit step (source=0)
@@ -623,7 +629,7 @@ class ExecutionGraph:
                         target_sink_id = sink_ids[SinkName(target)]
                         graph.add_edge(tid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
                         graph._route_label_map[(tid, target)] = route_label
-                        graph._route_resolution_map[(tid, route_label)] = target
+                        graph._route_resolution_map[(tid, route_label)] = RouteDestination.sink(target)
                     else:
                         gate_route_connections.append((tid, route_label, target))
 
@@ -686,12 +692,12 @@ class ExecutionGraph:
             for route_label, target in gate_config.routes.items():
                 if target == "fork":
                     # Fork is a special routing mode - handled by fork_to branches
-                    graph._route_resolution_map[(gid, route_label)] = "fork"
+                    graph._route_resolution_map[(gid, route_label)] = RouteDestination.fork()
                 elif SinkName(target) in sink_ids:
                     target_sink_id = sink_ids[SinkName(target)]
                     graph.add_edge(gid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
                     graph._route_label_map[(gid, target)] = route_label
-                    graph._route_resolution_map[(gid, route_label)] = target
+                    graph._route_resolution_map[(gid, route_label)] = RouteDestination.sink(target)
                 else:
                     gate_route_connections.append((gid, route_label, target))
 
@@ -943,7 +949,6 @@ class ExecutionGraph:
 
         # ===== MATCH PRODUCERS TO CONSUMERS =====
         gate_node_ids = {entry.node_id for entry in gate_entries}
-        gate_continue_destinations: dict[NodeID, NodeID] = {}
 
         for connection_name, consumer_id in consumers.items():
             if connection_name not in producers:
@@ -955,28 +960,25 @@ class ExecutionGraph:
 
             producer_id, producer_label = producers[connection_name]
             if producer_id in gate_node_ids and producer_label != "continue":
-                # Preserve existing processor behavior: route labels resolve to "continue"
-                # and gates emit a single continue edge to downstream processing.
-                if producer_id in gate_continue_destinations:
-                    existing_consumer = gate_continue_destinations[producer_id]
-                    if existing_consumer != consumer_id:
-                        raise GraphValidationError(
-                            f"Gate '{producer_id}' routes multiple labels to different processing connections. "
-                            "Current executor supports at most one downstream processing destination per gate."
-                        )
-                else:
+                # Preserve "destination: continue" semantics (continue edge label).
+                # Other connection targets keep route-label edges for unambiguous audit mapping.
+                if connection_name == "continue":
                     graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
-                    gate_continue_destinations[producer_id] = consumer_id
+                else:
+                    graph.add_edge(producer_id, consumer_id, label=producer_label, mode=RoutingMode.MOVE)
             else:
                 graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
 
         # ===== RESOLVE DEFERRED GATE ROUTES =====
         for gate_id, route_label, target in gate_route_connections:
+            if target == "continue":
+                graph._route_resolution_map[(gate_id, route_label)] = RouteDestination.continue_()
+                continue
             if target not in consumers:
                 suggestions = _suggest_similar(target, sorted(consumers.keys()))
                 hint = f" Did you mean: {suggestions}?" if suggestions else ""
                 raise GraphValidationError(f"Gate route target '{target}' is neither a sink nor a known connection name.{hint}")
-            graph._route_resolution_map[(gate_id, route_label)] = "continue"
+            graph._route_resolution_map[(gate_id, route_label)] = RouteDestination.processing_node(consumers[target])
 
         # ===== TERMINAL ROUTING (on_success -> sinks) =====
         for wired in transforms:
@@ -1288,12 +1290,12 @@ class ExecutionGraph:
         # Default path uses "continue" label
         return "continue"
 
-    def get_route_resolution_map(self) -> dict[tuple[NodeID, str], str]:
+    def get_route_resolution_map(self) -> dict[tuple[NodeID, str], RouteDestination]:
         """Get the route resolution map for all gates.
 
         Returns:
             Dict mapping (gate_node_id, route_label) -> destination.
-            Destination is either "continue" or a sink name.
+            Destination can be continue, fork, sink, or a processing node.
             Used by the executor to resolve route labels from gates.
         """
         return dict(self._route_resolution_map)

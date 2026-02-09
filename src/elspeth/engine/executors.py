@@ -24,6 +24,8 @@ from elspeth.contracts import (
     NodeStateOpen,
     PendingOutcome,
     PipelineRow,
+    RouteDestination,
+    RouteDestinationKind,
     RoutingAction,
     RoutingSpec,
     SchemaContract,
@@ -112,6 +114,7 @@ class GateOutcome:
     updated_token: TokenInfo
     child_tokens: list[TokenInfo] = field(default_factory=list)
     sink_name: str | None = None
+    next_node_id: NodeID | None = None
 
 
 class TransformExecutor:
@@ -540,7 +543,7 @@ class GateExecutor:
         span_factory: SpanFactory,
         step_resolver: StepResolver,
         edge_map: dict[tuple[NodeID, str], str] | None = None,
-        route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
+        route_resolution_map: dict[tuple[NodeID, str], RouteDestination] | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -549,7 +552,7 @@ class GateExecutor:
             span_factory: Span factory for tracing
             step_resolver: Resolves NodeID to 1-indexed audit step position
             edge_map: Maps (node_id, label) -> edge_id for routing
-            route_resolution_map: Maps (node_id, label) -> "continue" | sink_name
+            route_resolution_map: Maps (node_id, label) -> resolved route destination
         """
         self._recorder = recorder
         self._spans = span_factory
@@ -649,6 +652,7 @@ class GateExecutor:
         action = result.action
         child_tokens: list[TokenInfo] = []
         sink_name: str | None = None
+        next_node_id: NodeID | None = None
 
         try:
             if action.kind == RoutingKind.CONTINUE:
@@ -669,7 +673,7 @@ class GateExecutor:
                     # Label not in routes config - this is a configuration error
                     raise MissingEdgeError(node_id=NodeID(gate.node_id), label=route_label)
 
-                if destination == "continue":
+                if destination.kind == RouteDestinationKind.CONTINUE:
                     # Route label resolves to "continue" - record routing event (AUD-002)
                     # Preserve gate's reason and mode for full auditability
                     self._record_routing(
@@ -677,14 +681,32 @@ class GateExecutor:
                         node_id=gate.node_id,
                         action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
                     )
-                else:
+                elif destination.kind == RouteDestinationKind.SINK:
                     # Route label resolves to a sink name
-                    sink_name = destination
+                    if destination.sink_name is None:
+                        raise ValueError(f"Resolved sink destination missing sink_name for gate {gate.node_id} route '{route_label}'")
+                    sink_name = destination.sink_name
                     # Record routing event using the route label to find the edge
                     self._record_routing(
                         state_id=state.state_id,
                         node_id=gate.node_id,
                         action=action,
+                    )
+                elif destination.kind == RouteDestinationKind.PROCESSING_NODE:
+                    if destination.next_node_id is None:
+                        raise ValueError(
+                            f"Resolved processing destination missing next_node_id for gate {gate.node_id} route '{route_label}'"
+                        )
+                    next_node_id = destination.next_node_id
+                    self._record_routing(
+                        state_id=state.state_id,
+                        node_id=gate.node_id,
+                        action=action,
+                    )
+                else:
+                    raise ValueError(
+                        f"Gate {gate.node_id} route '{route_label}' resolved to unsupported destination kind "
+                        f"'{destination.kind}' for plugin gates"
                     )
 
             elif action.kind == RoutingKind.FORK_TO_PATHS:
@@ -768,6 +790,7 @@ class GateExecutor:
             updated_token=updated_token,
             child_tokens=child_tokens,
             sink_name=sink_name,
+            next_node_id=next_node_id,
         )
 
     def execute_config_gate(
@@ -885,15 +908,25 @@ class GateExecutor:
                 f"Gate '{gate_config.name}' condition returned '{route_label}' which is not in routes: {list(gate_config.routes.keys())}"
             )
 
-        destination = gate_config.routes[route_label]
+        destination = self._route_resolution_map.get((NodeID(node_id), route_label))
+        if destination is None:
+            # Fallback for isolated unit tests that construct GateExecutor directly
+            raw_destination = gate_config.routes[route_label]
+            if raw_destination == "continue":
+                destination = RouteDestination.continue_()
+            elif raw_destination == "fork":
+                destination = RouteDestination.fork()
+            else:
+                destination = RouteDestination.sink(raw_destination)
 
         # Build routing action and process based on destination
         child_tokens: list[TokenInfo] = []
         sink_name: str | None = None
+        next_node_id: NodeID | None = None
         reason: ConfigGateReason = {"condition": gate_config.condition, "result": route_label}
 
         try:
-            if destination == "continue":
+            if destination.kind == RouteDestinationKind.CONTINUE:
                 # Continue to next node - record routing event (AUD-002)
                 # Use CONTINUE kind for GateResult, ROUTE for recording (matches edge label)
                 action = RoutingAction.continue_(reason=reason)
@@ -903,7 +936,7 @@ class GateExecutor:
                     action=RoutingAction.route("continue", mode=RoutingMode.MOVE, reason=reason),
                 )
 
-            elif destination == "fork":
+            elif destination.kind == RouteDestinationKind.FORK:
                 # Fork to multiple paths - fork_to guaranteed by GateSettings.validate_fork_consistency()
                 # Pydantic validation ensures fork_to is not None when routes include "fork"
                 assert gate_config.fork_to is not None, "Pydantic validation guarantees fork_to when routes include 'fork'"
@@ -933,9 +966,11 @@ class GateExecutor:
                     row_data=token.row_data,
                 )
 
-            else:
+            elif destination.kind == RouteDestinationKind.SINK:
                 # Route to a named sink
-                sink_name = destination
+                if destination.sink_name is None:
+                    raise ValueError(f"Resolved sink destination missing sink_name for config gate {node_id} route '{route_label}'")
+                sink_name = destination.sink_name
                 action = RoutingAction.route(route_label, mode=RoutingMode.MOVE, reason=reason)
 
                 # Record routing event
@@ -944,8 +979,22 @@ class GateExecutor:
                     node_id=node_id,
                     action=action,
                 )
+            elif destination.kind == RouteDestinationKind.PROCESSING_NODE:
+                if destination.next_node_id is None:
+                    raise ValueError(
+                        f"Resolved processing destination missing next_node_id for config gate {node_id} route '{route_label}'"
+                    )
+                next_node_id = destination.next_node_id
+                action = RoutingAction.route(route_label, mode=RoutingMode.MOVE, reason=reason)
+                self._record_routing(
+                    state_id=state.state_id,
+                    node_id=node_id,
+                    action=action,
+                )
+            else:
+                raise ValueError(f"Unsupported route destination kind '{destination.kind}' for config gate {node_id}")
 
-        except (MissingEdgeError, RuntimeError) as e:
+        except (MissingEdgeError, RuntimeError, ValueError) as e:
             # Record failure before re-raising - ensures node_state is never left OPEN
             routing_error: ExecutionError = {
                 "exception": str(e),
@@ -988,6 +1037,7 @@ class GateExecutor:
             updated_token=updated_token,
             child_tokens=child_tokens,
             sink_name=sink_name,
+            next_node_id=next_node_id,
         )
 
     def _record_routing(

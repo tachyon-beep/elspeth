@@ -31,7 +31,7 @@ from elspeth.contracts.enums import (
 )
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
-from elspeth.contracts.routing import RoutingAction
+from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
@@ -193,6 +193,7 @@ class TestGateOutcome:
         outcome = GateOutcome(result=result, updated_token=token)
         assert outcome.child_tokens == []
         assert outcome.sink_name is None
+        assert outcome.next_node_id is None
 
     def test_custom_values(self) -> None:
         result = GateResult(row={"a": 1}, action=RoutingAction.continue_())
@@ -207,6 +208,7 @@ class TestGateOutcome:
         assert len(outcome.child_tokens) == 1
         assert outcome.child_tokens[0].token_id == "child_1"
         assert outcome.sink_name == "error_sink"
+        assert outcome.next_node_id is None
 
 
 # =============================================================================
@@ -582,7 +584,7 @@ class TestGateExecutor:
         recorder = _make_recorder()
         contract = _make_contract()
         edge_map = {(NodeID("gate_1"), "continue"): "edge_cont"}
-        route_map = {(NodeID("gate_1"), "high"): "continue"}
+        route_map = {(NodeID("gate_1"), "high"): RouteDestination.continue_()}
         executor = GateExecutor(
             recorder,
             _make_span_factory(),
@@ -608,7 +610,7 @@ class TestGateExecutor:
         recorder = _make_recorder()
         contract = _make_contract()
         edge_map = {(NodeID("gate_1"), "low"): "edge_low"}
-        route_map = {(NodeID("gate_1"), "low"): "quarantine"}
+        route_map = {(NodeID("gate_1"), "low"): RouteDestination.sink("quarantine")}
         executor = GateExecutor(
             recorder,
             _make_span_factory(),
@@ -628,6 +630,33 @@ class TestGateExecutor:
         outcome = executor.execute_gate(gate, token, ctx)
 
         assert outcome.sink_name == "quarantine"
+
+    def test_route_action_resolving_to_processing_node(self) -> None:
+        """ROUTE action can branch to a processing node via route label edge."""
+        recorder = _make_recorder()
+        contract = _make_contract()
+        edge_map = {(NodeID("gate_1"), "branch_a"): "edge_branch_a"}
+        route_map = {(NodeID("gate_1"), "branch_a"): RouteDestination.processing_node(NodeID("transform_2"))}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
+        gate = _make_gate()
+        gate.evaluate.return_value = GateResult(
+            row={"value": "test"},
+            action=RoutingAction.route("branch_a"),
+            contract=contract,
+        )
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        outcome = executor.execute_gate(gate, token, ctx)
+
+        assert outcome.sink_name is None
+        assert outcome.next_node_id == NodeID("transform_2")
 
     def test_route_action_unknown_label_raises_missing_edge(self) -> None:
         """ROUTE with unknown label raises MissingEdgeError."""
@@ -815,6 +844,38 @@ class TestGateExecutor:
         )
 
         assert outcome.sink_name is None
+
+    def test_config_gate_route_to_processing_node(self) -> None:
+        """Config gate route label can branch to a processing node."""
+        recorder = _make_recorder()
+        edge_map = {(NodeID("cg_1"), "high"): "edge_high"}
+        route_map = {(NodeID("cg_1"), "high"): RouteDestination.processing_node(NodeID("transform_2"))}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="'high'",
+            routes={"high": "branch_conn", "low": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        outcome = executor.execute_config_gate(
+            config,
+            "cg_1",
+            token,
+            ctx,
+        )
+
+        assert outcome.sink_name is None
+        assert outcome.next_node_id == NodeID("transform_2")
 
     def test_config_gate_unknown_route_label_raises_value_error(self) -> None:
         """Unknown route label raises ValueError with FAILED state recorded."""

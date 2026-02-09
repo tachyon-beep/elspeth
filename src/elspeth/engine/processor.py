@@ -16,7 +16,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from elspeth.contracts import RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts import RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import BranchName, CoalesceName, NodeID, SinkName, StepResolver
 
@@ -140,7 +140,7 @@ class RowProcessor:
         *,
         source_on_success: str,
         edge_map: dict[tuple[NodeID, str], str] | None = None,
-        route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
+        route_resolution_map: dict[tuple[NodeID, str], RouteDestination] | None = None,
         traversal: DAGTraversalContext,
         aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
         retry_manager: RetryManager | None = None,
@@ -163,7 +163,7 @@ class RowProcessor:
             source_node_id: Source node ID
             source_on_success: Source's on_success sink name for COMPLETED routing
             edge_map: Map of (node_id, label) -> edge_id
-            route_resolution_map: Map of (node_id, label) -> "continue" | sink_name
+            route_resolution_map: Map of (node_id, label) -> resolved route destination
             traversal: Precomputed DAG traversal context from orchestrator
             aggregation_settings: Map of node_id -> AggregationSettings for trigger evaluation
             retry_manager: Optional retry manager for transform execution
@@ -475,6 +475,9 @@ class RowProcessor:
         elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
             # For forks, return the branch names of child tokens
             return tuple(child.branch_name for child in outcome.child_tokens if child.branch_name)
+        elif outcome.next_node_id is not None and outcome.result.action.kind == RoutingKind.ROUTE:
+            # For route-label processing branches, report the chosen route label.
+            return outcome.result.action.destinations
         else:
             # Continue routing - destination is "continue"
             return ("continue",)
@@ -1896,6 +1899,9 @@ class RowProcessor:
                         ),
                         child_items,
                     )
+                elif outcome.next_node_id is not None:
+                    node_id = outcome.next_node_id
+                    continue
 
             elif isinstance(plugin, TransformProtocol):
                 row_transform = plugin
@@ -2123,6 +2129,9 @@ class RowProcessor:
                         ),
                         child_items,
                     )
+                elif outcome.next_node_id is not None:
+                    node_id = outcome.next_node_id
+                    continue
 
             else:
                 raise TypeError(f"Unknown transform type: {type(plugin).__name__}. Expected BaseTransform or BaseGate.")

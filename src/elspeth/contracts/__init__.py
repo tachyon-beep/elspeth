@@ -185,7 +185,13 @@ from elspeth.contracts.results import (
     SourceRow,
     TransformResult,
 )
-from elspeth.contracts.routing import EdgeInfo, RoutingAction, RoutingSpec
+from elspeth.contracts.routing import (
+    EdgeInfo,
+    RouteDestination,
+    RouteDestinationKind,
+    RoutingAction,
+    RoutingSpec,
+)
 
 # Schema contracts (Phase 1: Core Contracts)
 from elspeth.contracts.schema_contract import (
@@ -330,6 +336,8 @@ __all__ = [  # Grouped by category for readability
     "TransformResult",
     # routing
     "EdgeInfo",
+    "RouteDestination",
+    "RouteDestinationKind",
     "RoutingAction",
     "RoutingSpec",
     # data

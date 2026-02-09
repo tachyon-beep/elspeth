@@ -718,6 +718,7 @@ class TestExecutionGraphFromConfig:
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
@@ -953,6 +954,7 @@ class TestExecutionGraphFromConfig:
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
@@ -990,6 +992,7 @@ class TestExecutionGraphFromConfig:
         plugins = instantiate_plugins_from_config_raw(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
@@ -2860,6 +2863,82 @@ class TestSchemaValidation:
         # Error should mention incompatible schemas
         error_msg = str(exc_info.value).lower()
         assert "schema" in error_msg or "incompatible" in error_msg
+
+    def test_gate_routes_to_multiple_processing_connections(self, plugin_manager) -> None:
+        """Gate route labels can fan out to different downstream processing nodes."""
+        from elspeth.contracts import GateName, RouteDestinationKind
+        from elspeth.core.config import (
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="to_router",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
+            gates=[
+                GateSettings(
+                    name="router",
+                    input="to_router",
+                    condition="row['score'] > 0.5",
+                    routes={"true": "high_path", "false": "low_path"},
+                ),
+                GateSettings(
+                    name="high_gate",
+                    input="high_path",
+                    condition="True",
+                    routes={"true": "output", "false": "output"},
+                ),
+                GateSettings(
+                    name="low_gate",
+                    input="low_path",
+                    condition="True",
+                    routes={"true": "flagged", "false": "flagged"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        gate_ids = graph.get_config_gate_id_map()
+        router_id = gate_ids[GateName("router")]
+        high_gate_id = gate_ids[GateName("high_gate")]
+        low_gate_id = gate_ids[GateName("low_gate")]
+
+        router_edges = [edge for edge in graph.get_edges() if edge.from_node == router_id]
+        router_targets = {(edge.label, edge.to_node) for edge in router_edges}
+        assert ("true", high_gate_id) in router_targets
+        assert ("false", low_gate_id) in router_targets
+
+        route_map = graph.get_route_resolution_map()
+        true_dest = route_map[(router_id, "true")]
+        false_dest = route_map[(router_id, "false")]
+
+        assert true_dest.kind == RouteDestinationKind.PROCESSING_NODE
+        assert true_dest.next_node_id == high_gate_id
+        assert false_dest.kind == RouteDestinationKind.PROCESSING_NODE
+        assert false_dest.next_node_id == low_gate_id
 
     def test_coalesce_accepts_structurally_identical_schemas(self) -> None:
         """Coalesce should accept branches with structurally identical schemas.

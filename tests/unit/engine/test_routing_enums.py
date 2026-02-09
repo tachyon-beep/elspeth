@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from elspeth.contracts import NodeID, RoutingAction, RoutingKind, TokenInfo
+from elspeth.contracts import NodeID, RouteDestination, RoutingAction, RoutingKind, TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.engine.executors import GateExecutor, GateOutcome, MissingEdgeError
 from elspeth.testing import make_pipeline_row
@@ -22,7 +22,7 @@ class TestGateExecutorRoutingBehavior:
     def _make_executor(
         self,
         edge_map: dict[tuple[str, str], str] | None = None,
-        route_resolution_map: dict[tuple[str, str], str] | None = None,
+        route_resolution_map: dict[tuple[str, str], str | RouteDestination] | None = None,
     ) -> GateExecutor:
         """Create a GateExecutor with mocked dependencies."""
         recorder = MagicMock()
@@ -41,9 +41,18 @@ class TestGateExecutorRoutingBehavior:
         if edge_map is not None:
             typed_edge_map = {(NodeID(k[0]), k[1]): v for k, v in edge_map.items()}
 
-        typed_route_map: dict[tuple[NodeID, str], str] | None = None
+        typed_route_map: dict[tuple[NodeID, str], RouteDestination] | None = None
         if route_resolution_map is not None:
-            typed_route_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
+            typed_route_map = {}
+            for k, v in route_resolution_map.items():
+                if isinstance(v, RouteDestination):
+                    typed_route_map[(NodeID(k[0]), k[1])] = v
+                elif v == "continue":
+                    typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.continue_()
+                elif v == "fork":
+                    typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.fork()
+                else:
+                    typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.sink(v)
 
         return GateExecutor(
             recorder=recorder,
@@ -151,6 +160,31 @@ class TestGateExecutorRoutingBehavior:
 
         # "continue" is special - no sink routing
         assert outcome.sink_name is None
+
+    def test_route_action_to_processing_node(self) -> None:
+        """When gate route label resolves to a processing node, executor returns next_node_id."""
+        route_map = {("gate-1", "branch"): RouteDestination.processing_node(NodeID("transform-2"))}
+        edge_map = {("gate-1", "branch"): "edge-branch"}
+        executor = self._make_executor(route_resolution_map=route_map, edge_map=edge_map)
+        token = self._make_token()
+        ctx = self._make_context()
+
+        gate = MagicMock()
+        gate.node_id = "gate-1"
+        gate.evaluate.return_value = MagicMock(
+            success=True,
+            row=token.row_data,
+            action=RoutingAction.route("branch"),
+        )
+
+        outcome = executor.execute_gate(
+            gate=gate,
+            token=token,
+            ctx=ctx,
+        )
+
+        assert outcome.sink_name is None
+        assert outcome.next_node_id == NodeID("transform-2")
 
     def test_fork_action_creates_child_tokens(self) -> None:
         """When gate returns FORK_TO_PATHS, executor should create child tokens."""

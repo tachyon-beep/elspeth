@@ -321,12 +321,12 @@ allow_hits:
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/validation.py:R5:validate_route_destinations:fp=b681c5049ba16d78
+- key: engine/orchestrator/validation.py:R5:validate_route_destinations:fp=7f451dd3ea25d06c
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access correct attributes
   safety: isinstance() check selects code path for GateProtocol-specific name lookup; no bug hiding
   expires: '2026-05-02'
-- key: engine/orchestrator/validation.py:R5:validate_transform_error_sinks:fp=3f2acca1f0db538b
+- key: engine/orchestrator/validation.py:R5:validate_transform_error_sinks:fp=20e3a1053033bc0b
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish for _on_error access
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
@@ -1076,10 +1076,15 @@ allow_hits:
   reason: Sentinel class definition in except ImportError — not a runtime error handler
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
   expires: null
-- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=df8982be68bcf389
+- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=a43346912662a7c7
   owner: bugfix
   reason: Configuration validation - checking if route label exists in route_resolution_map (line shift from PipelineRow migration)
   safety: Returns None which is explicitly handled - raises MissingEdgeError with proper node_state completion
+  expires: null
+- key: engine/executors.py:R1:GateExecutor:execute_config_gate:fp=be581a97bb9b967d
+  owner: bugfix
+  reason: Route resolution map is optional in isolated unit tests; fallback to gate_config routes when missing
+  safety: Missing map entries fall back only to local config route strings; invalid labels still raise with FAILED node_state
   expires: null
 - key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=136d431ba7065684
   owner: architecture
@@ -1553,12 +1558,12 @@ allow_hits:
   reason: Gate plugin exclusion for producer registration requires explicit type narrowing
   safety: Non-gate plugins continue through contract-validated path; mismatches fail loudly
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=1a8a7079bd4e8aa6
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=e9d779f3f28d042e
   owner: architecture
   reason: Gate plugin exclusion for terminal on_success sink wiring requires explicit type narrowing
   safety: Routing config remains validated and errors are explicit
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=952b183d4f8fb512
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=15895d0e0dfe3c9c
   owner: architecture
   reason: Gate plugin exclusion for transform on_error divert-edge wiring requires explicit type narrowing
   safety: Only non-gate transforms are eligible for on_error; invalid use fails validation

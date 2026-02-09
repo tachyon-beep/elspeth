@@ -5,9 +5,11 @@ These types answer: "Where does data go next?"
 
 import copy
 from dataclasses import dataclass
+from enum import StrEnum
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import RoutingReason
+from elspeth.contracts.types import NodeID
 
 
 def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
@@ -144,6 +146,40 @@ class RoutingAction:
             mode=RoutingMode.COPY,  # Fork always copies
             reason=_copy_reason(reason),
         )
+
+
+class RouteDestinationKind(StrEnum):
+    """Resolved route destination type for gate route labels."""
+
+    CONTINUE = "continue"
+    FORK = "fork"
+    SINK = "sink"
+    PROCESSING_NODE = "processing_node"
+
+
+@dataclass(frozen=True)
+class RouteDestination:
+    """Resolved destination for a (gate_node_id, route_label) pair."""
+
+    kind: RouteDestinationKind
+    sink_name: str | None = None
+    next_node_id: NodeID | None = None
+
+    @classmethod
+    def continue_(cls) -> "RouteDestination":
+        return cls(kind=RouteDestinationKind.CONTINUE)
+
+    @classmethod
+    def fork(cls) -> "RouteDestination":
+        return cls(kind=RouteDestinationKind.FORK)
+
+    @classmethod
+    def sink(cls, sink_name: str) -> "RouteDestination":
+        return cls(kind=RouteDestinationKind.SINK, sink_name=sink_name)
+
+    @classmethod
+    def processing_node(cls, next_node_id: NodeID) -> "RouteDestination":
+        return cls(kind=RouteDestinationKind.PROCESSING_NODE, next_node_id=next_node_id)
 
 
 @dataclass(frozen=True)

@@ -22,7 +22,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 # For node registration
-from elspeth.contracts import NodeType, RowOutcome, SourceRow, TokenInfo, TransformResult
+from elspeth.contracts import NodeType, RouteDestination, RowOutcome, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.enums import (
     NodeStateStatus,
     RoutingKind,
@@ -30,11 +30,14 @@ from elspeth.contracts.enums import (
 )
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.results import GateResult
+from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.engine.executors import GateOutcome
 from elspeth.engine.processor import (
     MAX_WORK_QUEUE_ITERATIONS,
     DAGTraversalContext,
@@ -96,7 +99,7 @@ def _make_processor(
     source_node_id: str = "source-0",
     source_on_success: str = "default",
     edge_map: dict[tuple[NodeID, str], str] | None = None,
-    route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
+    route_resolution_map: dict[tuple[NodeID, str], RouteDestination] | None = None,
     config_gates: list[GateSettings] | None = None,
     config_gate_id_map: dict[GateName, NodeID] | None = None,
     aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
@@ -413,7 +416,19 @@ class TestGetGateDestinations:
         outcome = Mock()
         outcome.sink_name = None
         outcome.result.action.kind = RoutingKind.CONTINUE
+        outcome.next_node_id = None
         assert processor._get_gate_destinations(outcome) == ("continue",)
+
+    def test_route_to_processing_uses_route_label(self) -> None:
+        """Route-label branch to processing node reports chosen route label."""
+        _, recorder = _make_recorder()
+        processor = _make_processor(recorder)
+        outcome = Mock()
+        outcome.sink_name = None
+        outcome.next_node_id = NodeID("transform-2")
+        outcome.result.action.kind = RoutingKind.ROUTE
+        outcome.result.action.destinations = ("high",)
+        assert processor._get_gate_destinations(outcome) == ("high",)
 
 
 # =============================================================================
@@ -629,6 +644,70 @@ class TestProcessRowSingleTransform:
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.FAILED
         assert results[0].error is not None
+
+
+class TestProcessRowGateBranching:
+    """Tests for non-linear gate branching through next_node_id."""
+
+    def test_gate_route_to_processing_node_continues_execution(self) -> None:
+        """GateOutcome.next_node_id should override missing continue edge traversal."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+
+        gate = _make_mock_gate(node_id="gate-1", name="brancher")
+        transform = _make_mock_transform(node_id="transform-2", name="downstream")
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("gate-1")
+        downstream_node = NodeID("transform-2")
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="final_sink",
+            node_step_map={source_node: 0, gate_node: 1, downstream_node: 2},
+            node_to_next={source_node: gate_node, gate_node: None, downstream_node: None},
+            first_transform_node_id=gate_node,
+            node_to_plugin={gate_node: gate, downstream_node: transform},
+        )
+
+        gate_contract = _make_contract()
+        gate_result = GateResult(
+            row={"value": 10},
+            action=RoutingAction.route("branch_a"),
+            contract=gate_contract,
+        )
+
+        transform_result = TransformResult.success(
+            make_row({"value": 10, "handled": True}, contract=gate_contract),
+            success_reason={"action": "handled"},
+        )
+
+        def gate_side_effect(*, gate, token, ctx, token_manager=None):
+            return GateOutcome(
+                result=gate_result,
+                updated_token=token,
+                next_node_id=downstream_node,
+            )
+
+        def transform_side_effect(*, transform, token, ctx, attempt=0):
+            return (transform_result, token, None)
+
+        with (
+            patch.object(processor._gate_executor, "execute_gate", side_effect=gate_side_effect) as gate_exec,
+            patch.object(processor._transform_executor, "execute_transform", side_effect=transform_side_effect) as transform_exec,
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[gate, transform],
+                ctx=ctx,
+            )
+
+        assert gate_exec.call_count == 1
+        assert transform_exec.call_count == 1
+        assert len(results) == 1
+        assert results[0].outcome == RowOutcome.COMPLETED
 
 
 # =============================================================================

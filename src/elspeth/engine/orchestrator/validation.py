@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 # Import GateName at runtime - used in function body, not just type hints
+from elspeth.contracts import RouteDestination, RouteDestinationKind
 from elspeth.contracts.types import GateName
 from elspeth.engine.orchestrator.types import RouteValidationError
 
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 
 
 def validate_route_destinations(
-    route_resolution_map: dict[tuple[NodeID, str], str],
+    route_resolution_map: dict[tuple[NodeID, str], RouteDestination],
     available_sinks: set[str],
     transform_id_map: dict[int, NodeID],
     transforms: list[RowPlugin],
@@ -49,7 +50,7 @@ def validate_route_destinations(
     This catches config errors early instead of failing mid-run.
 
     Args:
-        route_resolution_map: Maps (gate_node_id, route_label) -> destination
+        route_resolution_map: Maps (gate_node_id, route_label) -> resolved destination
         available_sinks: Set of sink names from PipelineConfig
         transform_id_map: Maps transform sequence -> node_id
         transforms: List of transform plugins
@@ -78,22 +79,25 @@ def validate_route_destinations(
 
     # Check each route destination
     for (gate_node_id, route_label), destination in route_resolution_map.items():
-        # "continue" means proceed to next transform, not a sink
-        if destination == "continue":
+        if destination.kind in (RouteDestinationKind.CONTINUE, RouteDestinationKind.FORK, RouteDestinationKind.PROCESSING_NODE):
             continue
 
-        # "fork" means fork to multiple paths, not a sink
-        if destination == "fork":
+        if destination.kind != RouteDestinationKind.SINK:
             continue
+
+        if destination.sink_name is None:
+            raise ValueError(
+                f"Route destination for gate_node_id={gate_node_id!r}, route_label={route_label!r} has kind='sink' but sink_name is None"
+            )
 
         # destination should be a sink name
-        if destination not in available_sinks:
+        if destination.sink_name not in available_sinks:
             # Every gate in route_resolution_map MUST have a name mapping
             gate_name = node_id_to_gate_name[gate_node_id]
             raise RouteValidationError(
-                f"Gate '{gate_name}' can route to '{destination}' "
+                f"Gate '{gate_name}' can route to '{destination.sink_name}' "
                 f"(via route label '{route_label}') but no sink named "
-                f"'{destination}' exists. Available sinks: {sorted(available_sinks)}"
+                f"'{destination.sink_name}' exists. Available sinks: {sorted(available_sinks)}"
             )
 
 
