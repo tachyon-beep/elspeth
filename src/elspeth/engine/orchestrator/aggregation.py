@@ -75,7 +75,7 @@ def find_aggregation_transform(
     config: PipelineConfig,
     agg_node_id_str: str,
     agg_name: str,
-) -> tuple[TransformProtocol, int]:
+) -> tuple[TransformProtocol, NodeID]:
     """Find the batch-aware transform for an aggregation node.
 
     Args:
@@ -84,8 +84,7 @@ def find_aggregation_transform(
         agg_name: Human-readable aggregation name (for error messages)
 
     Returns:
-        Tuple of (transform, step_index) where step_index is the 0-indexed
-        position in the pipeline
+        Tuple of (transform, aggregation_node_id)
 
     Raises:
         RuntimeError: If no batch-aware transform found for the aggregation
@@ -93,12 +92,11 @@ def find_aggregation_transform(
     from elspeth.plugins.protocols import TransformProtocol
 
     agg_transform: TransformProtocol | None = None
-    agg_step = len(config.transforms)
+    agg_node_id = NodeID(agg_node_id_str)
 
-    for i, t in enumerate(config.transforms):
+    for t in config.transforms:
         if isinstance(t, TransformProtocol) and t.node_id == agg_node_id_str and t.is_batch_aware:
             agg_transform = t
-            agg_step = i
             break
 
     if agg_transform is None:
@@ -109,7 +107,7 @@ def find_aggregation_transform(
             f"Available transforms: {[t.node_id for t in config.transforms]}"
         )
 
-    return agg_transform, agg_step
+    return agg_transform, agg_node_id
 
 
 def handle_incomplete_batches(
@@ -146,7 +144,7 @@ def check_aggregation_timeouts(
     processor: RowProcessor,
     ctx: PluginContext,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] | None = None,
+    agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] | None = None,
 ) -> AggregationFlushResult:
     """Check and flush any aggregations whose timeout has expired.
 
@@ -177,7 +175,8 @@ def check_aggregation_timeouts(
         processor: RowProcessor with public aggregation timeout API
         ctx: Plugin context for transform execution
         pending_tokens: Dict of sink_name -> tokens to append results to
-        agg_transform_lookup: Pre-computed dict mapping node_id_str -> (transform, step).
+        agg_transform_lookup: Pre-computed dict mapping node_id_str ->
+            (transform, aggregation_node_id).
             If None, lookup is computed on each call (less efficient).
 
     Returns:
@@ -214,20 +213,17 @@ def check_aggregation_timeouts(
 
         # Get transform and step from pre-computed lookup (O(1)) or compute (O(n))
         if agg_transform_lookup and agg_node_id_str in agg_transform_lookup:
-            agg_transform, agg_step = agg_transform_lookup[agg_node_id_str]
+            agg_transform, _agg_node_id = agg_transform_lookup[agg_node_id_str]
         else:
             # Fallback: use helper method if lookup not provided
-            agg_transform, agg_step = find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
+            agg_transform, _agg_node_id = find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
 
-        # Use handle_timeout_flush for proper output_mode handling
-        # This correctly routes through remaining transforms and gates
-        total_steps = len(config.transforms)
+        # Use handle_timeout_flush for proper output_mode handling.
+        # Continuation is node-based inside the processor.
         completed_results, work_items = processor.handle_timeout_flush(
             node_id=agg_node_id,
             transform=agg_transform,
             ctx=ctx,
-            step=agg_step,
-            total_steps=total_steps,
             trigger_type=TriggerType.TIMEOUT,
         )
 
@@ -344,8 +340,6 @@ def flush_remaining_aggregation_buffers(
     rows_expanded = 0
     rows_buffered = 0
     routed_destinations: Counter[str] = Counter()
-    total_steps = len(config.transforms)
-
     for agg_node_id_str, agg_settings in config.aggregation_settings.items():
         agg_node_id = NodeID(agg_node_id_str)
 
@@ -355,7 +349,7 @@ def flush_remaining_aggregation_buffers(
             continue
 
         # Use helper method for transform lookup
-        agg_transform, agg_step = find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
+        agg_transform, _agg_node_id = find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
 
         # Use handle_timeout_flush with END_OF_SOURCE trigger
         # This properly handles output_mode and routes through remaining transforms
@@ -363,8 +357,6 @@ def flush_remaining_aggregation_buffers(
             node_id=agg_node_id,
             transform=agg_transform,
             ctx=ctx,
-            step=agg_step,
-            total_steps=total_steps,
             trigger_type=TriggerType.END_OF_SOURCE,
         )
 

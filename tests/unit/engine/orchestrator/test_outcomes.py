@@ -15,7 +15,7 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
-from elspeth.contracts.types import CoalesceName
+from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.engine.orchestrator.outcomes import (
     accumulate_row_outcomes,
     flush_coalesce_pending,
@@ -282,20 +282,21 @@ class TestHandleCoalesceTimeouts:
 
         processor = Mock()
         processor.process_token.return_value = []
+        processor.resolve_node_step.return_value = coalesce_step
 
         counters = _make_counters()
         pending = _make_pending()
-        coalesce_step_map = {CoalesceName("merge_1"): coalesce_step}
+        coalesce_node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
-        return coalesce_executor, processor, counters, pending, coalesce_step_map
+        return coalesce_executor, processor, counters, pending, coalesce_node_map
 
     def test_no_timeouts_is_noop(self) -> None:
         """No timed-out coalesces means nothing happens."""
-        executor, processor, counters, pending, step_map = self._setup()
+        executor, processor, counters, pending, node_map = self._setup()
 
         handle_coalesce_timeouts(
             coalesce_executor=executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
             config_transforms=[Mock(), Mock()],
             config_gates=[],
@@ -315,7 +316,7 @@ class TestHandleCoalesceTimeouts:
         outcome.merged_token = merged_token
         outcome.failure_reason = None
 
-        executor, processor, counters, pending, step_map = self._setup(
+        executor, processor, counters, pending, node_map = self._setup(
             timed_out_outcomes=[outcome],
             total_transforms=3,
             coalesce_step=1,
@@ -327,7 +328,7 @@ class TestHandleCoalesceTimeouts:
 
         handle_coalesce_timeouts(
             coalesce_executor=executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
             config_transforms=[Mock(), Mock(), Mock()],
             config_gates=[],
@@ -348,7 +349,7 @@ class TestHandleCoalesceTimeouts:
         outcome.merged_token = merged_token
         outcome.failure_reason = None
 
-        executor, processor, counters, pending, step_map = self._setup(
+        executor, processor, counters, pending, node_map = self._setup(
             timed_out_outcomes=[outcome],
             total_transforms=1,
             coalesce_step=1,  # step == total_steps
@@ -357,7 +358,7 @@ class TestHandleCoalesceTimeouts:
 
         handle_coalesce_timeouts(
             coalesce_executor=executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
             config_transforms=[Mock()],
             config_gates=[],
@@ -378,13 +379,13 @@ class TestHandleCoalesceTimeouts:
         outcome.merged_token = None
         outcome.failure_reason = "quorum_not_met"
 
-        executor, processor, counters, pending, step_map = self._setup(
+        executor, processor, counters, pending, node_map = self._setup(
             timed_out_outcomes=[outcome],
         )
 
         handle_coalesce_timeouts(
             coalesce_executor=executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
             config_transforms=[Mock(), Mock()],
             config_gates=[],
@@ -421,14 +422,15 @@ class TestFlushCoalescePending:
         processor.process_token.return_value = [
             _make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output"),
         ]
+        processor.resolve_node_step.return_value = 0
 
         counters = _make_counters()
         pending = _make_pending()
-        step_map = {CoalesceName("merge_1"): 0}
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
             config_transforms=[Mock(), Mock()],
             config_gates=[],
@@ -453,14 +455,15 @@ class TestFlushCoalescePending:
         coalesce_executor.flush_pending.return_value = [outcome]
 
         processor = Mock()
+        processor.resolve_node_step.return_value = 1
         processor.process_token.return_value = [_make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output")]
         counters = _make_counters()
         pending = _make_pending()
-        step_map = {CoalesceName("merge_1"): 1}
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
             config_transforms=[Mock()],
             config_gates=[],
@@ -490,7 +493,7 @@ class TestFlushCoalescePending:
 
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
-            coalesce_step_map={},
+            coalesce_node_map={},
             processor=Mock(),
             config_transforms=[],
             config_gates=[],
@@ -512,7 +515,7 @@ class TestFlushCoalescePending:
 
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
-            coalesce_step_map={},
+            coalesce_node_map={},
             processor=Mock(),
             config_transforms=[],
             config_gates=[],

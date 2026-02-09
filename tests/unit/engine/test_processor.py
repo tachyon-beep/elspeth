@@ -1204,7 +1204,6 @@ class TestNotifyCoalesceOfLostBranch:
             token,
             "quarantined:bad_value",
             [],
-            total_steps=3,
         )
 
         assert results == []
@@ -1225,7 +1224,6 @@ class TestNotifyCoalesceOfLostBranch:
             token,
             "quarantined:bad_value",
             [],
-            total_steps=3,
         )
 
         assert results == []
@@ -1250,7 +1248,6 @@ class TestNotifyCoalesceOfLostBranch:
             token,
             "quarantined:bad_value",
             [],
-            total_steps=3,
         )
 
         assert results == []
@@ -1282,7 +1279,6 @@ class TestNotifyCoalesceOfLostBranch:
             token,
             "quarantined:bad_value",
             [],
-            total_steps=5,
         )
 
         assert len(results) == 1
@@ -1318,7 +1314,6 @@ class TestNotifyCoalesceOfLostBranch:
             token,
             "quarantined:bad_value",
             [],
-            total_steps=5,
         )
 
         assert len(results) == 1
@@ -1340,6 +1335,7 @@ class TestNotifyCoalesceOfLostBranch:
             coalesce_executor=coalesce,
             branch_to_coalesce={BranchName("path_a"): CoalesceName("merge")},
             coalesce_step_map={CoalesceName("merge"): 3},
+            node_to_next={NodeID("coalesce::merge"): NodeID("transform-4")},
         )
         token = TokenInfo(
             row_id="row-1",
@@ -1352,7 +1348,6 @@ class TestNotifyCoalesceOfLostBranch:
             token,
             "quarantined:bad_value",
             child_items,
-            total_steps=5,
         )
 
         assert results == []

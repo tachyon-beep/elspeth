@@ -313,6 +313,10 @@ class RowProcessor:
         coalesce_at_step = self._node_id_to_step(work_item.coalesce_node_id) if work_item.coalesce_node_id is not None else None
         return start_step, coalesce_at_step
 
+    def resolve_node_step(self, node_id: NodeID) -> int:
+        """Resolve a node ID to processor step index (0-indexed)."""
+        return self._node_id_to_step(node_id)
+
     def _resolve_plugin_for_node(
         self, node_id: NodeID, transforms: list[Any]
     ) -> TransformProtocol | GateProtocol | GateSettings | None:
@@ -604,8 +608,6 @@ class RowProcessor:
         node_id: NodeID,
         transform: TransformProtocol,
         ctx: PluginContext,
-        step: int,
-        total_steps: int,
         trigger_type: TriggerType,
     ) -> tuple[list[RowResult], list[_WorkItem]]:
         """Handle an aggregation flush with proper output_mode semantics.
@@ -623,9 +625,6 @@ class RowProcessor:
             node_id: The aggregation node ID
             transform: The batch-aware transform to execute
             ctx: Plugin context
-            step: Position of this aggregation in the pipeline (0-indexed).
-                Converted to 1-indexed internally for audit recording.
-            total_steps: Total number of transform steps in pipeline
             trigger_type: The trigger type (TIMEOUT or END_OF_SOURCE)
 
         Returns:
@@ -637,10 +636,9 @@ class RowProcessor:
         settings = self._aggregation_settings[node_id]
         output_mode = settings.output_mode
 
-        # Convert 0-indexed step to 1-indexed for audit recording
-        # Normal transform execution uses: step = start_step + step_offset + 1
-        # Timeout/end-of-source paths must match this 1-indexed convention
-        audit_step = step + 1
+        # Use node-based audit step resolution to preserve numbering while
+        # decoupling timeout flush traversal from positional indexing.
+        audit_step = self._resolve_audit_step_for_node(node_id)
 
         # Execute flush with the specified trigger type
         result, buffered_tokens, _batch_id = self._aggregation_executor.execute_flush(
@@ -727,8 +725,8 @@ class RowProcessor:
                 transform_result=result,
             )
 
-        # Calculate if there are more transforms after this aggregation
-        more_transforms = step < total_steps
+        # Continue downstream only when there is a next processing node.
+        has_downstream_processing = self._resolve_next_node_for_processing(node_id) is not None
 
         # Derive coalesce metadata from buffered tokens' branch_name
         # For timeout/end-of-source flushes, we need to preserve coalesce path
@@ -773,7 +771,7 @@ class RowProcessor:
                 # This must happen EVEN if no more transforms - coalesce may be last step
                 needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and updated_token.branch_name is not None
 
-                if more_transforms or needs_coalesce:
+                if has_downstream_processing or needs_coalesce:
                     work_item_coalesce_name = coalesce_name if needs_coalesce else None
                     child_items.append(
                         self._create_continuation_work_item(
@@ -849,7 +847,7 @@ class RowProcessor:
                 first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
                 needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_expanded_branch is not None
 
-                if more_transforms or needs_coalesce:
+                if has_downstream_processing or needs_coalesce:
                     work_item_coalesce_name = coalesce_name if needs_coalesce else None
                     for token in expanded_tokens:
                         child_items.append(
@@ -883,7 +881,6 @@ class RowProcessor:
         ctx: PluginContext,
         step: int,
         child_items: list[_WorkItem],
-        total_steps: int,
         coalesce_at_step: int | None = None,
         coalesce_name: CoalesceName | None = None,
     ) -> tuple[RowResult | list[RowResult], list[_WorkItem]]:
@@ -919,7 +916,6 @@ class RowProcessor:
             ctx: Plugin context
             step: Pipeline step number
             child_items: Work items to return with result
-            total_steps: Total number of steps in the pipeline
             coalesce_at_step: Step index at which fork children should coalesce (optional)
             coalesce_name: Name of the coalesce point for merging (optional)
 
@@ -1075,8 +1071,8 @@ class RowProcessor:
                 pipeline_rows = list(result.rows)
 
                 # Build COMPLETED results for all buffered tokens with enriched data
-                # Check if there are more transforms after this one
-                more_transforms = step < total_steps
+                # Continue downstream only when there is a next processing node.
+                has_downstream_processing = self._resolve_next_node_for_processing(node_id) is not None
 
                 # Check if tokens need to go to a coalesce point
                 # This must happen EVEN if no more transforms - coalesce may be last step
@@ -1084,7 +1080,7 @@ class RowProcessor:
                 first_token_branch = buffered_tokens[0].branch_name if buffered_tokens else None
                 needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_token_branch is not None
 
-                if more_transforms or needs_coalesce:
+                if has_downstream_processing or needs_coalesce:
                     work_item_coalesce_name = coalesce_name if needs_coalesce else None
                     for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
@@ -1190,8 +1186,8 @@ class RowProcessor:
                     outcome=RowOutcome.CONSUMED_IN_BATCH,
                 )
 
-                # Check if there are more transforms after this one
-                more_transforms = step < total_steps
+                # Continue downstream only when there is a next processing node.
+                has_downstream_processing = self._resolve_next_node_for_processing(node_id) is not None
 
                 # Check if expanded tokens need to go to a coalesce point
                 # This must happen EVEN if no more transforms - coalesce may be last step
@@ -1199,7 +1195,7 @@ class RowProcessor:
                 first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
                 needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_expanded_branch is not None
 
-                if more_transforms or needs_coalesce:
+                if has_downstream_processing or needs_coalesce:
                     work_item_coalesce_name = coalesce_name if needs_coalesce else None
                     for token in expanded_tokens:
                         child_items.append(
@@ -1687,7 +1683,6 @@ class RowProcessor:
         current_token: TokenInfo,
         reason: str,
         child_items: list[_WorkItem],
-        total_steps: int,
     ) -> list[RowResult]:
         """Notify the coalesce executor that a forked branch was diverted.
 
@@ -1700,7 +1695,6 @@ class RowProcessor:
             current_token: The forked token being diverted
             reason: Machine-readable reason for the diversion
             child_items: Mutable work queue — merged tokens are appended here
-            total_steps: Total number of transform steps in pipeline
 
         Returns:
             List of RowResults for sibling tokens that failed as a consequence
@@ -1714,7 +1708,14 @@ class RowProcessor:
         if coalesce_name is None:
             return []
 
-        coalesce_step = self._coalesce_step_map[coalesce_name]
+        coalesce_node_id = self._coalesce_node_ids.get(coalesce_name)
+        if coalesce_node_id is None:
+            raise OrchestrationInvariantError(
+                f"Coalesce node_id missing for coalesce '{coalesce_name}' during branch-loss handling"
+            )
+        coalesce_step = self._coalesce_step_map.get(coalesce_name)
+        if coalesce_step is None:
+            coalesce_step = self._node_id_to_step(coalesce_node_id)
         outcome = self._coalesce_executor.notify_branch_lost(
             coalesce_name=coalesce_name,
             row_id=current_token.row_id,
@@ -1727,7 +1728,7 @@ class RowProcessor:
             return []
 
         if outcome.merged_token is not None:
-            if coalesce_step >= total_steps:
+            if self._resolve_next_node_for_processing(coalesce_node_id) is None:
                 sink_name = self._coalesce_on_success_map.get(coalesce_name)
                 if sink_name is None:
                     raise OrchestrationInvariantError(
@@ -1746,7 +1747,6 @@ class RowProcessor:
                     ),
                 ]
             # Non-terminal — resume merged token at coalesce step
-            coalesce_node_id = self._coalesce_node_ids[coalesce_name]
             child_items.append(
                 self._create_work_item(
                     token=outcome.merged_token,
@@ -1848,8 +1848,7 @@ class RowProcessor:
         """
         current_token = token
         child_items: list[_WorkItem] = []
-        total_steps = len(transforms) + len(self._config_gates)
-        last_on_success_sink: str | None = self._source_on_success
+        last_on_success_sink: str = self._source_on_success
         coalesce_at_step = self._node_id_to_step(coalesce_node_id) if coalesce_node_id is not None else None
 
         node_id: NodeID | None = current_node_id
@@ -1953,7 +1952,6 @@ class RowProcessor:
                         ctx=ctx,
                         step=step,
                         child_items=child_items,
-                        total_steps=total_steps,
                         coalesce_at_step=coalesce_at_step,
                         coalesce_name=coalesce_name,
                     )
@@ -1989,7 +1987,6 @@ class RowProcessor:
                         current_token,
                         f"max_retries_exceeded:{e}",
                         child_items,
-                        total_steps,
                     )
                     current_result = RowResult(
                         token=current_token,
@@ -2020,7 +2017,6 @@ class RowProcessor:
                             current_token,
                             f"quarantined:{error_detail}",
                             child_items,
-                            total_steps,
                         )
                         current_result = RowResult(
                             token=current_token,
@@ -2040,7 +2036,6 @@ class RowProcessor:
                             current_token,
                             f"error_routed:{error_detail}",
                             child_items,
-                            total_steps,
                         )
                         current_result = RowResult(
                             token=current_token,

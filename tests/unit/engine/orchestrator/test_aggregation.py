@@ -18,6 +18,7 @@ import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import BatchStatus, TriggerType
+from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.aggregation import (
     check_aggregation_timeouts,
     find_aggregation_transform,
@@ -106,14 +107,14 @@ class TestFindAggregationTransform:
     """Tests for find_aggregation_transform()."""
 
     def test_finds_batch_aware_transform(self) -> None:
-        """Returns transform and step index for matching node_id."""
+        """Returns transform and aggregation node ID for matching node_id."""
         t = _make_batch_transform(node_id="agg-node-1")
         config = _make_config(transforms=[Mock(), t, Mock()])
 
-        result_transform, result_step = find_aggregation_transform(config, "agg-node-1", "batch1")
+        result_transform, result_node_id = find_aggregation_transform(config, "agg-node-1", "batch1")
 
         assert result_transform is t
-        assert result_step == 1
+        assert result_node_id == NodeID("agg-node-1")
 
     def test_non_batch_aware_skipped(self) -> None:
         """Transform with is_batch_aware=False is not matched."""
@@ -159,10 +160,10 @@ class TestFindAggregationTransform:
         t2 = _make_batch_transform(node_id="agg-node-1")
         config = _make_config(transforms=[t1, t2])
 
-        result_transform, result_step = find_aggregation_transform(config, "agg-node-1", "batch1")
+        result_transform, result_node_id = find_aggregation_transform(config, "agg-node-1", "batch1")
 
         assert result_transform is t1
-        assert result_step == 0
+        assert result_node_id == NodeID("agg-node-1")
 
 
 # =============================================================================

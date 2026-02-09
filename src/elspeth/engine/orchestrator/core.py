@@ -453,46 +453,29 @@ class Orchestrator:
                 continue
             sink.node_id = sink_id_map[sink_name_typed]
 
-    def _compute_coalesce_step_map(
+    def _compute_coalesce_node_map(
         self,
         graph: ExecutionGraph,
-        config: PipelineConfig,
         settings: ElspethSettings | None,
-    ) -> dict[CoalesceName, int]:
-        """Compute coalesce step positions aligned with graph topology.
-
-        Coalesce step = gate_idx + 1 (step after the producing fork gate)
-
-        This ensures:
-        1. Fork children skip to coalesce step and merge before downstream processing
-        2. Merged tokens continue from the coalesce step, executing downstream nodes
-        3. Execution path matches graph topology (coalesce → downstream → sink)
-
-        The graph's coalesce_gate_index provides the pipeline position of each
-        coalesce's producing fork gate. The coalesce step is one position after
-        that gate, allowing merged tokens to traverse downstream nodes.
+    ) -> dict[CoalesceName, NodeID]:
+        """Compute configured coalesce_name -> node_id map from graph topology.
 
         Args:
-            graph: The execution graph (provides coalesce gate positions)
-            config: Pipeline configuration
+            graph: The execution graph (provides coalesce node IDs)
             settings: Elspeth settings (may be None)
 
         Returns:
-            Dict mapping coalesce name to its step index in the pipeline
+            Dict mapping configured coalesce names to graph node IDs.
         """
-        coalesce_step_map: dict[CoalesceName, int] = {}
+        coalesce_node_map: dict[CoalesceName, NodeID] = {}
         if settings is not None and settings.coalesce:
-            # Get actual gate positions from graph topology
-            coalesce_gate_index = graph.get_coalesce_gate_index()
+            graph_coalesce_map = graph.get_coalesce_id_map()
 
             for cs in settings.coalesce:
                 coalesce_name = CoalesceName(cs.name)
-                # Coalesce step is one AFTER the fork gate
-                # This allows merged tokens to continue downstream processing
-                gate_idx = coalesce_gate_index[coalesce_name]
-                coalesce_step_map[coalesce_name] = gate_idx + 1
+                coalesce_node_map[coalesce_name] = graph_coalesce_map[coalesce_name]
 
-        return coalesce_step_map
+        return coalesce_node_map
 
     def _build_dag_traversal_context(
         self,
@@ -1063,8 +1046,13 @@ class Orchestrator:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
-        # Compute coalesce step positions FROM GRAPH TOPOLOGY
-        coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
+        # Compute coalesce node mapping from graph topology.
+        coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
+        # Transitional compatibility: outcomes/coalesce APIs still use step indexes.
+        coalesce_step_map = {
+            coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1
+            for coalesce_name in coalesce_node_map
+        }
         traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
         coalesce_on_success_map: dict[CoalesceName, str] = {}
         if settings is not None and settings.coalesce:
@@ -1105,14 +1093,12 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
-        # Maps node_id_str -> (transform, step_in_pipeline)
-        # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
-        # for audit recording (to avoid node_state step_index collisions)
-        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
+        # Maps node_id_str -> (transform, aggregation_node_id)
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] = {}
         if config.aggregation_settings:
-            for i, t in enumerate(config.transforms):
+            for t in config.transforms:
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = (t, i)  # 0-indexed, converted in handle_timeout_flush
+                    agg_transform_lookup[t.node_id] = (t, NodeID(t.node_id))
 
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
@@ -1431,7 +1417,7 @@ class Orchestrator:
                         if coalesce_executor is not None:
                             handle_coalesce_timeouts(
                                 coalesce_executor=coalesce_executor,
-                                coalesce_step_map=coalesce_step_map,
+                                coalesce_node_map=coalesce_node_map,
                                 processor=processor,
                                 config_transforms=config.transforms,
                                 config_gates=config.gates,
@@ -1512,7 +1498,7 @@ class Orchestrator:
                     if coalesce_executor is not None:
                         flush_coalesce_pending(
                             coalesce_executor=coalesce_executor,
-                            coalesce_step_map=coalesce_step_map,
+                            coalesce_node_map=coalesce_node_map,
                             processor=processor,
                             config_transforms=config.transforms,
                             config_gates=config.gates,
@@ -1936,8 +1922,13 @@ class Orchestrator:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
-        # Compute coalesce step positions FROM GRAPH TOPOLOGY (same as main run path)
-        coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
+        # Compute coalesce node mapping from graph topology (same as main run path).
+        coalesce_node_map = self._compute_coalesce_node_map(graph, settings)
+        # Transitional compatibility: outcomes/coalesce APIs still use step indexes.
+        coalesce_step_map = {
+            coalesce_name: graph.get_coalesce_gate_index()[coalesce_name] + 1
+            for coalesce_name in coalesce_node_map
+        }
         traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
         coalesce_on_success_map: dict[CoalesceName, str] = {}
         if settings is not None and settings.coalesce:
@@ -1982,13 +1973,11 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
-        # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
-        # for audit recording (to avoid node_state step_index collisions)
-        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] = {}
         if config.aggregation_settings:
-            for i, t in enumerate(config.transforms):
+            for t in config.transforms:
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = (t, i)  # 0-indexed, converted in handle_timeout_flush
+                    agg_transform_lookup[t.node_id] = (t, NodeID(t.node_id))
 
         try:
             # Process each unprocessed row using process_existing_row
@@ -2040,7 +2029,7 @@ class Orchestrator:
                 if coalesce_executor is not None:
                     handle_coalesce_timeouts(
                         coalesce_executor=coalesce_executor,
-                        coalesce_step_map=coalesce_step_map,
+                        coalesce_node_map=coalesce_node_map,
                         processor=processor,
                         config_transforms=config.transforms,
                         config_gates=config.gates,
@@ -2069,7 +2058,7 @@ class Orchestrator:
             if coalesce_executor is not None:
                 flush_coalesce_pending(
                     coalesce_executor=coalesce_executor,
-                    coalesce_step_map=coalesce_step_map,
+                    coalesce_node_map=coalesce_node_map,
                     processor=processor,
                     config_transforms=config.transforms,
                     config_gates=config.gates,

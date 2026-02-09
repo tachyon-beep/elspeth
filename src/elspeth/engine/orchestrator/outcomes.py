@@ -22,7 +22,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
-from elspeth.contracts.types import CoalesceName
+from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.engine.orchestrator.types import ExecutionCounters, RowPlugin
 
 if TYPE_CHECKING:
@@ -96,7 +96,7 @@ def accumulate_row_outcomes(
 
 def handle_coalesce_timeouts(
     coalesce_executor: CoalesceExecutor,
-    coalesce_step_map: dict[CoalesceName, int],
+    coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
     config_transforms: list[RowPlugin],
     config_gates: Sequence[object],
@@ -116,7 +116,7 @@ def handle_coalesce_timeouts(
 
     Args:
         coalesce_executor: CoalesceExecutor managing join barriers
-        coalesce_step_map: Maps CoalesceName -> step position in pipeline
+        coalesce_node_map: Maps CoalesceName -> coalesce node ID in graph
         processor: RowProcessor for downstream processing
         config_transforms: Pipeline transform list for process_token
         config_gates: Pipeline gate list (retained for interface compatibility)
@@ -127,7 +127,8 @@ def handle_coalesce_timeouts(
     """
     for coalesce_name_str in coalesce_executor.get_registered_names():
         coalesce_name = CoalesceName(coalesce_name_str)
-        coalesce_step = coalesce_step_map[coalesce_name]
+        coalesce_node_id = coalesce_node_map[coalesce_name]
+        coalesce_step = processor.resolve_node_step(coalesce_node_id)
         timed_out = coalesce_executor.check_timeouts(
             coalesce_name=coalesce_name_str,
             step_in_pipeline=coalesce_step,
@@ -156,7 +157,7 @@ def handle_coalesce_timeouts(
 
 def flush_coalesce_pending(
     coalesce_executor: CoalesceExecutor,
-    coalesce_step_map: dict[CoalesceName, int],
+    coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
     config_transforms: list[RowPlugin],
     config_gates: Sequence[object],
@@ -174,7 +175,7 @@ def flush_coalesce_pending(
 
     Args:
         coalesce_executor: CoalesceExecutor managing join barriers
-        coalesce_step_map: Maps CoalesceName -> step position in pipeline
+        coalesce_node_map: Maps CoalesceName -> coalesce node ID in graph
         processor: RowProcessor for downstream processing
         config_transforms: Pipeline transform list for process_token
         config_gates: Pipeline gate list (retained for interface compatibility)
@@ -184,7 +185,10 @@ def flush_coalesce_pending(
         pending_tokens: Dict of sink_name -> tokens to append results to
     """
     # Convert CoalesceName -> str for CoalesceExecutor API
-    flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
+    flush_step_map = {
+        str(name): processor.resolve_node_step(node_id)
+        for name, node_id in coalesce_node_map.items()
+    }
     pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
 
     # Handle any merged tokens from flush
@@ -195,7 +199,7 @@ def flush_coalesce_pending(
             # Business logic: coalesce_name is guaranteed non-None when merged_token is not None
             assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
             coalesce_name = CoalesceName(outcome.coalesce_name)
-            coalesce_step = coalesce_step_map[coalesce_name]
+            coalesce_step = processor.resolve_node_step(coalesce_node_map[coalesce_name])
             # Route merged token through processor for remaining transforms.
             # When coalesce_step >= total_steps (no downstream nodes), the
             # processor returns COMPLETED with sink_name from on_success routing.
