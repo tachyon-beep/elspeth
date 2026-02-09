@@ -482,9 +482,7 @@ class ExecutionGraph:
             next_nodes.append(next_node_id)
 
         if len(next_nodes) > 1:
-            raise GraphValidationError(
-                f"Node '{node_id}' has multiple continue MOVE edges to processing nodes: {sorted(next_nodes)}"
-            )
+            raise GraphValidationError(f"Node '{node_id}' has multiple continue MOVE edges to processing nodes: {sorted(next_nodes)}")
         if len(next_nodes) == 1:
             return next_nodes[0]
         return None
@@ -1190,15 +1188,9 @@ class ExecutionGraph:
         """
         result: dict[NodeID, SinkName] = {}
         # Invert the sink_id_map for reverse lookup
-        sink_node_to_name: dict[NodeID, SinkName] = {
-            node_id: sink_name for sink_name, node_id in self._sink_id_map.items()
-        }
+        sink_node_to_name: dict[NodeID, SinkName] = {node_id: sink_name for sink_name, node_id in self._sink_id_map.items()}
         for from_id, to_id, _key, data in self._graph.edges(data=True, keys=True):
-            if (
-                data.get("label") == "on_success"
-                and data.get("mode") == RoutingMode.MOVE
-                and NodeID(to_id) in sink_node_to_name
-            ):
+            if data.get("label") == "on_success" and data.get("mode") == RoutingMode.MOVE and NodeID(to_id) in sink_node_to_name:
                 result[NodeID(from_id)] = sink_node_to_name[NodeID(to_id)]
         return result
 
