@@ -94,6 +94,7 @@ def _make_processor(
     *,
     run_id: str = "test-run",
     source_node_id: str = "source-0",
+    source_on_success: str = "continue",
     edge_map: dict[tuple[NodeID, str], str] | None = None,
     route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
     config_gates: list[GateSettings] | None = None,
@@ -106,6 +107,8 @@ def _make_processor(
     node_step_map: dict[NodeID, int] | None = None,
     coalesce_on_success_map: dict[CoalesceName, str] | None = None,
     node_to_next: dict[NodeID, NodeID | None] | None = None,
+    first_transform_node_id: NodeID | None = None,
+    node_to_plugin: dict[NodeID, Any] | None = None,
     restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
     telemetry_manager: Any = None,
 ) -> RowProcessor:
@@ -117,14 +120,20 @@ def _make_processor(
     for idx, coalesce_node in enumerate(coalesce_nodes.values(), start=1):
         traversal_steps.setdefault(coalesce_node, idx)
 
-    traversal = DAGTraversalContext(
-        node_step_map=traversal_steps,
-        node_to_plugin={
+    traversal_node_to_plugin = (
+        dict(node_to_plugin)
+        if node_to_plugin is not None
+        else {
             config_gate_id_map[GateName(gate.name)]: gate
             for gate in (config_gates or [])
             if config_gate_id_map and GateName(gate.name) in config_gate_id_map
-        },
-        first_transform_node_id=None,
+        }
+    )
+
+    traversal = DAGTraversalContext(
+        node_step_map=traversal_steps,
+        node_to_plugin=traversal_node_to_plugin,
+        first_transform_node_id=first_transform_node_id,
         node_to_next=node_to_next or {},
         coalesce_node_map=coalesce_nodes,
     )
@@ -134,6 +143,7 @@ def _make_processor(
         span_factory=SpanFactory(),  # No tracer — no-op spans
         run_id=run_id,
         source_node_id=NodeID(source_node_id),
+        source_on_success=source_on_success,
         traversal=traversal,
         edge_map=edge_map,
         route_resolution_map=route_resolution_map,
@@ -366,19 +376,27 @@ class TestProcessRowNoTransforms:
 class TestProcessRowSingleTransform:
     """Tests for process_row with a single transform."""
 
-    def _setup(self) -> tuple[LandscapeDB, LandscapeRecorder, RowProcessor]:
+    def _setup(self, transform: Any) -> tuple[LandscapeDB, LandscapeRecorder, RowProcessor]:
         db, recorder = _make_recorder()
+        source_node = NodeID("source-0")
+        transform_node = NodeID(transform.node_id)
 
-        processor = _make_processor(recorder)
+        processor = _make_processor(
+            recorder,
+            node_step_map={source_node: 0, transform_node: 1},
+            node_to_next={source_node: transform_node, transform_node: None},
+            first_transform_node_id=transform_node,
+            node_to_plugin={transform_node: transform},
+        )
         return db, recorder, processor
 
     def test_successful_transform_returns_completed(self) -> None:
         """Row passes through transform → COMPLETED."""
-        _db, _recorder, processor = self._setup()
+        transform = _make_mock_transform()
+        _db, _recorder, processor = self._setup(transform)
         source_row = _make_source_row({"value": 10})
         ctx = PluginContext(run_id="test-run", config={})
 
-        transform = _make_mock_transform()
         output_data = make_row({"value": 10, "enriched": True})
         success_result = TransformResult.success(
             output_data,
@@ -406,11 +424,11 @@ class TestProcessRowSingleTransform:
 
     def test_transform_error_with_discard_returns_quarantined(self) -> None:
         """Transform error with on_error='discard' → QUARANTINED."""
-        _db, _recorder, processor = self._setup()
+        transform = _make_mock_transform(on_error="discard")
+        _db, _recorder, processor = self._setup(transform)
         source_row = _make_source_row()
         ctx = PluginContext(run_id="test-run", config={})
 
-        transform = _make_mock_transform(on_error="discard")
         error_result = TransformResult.error(
             {"reason": "bad_value"},
             retryable=False,
@@ -436,11 +454,11 @@ class TestProcessRowSingleTransform:
 
     def test_transform_error_with_named_sink_returns_routed(self) -> None:
         """Transform error with on_error='errors' → ROUTED to error sink."""
-        _db, _recorder, processor = self._setup()
+        transform = _make_mock_transform(on_error="errors")
+        _db, _recorder, processor = self._setup(transform)
         source_row = _make_source_row()
         ctx = PluginContext(run_id="test-run", config={})
 
-        transform = _make_mock_transform(on_error="errors")
         error_result = TransformResult.error(
             {"reason": "bad_value"},
             retryable=False,
@@ -467,11 +485,11 @@ class TestProcessRowSingleTransform:
 
     def test_max_retries_exceeded_returns_failed(self) -> None:
         """MaxRetriesExceeded → FAILED outcome."""
-        _db, _recorder, processor = self._setup()
+        transform = _make_mock_transform()
+        _db, _recorder, processor = self._setup(transform)
         source_row = _make_source_row()
         ctx = PluginContext(run_id="test-run", config={})
 
-        transform = _make_mock_transform()
         with patch.object(
             processor._transform_executor,
             "execute_transform",
@@ -500,8 +518,6 @@ class TestProcessRowMultiRowOutput:
     def test_multi_row_with_creates_tokens_returns_expanded(self) -> None:
         """Transform with creates_tokens=True returning multi-row → EXPANDED."""
         _db, recorder = _make_recorder()
-
-        processor = _make_processor(recorder)
         source_row = _make_source_row()
         ctx = PluginContext(run_id="test-run", config={})
 
@@ -516,6 +532,15 @@ class TestProcessRowMultiRowOutput:
         )
 
         transform = _make_mock_transform(creates_tokens=True)
+        source_node = NodeID("source-0")
+        transform_node = NodeID(transform.node_id)
+        processor = _make_processor(
+            recorder,
+            node_step_map={source_node: 0, transform_node: 1},
+            node_to_next={source_node: transform_node, transform_node: None},
+            first_transform_node_id=transform_node,
+            node_to_plugin={transform_node: transform},
+        )
 
         def executor_side_effect(*, transform, token, ctx, step_in_pipeline, attempt=0):
             return (multi_result, token, None)
@@ -540,8 +565,6 @@ class TestProcessRowMultiRowOutput:
     def test_multi_row_without_creates_tokens_raises(self) -> None:
         """Transform returning multi-row without creates_tokens=True → RuntimeError."""
         _db, recorder = _make_recorder()
-
-        processor = _make_processor(recorder)
         source_row = _make_source_row()
         ctx = PluginContext(run_id="test-run", config={})
 
@@ -556,6 +579,15 @@ class TestProcessRowMultiRowOutput:
         )
 
         transform = _make_mock_transform(creates_tokens=False)
+        source_node = NodeID("source-0")
+        transform_node = NodeID(transform.node_id)
+        processor = _make_processor(
+            recorder,
+            node_step_map={source_node: 0, transform_node: 1},
+            node_to_next={source_node: transform_node, transform_node: None},
+            first_transform_node_id=transform_node,
+            node_to_plugin={transform_node: transform},
+        )
 
         def executor_side_effect(*, transform, token, ctx, step_in_pipeline, attempt=0):
             return (multi_result, token, None)
@@ -665,6 +697,75 @@ class TestProcessToken:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COMPLETED
+
+    def test_terminal_coalesce_continuation_uses_coalesce_on_success_sink(self) -> None:
+        """Merged token resumed at terminal coalesce must route to coalesce sink, not source sink."""
+        _db, recorder = _make_recorder()
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            coalesce_on_success_map={CoalesceName("merge"): "coalesce_sink"},
+            node_step_map={NodeID("coalesce::merge"): 1},
+            node_to_next={NodeID("coalesce::merge"): None},
+        )
+        ctx = PluginContext(run_id="test-run", config={})
+        token = make_token_info(data={"value": 42})
+
+        results = processor.process_token(
+            token=token,
+            transforms=[],
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge"),
+            coalesce_node_id=NodeID("coalesce::merge"),
+            coalesce_name=CoalesceName("merge"),
+        )
+
+        assert len(results) == 1
+        assert results[0].outcome == RowOutcome.COMPLETED
+        assert results[0].sink_name == "coalesce_sink"
+
+    def test_non_terminal_coalesce_continuation_uses_downstream_sink(self) -> None:
+        """Coalesce sink must not override downstream terminal transform routing."""
+        _db, recorder = _make_recorder()
+        transform = _make_mock_transform(node_id="transform-1")
+        transform.on_success = "downstream_sink"
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            coalesce_on_success_map={CoalesceName("merge"): "coalesce_sink"},
+            node_step_map={NodeID("coalesce::merge"): 1, NodeID("transform-1"): 2},
+            node_to_next={NodeID("coalesce::merge"): NodeID("transform-1"), NodeID("transform-1"): None},
+            first_transform_node_id=NodeID("transform-1"),
+            node_to_plugin={NodeID("transform-1"): transform},
+        )
+        ctx = PluginContext(run_id="test-run", config={})
+        token = make_token_info(data={"value": 42})
+
+        with patch.object(
+            processor,
+            "_execute_transform_with_retry",
+            return_value=(
+                TransformResult.success(make_row({"value": 42}), success_reason={"action": "noop"}),
+                token,
+                None,
+            ),
+        ):
+            results = processor.process_token(
+                token=token,
+                transforms=[transform],
+                ctx=ctx,
+                current_node_id=NodeID("coalesce::merge"),
+                coalesce_node_id=NodeID("coalesce::merge"),
+                coalesce_name=CoalesceName("merge"),
+            )
+
+        assert len(results) == 1
+        assert results[0].outcome == RowOutcome.COMPLETED
+        assert results[0].sink_name == "downstream_sink"
 
 
 # =============================================================================
@@ -1375,20 +1476,29 @@ class TestUnknownTransformType:
     def test_unknown_type_raises_type_error(self) -> None:
         """Transform that is neither TransformProtocol nor GateProtocol raises TypeError."""
         _db, recorder = _make_recorder()
-
-        processor = _make_processor(recorder)
         source_row = _make_source_row()
         ctx = PluginContext(run_id="test-run", config={})
 
         # Create an object that is NOT a transform or gate
         class FakePlugin:
-            pass
+            node_id = "fake-node"
+
+        fake_plugin = FakePlugin()
+        source_node = NodeID("source-0")
+        fake_node = NodeID(fake_plugin.node_id)
+        processor = _make_processor(
+            recorder,
+            node_step_map={source_node: 0, fake_node: 1},
+            node_to_next={source_node: fake_node, fake_node: None},
+            first_transform_node_id=fake_node,
+            node_to_plugin={fake_node: fake_plugin},
+        )
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(
                 row_index=0,
                 source_row=source_row,
-                transforms=[FakePlugin()],
+                transforms=[fake_plugin],
                 ctx=ctx,
             )
 

@@ -199,30 +199,6 @@ class RowProcessor:
         """Expose token manager for orchestrator to create tokens for quarantined rows."""
         return self._token_manager
 
-    def _bind_runtime_transforms(self, transforms: list[Any]) -> None:
-        """Bind runtime transforms into traversal maps when tests provide sparse context."""
-        if not transforms:
-            return
-
-        ordered_nodes: list[NodeID] = []
-        for idx, transform in enumerate(transforms):
-            raw_node_id = getattr(transform, "node_id", None)
-            if raw_node_id is None:
-                raw_node_id = f"runtime-node-{idx}"
-            node_id = NodeID(raw_node_id)
-            self._node_to_plugin.setdefault(node_id, transform)
-            ordered_nodes.append(node_id)
-
-        if self._first_transform_node_id is None and ordered_nodes:
-            self._first_transform_node_id = ordered_nodes[0]
-
-        self._node_to_next.setdefault(self._source_node_id, ordered_nodes[0])
-
-        for idx, node_id in enumerate(ordered_nodes):
-            self._node_step_map.setdefault(node_id, idx + 1)
-            if node_id not in self._node_to_next:
-                self._node_to_next[node_id] = ordered_nodes[idx + 1] if idx + 1 < len(ordered_nodes) else None
-
     def _create_work_item(
         self,
         *,
@@ -1399,7 +1375,10 @@ class RowProcessor:
             duration_ms=0,
         )
 
-        self._bind_runtime_transforms(transforms)
+        if transforms and self._first_transform_node_id is None:
+            raise OrchestrationInvariantError(
+                "Traversal context is missing first_transform_node_id for non-empty transform pipeline"
+            )
         initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
         return self._drain_work_queue(
             self._create_work_item(
@@ -1463,7 +1442,10 @@ class RowProcessor:
             duration_ms=0,
         )
 
-        self._bind_runtime_transforms(transforms)
+        if transforms and self._first_transform_node_id is None:
+            raise OrchestrationInvariantError(
+                "Traversal context is missing first_transform_node_id for non-empty transform pipeline"
+            )
         initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
         return self._drain_work_queue(
             self._create_work_item(
@@ -1490,7 +1472,6 @@ class RowProcessor:
 
         Used for mid-pipeline coalesce merges that must continue processing.
         """
-        self._bind_runtime_transforms(transforms)
         return self._drain_work_queue(
             self._create_work_item(
                 token=token,
@@ -1756,6 +1737,15 @@ class RowProcessor:
         current_token = token
         child_items: list[_WorkItem] = []
         last_on_success_sink: str = self._source_on_success
+        if coalesce_name is not None and current_node_id is not None:
+            coalesce_node_id_for_name = self._coalesce_node_ids.get(coalesce_name)
+            if coalesce_node_id_for_name == current_node_id and self._resolve_next_node_for_processing(current_node_id) is None:
+                coalesce_sink = self._coalesce_on_success_map.get(coalesce_name)
+                if coalesce_sink is None:
+                    raise OrchestrationInvariantError(
+                        f"Terminal coalesce '{coalesce_name}' continuation is missing on_success sink mapping"
+                    )
+                last_on_success_sink = coalesce_sink
 
         node_id: NodeID | None = current_node_id
         while node_id is not None:

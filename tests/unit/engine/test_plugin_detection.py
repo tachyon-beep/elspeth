@@ -12,6 +12,8 @@ from typing import Any
 
 from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.types import NodeID
+from elspeth.engine.processor import DAGTraversalContext
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.results import (
     GateResult,
@@ -19,6 +21,17 @@ from elspeth.plugins.results import (
     TransformResult,
 )
 from tests.fixtures.base_classes import create_observed_contract
+
+
+def _single_node_traversal(node_id: NodeID, plugin: Any) -> DAGTraversalContext:
+    """Build explicit traversal context for a one-node pipeline."""
+    return DAGTraversalContext(
+        node_step_map={node_id: 1},
+        node_to_plugin={node_id: plugin},
+        first_transform_node_id=node_id,
+        node_to_next={node_id: None},
+        coalesce_node_map={},
+    )
 
 
 class TestPluginTypeDetection:
@@ -116,7 +129,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.contracts.types import NodeID
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.processor import DAGTraversalContext, RowProcessor
+        from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
 
         class DuckTypedTransform:
@@ -141,27 +154,22 @@ class TestProcessorRejectsDuckTypedPlugins:
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
-        processor = RowProcessor(
-            recorder=recorder,
-            span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source.node_id),
-            traversal=DAGTraversalContext(
-                node_step_map={},
-                node_to_plugin={},
-                first_transform_node_id=None,
-                node_to_next={},
-                coalesce_node_map={},
-            ),
-        )
-
-        ctx = PluginContext(run_id=run.run_id, config={})
-
         # The duck-typed object has the method, but processor should reject it
         duck = DuckTypedTransform()
         assert hasattr(duck, "process"), "Duck type has process method"
         # Runtime check that duck is not a BaseTransform - mypy knows these are incompatible
         assert not isinstance(duck, BaseTransform), "But is not a BaseTransform"  # type: ignore[unreachable]
+        duck_node_id = NodeID(duck.node_id)
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            traversal=_single_node_traversal(duck_node_id, duck),
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(
@@ -182,7 +190,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.contracts.types import NodeID
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.processor import DAGTraversalContext, RowProcessor
+        from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
 
         class DuckTypedGate:
@@ -207,27 +215,22 @@ class TestProcessorRejectsDuckTypedPlugins:
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
-        processor = RowProcessor(
-            recorder=recorder,
-            span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source.node_id),
-            traversal=DAGTraversalContext(
-                node_step_map={},
-                node_to_plugin={},
-                first_transform_node_id=None,
-                node_to_next={},
-                coalesce_node_map={},
-            ),
-        )
-
-        ctx = PluginContext(run_id=run.run_id, config={})
-
         # The duck-typed object has the method, but processor should reject it
         duck = DuckTypedGate()
         assert hasattr(duck, "evaluate"), "Duck type has evaluate method"
         # Runtime check that duck is not a BaseGate - mypy knows these are incompatible
         assert not isinstance(duck, BaseGate), "But is not a BaseGate"  # type: ignore[unreachable]
+        duck_node_id = NodeID(duck.node_id)
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            traversal=_single_node_traversal(duck_node_id, duck),
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(

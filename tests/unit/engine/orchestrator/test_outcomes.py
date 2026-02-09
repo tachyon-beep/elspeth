@@ -326,21 +326,30 @@ class TestHandleCoalesceTimeouts:
             _make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output"),
         ]
 
+        ctx = Mock()
+        transforms = [Mock(), Mock(), Mock()]
         handle_coalesce_timeouts(
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock(), Mock(), Mock()],
+            config_transforms=transforms,
             config_gates=[],
             config_sinks={"output": Mock()},
-            ctx=Mock(),
+            ctx=ctx,
             counters=counters,
             pending_tokens=pending,
         )
 
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
-        processor.process_token.assert_called_once()
+        processor.process_token.assert_called_once_with(
+            token=merged_token,
+            transforms=transforms,
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge_1"),
+            coalesce_node_id=NodeID("coalesce::merge_1"),
+            coalesce_name=CoalesceName("merge_1"),
+        )
 
     def test_merged_token_terminal_processed_for_explicit_sink_routing(self) -> None:
         """Terminal merged token is processed to resolve explicit on_success sink."""
@@ -356,14 +365,16 @@ class TestHandleCoalesceTimeouts:
         )
         processor.process_token.return_value = [_make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output")]
 
+        ctx = Mock()
+        transforms = [Mock()]
         handle_coalesce_timeouts(
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock()],
+            config_transforms=transforms,
             config_gates=[],
             config_sinks={"output": Mock()},
-            ctx=Mock(),
+            ctx=ctx,
             counters=counters,
             pending_tokens=pending,
         )
@@ -371,7 +382,14 @@ class TestHandleCoalesceTimeouts:
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
         assert len(pending["output"]) == 1
-        processor.process_token.assert_called_once()
+        processor.process_token.assert_called_once_with(
+            token=merged_token,
+            transforms=transforms,
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge_1"),
+            coalesce_node_id=NodeID("coalesce::merge_1"),
+            coalesce_name=CoalesceName("merge_1"),
+        )
 
     def test_failure_increments_coalesce_failed(self) -> None:
         """Failed coalesce (missing branches) increments coalesce_failed."""
@@ -428,20 +446,30 @@ class TestFlushCoalescePending:
         pending = _make_pending()
         node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
+        ctx = Mock()
+        transforms = [Mock(), Mock()]
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock(), Mock()],
+            config_transforms=transforms,
             config_gates=[],
             config_sinks={"output": Mock()},
-            ctx=Mock(),
+            ctx=ctx,
             counters=counters,
             pending_tokens=pending,
         )
 
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
+        processor.process_token.assert_called_once_with(
+            token=merged_token,
+            transforms=transforms,
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge_1"),
+            coalesce_node_id=NodeID("coalesce::merge_1"),
+            coalesce_name=CoalesceName("merge_1"),
+        )
 
     def test_merged_token_terminal(self) -> None:
         """Terminal merged token is processed to resolve explicit on_success sink."""
@@ -461,14 +489,16 @@ class TestFlushCoalescePending:
         pending = _make_pending()
         node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
+        ctx = Mock()
+        transforms = [Mock()]
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock()],
+            config_transforms=transforms,
             config_gates=[],
             config_sinks={"output": Mock()},
-            ctx=Mock(),
+            ctx=ctx,
             counters=counters,
             pending_tokens=pending,
         )
@@ -476,7 +506,14 @@ class TestFlushCoalescePending:
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
         assert len(pending["output"]) == 1
-        processor.process_token.assert_called_once()
+        processor.process_token.assert_called_once_with(
+            token=merged_token,
+            transforms=transforms,
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge_1"),
+            coalesce_node_id=NodeID("coalesce::merge_1"),
+            coalesce_name=CoalesceName("merge_1"),
+        )
 
     def test_failure_increments_coalesce_failed(self) -> None:
         """Failed flush outcomes increment coalesce_failed counter."""

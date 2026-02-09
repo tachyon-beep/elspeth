@@ -144,6 +144,8 @@ def handle_coalesce_timeouts(
                     transforms=config_transforms,
                     ctx=ctx,
                     current_node_id=coalesce_node_id,
+                    coalesce_node_id=coalesce_node_id,
+                    coalesce_name=coalesce_name,
                 )
                 accumulate_row_outcomes(
                     continuation_results,
@@ -204,6 +206,8 @@ def flush_coalesce_pending(
                 transforms=config_transforms,
                 ctx=ctx,
                 current_node_id=coalesce_node_map[coalesce_name],
+                coalesce_node_id=coalesce_node_map[coalesce_name],
+                coalesce_name=coalesce_name,
             )
             accumulate_row_outcomes(
                 continuation_results,
