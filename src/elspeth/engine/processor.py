@@ -157,6 +157,10 @@ class RowProcessor:
         self._source_node_id: NodeID = source_node_id
         self._source_on_success: str = source_on_success
         self._traversal = traversal
+        self._node_step_map: dict[NodeID, int] = dict(traversal.node_step_map)
+        self._node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = dict(traversal.node_to_plugin)
+        self._first_transform_node_id: NodeID | None = traversal.first_transform_node_id
+        self._node_to_next: dict[NodeID, NodeID | None] = dict(traversal.node_to_next)
         gate_entries: list[tuple[NodeID, GateSettings]] = sorted(
             [(node_id, plugin) for node_id, plugin in traversal.node_to_plugin.items() if isinstance(plugin, GateSettings)],
             key=lambda item: traversal.node_step_map[item[0]],
@@ -296,6 +300,38 @@ class RowProcessor:
         start_step = self._node_id_to_step(work_item.current_node_id)
         coalesce_at_step = self._node_id_to_step(work_item.coalesce_node_id) if work_item.coalesce_node_id is not None else None
         return start_step, coalesce_at_step
+
+    def _resolve_plugin_for_node(
+        self, node_id: NodeID, transforms: list[Any]
+    ) -> TransformProtocol | GateProtocol | GateSettings | None:
+        """Resolve the plugin/gate associated with a processing node."""
+        if node_id in self._node_to_plugin:
+            return self._node_to_plugin[node_id]
+        if node_id in self._active_node_to_step:
+            step = self._active_node_to_step[node_id]
+            if step < len(transforms):
+                return cast(TransformProtocol | GateProtocol, transforms[step])
+            gate_idx = step - len(transforms)
+            if 0 <= gate_idx < len(self._config_gates):
+                return self._config_gates[gate_idx]
+        return None
+
+    def _resolve_next_node_for_processing(self, node_id: NodeID) -> NodeID | None:
+        """Resolve the next processing node from traversal metadata."""
+        if node_id in self._node_to_next:
+            return self._node_to_next[node_id]
+        if node_id in self._active_node_to_step:
+            next_step = self._active_node_to_step[node_id] + 1
+            return self._active_step_to_node.get(next_step)
+        return None
+
+    def _resolve_audit_step_for_node(self, node_id: NodeID) -> int:
+        """Resolve 1-indexed audit step for a processing node."""
+        if node_id in self._node_step_map:
+            return self._node_step_map[node_id]
+        if node_id == self._source_node_id:
+            return 0
+        return self._node_id_to_step(node_id) + 1
 
     def _emit_telemetry(self, event: TelemetryEvent) -> None:
         """Emit telemetry event if manager is configured.
@@ -1734,13 +1770,12 @@ class RowProcessor:
                     raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
 
                 item = work_queue.popleft()
-                start_step = self._node_id_to_step(item.current_node_id)
                 coalesce_at_step = self._node_id_to_step(item.coalesce_node_id) if item.coalesce_node_id is not None else None
                 result, child_items = self._process_single_token(
                     token=item.token,
                     transforms=transforms,
                     ctx=ctx,
-                    start_step=start_step,
+                    current_node_id=item.current_node_id,
                     coalesce_at_step=coalesce_at_step,
                     coalesce_name=item.coalesce_name,
                 )
@@ -1760,17 +1795,17 @@ class RowProcessor:
         token: TokenInfo,
         transforms: list[Any],
         ctx: PluginContext,
-        start_step: int,
+        current_node_id: NodeID,
         coalesce_at_step: int | None = None,
         coalesce_name: CoalesceName | None = None,
     ) -> tuple[RowResult | list[RowResult] | None, list[_WorkItem]]:
-        """Process a single token through transforms starting at given step.
+        """Process a single token through processing nodes starting at node_id.
 
         Args:
             token: Token to process
             transforms: List of transform plugins
             ctx: Plugin context
-            start_step: Index in transforms to start from (0-indexed)
+            current_node_id: Node ID to start processing from
             coalesce_at_step: Step index at which fork children should coalesce
             coalesce_name: Name of the coalesce point for merging
 
@@ -1786,6 +1821,7 @@ class RowProcessor:
         total_steps = len(transforms) + len(self._config_gates)
         last_on_success_sink: str | None = self._source_on_success
 
+        start_step = self._node_id_to_step(current_node_id)
         handled, result = self._maybe_coalesce_token(
             current_token,
             coalesce_at_step=coalesce_at_step,
@@ -1797,15 +1833,22 @@ class RowProcessor:
         if handled:
             return (result, child_items)
 
-        # Process transforms starting from start_step
-        for step_offset, transform in enumerate(transforms[start_step:]):
-            step = start_step + step_offset + 1  # 1-indexed for audit
+        node_id: NodeID | None = current_node_id
+        while node_id is not None:
+            next_node_id = self._resolve_next_node_for_processing(node_id)
+            plugin = self._resolve_plugin_for_node(node_id, transforms)
+            if plugin is None:
+                # Non-processing structural nodes (e.g. coalesce) are traversed but not executed.
+                node_id = next_node_id
+                continue
+
+            step = self._resolve_audit_step_for_node(node_id)
 
             # Type-safe plugin detection using protocols (supports protocol-only plugins)
-            if isinstance(transform, GateProtocol):
-                # Gate transform
+            if isinstance(plugin, GateProtocol):
+                gate_plugin = plugin
                 outcome = self._gate_executor.execute_gate(
-                    gate=transform,
+                    gate=gate_plugin,
                     token=current_token,
                     ctx=ctx,
                     step_in_pipeline=step,
@@ -1816,11 +1859,11 @@ class RowProcessor:
                 # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
                 # (Landscape recording happens inside execute_gate)
                 # node_id is assigned by orchestrator before execution (see _assign_node_ids_to_plugins)
-                assert transform.node_id is not None, "node_id must be assigned by orchestrator before execution"
+                assert gate_plugin.node_id is not None, "node_id must be assigned by orchestrator before execution"
                 self._emit_gate_evaluated(
                     token=current_token,
-                    gate_name=transform.name,
-                    gate_node_id=transform.node_id,
+                    gate_name=gate_plugin.name,
+                    gate_node_id=gate_plugin.node_id,
                     routing_mode=outcome.result.action.mode,
                     destinations=self._get_gate_destinations(outcome),
                 )
@@ -1841,8 +1884,10 @@ class RowProcessor:
                         child_items,
                     )
                 elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
-                    # Parent becomes FORKED, children continue from NEXT step
-                    next_step = start_step + step_offset + 1
+                    # Parent becomes FORKED, children continue from next node.
+                    continuation_start = (
+                        self._node_id_to_step(next_node_id) if next_node_id is not None else self._node_id_to_step(node_id) + 1
+                    )
                     for child_token in outcome.child_tokens:
                         # Look up coalesce info for this branch
                         branch_name = child_token.branch_name
@@ -1857,7 +1902,7 @@ class RowProcessor:
                         child_items.append(
                             self._create_work_item(
                                 token=child_token,
-                                start_step=child_coalesce_step if child_coalesce_step is not None else next_step,
+                                start_step=child_coalesce_step if child_coalesce_step is not None else continuation_start,
                                 coalesce_at_step=child_coalesce_step,
                                 coalesce_name=child_coalesce_name,
                             )
@@ -1885,17 +1930,14 @@ class RowProcessor:
                 if handled:
                     return (result, child_items)
 
-            # NOTE: BaseAggregation branch was DELETED in aggregation structural cleanup.
-            # Aggregation is now handled by batch-aware transforms (is_batch_aware=True).
-            # The engine buffers rows and calls Transform.process(rows: list[dict]).
-
-            elif isinstance(transform, TransformProtocol):
+            elif isinstance(plugin, TransformProtocol):
+                row_transform = plugin
                 # Check if this is a batch-aware transform at an aggregation node
-                node_id = transform.node_id
-                if transform.is_batch_aware and node_id is not None and node_id in self._aggregation_settings:
+                transform_node_id = row_transform.node_id
+                if row_transform.is_batch_aware and transform_node_id is not None and transform_node_id in self._aggregation_settings:
                     # Use engine buffering for aggregation
                     return self._process_batch_aggregation_node(
-                        transform=transform,
+                        transform=row_transform,
                         current_token=current_token,
                         ctx=ctx,
                         step=step,
@@ -1908,7 +1950,7 @@ class RowProcessor:
                 # Regular transform (with optional retry)
                 try:
                     transform_result, current_token, error_sink = self._execute_transform_with_retry(
-                        transform=transform,
+                        transform=row_transform,
                         token=current_token,
                         ctx=ctx,
                         step=step,
@@ -1917,7 +1959,7 @@ class RowProcessor:
                     # (Landscape recording happens inside _execute_transform_with_retry)
                     self._emit_transform_completed(
                         token=current_token,
-                        transform=transform,
+                        transform=row_transform,
                         transform_result=transform_result,
                     )
                 except MaxRetriesExceeded as e:
@@ -2000,17 +2042,17 @@ class RowProcessor:
                         return (current_result, child_items)
 
                 # Track on_success for sink routing at end of chain
-                if transform.on_success is not None:
-                    last_on_success_sink = transform.on_success
+                if row_transform.on_success is not None:
+                    last_on_success_sink = row_transform.on_success
 
                 # Handle multi-row output (deaggregation)
                 # NOTE: This is ONLY for non-aggregation transforms. Aggregation
                 # transforms route through _process_batch_aggregation_node() above.
                 if transform_result.is_multi_row:
                     # Validate transform is allowed to create tokens
-                    if not transform.creates_tokens:
+                    if not row_transform.creates_tokens:
                         raise RuntimeError(
-                            f"Transform '{transform.name}' returned multi-row result "
+                            f"Transform '{row_transform.name}' returned multi-row result "
                             f"but has creates_tokens=False. Either set creates_tokens=True "
                             f"or return single row via TransformResult.success(row). "
                             f"(Multi-row is allowed in aggregation passthrough mode.)"
@@ -2032,13 +2074,14 @@ class RowProcessor:
                     )
 
                     # Queue each child for continued processing
-                    # Children start at next step (step_offset + 1 gives 0-indexed next)
-                    next_step = start_step + step_offset + 1
+                    continuation_start = (
+                        self._node_id_to_step(next_node_id) if next_node_id is not None else self._node_id_to_step(node_id) + 1
+                    )
                     for child_token in child_tokens:
                         child_items.append(
                             self._create_work_item(
                                 token=child_token,
-                                start_step=next_step,
+                                start_step=continuation_start,
                                 coalesce_at_step=coalesce_at_step,
                                 coalesce_name=coalesce_name,
                             )
@@ -2068,100 +2111,91 @@ class RowProcessor:
                 if handled:
                     return (result, child_items)
 
-            else:
-                raise TypeError(f"Unknown transform type: {type(transform).__name__}. Expected BaseTransform or BaseGate.")
-
-        # Process config-driven gates (after all plugin transforms)
-        # Step continues from where transforms left off
-        config_gate_start_step = len(transforms) + 1
-
-        # Calculate which config gate to start from based on start_step
-        # If start_step > len(transforms), we skip some config gates
-        # (e.g., fork children that already passed through earlier gates)
-        config_gate_start_idx = max(0, start_step - len(transforms))
-        for gate_idx, gate_config in enumerate(self._config_gates[config_gate_start_idx:], start=config_gate_start_idx):
-            step = config_gate_start_step + gate_idx
-
-            # Get the node_id for this config gate
-            node_id = self._config_gate_id_map[GateName(gate_config.name)]
-
-            outcome = self._gate_executor.execute_config_gate(
-                gate_config=gate_config,
-                node_id=node_id,
-                token=current_token,
-                ctx=ctx,
-                step_in_pipeline=step,
-                token_manager=self._token_manager,
-            )
-            current_token = outcome.updated_token
-
-            # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
-            # (Landscape recording happens inside execute_config_gate)
-            self._emit_gate_evaluated(
-                token=current_token,
-                gate_name=gate_config.name,
-                gate_node_id=node_id,
-                routing_mode=outcome.result.action.mode,
-                destinations=self._get_gate_destinations(outcome),
-            )
-
-            # Check if gate routed to a sink
-            if outcome.sink_name is not None:
-                # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
-                # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                return (
-                    RowResult(
-                        token=current_token,
-                        final_data=current_token.row_data,
-                        outcome=RowOutcome.ROUTED,
-                        sink_name=outcome.sink_name,
-                    ),
-                    child_items,
+            elif isinstance(plugin, GateSettings):
+                gate_config = plugin
+                outcome = self._gate_executor.execute_config_gate(
+                    gate_config=gate_config,
+                    node_id=node_id,
+                    token=current_token,
+                    ctx=ctx,
+                    step_in_pipeline=step,
+                    token_manager=self._token_manager,
                 )
-            elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
-                # Config gate fork - children continue from next config gate
-                next_config_step = gate_idx + 1
-                for child_token in outcome.child_tokens:
-                    # Look up coalesce info for this branch
-                    cfg_branch_name = child_token.branch_name
-                    cfg_coalesce_name: CoalesceName | None = None
-                    cfg_coalesce_step: int | None = None
+                current_token = outcome.updated_token
 
-                    if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
-                        cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
-                        cfg_coalesce_step = self._coalesce_step_map[cfg_coalesce_name]
+                # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
+                # (Landscape recording happens inside execute_config_gate)
+                self._emit_gate_evaluated(
+                    token=current_token,
+                    gate_name=gate_config.name,
+                    gate_node_id=node_id,
+                    routing_mode=outcome.result.action.mode,
+                    destinations=self._get_gate_destinations(outcome),
+                )
 
-                    # Children skip directly to coalesce step (or next config gate if no coalesce)
-                    child_items.append(
-                        self._create_work_item(
-                            token=child_token,
-                            start_step=cfg_coalesce_step if cfg_coalesce_step is not None else len(transforms) + next_config_step,
-                            coalesce_at_step=cfg_coalesce_step,
-                            coalesce_name=cfg_coalesce_name,
+                # Check if gate routed to a sink
+                if outcome.sink_name is not None:
+                    # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+                    # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+                    return (
+                        RowResult(
+                            token=current_token,
+                            final_data=current_token.row_data,
+                            outcome=RowOutcome.ROUTED,
+                            sink_name=outcome.sink_name,
+                        ),
+                        child_items,
+                    )
+                elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
+                    continuation_start = (
+                        self._node_id_to_step(next_node_id) if next_node_id is not None else self._node_id_to_step(node_id) + 1
+                    )
+                    for child_token in outcome.child_tokens:
+                        # Look up coalesce info for this branch
+                        cfg_branch_name = child_token.branch_name
+                        cfg_coalesce_name: CoalesceName | None = None
+                        cfg_coalesce_step: int | None = None
+
+                        if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
+                            cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
+                            cfg_coalesce_step = self._coalesce_step_map[cfg_coalesce_name]
+
+                        # Children skip directly to coalesce step (or next processing node if no coalesce)
+                        child_items.append(
+                            self._create_work_item(
+                                token=child_token,
+                                start_step=cfg_coalesce_step if cfg_coalesce_step is not None else continuation_start,
+                                coalesce_at_step=cfg_coalesce_step,
+                                coalesce_name=cfg_coalesce_name,
+                            )
                         )
+
+                    # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+                    # to eliminate crash window between child creation and outcome recording.
+                    return (
+                        RowResult(
+                            token=current_token,
+                            final_data=current_token.row_data,
+                            outcome=RowOutcome.FORKED,
+                        ),
+                        child_items,
                     )
 
-                # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
-                # to eliminate crash window between child creation and outcome recording.
-                return (
-                    RowResult(
-                        token=current_token,
-                        final_data=current_token.row_data,
-                        outcome=RowOutcome.FORKED,
-                    ),
-                    child_items,
+                handled, result = self._maybe_coalesce_token(
+                    current_token,
+                    coalesce_at_step=coalesce_at_step,
+                    coalesce_name=coalesce_name,
+                    step_completed=step,
+                    total_steps=total_steps,
+                    child_items=child_items,
                 )
+                if handled:
+                    return (result, child_items)
 
-            handled, result = self._maybe_coalesce_token(
-                current_token,
-                coalesce_at_step=coalesce_at_step,
-                coalesce_name=coalesce_name,
-                step_completed=step,
-                total_steps=total_steps,
-                child_items=child_items,
-            )
-            if handled:
-                return (result, child_items)
+            else:
+                raise TypeError(f"Unknown transform type: {type(plugin).__name__}. Expected BaseTransform or BaseGate.")
+
+            node_id = next_node_id
 
         # Final coalesce check after all transforms/gates
         # Use total_steps + 1 to match coalesce_at_step calculation (which is base_step + 1 + i)

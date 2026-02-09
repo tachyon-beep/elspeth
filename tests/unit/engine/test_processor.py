@@ -682,7 +682,7 @@ class TestDrainWorkQueueIterationGuard:
         token = make_token_info(data={"value": 1})
 
         # Mock _process_single_token to always produce more work
-        def infinite_loop_producer(token, transforms, ctx, start_step, **kwargs):
+        def infinite_loop_producer(token, transforms, ctx, current_node_id, **kwargs):
             new_token = make_token_info(data={"value": 1})
             return (None, [_WorkItem(token=new_token, current_node_id=NodeID("source-0"))])
 
