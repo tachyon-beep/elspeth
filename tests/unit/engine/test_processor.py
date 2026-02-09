@@ -105,6 +105,7 @@ def _make_processor(
     branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
     coalesce_step_map: dict[CoalesceName, int] | None = None,
     coalesce_on_success_map: dict[CoalesceName, str] | None = None,
+    node_to_next: dict[NodeID, NodeID | None] | None = None,
     restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
     telemetry_manager: Any = None,
 ) -> RowProcessor:
@@ -122,7 +123,7 @@ def _make_processor(
             if config_gate_id_map and GateName(gate.name) in config_gate_id_map
         },
         first_transform_node_id=None,
-        node_to_next={},
+        node_to_next=node_to_next or {},
         coalesce_node_map=coalesce_nodes,
     )
 
@@ -1024,10 +1025,9 @@ class TestMaybeCoalesceToken:
 
         handled, result = processor._maybe_coalesce_token(
             token,
-            coalesce_at_step=1,
+            current_node_id=NodeID("coalesce::merge"),
+            coalesce_node_id=NodeID("coalesce::merge"),
             coalesce_name=CoalesceName("merge"),
-            step_completed=1,
-            total_steps=2,
             child_items=[],
         )
 
@@ -1038,7 +1038,11 @@ class TestMaybeCoalesceToken:
         """Token without branch_name is not a fork child, skip coalesce."""
         _, recorder = _make_recorder()
         coalesce = Mock()
-        processor = _make_processor(recorder, coalesce_executor=coalesce)
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            coalesce_step_map={CoalesceName("merge"): 1},
+        )
         token = make_token_info()
         # Ensure branch_name is None
         token = TokenInfo(
@@ -1050,20 +1054,23 @@ class TestMaybeCoalesceToken:
 
         handled, _result = processor._maybe_coalesce_token(
             token,
-            coalesce_at_step=1,
+            current_node_id=NodeID("coalesce::merge"),
+            coalesce_node_id=NodeID("coalesce::merge"),
             coalesce_name=CoalesceName("merge"),
-            step_completed=1,
-            total_steps=2,
             child_items=[],
         )
 
         assert handled is False
 
-    def test_step_not_reached_returns_not_handled(self) -> None:
-        """If step_completed < coalesce_at_step, coalesce is not triggered."""
+    def test_current_node_not_coalesce_node_returns_not_handled(self) -> None:
+        """Coalesce is only triggered when traversal reaches the coalesce node."""
         _, recorder = _make_recorder()
         coalesce = Mock()
-        processor = _make_processor(recorder, coalesce_executor=coalesce)
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            coalesce_step_map={CoalesceName("merge"): 5},
+        )
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
@@ -1073,10 +1080,9 @@ class TestMaybeCoalesceToken:
 
         handled, _result = processor._maybe_coalesce_token(
             token,
-            coalesce_at_step=5,
+            current_node_id=NodeID("transform-3"),
+            coalesce_node_id=NodeID("coalesce::merge"),
             coalesce_name=CoalesceName("merge"),
-            step_completed=3,
-            total_steps=6,
             child_items=[],
         )
 
@@ -1087,7 +1093,11 @@ class TestMaybeCoalesceToken:
         _, recorder = _make_recorder()
         coalesce = Mock()
         coalesce.accept.return_value = Mock(held=True, merged_token=None)
-        processor = _make_processor(recorder, coalesce_executor=coalesce)
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            coalesce_step_map={CoalesceName("merge"): 2},
+        )
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
@@ -1097,10 +1107,9 @@ class TestMaybeCoalesceToken:
 
         handled, result = processor._maybe_coalesce_token(
             token,
-            coalesce_at_step=2,
+            current_node_id=NodeID("coalesce::merge"),
+            coalesce_node_id=NodeID("coalesce::merge"),
             coalesce_name=CoalesceName("merge"),
-            step_completed=2,
-            total_steps=3,
             child_items=[],
         )
 
@@ -1116,6 +1125,7 @@ class TestMaybeCoalesceToken:
         processor = _make_processor(
             recorder,
             coalesce_executor=coalesce,
+            coalesce_step_map={CoalesceName("merge"): 3},
             coalesce_on_success_map={CoalesceName("merge"): "output"},
         )
         token = TokenInfo(
@@ -1127,10 +1137,9 @@ class TestMaybeCoalesceToken:
 
         handled, result = processor._maybe_coalesce_token(
             token,
-            coalesce_at_step=3,
+            current_node_id=NodeID("coalesce::merge"),
+            coalesce_node_id=NodeID("coalesce::merge"),
             coalesce_name=CoalesceName("merge"),
-            step_completed=3,
-            total_steps=3,  # coalesce IS terminal
             child_items=[],
         )
 
@@ -1144,7 +1153,12 @@ class TestMaybeCoalesceToken:
         merged_token = make_token_info(data={"merged": True})
         coalesce = Mock()
         coalesce.accept.return_value = Mock(held=False, merged_token=merged_token)
-        processor = _make_processor(recorder, coalesce_executor=coalesce)
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            coalesce_step_map={CoalesceName("merge"): 2},
+            node_to_next={NodeID("coalesce::merge"): NodeID("transform-5")},
+        )
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
@@ -1155,10 +1169,9 @@ class TestMaybeCoalesceToken:
 
         handled, result = processor._maybe_coalesce_token(
             token,
-            coalesce_at_step=2,
+            current_node_id=NodeID("coalesce::merge"),
+            coalesce_node_id=NodeID("coalesce::merge"),
             coalesce_name=CoalesceName("merge"),
-            step_completed=2,
-            total_steps=5,  # coalesce is NOT terminal
             child_items=child_items,
         )
 

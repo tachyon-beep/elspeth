@@ -1596,32 +1596,35 @@ class RowProcessor:
         self,
         current_token: TokenInfo,
         *,
-        coalesce_at_step: int | None,
+        current_node_id: NodeID,
+        coalesce_node_id: NodeID | None,
         coalesce_name: CoalesceName | None,
-        step_completed: int,
-        total_steps: int,
         child_items: list[_WorkItem],
     ) -> tuple[bool, RowResult | None]:
         if (
             self._coalesce_executor is None
             or current_token.branch_name is None
             or coalesce_name is None
-            or coalesce_at_step is None
-            or step_completed < coalesce_at_step
+            or coalesce_node_id is None
+            or current_node_id != coalesce_node_id
         ):
             return False, None
+
+        coalesce_step = self._coalesce_step_map.get(coalesce_name)
+        if coalesce_step is None:
+            coalesce_step = self._node_id_to_step(coalesce_node_id)
 
         coalesce_outcome = self._coalesce_executor.accept(
             token=current_token,
             coalesce_name=coalesce_name,
-            step_in_pipeline=coalesce_at_step,
+            step_in_pipeline=coalesce_step,
         )
 
         if coalesce_outcome.held:
             return True, None
 
         if coalesce_outcome.merged_token is not None:
-            if coalesce_at_step >= total_steps:
+            if self._resolve_next_node_for_processing(coalesce_node_id) is None:
                 if coalesce_name is None:
                     raise OrchestrationInvariantError("Terminal coalesce outcome missing coalesce_name")
                 sink_name = self._coalesce_on_success_map.get(coalesce_name)
@@ -1641,10 +1644,6 @@ class RowProcessor:
 
             if coalesce_name in self._coalesce_node_ids:
                 coalesce_node_id = self._coalesce_node_ids[coalesce_name]
-            else:
-                # Transitional fallback for tests that provide coalesce_at_step without
-                # a coalesce node map in traversal context.
-                coalesce_node_id = self._step_to_node_id(coalesce_at_step)
             child_items.append(
                 self._create_work_item(
                     token=coalesce_outcome.merged_token,
@@ -1802,13 +1801,12 @@ class RowProcessor:
                     raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
 
                 item = work_queue.popleft()
-                coalesce_at_step = self._node_id_to_step(item.coalesce_node_id) if item.coalesce_node_id is not None else None
                 result, child_items = self._process_single_token(
                     token=item.token,
                     transforms=transforms,
                     ctx=ctx,
                     current_node_id=item.current_node_id,
-                    coalesce_at_step=coalesce_at_step,
+                    coalesce_node_id=item.coalesce_node_id,
                     coalesce_name=item.coalesce_name,
                 )
 
@@ -1828,7 +1826,7 @@ class RowProcessor:
         transforms: list[Any],
         ctx: PluginContext,
         current_node_id: NodeID,
-        coalesce_at_step: int | None = None,
+        coalesce_node_id: NodeID | None = None,
         coalesce_name: CoalesceName | None = None,
     ) -> tuple[RowResult | list[RowResult] | None, list[_WorkItem]]:
         """Process a single token through processing nodes starting at node_id.
@@ -1838,7 +1836,7 @@ class RowProcessor:
             transforms: List of transform plugins
             ctx: Plugin context
             current_node_id: Node ID to start processing from
-            coalesce_at_step: Step index at which fork children should coalesce
+            coalesce_node_id: Node ID at which fork children should coalesce
             coalesce_name: Name of the coalesce point for merging
 
         Returns:
@@ -1852,21 +1850,20 @@ class RowProcessor:
         child_items: list[_WorkItem] = []
         total_steps = len(transforms) + len(self._config_gates)
         last_on_success_sink: str | None = self._source_on_success
-
-        start_step = self._node_id_to_step(current_node_id)
-        handled, result = self._maybe_coalesce_token(
-            current_token,
-            coalesce_at_step=coalesce_at_step,
-            coalesce_name=coalesce_name,
-            step_completed=start_step,
-            total_steps=total_steps,
-            child_items=child_items,
-        )
-        if handled:
-            return (result, child_items)
+        coalesce_at_step = self._node_id_to_step(coalesce_node_id) if coalesce_node_id is not None else None
 
         node_id: NodeID | None = current_node_id
         while node_id is not None:
+            handled, result = self._maybe_coalesce_token(
+                current_token,
+                current_node_id=node_id,
+                coalesce_node_id=coalesce_node_id,
+                coalesce_name=coalesce_name,
+                child_items=child_items,
+            )
+            if handled:
+                return (result, child_items)
+
             next_node_id = self._resolve_next_node_for_processing(node_id)
             plugin = self._resolve_plugin_for_node(node_id, transforms)
             if plugin is None:
@@ -1943,17 +1940,6 @@ class RowProcessor:
                         ),
                         child_items,
                     )
-
-                handled, result = self._maybe_coalesce_token(
-                    current_token,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                    step_completed=step,
-                    total_steps=total_steps,
-                    child_items=child_items,
-                )
-                if handled:
-                    return (result, child_items)
 
             elif isinstance(plugin, TransformProtocol):
                 row_transform = plugin
@@ -2122,17 +2108,6 @@ class RowProcessor:
 
                 # Single row output (existing logic - current_token already updated
                 # by _execute_transform_with_retry, continues to next transform)
-                handled, result = self._maybe_coalesce_token(
-                    current_token,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                    step_completed=step,
-                    total_steps=total_steps,
-                    child_items=child_items,
-                )
-                if handled:
-                    return (result, child_items)
-
             elif isinstance(plugin, GateSettings):
                 gate_config = plugin
                 outcome = self._gate_executor.execute_config_gate(
@@ -2197,36 +2172,10 @@ class RowProcessor:
                         child_items,
                     )
 
-                handled, result = self._maybe_coalesce_token(
-                    current_token,
-                    coalesce_at_step=coalesce_at_step,
-                    coalesce_name=coalesce_name,
-                    step_completed=step,
-                    total_steps=total_steps,
-                    child_items=child_items,
-                )
-                if handled:
-                    return (result, child_items)
-
             else:
                 raise TypeError(f"Unknown transform type: {type(plugin).__name__}. Expected BaseTransform or BaseGate.")
 
             node_id = next_node_id
-
-        # Final coalesce check after all transforms/gates
-        # Use total_steps + 1 to match coalesce_at_step calculation (which is base_step + 1 + i)
-        # This ensures step_completed >= coalesce_at_step when all processing is done
-        final_step = total_steps + 1 if coalesce_at_step is not None else total_steps
-        handled, result = self._maybe_coalesce_token(
-            current_token,
-            coalesce_at_step=coalesce_at_step,
-            coalesce_name=coalesce_name,
-            step_completed=final_step,
-            total_steps=total_steps,
-            child_items=child_items,
-        )
-        if handled:
-            return (result, child_items)
 
         return (
             RowResult(
