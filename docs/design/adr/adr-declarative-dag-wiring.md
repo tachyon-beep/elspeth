@@ -4,8 +4,9 @@
 **Bead:** `elspeth-rapid-tbia`
 **Date:** 2026-02-09
 **Decision Makers:** Architecture Review Board
-**Depends On:** ADR-explicit-sink-routing (`elspeth-rapid-o639`), processor refactoring (new prerequisite)
+**Depends On:** ADR-explicit-sink-routing (`elspeth-rapid-o639` — CLOSED), processor refactoring (`elspeth-rapid-hscm` — CLOSED)
 **Review Board Verdict:** Unanimous Approve (3/3) with conditions — all incorporated below
+**Design Decisions (2026-02-10):** on_success lifted to settings level (3a3f-A), settings.name drives node IDs (0wfr), aggregations stay post-transform (8q0m-A)
 
 ## Context
 
@@ -77,9 +78,11 @@ Every processing node declares where it receives data:
 
 ```python
 class TransformSettings(BaseModel):
+    name: str                     # NEW: user-facing wiring label, drives node IDs (0wfr)
     input: str                    # NEW: named input connection
-    on_success: str | None = None # from on_success ADR
-    on_error: str | None = None   # existing
+    on_success: str | None = None # LIFTED from options to settings level (3a3f-A)
+    plugin: str                   # existing
+    options: dict | None = None   # existing (on_success removed from here)
 ```
 
 ### Named Connections Replace Positional Ordering
@@ -166,7 +169,7 @@ transforms:
 
 coalesce:
   - name: merger
-    inputs: [merge_input_a, merge_input_b]   # multiple inputs
+    branches: [merge_input_a, merge_input_b]   # multiple branches
     on_success: final_sink
 ```
 
@@ -191,23 +194,16 @@ No transforms, no `input:` fields needed. Source → sink via named connection.
 
 The on_success ADR must be implemented first. It establishes the `on_success` field on protocols and config, removes `default_sink`, and creates the explicit output routing foundation.
 
-### Prerequisite 2: Processor Refactoring (new work item)
+### Prerequisite 2: Processor Refactoring (`elspeth-rapid-hscm` — CLOSED)
 
-**CRITICAL:** The processor (`engine/processor.py`) currently uses positional step indices to traverse transforms:
+**COMPLETED (2026-02-10).** The processor now uses `node_id`-based traversal:
 
-- `_WorkItem.start_step` is a positional index threaded through the entire work queue
-- `transforms[start_step:]` slicing for continuation after forks, coalesce, aggregation
-- `start_step + step_offset + 1` arithmetic for audit step numbers
-- Fork children, coalesce merges, and aggregation flushes all compute `next_step` as positional offsets
-- 20+ references to `start_step` across the processor
+- `_WorkItem.current_node_id: NodeID | None` replaces the former `start_step: int`
+- Processor follows DAG edges via `ExecutionGraph.get_next_node()` instead of list indexing
+- `start_step` has zero references in processor.py
+- All Phase 2 children resolved: hscm.1 (terminal deagg sink routing), hscm.2 (coalesce traversal invariant)
 
-The processor fundamentally models execution as "walk a list from position N." This means it depends on the transforms list being in topological order. The declarative wiring ADR allows YAML order to be cosmetic — which breaks this assumption.
-
-**The processor must be refactored to follow DAG edges (via `node_id`) instead of positional indices (via `start_step`).** This is a separate work item that must be completed BEFORE declarative wiring. Doing both simultaneously doubles the blast radius.
-
-**Transitional constraint:** Until the processor is refactored, YAML order must match topological order. The DAG builder validates this: if a transform's `input:` references a connection produced by a later YAML entry, `GraphValidationError` is raised with a message like "Transform 'X' with `input: Y` must appear after the node that produces 'Y'. Reorder your transforms list."
-
-After processor refactoring, this constraint is lifted and YAML order becomes purely cosmetic.
+YAML order still matches topological order by convention, but the processor no longer depends on it.
 
 ## Impact Analysis
 
@@ -215,10 +211,12 @@ After processor refactoring, this constraint is lifted and YAML order becomes pu
 
 | Area | Change | Scope |
 |------|--------|-------|
-| `core/config.py` | Add `input:` field to `TransformSettings`, `GateSettings`, `AggregationSettings`, `CoalesceSettings` | ~20 lines |
+| `core/config.py` | Add `name:` + `input:` to `TransformSettings`; add `input:` to `GateSettings`, `AggregationSettings` | ~30 lines |
+| `core/config.py` + `plugins/config_base.py` | Lift `on_success` from `TransformDataConfig`/`SourceDataConfig` (options) to settings level | ~50 lines (model changes) + broad YAML/test updates |
 | `core/dag.py` | Replace positional edge inference with connection-name matching in `from_plugin_instances()` | ~200 lines (rewrite of edge creation) |
 | `core/dag.py` | Add connection validation (dangling outputs, missing inputs, namespace collisions, near-miss suggestions) | ~80 lines |
-| `engine/processor.py` | Refactored to use `node_id` instead of `start_step` (prerequisite, separate work item) | ~200 lines |
+| `core/dag.py` | Change node ID derivation to use `settings.name` instead of `plugin.name + sequence` | ~20 lines |
+| `engine/processor.py` | Already refactored to use `node_id` (Phase 2 — CLOSED) | 0 (done) |
 | `plugins/protocols.py` | No change — `input` is a config/wiring concern, not a plugin concern | 0 |
 | All example YAMLs | Add `input:` to every transform/gate | All examples |
 | All tests | Update pipeline construction | Broad (~800+ refs) |
@@ -234,11 +232,11 @@ After processor refactoring, this constraint is lifted and YAML order becomes pu
 
 | Metric | Count | Notes |
 |--------|-------|-------|
-| `from_plugin_instances()` calls | 129 across 35 files | Every call gains `input:` on all transforms |
+| `from_plugin_instances()` calls | 191 across 45 files | Every call gains `input:` on all transforms |
 | `fork_to` refs | 201 across 31 files | Verify `fork_to` ↔ `input:` wiring |
 | Transform list construction | 233 across 46 files | Every transform list needs `input:` added |
-| Example YAMLs | 26 settings files | Add `input:` + `on_success:` to every node |
-| **Estimated total** | **~800+ refs** | Larger than on_success ADR (~472 refs) |
+| Example YAMLs | 28 settings files | Add `input:` + `on_success:` to every node |
+| **Estimated total** | **~900+ refs** | Larger than on_success ADR (~472 refs) |
 
 **Critical leverage points:**
 - `tests/fixtures/pipeline.py` — single highest-leverage file (cascades to 20+ test files)
@@ -279,22 +277,45 @@ Connection names colliding with sink names was identified as the primary risk lo
 ## Implementation Sequencing
 
 ```
-Phase 1: on_success ADR (elspeth-rapid-o639)    ← approved, P1
+Phase 1: on_success ADR (elspeth-rapid-o639)    ← CLOSED
     ↓
-Phase 2: Processor refactoring                   ← new work item needed
-    (start_step → node_id, ~200 lines)
+Phase 2: Processor refactoring (elspeth-rapid-hscm) ← CLOSED
+    (start_step → node_id, completed)
     ↓
-Phase 3: Declarative DAG wiring (this ADR)       ← P3
-    (from_plugin_instances() rewrite, ~800+ test refs)
+Phase 3: Declarative DAG wiring (this ADR)       ← READY (all prerequisites met)
+    (from_plugin_instances() rewrite, ~900+ test refs)
 ```
 
-Each phase is independently committable and testable. Phase 2 is a refactoring with no behavioral change — the processor follows the same paths, just indexed by node_id instead of position. Phase 3 changes how edges are built but not how they're traversed.
+Phases 1 and 2 are complete. Phase 3 implementation proceeds in waves: config models → core rewrite → propagation → tests → verification. See `elspeth-rapid-tbia` for the full wave breakdown.
+
+### Design Decisions (resolved 2026-02-10)
+
+| Bead | Decision | Rationale |
+|------|----------|-----------|
+| `3a3f` | **Option A**: Lift `on_success` from `options:` (plugin config) to settings level for all node types | Aligns with CoalesceSettings (already at settings level). All wiring fields (`name`, `input`, `on_success`) at same YAML level. High blast radius accepted. |
+| `0wfr` | `settings.name` drives node IDs, appears in audit, must be unique | Matches gates/aggregations. Eliminates sequence-dependent node IDs. Position-independent checkpoint resume. |
+| `8q0m` | **Option A**: Aggregations stay post-transform; `input:` makes wiring explicit within that constraint | Mid-chain aggregations deferred to P4 (`elspeth-rapid-ipwc`). Current model supports accumulate-then-transform via natural chain order. |
+
+### Runtime Semantics (Phase 3 additions)
+
+Phase 3 extends DAG construction AND runtime route resolution:
+
+1. **Route-to-node targets**: Gate routes can target downstream processing nodes by connection name (not only sinks). The route resolution contract becomes `(gate_node_id, route_label) → RouteTarget` where RouteTarget is one of: `sink:<sink_name>`, `node:<node_id>`, or `fork:<branches>`.
+
+2. **Graph traversal API**: `ExecutionGraph` gains explicit route-target lookup APIs for gate labels. `get_next_node()` remains for structural "continue" traversal but is not the only continuation source for routed branches.
+
+3. **Node ID derivation**: Changes from `{prefix}_{plugin_name}_{config_hash}_{sequence}` to `{prefix}_{settings_name}_{config_hash}` — position-independent, human-readable in audit records.
 
 ## References
 
-- Prerequisite ADR: `docs/design/adr/adr-explicit-sink-routing.md` (on_success)
-- DAG construction: `core/dag.py:from_plugin_instances()` (lines 366-835)
-- Processor positional indexing: `engine/processor.py` (`start_step`, `_WorkItem`, `transforms[start_step:]`)
+- Prerequisite ADR: `docs/design/adr/adr-explicit-sink-routing.md` (on_success — Phase 1 CLOSED)
+- Prerequisite refactoring: `elspeth-rapid-hscm` (processor node_id traversal — Phase 2 CLOSED)
+- DAG construction: `core/dag.py:from_plugin_instances()` (lines 561-1110, ~550 lines)
+- Processor traversal: `engine/processor.py` (`current_node_id`, `_WorkItem`) — node_id based
 - Gate routing: `core/config.py:GateSettings.routes`
-- Fork/join: `core/dag.py` fork edge creation (lines 680-700)
+- Fork/join: `core/dag.py` fork edge creation
+- Node ID derivation: `core/dag.py:node_id()` (lines 601-629)
+- Config models: `core/config.py:TransformSettings` (line 552), `GateSettings` (line 292), `AggregationSettings` (line 238)
+- Plugin config: `plugins/config_base.py:TransformDataConfig.on_success` (line 359), `SourceDataConfig.on_success` (line 153)
+- Design decisions: `3a3f` (on_success level), `0wfr` (name identity), `8q0m` (aggregation ordering)
 - Analogous systems: dbt `ref()`, Apache Beam PCollections, Airflow `>>` operator
