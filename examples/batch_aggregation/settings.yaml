@@ -19,6 +19,7 @@ aggregations:
     count: 5
   output_mode: transform
   options:
+    on_success: output
     schema:
       mode: observed
     value_field: amount

@@ -135,12 +135,12 @@ def _build_graph(
     return graph, aggregation_names, gate_names
 
 
-class TestStepMapPositionalCompatibility:
-    """Property checks that build_step_map preserves legacy numbering."""
+class TestStepMapSchemaContract:
+    """Property checks that build_step_map satisfies Landscape DB step numbering contract."""
 
     @given(topology=_topologies())
     @settings(max_examples=120, deadline=None)
-    def test_build_step_map_matches_legacy_positional_scheme(
+    def test_build_step_map_matches_schema_contract(
         self,
         topology: tuple[int, int, int, bool],
     ) -> None:

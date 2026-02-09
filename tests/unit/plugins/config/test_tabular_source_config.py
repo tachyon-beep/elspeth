@@ -110,7 +110,7 @@ class TestTabularSourceDataConfigValidation:
                 "path": "/tmp/test.csv",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                    "on_success": "output",
+                "on_success": "output",
                 "normalize_fields": True,
             }
         )
@@ -127,7 +127,7 @@ class TestTabularSourceDataConfigValidation:
                 "path": "/tmp/test.csv",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                    "on_success": "output",
+                "on_success": "output",
                 "columns": ["id", "name", "amount"],
             }
         )
@@ -143,7 +143,7 @@ class TestTabularSourceDataConfigValidation:
                 "path": "/tmp/test.csv",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                    "on_success": "output",
+                "on_success": "output",
                 "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
             }
@@ -160,7 +160,7 @@ class TestTabularSourceDataConfigValidation:
                 "path": "/tmp/test.csv",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                    "on_success": "output",
+                "on_success": "output",
                 "normalize_fields": True,
                 "field_mapping": {},
             }
@@ -177,7 +177,7 @@ class TestTabularSourceDataConfigValidation:
                 "path": "/tmp/test.csv",
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                    "on_success": "output",
+                "on_success": "output",
                 "columns": ["id"],
             }
         )

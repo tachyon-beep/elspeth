@@ -338,6 +338,10 @@ class RowResult:
     def __post_init__(self) -> None:
         if self.outcome == RowOutcome.COMPLETED and self.sink_name is None:
             raise OrchestrationInvariantError("COMPLETED outcome requires sink_name to be set")
+        if self.outcome == RowOutcome.ROUTED and self.sink_name is None:
+            raise OrchestrationInvariantError("ROUTED outcome requires sink_name to be set")
+        if self.outcome == RowOutcome.COALESCED and self.sink_name is None:
+            raise OrchestrationInvariantError("COALESCED outcome requires sink_name to be set")
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,7 @@ aggregations:
     count: 3
   output_mode: transform
   options:
+    on_success: output
     schema:
       mode: observed
     copies_field: copies

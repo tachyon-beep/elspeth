@@ -254,6 +254,7 @@ class Orchestrator:
         ctx: PluginContext,
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
         sink_id_map: dict[SinkName, NodeID],
+        sink_step: int,
         *,
         on_token_written_factory: Callable[[str], Callable[[TokenInfo], None]] | None = None,
     ) -> None:
@@ -269,6 +270,7 @@ class Orchestrator:
             ctx: Plugin context
             pending_tokens: Dict of sink_name -> list of (token, pending_outcome) pairs
             sink_id_map: Maps SinkName -> NodeID for checkpoint callbacks
+            sink_step: Audit step index for sink writes (from processor.resolve_sink_step())
             on_token_written_factory: Optional factory that creates per-sink checkpoint
                 callbacks. Takes sink_node_id, returns callback(TokenInfo) -> None.
                 When None (resume path), no checkpoint callbacks are used.
@@ -278,8 +280,7 @@ class Orchestrator:
         from elspeth.engine.executors import SinkExecutor
 
         sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
-        # Step = transforms + config gates + 1 (for sink)
-        step = len(config.transforms) + len(config.gates) + 1
+        step = sink_step
 
         for sink_name, token_outcome_pairs in pending_tokens.items():
             if token_outcome_pairs and sink_name in config.sinks:
@@ -486,9 +487,12 @@ class Orchestrator:
     ) -> DAGTraversalContext:
         """Build traversal context for RowProcessor from graph + pipeline config."""
         node_step_map = graph.build_step_map()
-        coalesce_gate_index = graph.get_coalesce_gate_index()
-        for coalesce_name, coalesce_node_id in graph.get_coalesce_id_map().items():
-            node_step_map[coalesce_node_id] = coalesce_gate_index[coalesce_name] + 1
+        # Assign coalesce nodes step numbers after all processing nodes.
+        # Coalesce executes after all branch processing completes, so its step
+        # must be higher than any branch node's step to avoid audit trail ambiguity.
+        max_step = max(node_step_map.values()) if node_step_map else 0
+        for i, coalesce_node_id in enumerate(graph.get_coalesce_id_map().values()):
+            node_step_map[coalesce_node_id] = max_step + 1 + i
         node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = {}
 
         for transform in config.transforms:
@@ -1454,7 +1458,6 @@ class Orchestrator:
                                 coalesce_node_map=coalesce_node_map,
                                 processor=processor,
                                 config_transforms=config.transforms,
-                                config_gates=config.gates,
                                 config_sinks=config.sinks,
                                 ctx=ctx,
                                 counters=counters,
@@ -1535,7 +1538,6 @@ class Orchestrator:
                             coalesce_node_map=coalesce_node_map,
                             processor=processor,
                             config_transforms=config.transforms,
-                            config_gates=config.gates,
                             config_sinks=config.sinks,
                             ctx=ctx,
                             counters=counters,
@@ -1612,6 +1614,7 @@ class Orchestrator:
                 ctx=ctx,
                 pending_tokens=pending_tokens,
                 sink_id_map=sink_id_map,
+                sink_step=processor.resolve_sink_step(),
                 on_token_written_factory=checkpoint_after_sink,
             )
 
@@ -2010,7 +2013,6 @@ class Orchestrator:
                         coalesce_node_map=coalesce_node_map,
                         processor=processor,
                         config_transforms=config.transforms,
-                        config_gates=config.gates,
                         config_sinks=config.sinks,
                         ctx=ctx,
                         counters=counters,
@@ -2039,7 +2041,6 @@ class Orchestrator:
                     coalesce_node_map=coalesce_node_map,
                     processor=processor,
                     config_transforms=config.transforms,
-                    config_gates=config.gates,
                     config_sinks=config.sinks,
                     ctx=ctx,
                     counters=counters,
@@ -2054,6 +2055,7 @@ class Orchestrator:
                 ctx=ctx,
                 pending_tokens=pending_tokens,
                 sink_id_map=sink_id_map,
+                sink_step=processor.resolve_sink_step(),
             )
 
         finally:

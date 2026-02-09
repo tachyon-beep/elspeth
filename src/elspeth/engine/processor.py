@@ -225,6 +225,14 @@ class RowProcessor:
             raise OrchestrationInvariantError(f"Node ID '{node_id}' missing from traversal step map")
         return self._node_step_map[node_id]
 
+    def resolve_sink_step(self) -> int:
+        """Resolve the audit step index for sink writes.
+
+        Sinks are always the last step in processing, after all transforms,
+        gates, aggregations, and coalesce nodes. Returns max(step_map) + 1.
+        """
+        return max(self._node_step_map.values()) + 1
+
     def _resolve_plugin_for_node(self, node_id: NodeID) -> TransformProtocol | GateProtocol | GateSettings | None:
         """Resolve the plugin/gate associated with a processing node."""
         if node_id in self._node_to_plugin:
@@ -235,8 +243,7 @@ class RowProcessor:
         """Resolve the next processing node from traversal metadata."""
         if node_id not in self._node_to_next:
             raise OrchestrationInvariantError(
-                f"Node ID '{node_id}' missing from traversal next-node map "
-                "(terminal nodes must have explicit None entries)"
+                f"Node ID '{node_id}' missing from traversal next-node map (terminal nodes must have explicit None entries)"
             )
         return self._node_to_next[node_id]
 
@@ -467,38 +474,6 @@ class RowProcessor:
         """
         return self._aggregation_executor.get_checkpoint_state()
 
-    def flush_aggregation_timeout(
-        self,
-        node_id: NodeID,
-        transform: TransformProtocol,
-        ctx: PluginContext,
-        step_in_pipeline: int,
-    ) -> tuple[TransformResult, list[TokenInfo], str | None]:
-        """Execute a timeout-triggered flush for an aggregation.
-
-        This is a public facade for orchestrator to flush timed-out aggregations
-        without directly accessing private _aggregation_executor.
-
-        Args:
-            node_id: The aggregation node ID
-            transform: The batch-aware transform to execute
-            ctx: Plugin context
-            step_in_pipeline: Position of this aggregation in the pipeline
-
-        Returns:
-            Tuple of (result, buffered_tokens, batch_id):
-            - result: TransformResult from batch processing
-            - buffered_tokens: List of tokens that were in the batch
-            - batch_id: The batch ID (for audit trail)
-        """
-        return self._aggregation_executor.execute_flush(
-            node_id=node_id,
-            transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
-            ctx=ctx,
-            step_in_pipeline=step_in_pipeline,
-            trigger_type=TriggerType.TIMEOUT,
-        )
-
     def handle_timeout_flush(
         self,
         node_id: NodeID,
@@ -675,6 +650,11 @@ class RowProcessor:
                     )
                 else:
                     # No more transforms and no coalesce - return COMPLETED
+                    if transform.on_success is None:
+                        raise OrchestrationInvariantError(
+                            f"Aggregation transform '{transform.name}' reached terminal position "
+                            f"but has no on_success configured. This is a DAG validation bug."
+                        )
                     results.append(
                         RowResult(
                             token=updated_token,
@@ -752,6 +732,11 @@ class RowProcessor:
                         )
                 else:
                     # No more transforms and no coalesce - return COMPLETED
+                    if transform.on_success is None:
+                        raise OrchestrationInvariantError(
+                            f"Aggregation transform '{transform.name}' reached terminal position "
+                            f"but has no on_success configured. This is a DAG validation bug."
+                        )
                     for token in expanded_tokens:
                         results.append(
                             RowResult(
@@ -989,6 +974,11 @@ class RowProcessor:
                     return ([], child_items)
                 else:
                     # No more transforms and no coalesce - return COMPLETED for all tokens
+                    if transform.on_success is None:
+                        raise OrchestrationInvariantError(
+                            f"Aggregation transform '{transform.name}' reached terminal position "
+                            f"but has no on_success configured. This is a DAG validation bug."
+                        )
                     passthrough_results: list[RowResult] = []
                     for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
@@ -1102,6 +1092,11 @@ class RowProcessor:
                     return (triggering_result, child_items)
                 else:
                     # No more transforms and no coalesce - return COMPLETED for expanded tokens
+                    if transform.on_success is None:
+                        raise OrchestrationInvariantError(
+                            f"Aggregation transform '{transform.name}' reached terminal position "
+                            f"but has no on_success configured. This is a DAG validation bug."
+                        )
                     output_results: list[RowResult] = [triggering_result]
                     for token in expanded_tokens:
                         output_results.append(
@@ -1381,9 +1376,7 @@ class RowProcessor:
         )
 
         if transforms and self._first_transform_node_id is None:
-            raise OrchestrationInvariantError(
-                "Traversal context is missing first_transform_node_id for non-empty transform pipeline"
-            )
+            raise OrchestrationInvariantError("Traversal context is missing first_transform_node_id for non-empty transform pipeline")
         initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
         return self._drain_work_queue(
             self._create_work_item(
@@ -1448,9 +1441,7 @@ class RowProcessor:
         )
 
         if transforms and self._first_transform_node_id is None:
-            raise OrchestrationInvariantError(
-                "Traversal context is missing first_transform_node_id for non-empty transform pipeline"
-            )
+            raise OrchestrationInvariantError("Traversal context is missing first_transform_node_id for non-empty transform pipeline")
         initial_node_id = self._first_transform_node_id if self._first_transform_node_id is not None else self._source_node_id
         return self._drain_work_queue(
             self._create_work_item(
@@ -1753,7 +1744,15 @@ class RowProcessor:
                 last_on_success_sink = coalesce_sink
 
         node_id: NodeID | None = current_node_id
+        max_inner_iterations = len(self._node_to_next) + 1
+        inner_iterations = 0
         while node_id is not None:
+            inner_iterations += 1
+            if inner_iterations > max_inner_iterations:
+                raise OrchestrationInvariantError(
+                    f"Inner traversal exceeded {max_inner_iterations} iterations for token "
+                    f"{token.token_id}. Possible cycle in node_to_next map."
+                )
             handled, result = self._maybe_coalesce_token(
                 current_token,
                 current_node_id=node_id,
@@ -2083,6 +2082,14 @@ class RowProcessor:
             if branch not in self._branch_to_coalesce:
                 # Fork child targeting a direct sink (not a coalesce branch)
                 effective_sink = current_token.branch_name
+
+        if not effective_sink or not effective_sink.strip():
+            raise OrchestrationInvariantError(
+                f"No effective sink for token {current_token.token_id}: "
+                f"last_on_success_sink={last_on_success_sink!r}, "
+                f"branch_name={current_token.branch_name!r}. "
+                f"This indicates a DAG construction or on_success configuration bug."
+            )
 
         return (
             RowResult(

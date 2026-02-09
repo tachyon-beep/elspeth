@@ -108,7 +108,7 @@ def _make_row_result(
     branch_name: str | None = None,
 ) -> RowResult:
     """Create a RowResult for outcome accumulation tests."""
-    if outcome in (RowOutcome.COMPLETED, RowOutcome.COALESCED) and sink_name is None:
+    if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) and sink_name is None:
         sink_name = "default"
     token = _make_token(branch_name=branch_name)
     return RowResult(
@@ -543,10 +543,16 @@ class TestAccumulateRowOutcomesProperties:
         assert len(pending["alerts"]) == 1
 
     def test_routed_without_sink_name_raises(self) -> None:
-        """Property: ROUTED without sink_name raises RuntimeError."""
-        result = _make_row_result(RowOutcome.ROUTED, sink_name=None)
-        with pytest.raises(RuntimeError, match="ROUTED outcome requires sink_name"):
-            self._run_accumulation([result])
+        """Property: ROUTED without sink_name raises at construction time."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        with pytest.raises(OrchestrationInvariantError, match="ROUTED outcome requires sink_name"):
+            RowResult(
+                token=_make_token(),
+                final_data={"field": "value"},
+                outcome=RowOutcome.ROUTED,
+                sink_name=None,
+            )
 
     def test_failed_increments_failed(self) -> None:
         """Property: FAILED outcome increments rows_failed."""

@@ -1262,8 +1262,8 @@ class TestExecutionGraphFromConfig:
         assert graph.get_next_node(sequence[0]) == sequence[1]
         assert graph.get_next_node(sequence[1]) is None
 
-    def test_build_step_map_matches_positional_scheme(self, plugin_manager) -> None:
-        """Step numbering must match legacy positional indexing."""
+    def test_build_step_map_matches_schema_contract(self, plugin_manager) -> None:
+        """Step numbering must satisfy Landscape DB schema contract (UniqueConstraint on token_id, step_index, attempt)."""
         from elspeth.contracts.types import GateName
         from elspeth.core.config import (
             ElspethSettings,
@@ -1327,11 +1327,6 @@ class TestExecutionGraphFromConfig:
             config_gate_map[GateName("g2")]: 5,
         }
         assert step_map == expected_step_map
-
-        inverse_transform_map = graph.get_inverse_transform_id_map()
-        assert inverse_transform_map[transform_map[0]] == 0
-        assert inverse_transform_map[transform_map[1]] == 1
-        assert inverse_transform_map[transform_map[2]] == 2
 
         sink_id = graph.get_sink_id_map()["output"]
         assert graph.is_sink_node(sink_id) is True
@@ -4057,3 +4052,496 @@ class TestDivertEdges:
         error_edges = [e for e in divert_edges if e.label.startswith("__error_")]
         assert len(error_edges) == 2
         assert {e.label for e in error_edges} == {"__error_0__", "__error_1__"}
+
+
+class TestTerminalGateContinueValidation:
+    """vxy0: Terminal gate with 'continue' route must be rejected.
+
+    A gate that is the last processing node in the pipeline cannot have a
+    'continue' route because there is no downstream node to continue to.
+    Terminal gates must route all paths to named sinks.
+
+    Error path: dag.py:998
+    """
+
+    def test_terminal_gate_with_continue_route_raises(self, plugin_manager) -> None:
+        """Terminal gate with 'continue' in routes raises GraphValidationError."""
+        from elspeth.core.config import (
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                GateSettings(
+                    name="threshold",
+                    condition="row['score'] > 0.5",
+                    routes={"true": "output", "false": "continue"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"continue.*last node"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_non_terminal_gate_with_continue_route_passes(self, plugin_manager) -> None:
+        """Non-terminal gate with 'continue' route builds successfully.
+
+        Config gates are positioned AFTER transforms in the pipeline. A gate is
+        non-terminal when another config gate follows it. The first gate's
+        'continue' route leads to the second gate.
+        """
+        from elspeth.core.config import (
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+                "flagged": SinkSettings(
+                    plugin="json",
+                    options={"path": "flagged.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                GateSettings(
+                    name="first_gate",
+                    condition="row['score'] > 0.5",
+                    routes={"true": "flagged", "false": "continue"},
+                ),
+                GateSettings(
+                    name="second_gate",
+                    condition="True",
+                    routes={"true": "output", "false": "output"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+
+class TestAggregationOnSuccessValidation:
+    """wp68: Aggregation on_success routing validation (3 error paths).
+
+    Three error paths in _validate_aggregation_on_success_routing:
+    - dag.py:210: Terminal aggregation missing on_success
+    - dag.py:217: Aggregation on_success references unknown sink
+    - dag.py:228: Non-terminal aggregation with on_success set
+    """
+
+    def test_terminal_aggregation_missing_on_success_raises(self, plugin_manager) -> None:
+        """Terminal aggregation without on_success raises GraphValidationError."""
+        from elspeth.core.config import (
+            AggregationSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TriggerConfig,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            aggregations=[
+                AggregationSettings(
+                    name="batch_stats",
+                    plugin="batch_stats",
+                    trigger=TriggerConfig(count=10),
+                    output_mode="transform",
+                    options={
+                        "value_field": "value",
+                        "schema": {"mode": "observed"},
+                        # No on_success — terminal aggregation must have it
+                    },
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"terminal.*no 'on_success'"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_terminal_aggregation_unknown_sink_raises(self, plugin_manager) -> None:
+        """Terminal aggregation on_success referencing unknown sink raises GraphValidationError."""
+        from elspeth.core.config import (
+            AggregationSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TriggerConfig,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            aggregations=[
+                AggregationSettings(
+                    name="batch_stats",
+                    plugin="batch_stats",
+                    trigger=TriggerConfig(count=10),
+                    output_mode="transform",
+                    options={
+                        "value_field": "value",
+                        "schema": {"mode": "observed"},
+                        "on_success": "nonexistent_sink",
+                    },
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"unknown sink 'nonexistent_sink'"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_non_terminal_aggregation_with_on_success_raises(self, plugin_manager) -> None:
+        """Non-terminal aggregation with on_success set raises GraphValidationError.
+
+        Pipeline order is: transforms -> aggregations -> config gates. A config
+        gate after the aggregation makes the aggregation non-terminal. Aggregation
+        must NOT declare on_success when it is not the last processing node.
+        """
+        from elspeth.core.config import (
+            AggregationSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+            TriggerConfig,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+                "flagged": SinkSettings(
+                    plugin="json",
+                    options={"path": "flagged.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            aggregations=[
+                AggregationSettings(
+                    name="batch_stats",
+                    plugin="batch_stats",
+                    trigger=TriggerConfig(count=10),
+                    output_mode="transform",
+                    options={
+                        "value_field": "value",
+                        "schema": {"mode": "observed"},
+                        "on_success": "output",
+                    },
+                ),
+            ],
+            gates=[
+                GateSettings(
+                    name="router",
+                    condition="True",
+                    routes={"true": "output", "false": "flagged"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"not terminal"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+
+class TestCoalesceOnSuccessValidation:
+    """xe91: Coalesce on_success routing validation (3 error paths).
+
+    Three error paths in coalesce wiring (dag.py:1081-1103):
+    - dag.py:1091: Terminal coalesce missing on_success
+    - dag.py:1082: Non-terminal coalesce with on_success set
+    - dag.py:1099: Coalesce on_success references unknown sink
+    """
+
+    def test_terminal_coalesce_missing_on_success_raises(self, plugin_manager) -> None:
+        """Terminal coalesce without on_success raises GraphValidationError."""
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "output"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                    # No on_success — terminal coalesce must have it
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"terminal.*no 'on_success'"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+                coalesce_settings=config.coalesce,
+            )
+
+    def test_non_terminal_coalesce_with_on_success_raises(self, plugin_manager) -> None:
+        """Non-terminal coalesce with on_success set raises GraphValidationError.
+
+        Coalesce terminality is determined by the fork gate's position. A second
+        config gate after the fork gate makes the fork gate (and thus the
+        coalesce) non-terminal. Non-terminal coalesce must NOT have on_success.
+        """
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+                "flagged": SinkSettings(
+                    plugin="json",
+                    options={"path": "flagged.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "output"},
+                    fork_to=["path_a", "path_b"],
+                ),
+                GateSettings(
+                    name="router",
+                    condition="True",
+                    routes={"true": "output", "false": "flagged"},
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                    on_success="output",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"not terminal"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+                coalesce_settings=config.coalesce,
+            )
+
+    def test_terminal_coalesce_unknown_sink_raises(self, plugin_manager) -> None:
+        """Coalesce on_success referencing unknown sink raises GraphValidationError."""
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "output",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "output"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                    on_success="nonexistent_sink",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"unknown sink 'nonexistent_sink'"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+                coalesce_settings=config.coalesce,
+            )

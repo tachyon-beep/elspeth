@@ -91,7 +91,7 @@ def _validate_on_success_routing(
     transforms: list[TransformProtocol],
     transform_ids: dict[int, NodeID],
     sink_ids: dict[SinkName, NodeID],
-    pipeline_nodes: list[NodeID],
+    next_in_pipeline: dict[NodeID, NodeID | None],
     graph: ExecutionGraph,
 ) -> None:
     """Validate and wire on_success routing for terminal transforms.
@@ -100,24 +100,14 @@ def _validate_on_success_routing(
     to explicitly route completed rows to a sink. Non-terminal transforms MUST
     NOT have on_success set.
 
-    **Terminality model:** A node is "terminal" when its positional index is the
-    last in ``pipeline_nodes`` (i.e. ``step + 1 == len(pipeline_nodes)``). This
-    is functionally equivalent to structural terminality (no outgoing ``continue``
-    edge) because ``from_plugin_instances()`` constructs a linear chain where each
-    node connects to the next. If DAG construction is ever extended to support
-    non-linear topologies (e.g. conditional bypasses, diamond merges without
-    coalesce), this positional check MUST be replaced with a structural graph
-    query such as ``not any(graph.successors(node_id, label="continue"))``.
-    The same assumption applies to ``_validate_aggregation_on_success_routing``,
-    the coalesce terminal check, and the gate terminal check in
-    ``from_plugin_instances()``.
+    Terminality is determined structurally: a node is terminal when
+    ``next_in_pipeline[node_id] is None`` (no downstream processing node).
 
     Args:
         transforms: Ordered list of transform instances (includes plugin gates)
         transform_ids: Mapping from transform index to node ID
         sink_ids: Mapping from sink name to node ID
-        pipeline_nodes: Ordered list of processing node IDs (transforms,
-            aggregations, then config gates)
+        next_in_pipeline: Maps each pipeline node to its successor (None for terminal)
         graph: The graph being constructed
 
     Raises:
@@ -131,17 +121,13 @@ def _validate_on_success_routing(
     if not transforms:
         return
 
-    pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
-
     for i, transform in enumerate(transforms):
         # Skip plugin gates — they route via routes dict, not on_success
         if isinstance(transform, GateProtocol):
             continue
 
         transform_node_id = transform_ids[i]
-        transform_step = pipeline_index[transform_node_id]
-        # Positional terminality — see docstring above for assumptions.
-        is_terminal = transform_step + 1 == len(pipeline_nodes)
+        is_terminal = next_in_pipeline[transform_node_id] is None
 
         on_success = transform.on_success
 
@@ -183,7 +169,7 @@ def _validate_aggregation_on_success_routing(
     aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
     aggregation_ids: dict[AggregationName, NodeID],
     sink_ids: dict[SinkName, NodeID],
-    pipeline_nodes: list[NodeID],
+    next_in_pipeline: dict[NodeID, NodeID | None],
     graph: ExecutionGraph,
 ) -> None:
     """Validate and wire on_success routing for aggregation nodes.
@@ -195,14 +181,9 @@ def _validate_aggregation_on_success_routing(
     if not aggregations:
         return
 
-    pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
-
     for agg_name, (transform, _agg_settings) in aggregations.items():
         agg_id = aggregation_ids[AggregationName(agg_name)]
-        agg_step = pipeline_index[agg_id]
-        # Positional terminality — see docstring on _validate_on_success_routing
-        # for assumptions and migration path to structural terminality.
-        is_terminal = agg_step + 1 == len(pipeline_nodes)
+        is_terminal = next_in_pipeline[agg_id] is None
         on_success = transform.on_success
 
         if is_terminal:
@@ -530,10 +511,6 @@ class ExecutionGraph:
 
         self._node_step_map = dict(step_map)
         return dict(step_map)
-
-    def get_inverse_transform_id_map(self) -> dict[NodeID, int]:
-        """Get inverse mapping of transform node ID -> transform index."""
-        return {node_id: index for index, node_id in self._transform_id_map.items()}
 
     def get_nodes(self) -> list[NodeInfo]:
         """Get all nodes as NodeInfo objects.
@@ -953,6 +930,11 @@ class ExecutionGraph:
         # ===== COMPUTE COALESCE INSERTION POINTS =====
         # Coalesce continues after the latest gate that produces any of its branches.
         pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
+        # Structural next-node map: each pipeline node maps to its successor (None for terminal).
+        # Replaces positional arithmetic (step+1==len, idx+1<len) with direct lookup.
+        next_in_pipeline: dict[NodeID, NodeID | None] = {}
+        for idx, node_id in enumerate(pipeline_nodes):
+            next_in_pipeline[node_id] = pipeline_nodes[idx + 1] if idx + 1 < len(pipeline_nodes) else None
         coalesce_gate_index: dict[CoalesceName, int] = {}
         if coalesce_settings:
             for gate_entry in gate_entries:
@@ -985,14 +967,8 @@ class ExecutionGraph:
             has_continue_route = any(target == "continue" for target in gate_entry.routes.values())
 
             if has_continue_route:
-                # Determine next node in chain.
-                # Positional terminality — see docstring on
-                # _validate_on_success_routing for assumptions and
-                # migration path to structural terminality.
-                gate_idx = pipeline_index[gate_entry.node_id]
-                if gate_idx + 1 < len(pipeline_nodes):
-                    next_node_id = pipeline_nodes[gate_idx + 1]
-                else:
+                next_node_id = next_in_pipeline[gate_entry.node_id]
+                if next_node_id is None:
                     # Terminal gate with "continue" route is a configuration error.
                     # Gates must route to named sinks — use explicit route targets.
                     raise GraphValidationError(
@@ -1009,8 +985,8 @@ class ExecutionGraph:
         # Terminal transforms (last in chain before sinks) must declare on_success.
         # This replaces the old default_sink fallback with explicit routing.
         # Non-terminal transforms MUST NOT have on_success set.
-        _validate_on_success_routing(transforms, transform_ids, sink_ids, pipeline_nodes, graph)
-        _validate_aggregation_on_success_routing(aggregations, aggregation_ids, sink_ids, pipeline_nodes, graph)
+        _validate_on_success_routing(transforms, transform_ids, sink_ids, next_in_pipeline, graph)
+        _validate_aggregation_on_success_routing(aggregations, aggregation_ids, sink_ids, next_in_pipeline, graph)
 
         # ===== ADD DIVERT EDGES (quarantine/error sinks) =====
         # Divert edges represent error/quarantine data flows that bypass the
@@ -1072,11 +1048,12 @@ class ExecutionGraph:
             for coalesce_config in coalesce_settings:
                 coalesce_name = CoalesceName(coalesce_config.name)
                 coalesce_id = coalesce_ids[coalesce_name]
+                # Coalesce continues after its producing fork gate.
                 gate_idx = coalesce_gate_index[coalesce_name]
-                # Positional terminality — see docstring on
-                # _validate_on_success_routing for assumptions and
-                # migration path to structural terminality.
-                if gate_idx + 1 < len(pipeline_nodes):
+                producing_gate_node = pipeline_nodes[gate_idx]
+                coalesce_next = next_in_pipeline[producing_gate_node]
+
+                if coalesce_next is not None:
                     # Non-terminal coalesce: continue to next pipeline node
                     if coalesce_config.on_success is not None:
                         raise GraphValidationError(
@@ -1084,8 +1061,7 @@ class ExecutionGraph:
                             f"'{coalesce_config.on_success}', but it is not terminal. "
                             "Only terminal coalesce nodes may declare on_success."
                         )
-                    next_node_id = pipeline_nodes[gate_idx + 1]
-                    graph.add_edge(coalesce_id, next_node_id, label="continue", mode=RoutingMode.MOVE)
+                    graph.add_edge(coalesce_id, coalesce_next, label="continue", mode=RoutingMode.MOVE)
                 else:
                     # Terminal coalesce: must have on_success
                     if coalesce_config.on_success is None:

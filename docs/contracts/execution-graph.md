@@ -159,7 +159,6 @@ def from_plugin_instances(
     sinks: dict[str, SinkProtocol],
     aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
     gates: list[GateSettings],
-    default_sink: str,
     coalesce_settings: list[CoalesceSettings] | None = None,
 ) -> ExecutionGraph
 ```
@@ -264,7 +263,7 @@ Phase 4: Structural Validation (called externally by orchestrator)
 
 **Gate continue routes:**
 - `"continue"` label routes to the next node in the pipeline chain
-- If the gate is the last gate, `"continue"` routes to `default_sink`
+- If the gate is the last gate, `"continue"` routes to the sink specified by the source or terminal transform's `on_success` option
 
 **DIVERT edges** (structural error/quarantine routing):
 - Source `on_validation_failure` → quarantine sink (if not `"discard"`)
@@ -291,7 +290,6 @@ The `ExecutionGraph` maintains several lookup maps for O(1) access during execut
 | `_route_label_map` | `dict[tuple[NodeID, str], str]` | (gate, sink_name) → route_label |
 | `_route_resolution_map` | `dict[tuple[NodeID, str], str]` | (gate, label) → "continue" or sink_name |
 | `_coalesce_gate_index` | `dict[CoalesceName, int]` | Coalesce name → producing gate pipeline index |
-| `_default_sink` | `str` | Default output sink name |
 
 ---
 
@@ -493,7 +491,7 @@ While work queue is not empty:
     │   └── SinkExecutor.execute_sink(token, sink_name)
     │
     └── If no routing (fell through transforms):
-        └── Route to default_sink
+        └── Route to sink specified by source or terminal transform's on_success option
 
 Iteration guard: MAX_WORK_QUEUE_ITERATIONS = 10,000
 ```
@@ -618,7 +616,6 @@ All map accessors return copies to prevent external mutation of graph state.
 | `get_coalesce_id_map()` | `dict[CoalesceName, NodeID]` | Coalesce name → node ID |
 | `get_branch_to_coalesce_map()` | `dict[BranchName, CoalesceName]` | Fork branch → coalesce destination |
 | `get_coalesce_gate_index()` | `dict[CoalesceName, int]` | Coalesce → producing gate pipeline index |
-| `get_default_sink()` | `str` | Default output sink name |
 
 ### Routing Queries
 

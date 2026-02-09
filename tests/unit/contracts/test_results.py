@@ -357,6 +357,39 @@ class TestRowResult:
         assert result.outcome == RowOutcome.ROUTED
         assert result.sink_name == "flagged"
 
+    def test_routed_without_sink_name_raises(self) -> None:
+        """ROUTED outcome requires sink_name."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        with pytest.raises(OrchestrationInvariantError, match="ROUTED outcome requires sink_name"):
+            RowResult(
+                token=token,
+                final_data={"x": 1},
+                outcome=RowOutcome.ROUTED,
+            )
+
+    def test_coalesced_without_sink_name_raises(self) -> None:
+        """COALESCED outcome requires sink_name."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        with pytest.raises(OrchestrationInvariantError, match="COALESCED outcome requires sink_name"):
+            RowResult(
+                token=token,
+                final_data={"x": 1},
+                outcome=RowOutcome.COALESCED,
+            )
+
+    def test_coalesced_with_sink_name(self) -> None:
+        """COALESCED outcome accepts sink_name."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        result = RowResult(
+            token=token,
+            final_data={"x": 1},
+            outcome=RowOutcome.COALESCED,
+            sink_name="output",
+        )
+
+        assert result.outcome == RowOutcome.COALESCED
+        assert result.sink_name == "output"
+
 
 class TestArtifactDescriptor:
     """Tests for ArtifactDescriptor."""

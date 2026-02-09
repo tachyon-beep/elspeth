@@ -159,7 +159,14 @@ def build_production_graph(
 
                 return TransformResult.success(row, success_reason={"action": "test"})
 
-        aggregations[agg_name] = (_AggTransform(), agg_settings)  # type: ignore[assignment]
+        agg_transform = _AggTransform()
+        # Propagate on_success from aggregation options to the transform instance
+        # (production code does this during plugin instantiation; test infrastructure
+        # must replicate the wiring since it creates transforms directly)
+        on_success = agg_settings.options.get("on_success")
+        if on_success:
+            agg_transform._on_success = on_success
+        aggregations[agg_name] = (agg_transform, agg_settings)  # type: ignore[assignment]
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,

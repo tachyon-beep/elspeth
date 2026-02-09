@@ -16,6 +16,7 @@ aggregations:
     count: 5
   output_mode: passthrough
   options:
+    on_success: output
     api_key: ${OPENROUTER_API_KEY}
     model: openai/gpt-4o-mini
     template: 'Analyze the sentiment of the following text and respond with ONLY a JSON object.

@@ -283,6 +283,7 @@ transforms:
         fields: dynamic
       mappings:
         old_name: new_name
+      on_success: results
 
 gates:
   - name: quality_gate
@@ -290,8 +291,6 @@ gates:
     routes:
       "true": continue
       "false": flagged
-
-default_sink: results
 
 landscape:
   url: sqlite:///./audit.db

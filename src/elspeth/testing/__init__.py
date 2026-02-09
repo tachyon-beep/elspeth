@@ -494,16 +494,18 @@ def make_row_result(
 ) -> RowResult:
     """Build a RowResult (final row outcome).
 
-    COMPLETED outcomes require sink_name (enforced by RowResult.__post_init__).
-    Defaults to "default" for COMPLETED when not explicitly provided.
+    COMPLETED, ROUTED, and COALESCED outcomes require sink_name
+    (enforced by RowResult.__post_init__).
+    Defaults to "default" when not explicitly provided for these outcomes.
     """
     from elspeth.contracts.enums import RowOutcome
     from elspeth.contracts.results import RowResult
 
     resolved_outcome = outcome or RowOutcome.COMPLETED
-    # COMPLETED requires sink_name — default to "default" for test convenience
+    # Sink-targeting outcomes require sink_name — default for test convenience
+    _SINK_OUTCOMES = {RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED}
     resolved_sink_name = sink_name
-    if resolved_outcome == RowOutcome.COMPLETED and resolved_sink_name is None:
+    if resolved_outcome in _SINK_OUTCOMES and resolved_sink_name is None:
         resolved_sink_name = "default"
 
     token = make_token_info()

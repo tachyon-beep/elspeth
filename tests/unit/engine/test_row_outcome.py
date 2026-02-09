@@ -28,7 +28,7 @@ class TestRowResultOutcome:
 
         # Iterate over ALL enum members - not a hardcoded subset
         for outcome in RowOutcome:
-            sink_name = "output" if outcome == RowOutcome.COMPLETED else None
+            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
             result = RowResult(
                 token=token,
                 final_data={},
@@ -43,7 +43,7 @@ class TestRowResultOutcome:
         token = TokenInfo(row_id="r1", token_id="t1", row_data=make_pipeline_row({}), branch_name=None)
 
         for outcome in RowOutcome:
-            sink_name = "output" if outcome == RowOutcome.COMPLETED else None
+            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
             result = RowResult(token=token, final_data={}, outcome=outcome, sink_name=sink_name)
             # Use 'is' to verify identity, not just value equality
             assert result.outcome is outcome
@@ -91,7 +91,7 @@ class TestRowResultOutcome:
         ]
 
         for outcome in terminal_outcomes:
-            sink_name = "output" if outcome == RowOutcome.COMPLETED else None
+            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
             result = RowResult(token=token, final_data={}, outcome=outcome, sink_name=sink_name)
             assert result.outcome.is_terminal is True
 
