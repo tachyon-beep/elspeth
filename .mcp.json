@@ -3,15 +3,6 @@
     "elspeth-landscape": {
       "command": "elspeth-mcp",
       "args": []
-    },
-    "keel": {
-      "type": "stdio",
-      "command": "/home/john/elspeth-rapid/.venv/bin/keel-mcp",
-      "args": [
-        "--project",
-        "/home/john/elspeth-rapid"
-      ],
-      "env": {}
     }
   }
 }
