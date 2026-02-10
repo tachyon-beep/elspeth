@@ -225,6 +225,7 @@ class RowProcessor:
         self._coalesce_name_by_node_id: dict[NodeID, CoalesceName] = {
             node_id: coalesce_name for coalesce_name, node_id in self._coalesce_node_ids.items()
         }
+        self._structural_node_ids: frozenset[NodeID] = frozenset(nid for nid in self._node_to_next if nid not in self._node_to_plugin)
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
         self._branch_to_sink: dict[BranchName, SinkName] = branch_to_sink or {}
         overlap = set(self._branch_to_coalesce.keys()) & set(self._branch_to_sink.keys())
@@ -322,13 +323,20 @@ class RowProcessor:
 
         Returns None for structural nodes (e.g. coalesce points) that exist in
         the DAG traversal but have no plugin to execute. The caller skips these
-        nodes and continues to the next processing node. This is intentional —
-        unlike _resolve_next_node_for_processing (which crashes on unknown nodes),
-        a None return here means "valid node, no plugin work needed."
+        nodes and continues to the next processing node.
+
+        Raises OrchestrationInvariantError for unknown nodes that are neither
+        plugin-bearing nor structural — this would indicate a graph construction bug.
         """
         if node_id in self._node_to_plugin:
             return self._node_to_plugin[node_id]
-        return None
+        if node_id in self._structural_node_ids:
+            return None
+        raise OrchestrationInvariantError(
+            f"Node ID '{node_id}' is neither a plugin node nor a known structural node (coalesce). "
+            f"Plugin nodes: {sorted(self._node_to_plugin.keys())}, "
+            f"structural nodes: {sorted(self._structural_node_ids)}"
+        )
 
     def _resolve_next_node_for_processing(self, node_id: NodeID) -> NodeID | None:
         """Resolve the next processing node from traversal metadata."""

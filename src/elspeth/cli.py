@@ -422,13 +422,12 @@ def run(
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
-    except ValueError as e:
-        # Schema compatibility errors raised during graph construction (PHASE 2)
-        # Updated for Task 4: Schema validation moved to construction time
-        typer.echo(f"Schema validation error: {e}", err=True)
-        raise typer.Exit(1) from None
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        # Schema compatibility errors raised during graph construction (PHASE 2)
+        typer.echo(f"Schema validation error: {e}", err=True)
         raise typer.Exit(1) from None
 
     # Console-only messages (don't emit in JSON mode to keep stream clean)
@@ -981,19 +980,19 @@ def validate(
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
+    except GraphValidationError as e:
+        _format_validation_error(
+            title="Pipeline Graph Error",
+            message=str(e),
+            hint="Check for cycles, missing sinks, or invalid routing.",
+        )
+        raise typer.Exit(1) from None
     except ValueError as e:
         # Schema compatibility errors raised during graph construction
         _format_validation_error(
             title="Schema Validation Error",
             message=str(e),
             hint="Ensure upstream nodes provide fields required by downstream nodes.",
-        )
-        raise typer.Exit(1) from None
-    except GraphValidationError as e:
-        _format_validation_error(
-            title="Pipeline Graph Error",
-            message=str(e),
-            hint="Check for cycles, missing sinks, or invalid routing.",
         )
         raise typer.Exit(1) from None
 

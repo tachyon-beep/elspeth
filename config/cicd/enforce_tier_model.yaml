@@ -152,7 +152,7 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R6:_normalize_value:fp=8ef8fcd777ae4ddf
+- key: core/canonical.py:R6:_normalize_value:fp=923db5911422d223
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -467,72 +467,72 @@ allow_hits:
   reason: Contract resolution attempt - KeyError means field not in contract, handled as unresolved
   safety: Returns explicit resolved=False state, never silently drops - legitimate boundary handling
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=b40305f2a4c95243
+- key: core/canonical.py:R5:_normalize_value:fp=4438a2dca309b0e4
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=d097732d7e19e600
+- key: core/canonical.py:R5:_normalize_value:fp=b3b08971ab21da73
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=a07e49d3a99eb425
+- key: core/canonical.py:R5:_normalize_value:fp=ac1eff91067e1362
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=d273c00e914f4675
+- key: core/canonical.py:R5:_normalize_value:fp=fdbea316446915ea
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=25263724f0ed5aa5
+- key: core/canonical.py:R5:_normalize_value:fp=4c37c2fbe4a1e437
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=36ee3c1a855d74b5
+- key: core/canonical.py:R5:_normalize_value:fp=ba832051b0f05ffa
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=2eec034d080cdca1
+- key: core/canonical.py:R5:_normalize_value:fp=5defca57b6f14588
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=2fc596ea6a6d848c
+- key: core/canonical.py:R5:_normalize_value:fp=6c03cfe4e1d280e2
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=a33b825cdbdf307b
+- key: core/canonical.py:R5:_normalize_value:fp=7d2fa7f6ababc6e3
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=5d42d4dc61674323
+- key: core/canonical.py:R5:_normalize_value:fp=db74ac7dfb931f94
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_value:fp=848a6c78692ac91c
+- key: core/canonical.py:R5:_normalize_value:fp=9192ead0b8da55e0
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/canonical.py:R5:_normalize_for_canonical:fp=67673a677c3127f2
+- key: core/canonical.py:R5:_normalize_for_canonical:fp=911ce3668bec91c9
   owner: P1-2026-02-05-typecheck
   reason: PipelineRow type detection for canonical JSON serialization after mypy typecheck
   safety: isinstance() required to convert PipelineRow to dict for RFC8785 compliance
   expires: null
-- key: core/canonical.py:R5:_normalize_for_canonical:fp=6528210ee55b1344
+- key: core/canonical.py:R5:_normalize_for_canonical:fp=df91b2f539004403
   owner: P1-2026-02-05-typecheck
   reason: Dict type detection for canonical JSON serialization after mypy typecheck
   safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
   expires: null
-- key: core/canonical.py:R5:_normalize_for_canonical:fp=08b99fa8c7162ddb
+- key: core/canonical.py:R5:_normalize_for_canonical:fp=99775927d0fcf089
   owner: P1-2026-02-05-typecheck
   reason: List/tuple type detection for canonical JSON serialization after mypy typecheck
   safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
@@ -1519,62 +1519,67 @@ allow_hits:
   reason: Protocol dispatch - isinstance for GateSettings type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=6e0cfc3879ec14bc
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=0dc6d04e8880e523
   owner: architecture
   reason: Framework-boundary type narrowing for mixed transform and gate plugin lists
   safety: Raises on incompatible plugin behavior; no silent fallback
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=d5ffb7eabc91845d
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=9795be30dfab13e0
   owner: architecture
   reason: Gate vs transform dispatch for unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=b1afa822e52b9ba2
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=1d54c7267c9e38c0
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
   safety: Missing metadata is handled as None; core schema enforcement still validates edges
   expires: '2026-03-10'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=b3167081c993daeb
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=5fae03b9ab5c4ffa
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select aggregation plugins
   safety: Missing metadata is handled as None; aggregation schemas still validated via contracts
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=11afdd4bd8aa7c7f
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=abcf189d4af05d23
   owner: architecture
   reason: Gate plugin exclusion for terminal on_success sink wiring requires explicit type narrowing
   safety: Routing config remains validated and errors are explicit
   expires: '2026-03-10'
-- key: core/dag.py:R8:ExecutionGraph:from_plugin_instances:fp=de78f7b9fe101113
+- key: core/dag.py:R8:ExecutionGraph:from_plugin_instances:fp=f685ef50f538f3f6
   owner: architecture
   reason: setdefault used for route-label grouping while building gate continue-route diagnostics
   safety: Grouping is deterministic and validated before runtime routing
   expires: '2026-03-10'
-- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=cf7267ebc8b07d87
+- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=774e1c8ec82db2d1
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=d4a8dcf4b17775b6
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=c5f0c5799f15aa20
   owner: architecture
   reason: Gate plugin exclusion for transform on_error divert-edge wiring requires explicit type narrowing
   safety: Only non-gate transforms are eligible for on_error; invalid use fails validation
   expires: '2026-03-10'
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=6ad33187820a4320
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=c2eddb4e8650382c
+  owner: architecture
+  reason: Gate protocol dispatch for MappingProxyType config freeze requires isinstance narrowing
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-10'
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=459cacc5e745dc40
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=76248ffde21d80bd
+- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=5b43b3da169508c7
   owner: architecture
   reason: Runtime shape check before coercing schema dict to SchemaConfig
   safety: Non-dict payloads are rejected and converted to explicit validation failures
   expires: '2026-03-10'
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=ca9d5b32e24b67a5
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=a0709616baa7dc8e
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=91555c5ddabbdaaf
+- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=a861fff774b8c58b
   owner: architecture
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced

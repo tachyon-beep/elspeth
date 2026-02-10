@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import math
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -138,7 +139,7 @@ def _normalize_for_canonical(data: Any) -> Any:
     if isinstance(data, PipelineRow):
         data = data.to_dict()
 
-    if isinstance(data, dict):
+    if isinstance(data, Mapping):
         return {k: _normalize_for_canonical(v) for k, v in data.items()}
     if isinstance(data, list | tuple):
         return [_normalize_for_canonical(v) for v in data]

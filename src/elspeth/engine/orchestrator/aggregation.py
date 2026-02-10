@@ -251,6 +251,11 @@ def check_aggregation_timeouts(
                     rows_routed += 1
                     routed_sink = cast(str, result.sink_name)
                     routed_destinations[routed_sink] += 1
+                    if routed_sink not in pending_tokens:
+                        raise OrchestrationInvariantError(
+                            f"Routed sink '{routed_sink}' not in configured sinks. "
+                            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                        )
                     pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                 elif result.outcome == RowOutcome.QUARANTINED:
                     rows_quarantined += 1
@@ -258,6 +263,11 @@ def check_aggregation_timeouts(
                     sink_name = cast(str, result.sink_name)
                     rows_coalesced += 1
                     rows_succeeded += 1
+                    if sink_name not in pending_tokens:
+                        raise OrchestrationInvariantError(
+                            f"Coalesced sink '{sink_name}' not in configured sinks. "
+                            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                        )
                     pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                 elif result.outcome == RowOutcome.FORKED:
                     rows_forked += 1
@@ -377,6 +387,11 @@ def flush_remaining_aggregation_buffers(
                     rows_routed += 1
                     routed_sink = cast(str, result.sink_name)
                     routed_destinations[routed_sink] += 1
+                    if routed_sink not in pending_tokens:
+                        raise OrchestrationInvariantError(
+                            f"Routed sink '{routed_sink}' not in configured sinks. "
+                            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                        )
                     pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                     if checkpoint_callback is not None:
                         checkpoint_callback(result.token)
@@ -386,6 +401,11 @@ def flush_remaining_aggregation_buffers(
                     sink_name = cast(str, result.sink_name)
                     rows_coalesced += 1
                     rows_succeeded += 1
+                    if sink_name not in pending_tokens:
+                        raise OrchestrationInvariantError(
+                            f"Coalesced sink '{sink_name}' not in configured sinks. "
+                            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                        )
                     pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                     if checkpoint_callback is not None:
                         checkpoint_callback(result.token)

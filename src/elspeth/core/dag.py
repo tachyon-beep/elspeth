@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 import networkx as nx
@@ -104,8 +105,8 @@ class _GateEntry:
 
     node_id: NodeID
     name: str
-    fork_to: list[str] | None
-    routes: dict[str, str]
+    fork_to: tuple[str, ...] | None
+    routes: MappingProxyType[str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,7 +267,7 @@ class ExecutionGraph:
 
         # Check for exactly one source
         # All nodes have "info" - added via add_node(), direct access is safe
-        sources = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "source"]
+        sources = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.SOURCE]
         if len(sources) != 1:
             raise GraphValidationError(f"Graph must have exactly one source, found {len(sources)}")
 
@@ -329,7 +330,7 @@ class ExecutionGraph:
             The source node ID, or None if not exactly one source exists.
         """
         # All nodes have "info" - added via add_node(), direct access is safe
-        sources = [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "source"]
+        sources = [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.SOURCE]
         return sources[0] if len(sources) == 1 else None
 
     def get_sinks(self) -> list[NodeID]:
@@ -339,7 +340,7 @@ class ExecutionGraph:
             List of sink node IDs.
         """
         # All nodes have "info" - added via add_node(), direct access is safe
-        return [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "sink"]
+        return [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.SINK]
 
     def get_node_info(self, node_id: str) -> NodeInfo:
         """Get NodeInfo for a node.
@@ -366,7 +367,7 @@ class ExecutionGraph:
         """
         for node_id, attrs in self._graph.nodes(data=True):
             info = cast(NodeInfo, attrs["info"])
-            if info.node_type != "gate":
+            if info.node_type != NodeType.GATE:
                 continue
 
             routes = cast(dict[str, str], info.config["routes"])
@@ -433,7 +434,7 @@ class ExecutionGraph:
 
     def is_sink_node(self, node_id: NodeID) -> bool:
         """Check if a node is a sink node."""
-        return self.get_node_info(node_id).node_type == "sink"
+        return self.get_node_info(node_id).node_type == NodeType.SINK
 
     def get_first_transform_node(self) -> NodeID | None:
         """Get the first processing node after source via continue edge.
@@ -722,8 +723,8 @@ class ExecutionGraph:
                     _GateEntry(
                         node_id=tid,
                         name=gate.name,
-                        fork_to=list(gate.fork_to) if gate.fork_to is not None else None,
-                        routes=dict(gate.routes),
+                        fork_to=tuple(gate.fork_to) if gate.fork_to is not None else None,
+                        routes=MappingProxyType(dict(gate.routes)),
                     )
                 )
 
@@ -813,8 +814,8 @@ class ExecutionGraph:
                 _GateEntry(
                     node_id=gid,
                     name=gate_config.name,
-                    fork_to=list(gate_config.fork_to) if gate_config.fork_to is not None else None,
-                    routes=dict(gate_config.routes),
+                    fork_to=tuple(gate_config.fork_to) if gate_config.fork_to is not None else None,
+                    routes=MappingProxyType(dict(gate_config.routes)),
                 )
             )
 
@@ -1294,6 +1295,15 @@ class ExecutionGraph:
         # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
         graph.validate_edge_compatibility()
 
+        # Freeze all NodeInfo configs now that schema resolution is complete.
+        # NodeInfo is frozen=True so we use object.__setattr__ to replace the
+        # mutable dict with an immutable MappingProxyType.  This prevents
+        # accidental mutation of node configs after graph construction.
+        for _, attrs in graph._graph.nodes(data=True):
+            info = attrs["info"]
+            if isinstance(info.config, dict):
+                object.__setattr__(info, "config", MappingProxyType(info.config))
+
         # Step maps and node sequence support node_id-based processor traversal.
         graph._pipeline_nodes = list(pipeline_nodes)
         graph._node_step_map = graph.build_step_map()
@@ -1447,7 +1457,7 @@ class ExecutionGraph:
             self._validate_single_edge(from_id, to_id)
 
         # Validate all coalesce nodes (must have compatible schemas from all branches)
-        coalesce_nodes = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "coalesce"]
+        coalesce_nodes = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.COALESCE]
         for coalesce_id in coalesce_nodes:
             self._validate_coalesce_compatibility(coalesce_id)
 
@@ -1473,12 +1483,12 @@ class ExecutionGraph:
 
         # Skip edge validation for coalesce nodes - they have special validation
         # that checks all incoming branches together
-        if to_info.node_type == "coalesce":
+        if to_info.node_type == NodeType.COALESCE:
             return
 
         # Rule 0: Gates must preserve schema (input == output)
         if (
-            to_info.node_type == "gate"
+            to_info.node_type == NodeType.GATE
             and to_info.input_schema is not None
             and to_info.output_schema is not None
             and to_info.input_schema != to_info.output_schema
@@ -1563,7 +1573,7 @@ class ExecutionGraph:
             return node_info.output_schema
 
         # Node has no schema - check if it's a pass-through type (gate or coalesce)
-        if node_info.node_type in ("gate", "coalesce"):
+        if node_info.node_type in (NodeType.GATE, NodeType.COALESCE):
             # Pass-through nodes inherit schema from upstream producers
             incoming = list(self._graph.in_edges(node_id, data=True))
 
@@ -1813,10 +1823,10 @@ class ExecutionGraph:
             return frozenset(required_input)
 
         # For aggregation nodes, also check inside "options" where transform config is nested
-        if node_info.node_type == "aggregation":
+        if node_info.node_type == NodeType.AGGREGATION:
             options = node_info.config["options"]
             if not isinstance(options, dict):
-                raise TypeError(f"Aggregation node config 'options' must be dict, got {type(options).__name__}")
+                raise GraphValidationError(f"Aggregation node config 'options' must be dict, got {type(options).__name__}")
             if "required_input_fields" in options:
                 required_input = options["required_input_fields"]
                 if required_input is not None and len(required_input) > 0:
@@ -1861,7 +1871,7 @@ class ExecutionGraph:
         # Gates ALWAYS inherit from upstream - they don't compute schemas.
         # Their raw config["schema"] may miss computed guarantees from upstream's
         # output_schema_config (e.g., LLM *_usage fields).
-        if node_info.node_type == "gate":
+        if node_info.node_type == NodeType.GATE:
             incoming = list(self._graph.in_edges(node_id, data=True))
             if not incoming:
                 return frozenset()
@@ -1869,7 +1879,7 @@ class ExecutionGraph:
             return self._get_effective_guaranteed_fields(incoming[0][0])
 
         # Coalesce nodes return intersection of branch guarantees
-        if node_info.node_type == "coalesce":
+        if node_info.node_type == NodeType.COALESCE:
             incoming = list(self._graph.in_edges(node_id, data=True))
             if not incoming:
                 return frozenset()
