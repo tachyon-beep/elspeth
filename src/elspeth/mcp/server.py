@@ -2574,16 +2574,12 @@ Environment Variables:
 
         database_url = f"sqlite:///{db_path}"
 
-    # SQLCipher passphrase from environment — only applies to SQLite backends.
-    # Non-SQLite URLs (e.g. postgresql://) ignore the key even if it's set
-    # in the environment for other ELSPETH commands.
-    passphrase: str | None = None
-    if database_url.startswith("sqlite"):
-        passphrase = os.environ.get("ELSPETH_AUDIT_KEY")
-
+    # No passphrase — the MCP server is an ad-hoc analysis tool with no
+    # settings file.  Without explicit backend=sqlcipher config, passing a
+    # passphrase to a plain SQLite database causes "file is not a database".
     import asyncio
 
-    asyncio.run(run_server(database_url, passphrase=passphrase))
+    asyncio.run(run_server(database_url, passphrase=None))
 
 
 if __name__ == "__main__":

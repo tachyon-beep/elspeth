@@ -613,10 +613,10 @@ def explain(
             settings_for_passphrase = load_settings(settings_path)
             landscape_settings = settings_for_passphrase.landscape
         except Exception:
-            pass  # Fall through to opportunistic ELSPETH_AUDIT_KEY lookup
+            pass  # No settings available — passphrase will be None
 
     try:
-        passphrase = resolve_audit_passphrase(landscape_settings, database_url=db_url)
+        passphrase = resolve_audit_passphrase(landscape_settings)
     except RuntimeError as e:
         if json_output:
             typer.echo(json_module.dumps({"error": str(e)}))
@@ -1265,7 +1265,7 @@ def purge(
     from elspeth.cli_helpers import resolve_audit_passphrase
 
     try:
-        passphrase = resolve_audit_passphrase(config.landscape if config else None, database_url=db_url)
+        passphrase = resolve_audit_passphrase(config.landscape if config else None)
     except RuntimeError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None

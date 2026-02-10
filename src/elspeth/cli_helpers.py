@@ -173,8 +173,6 @@ def resolve_run_id(run_id: str, recorder: "LandscapeRecorder") -> str | None:
 
 def resolve_audit_passphrase(
     settings: "LandscapeSettings | None",
-    *,
-    database_url: str | None = None,
 ) -> str | None:
     """Resolve the SQLCipher passphrase from the environment.
 
@@ -182,13 +180,14 @@ def resolve_audit_passphrase(
     files or URLs) to prevent it from appearing in logs, tracebacks, or the audit
     trail itself.
 
+    When settings is None (e.g. ad-hoc CLI access via ``--database``), returns
+    None — encryption requires explicit ``backend: sqlcipher`` configuration.
+    This prevents ELSPETH_AUDIT_KEY from accidentally opening plain SQLite
+    databases through SQLCipher.
+
     Args:
-        settings: LandscapeSettings if available (determines which env var to read).
-            If None, attempts opportunistic lookup using the default env var.
-        database_url: Target database URL. When settings is None, the passphrase
-            is only returned for sqlite-scheme URLs (SQLCipher is a SQLite
-            extension). Non-sqlite URLs (e.g. postgresql) are never encrypted
-            via SQLCipher.
+        settings: LandscapeSettings determining which env var to read.
+            If None, returns None (no encryption without explicit config).
 
     Returns:
         Passphrase string if backend is sqlcipher, None otherwise.
@@ -205,13 +204,8 @@ def resolve_audit_passphrase(
             )
         return passphrase
 
-    # Opportunistic: no settings available.
-    # Only attempt SQLCipher for sqlite-scheme URLs (SQLCipher is a SQLite
-    # extension — passing a passphrase to PostgreSQL or other backends would
-    # force an invalid SQLCipher engine and fail).
-    if settings is None:
-        if database_url is not None and not database_url.startswith("sqlite"):
-            return None
-        return os.environ.get("ELSPETH_AUDIT_KEY")
-
+    # No settings, or settings.backend is not sqlcipher → no encryption.
+    # We intentionally do NOT fall back to ELSPETH_AUDIT_KEY when settings
+    # is None — that env var may be set for a different pipeline, and passing
+    # a passphrase to a plain SQLite database causes "file is not a database".
     return None
