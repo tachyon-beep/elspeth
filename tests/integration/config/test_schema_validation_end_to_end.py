@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 from elspeth.cli import app
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.core.config import ElspethSettings
-from elspeth.core.dag import ExecutionGraph
+from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
 
 def test_compatible_pipeline_passes_validation():
@@ -409,7 +409,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     plugins = instantiate_plugins_from_config(config)
 
     # Graph construction should fail (PHASE 2 - schemas incompatible)
-    with pytest.raises(ValueError, match=r"Missing fields.*email"):
+    with pytest.raises(GraphValidationError, match=r"Missing fields.*email"):
         ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
             source_settings=plugins["source_settings"],

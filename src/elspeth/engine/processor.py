@@ -104,15 +104,28 @@ def make_step_resolver(
     return resolve
 
 
-@dataclass
+@dataclass(frozen=True)
 class _WorkItem:
-    """Item in the work queue for DAG processing."""
+    """Item in the work queue for DAG processing.
+
+    Frozen to prevent post-construction mutation. Use _create_work_item()
+    factory method for construction with coalesce node resolution.
+    """
 
     token: TokenInfo
     current_node_id: NodeID | None
     coalesce_node_id: NodeID | None = None
     coalesce_name: CoalesceName | None = None  # Name of the coalesce point (if any)
     on_success_sink: str | None = None  # Inherited sink for terminal children (deagg)
+
+    def __post_init__(self) -> None:
+        has_id = self.coalesce_node_id is not None
+        has_name = self.coalesce_name is not None
+        if has_id != has_name:
+            raise OrchestrationInvariantError(
+                f"_WorkItem coalesce fields must be both set or both None: "
+                f"coalesce_node_id={self.coalesce_node_id}, coalesce_name={self.coalesce_name}"
+            )
 
 
 class RowProcessor:
@@ -353,7 +366,9 @@ class RowProcessor:
 
             plugin = self._resolve_plugin_for_node(node_id)
             if isinstance(plugin, TransformProtocol) and plugin.on_success is not None:
-                resolved_sink = plugin.on_success
+                candidate_sink = plugin.on_success
+                if not self._sink_names or candidate_sink in self._sink_names:
+                    resolved_sink = candidate_sink
 
             next_node_id = self._resolve_next_node_for_processing(node_id)
             if next_node_id is None and node_id in self._coalesce_name_by_node_id:

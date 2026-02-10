@@ -713,10 +713,10 @@ class CoalesceSettings(BaseModel):
     @classmethod
     def validate_on_success(cls, v: str | None) -> str | None:
         """Ensure on_success sink name is not empty or system-reserved."""
+        if v is not None and not v.strip():
+            raise ValueError("on_success must be a sink name or omitted entirely")
         if v is None:
             return None
-        if not v.strip():
-            raise ValueError("on_success must be a sink name or omitted entirely")
         value = v.strip()
         return _validate_connection_or_sink_name(value, field_label="Coalesce on_success sink name")
 
@@ -1219,19 +1219,6 @@ class ElspethSettings(BaseModel):
         description="Telemetry and observability configuration",
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def reject_default_sink(cls, data: Any) -> Any:
-        """Reject deprecated default_sink with migration message."""
-        if isinstance(data, dict) and "default_sink" in data:
-            raise ValueError(
-                "'default_sink' has been removed. Use explicit 'on_success' routing instead.\n"
-                "Migration: Add 'on_success: <sink_name>' to your source options and to the "
-                "options of each terminal transform (the last transform before output).\n"
-                "Then remove the 'default_sink' line from your pipeline YAML."
-            )
-        return data
-
     @model_validator(mode="after")
     def validate_export_sink_exists(self) -> "ElspethSettings":
         """Ensure export.sink references a defined sink when enabled."""
@@ -1297,14 +1284,16 @@ class ElspethSettings(BaseModel):
             all_names.append((a.name, "aggregation"))
         for c in self.coalesce:
             all_names.append((c.name, "coalesce"))
+        for sink_name in self.sinks:
+            all_names.append((sink_name, "sink"))
 
         seen: dict[str, str] = {}
         for name, node_type in all_names:
             if name in seen:
                 raise ValueError(
                     f"Node name '{name}' is used by both {seen[name]} and {node_type}. "
-                    f"All processing node names must be unique across transforms, gates, "
-                    f"aggregations, and coalesce nodes."
+                    f"All node names must be unique across transforms, gates, "
+                    f"aggregations, coalesce nodes, and sinks."
                 )
             seen[name] = node_type
         return self
@@ -1933,8 +1922,8 @@ def load_settings(config_path: Path) -> ElspethSettings:
     raw_dict = dynaconf_settings.as_dict()
     raw_config = _lowercase_schema_keys(raw_dict)
 
-    # Explicitly reject deprecated default_sink in YAML before allowlist filtering.
-    # This ensures the validate command catches migration issues early.
+    # Explicitly reject removed default_sink in YAML before allowlist filtering.
+    # This MUST happen before the allowlist (which would silently strip it).
     if "default_sink" in raw_config:
         raise ValueError(
             "'default_sink' has been removed. Use explicit 'on_success' routing instead.\n"

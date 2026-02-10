@@ -33,6 +33,7 @@ from elspeth.contracts.types import (
     NodeID,
     SinkName,
 )
+from elspeth.core.landscape.schema import NODE_ID_COLUMN_LENGTH
 
 if TYPE_CHECKING:
     from elspeth.contracts import PluginSchema
@@ -52,7 +53,7 @@ class GraphValidationError(Exception):
     pass
 
 
-_NODE_ID_MAX_LENGTH = 64  # Must match landscape.schema nodes_table.c.node_id (String(64))
+_NODE_ID_MAX_LENGTH = NODE_ID_COLUMN_LENGTH
 
 
 # Config stored on graph nodes varies by node type:
@@ -167,19 +168,16 @@ class ExecutionGraph:
         return self._graph.has_node(node_id)
 
     def get_nx_graph(self) -> MultiDiGraph[str]:
-        """Return the underlying NetworkX graph for advanced operations.
+        """Return a frozen copy of the underlying NetworkX graph.
 
         Use this for topology analysis, subgraph operations, and other
         NetworkX algorithms that require direct graph access.
 
         Returns:
-            The underlying NetworkX MultiDiGraph.
-
-        Warning:
-            Direct graph manipulation should be avoided. Use ExecutionGraph
-            methods (add_node, add_edge) to ensure integrity constraints.
+            A frozen (immutable) copy of the internal MultiDiGraph.
+            Mutation attempts raise nx.NetworkXError.
         """
-        return self._graph
+        return nx.freeze(self._graph.copy())
 
     def add_node(
         self,
@@ -941,6 +939,7 @@ class ExecutionGraph:
         # ===== BUILD PRODUCER REGISTRY =====
         producers: dict[str, tuple[NodeID, str]] = {}
         producer_desc: dict[str, str] = {}
+        gate_connection_route_labels: dict[tuple[NodeID, str], list[str]] = {}
 
         def register_producer(connection_name: str, node_id: NodeID, label: str, description: str) -> None:
             if connection_name in producers:
@@ -990,6 +989,9 @@ class ExecutionGraph:
                     )
 
         for gate_id, route_label, target in gate_route_connections:
+            gate_connection_key = (gate_id, target)
+            gate_connection_route_labels.setdefault(gate_connection_key, []).append(route_label)
+
             # Multiple routes from the same gate may converge to the same target
             # (e.g., {"true": "next_gate", "false": "next_gate"}). Only register
             # the producer once — the connection is the same regardless of which
@@ -1080,7 +1082,12 @@ class ExecutionGraph:
         for connection_name, consumer_id in consumers.items():
             producer_id, producer_label = producers[connection_name]
             if producer_id in gate_node_ids and producer_label != "continue":
-                graph.add_edge(producer_id, consumer_id, label=producer_label, mode=RoutingMode.MOVE)
+                route_labels = gate_connection_route_labels.get((producer_id, connection_name))
+                if route_labels:
+                    for route_label in route_labels:
+                        graph.add_edge(producer_id, consumer_id, label=route_label, mode=RoutingMode.MOVE)
+                else:
+                    graph.add_edge(producer_id, consumer_id, label=producer_label, mode=RoutingMode.MOVE)
             else:
                 graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
 
@@ -1541,7 +1548,7 @@ class ExecutionGraph:
         # Rule 2: Full compatibility check (missing fields, type mismatches, extra fields)
         result = check_compatibility(producer_schema, consumer_schema)
         if not result.compatible:
-            raise ValueError(
+            raise GraphValidationError(
                 f"Edge from '{from_node_id}' to '{to_node_id}' invalid: "
                 f"producer schema '{producer_schema.__name__}' incompatible with "
                 f"consumer schema '{consumer_schema.__name__}': {result.error_message}"

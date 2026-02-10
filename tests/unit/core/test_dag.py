@@ -1742,6 +1742,73 @@ class TestGateConnectionRouteMaterialization:
         true_edges = [e for e in edges if NodeID(e.from_node) == router_id and e.to_node == checker_id and e.label == "true"]
         assert len(true_edges) == 1, f"Expected 1 'true' edge from router to checker, got {len(true_edges)}"
 
+    def test_gate_converging_connection_routes_preserve_all_labels(self, plugin_manager) -> None:
+        """Converging gate labels to one connection should materialize all route edges."""
+        from elspeth.contracts import RouteDestinationKind
+        from elspeth.contracts.types import GateName
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.config import (
+            GateSettings as GateSettingsModel,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettingsModel(
+                    name="router",
+                    input="source_out",
+                    condition="True",
+                    routes={"true": "checker_in", "false": "checker_in"},
+                ),
+                GateSettingsModel(
+                    name="checker",
+                    input="checker_in",
+                    condition="True",
+                    routes={"true": "output", "false": "output"},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        gate_ids = graph.get_config_gate_id_map()
+        router_id = gate_ids[GateName("router")]
+        checker_id = gate_ids[GateName("checker")]
+
+        edges = [edge for edge in graph.get_edges() if edge.from_node == router_id and edge.to_node == checker_id]
+        assert len(edges) == 2
+        assert {edge.label for edge in edges} == {"true", "false"}
+
+        route_map = graph.get_route_resolution_map()
+        for route_label in ("true", "false"):
+            destination = route_map[(router_id, route_label)]
+            assert destination.kind == RouteDestinationKind.PROCESSING_NODE
+            assert destination.next_node_id == checker_id
+
     def test_gate_connection_route_preserves_route_resolution(self, plugin_manager) -> None:
         """Named-connection routes resolve to processing nodes; sink routes resolve to sinks."""
         from elspeth.contracts import RouteDestination, RouteDestinationKind

@@ -314,12 +314,15 @@ class GateResult:
 # The engine buffers rows and decides when to flush via TriggerEvaluator.
 
 
-@dataclass
+@dataclass(frozen=True)
 class RowResult:
     """Final result of processing a row through the pipeline.
 
     Uses RowOutcome enum, which is explicitly recorded in the token_outcomes
     table (AUD-001) at determination time for complete audit traceability.
+
+    Frozen to prevent post-construction mutation of outcome/sink_name,
+    which would bypass __post_init__ invariant checks.
 
     Fields:
         token: Token identity for this row instance

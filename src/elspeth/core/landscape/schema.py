@@ -25,6 +25,10 @@ from sqlalchemy import (
 # Shared metadata for all tables
 metadata = MetaData()
 
+# Column width for node_id across all tables. Referenced by dag.py
+# for validation — changing this value requires an Alembic migration.
+NODE_ID_COLUMN_LENGTH = 64
+
 # === Runs and Configuration ===
 
 runs_table = Table(

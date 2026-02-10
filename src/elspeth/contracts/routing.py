@@ -168,15 +168,15 @@ class RouteDestination:
     def __post_init__(self) -> None:
         """Validate destination payload by kind."""
         if self.kind == RouteDestinationKind.SINK:
-            if self.sink_name is None:
-                raise ValueError("SINK destination requires sink_name")
+            if self.sink_name is None or not self.sink_name:
+                raise ValueError("SINK destination requires non-empty sink_name")
             if self.next_node_id is not None:
                 raise ValueError("SINK destination must not include next_node_id")
             return
 
         if self.kind == RouteDestinationKind.PROCESSING_NODE:
-            if self.next_node_id is None:
-                raise ValueError("PROCESSING_NODE destination requires next_node_id")
+            if self.next_node_id is None or not self.next_node_id:
+                raise ValueError("PROCESSING_NODE destination requires non-empty next_node_id")
             if self.sink_name is not None:
                 raise ValueError("PROCESSING_NODE destination must not include sink_name")
             return

@@ -23,7 +23,7 @@ class TestGateExecutorRoutingBehavior:
     def _make_executor(
         self,
         edge_map: dict[tuple[str, str], str] | None = None,
-        route_resolution_map: dict[tuple[str, str], str | RouteDestination] | None = None,
+        route_resolution_map: dict[tuple[str, str], RouteDestination] | None = None,
     ) -> GateExecutor:
         """Create a GateExecutor with mocked dependencies."""
         recorder = MagicMock()
@@ -44,16 +44,9 @@ class TestGateExecutorRoutingBehavior:
 
         typed_route_map: dict[tuple[NodeID, str], RouteDestination] | None = None
         if route_resolution_map is not None:
-            typed_route_map = {}
-            for k, v in route_resolution_map.items():
-                if isinstance(v, RouteDestination):
-                    typed_route_map[(NodeID(k[0]), k[1])] = v
-                elif v == "continue":
-                    typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.continue_()
-                elif v == "fork":
-                    typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.fork()
-                else:
-                    typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.sink(SinkName(v))
+            typed_route_map = {
+                (NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()
+            }
 
         return GateExecutor(
             recorder=recorder,
@@ -110,8 +103,10 @@ class TestGateExecutorRoutingBehavior:
 
     def test_route_action_resolves_to_sink(self) -> None:
         """When gate returns ROUTE with label, executor should resolve to sink name."""
-        # Route resolution map: (gate_id, label) -> sink_name
-        route_map: dict[tuple[str, str], str | RouteDestination] = {("gate-1", "above"): "high_value_sink"}
+        # Route resolution map: (gate_id, label) -> destination
+        route_map: dict[tuple[str, str], RouteDestination] = {
+            ("gate-1", "above"): RouteDestination.sink(SinkName("high_value_sink"))
+        }
         # Edge map for audit recording
         edge_map = {("gate-1", "above"): "edge-above"}
         executor = self._make_executor(route_resolution_map=route_map, edge_map=edge_map)
@@ -138,7 +133,9 @@ class TestGateExecutorRoutingBehavior:
 
     def test_route_action_to_continue_label(self) -> None:
         """When gate routes to label that resolves to 'continue', should not set sink_name."""
-        route_map: dict[tuple[str, str], str | RouteDestination] = {("gate-1", "pass"): "continue"}
+        route_map: dict[tuple[str, str], RouteDestination] = {
+            ("gate-1", "pass"): RouteDestination.continue_()
+        }
         edge_map = {("gate-1", "continue"): "edge-continue"}
         executor = self._make_executor(route_resolution_map=route_map, edge_map=edge_map)
         token = self._make_token()
@@ -164,7 +161,7 @@ class TestGateExecutorRoutingBehavior:
 
     def test_route_action_to_processing_node(self) -> None:
         """When gate route label resolves to a processing node, executor returns next_node_id."""
-        route_map: dict[tuple[str, str], str | RouteDestination] = {
+        route_map: dict[tuple[str, str], RouteDestination] = {
             ("gate-1", "branch"): RouteDestination.processing_node(NodeID("transform-2"))
         }
         edge_map = {("gate-1", "branch"): "edge-branch"}

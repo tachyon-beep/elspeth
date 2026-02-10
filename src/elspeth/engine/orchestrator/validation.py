@@ -82,9 +82,6 @@ def validate_route_destinations(
         if destination.kind in (RouteDestinationKind.CONTINUE, RouteDestinationKind.FORK, RouteDestinationKind.PROCESSING_NODE):
             continue
 
-        if destination.kind != RouteDestinationKind.SINK:
-            continue
-
         if destination.sink_name is None:
             raise ValueError(
                 f"Route destination for gate_node_id={gate_node_id!r}, route_label={route_label!r} has kind='sink' but sink_name is None"

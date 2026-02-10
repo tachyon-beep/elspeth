@@ -114,6 +114,7 @@ def _make_processor(
     node_to_plugin: dict[NodeID, Any] | None = None,
     restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
     telemetry_manager: Any = None,
+    sink_names: frozenset[str] | None = None,
 ) -> RowProcessor:
     """Create a RowProcessor with sensible defaults."""
     coalesce_nodes = dict(coalesce_node_ids or {})
@@ -161,6 +162,7 @@ def _make_processor(
         coalesce_on_success_map=coalesce_on_success_map,
         restored_aggregation_state=restored_aggregation_state,
         telemetry_manager=telemetry_manager,
+        sink_names=sink_names,
     )
 
 
@@ -947,6 +949,47 @@ class TestProcessRowGateBranching:
 
         with pytest.raises(OrchestrationInvariantError, match="Coalesce 'merge' not in on_success map"):
             processor._resolve_jump_target_on_success_sink(router_node)
+
+    def test_jump_target_resolution_ignores_non_sink_transform_on_success(self) -> None:
+        """Jump sink preloading should ignore transform on_success values that are connections."""
+        _db, recorder = _make_recorder()
+
+        source_node = NodeID("source-0")
+        jump_start_node = NodeID("branch-transform-1")
+        downstream_gate_node = NodeID("branch-gate-2")
+
+        branch_transform = _make_mock_transform(
+            node_id=str(jump_start_node),
+            name="branch_transform",
+            on_success="branch_conn",
+        )
+        branch_gate = _make_mock_gate(
+            node_id=str(downstream_gate_node),
+            name="branch_gate",
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            sink_names=frozenset({"source_sink", "branch_sink"}),
+            node_step_map={
+                source_node: 0,
+                jump_start_node: 1,
+                downstream_gate_node: 2,
+            },
+            node_to_next={
+                source_node: jump_start_node,
+                jump_start_node: downstream_gate_node,
+                downstream_gate_node: None,
+            },
+            first_transform_node_id=jump_start_node,
+            node_to_plugin={
+                jump_start_node: branch_transform,
+                downstream_gate_node: branch_gate,
+            },
+        )
+
+        assert processor._resolve_jump_target_on_success_sink(jump_start_node) is None
 
 
 # =============================================================================

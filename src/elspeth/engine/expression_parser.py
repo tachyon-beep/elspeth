@@ -298,6 +298,26 @@ class _ExpressionValidator(ast.NodeVisitor):
         """Starred expressions (*x) are forbidden."""
         self.errors.append("Starred expressions (*) are forbidden")
 
+    def visit(self, node: ast.AST) -> None:
+        """Dispatch with fail-closed default for unhandled expression nodes.
+
+        Overrides NodeVisitor.visit to reject any *expression* node type
+        without an explicit visit_* handler. This is defense-in-depth: if a
+        future Python version adds a new AST expression node type (e.g.,
+        ast.MatchValue), it will be rejected here rather than silently
+        passing validation.
+
+        Non-expression AST nodes (operator types like ast.Eq, context
+        markers like ast.Load, the wrapper ast.Expression) are allowed
+        through because they are structural metadata, not executable
+        constructs.
+        """
+        method_name = "visit_" + node.__class__.__name__
+        if not hasattr(self, method_name) and isinstance(node, ast.expr):
+            self.errors.append(f"Unsupported expression construct: {type(node).__name__}")
+            return
+        super().visit(node)
+
 
 class _ExpressionEvaluator(ast.NodeVisitor):
     """AST visitor that evaluates validated expressions."""
