@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Self
 
 from pydantic import Field, field_validator, model_validator
 
@@ -236,29 +236,14 @@ def validate_multi_query_key_collisions(
             )
 
 
-class MultiQueryConfig(AzureOpenAIConfig):
-    """Configuration for multi-query LLM transform.
+class MultiQueryConfigMixin(PluginConfig):
+    """Mixin providing multi-query config fields for any LLM provider.
 
-    Extends AzureOpenAIConfig with:
-    - case_studies: List of case study definitions
-    - criteria: List of criterion definitions
-    - output_mapping: JSON field -> typed output field configuration
-    - response_format: Response format mode (standard or structured)
+    Provides case_studies x criteria cross-product evaluation support.
+    Add as a second base class alongside a provider config:
 
-    The cross-product of case_studies x criteria defines all queries.
-
-    Example:
-        output_mapping:
-          score:
-            suffix: score
-            type: integer
-          rationale:
-            suffix: rationale
-            type: string
-          confidence:
-            suffix: confidence
-            type: enum
-            values: [low, medium, high]
+        class MultiQueryConfig(AzureOpenAIConfig, MultiQueryConfigMixin): ...
+        class OpenRouterMultiQueryConfig(OpenRouterConfig, MultiQueryConfigMixin): ...
     """
 
     case_studies: list[CaseStudyConfig] = Field(
@@ -292,7 +277,7 @@ class MultiQueryConfig(AzureOpenAIConfig):
         return v
 
     @model_validator(mode="after")
-    def validate_no_output_key_collisions(self) -> MultiQueryConfig:
+    def validate_no_output_key_collisions(self) -> Self:
         """Validate no duplicate names or reserved suffix collisions."""
         validate_multi_query_key_collisions(self.case_studies, self.criteria, self.output_mapping)
         return self
@@ -332,9 +317,8 @@ class MultiQueryConfig(AzureOpenAIConfig):
                     "schema": self.build_json_schema(),
                 },
             }
-        else:
-            # Standard JSON mode
-            return {"type": "json_object"}
+        # Standard JSON mode
+        return {"type": "json_object"}
 
     def expand_queries(self) -> list[QuerySpec]:
         """Expand config into QuerySpec list (case_studies x criteria).
@@ -358,3 +342,31 @@ class MultiQueryConfig(AzureOpenAIConfig):
                 specs.append(spec)
 
         return specs
+
+
+class MultiQueryConfig(AzureOpenAIConfig, MultiQueryConfigMixin):
+    """Configuration for Azure multi-query LLM transform.
+
+    Combines AzureOpenAIConfig (connection settings, pooling, templates)
+    with MultiQueryConfigMixin (case_studies, criteria, output_mapping).
+
+    The cross-product of case_studies x criteria defines all queries.
+
+    Example:
+        output_mapping:
+          score:
+            suffix: score
+            type: integer
+          rationale:
+            suffix: rationale
+            type: string
+          confidence:
+            suffix: confidence
+            type: enum
+            values: [low, medium, high]
+    """
+
+
+# Resolve forward references for Pydantic
+MultiQueryConfigMixin.model_rebuild()
+MultiQueryConfig.model_rebuild()

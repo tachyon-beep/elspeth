@@ -89,7 +89,7 @@ class TestSingleQueryProcessing:
             spec = transform._query_specs[0]  # cs1_diagnosis
 
             assert ctx.state_id is not None
-            transform._process_single_query(row, spec, ctx.state_id, "test-token-id")
+            transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
 
             # Check template was rendered with correct content
             call_args = mock_client.chat.completions.create.call_args
@@ -112,7 +112,7 @@ class TestSingleQueryProcessing:
             spec = transform._query_specs[0]  # cs1_diagnosis
 
             assert ctx.state_id is not None
-            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id")
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
 
             assert result.status == "success"
             assert result.row is not None
@@ -135,7 +135,7 @@ class TestSingleQueryProcessing:
             spec = transform._query_specs[0]
 
             assert ctx.state_id is not None
-            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id")
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
 
             assert result.status == "error"
             assert result.reason is not None
@@ -166,7 +166,7 @@ class TestSingleQueryProcessing:
 
                 assert ctx.state_id is not None
                 with pytest.raises(CapacityError) as exc_info:
-                    transform._process_single_query(row, spec, ctx.state_id, "test-token-id")
+                    transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
 
                 assert exc_info.value.status_code == 429
 
@@ -186,7 +186,7 @@ class TestSingleQueryProcessing:
                 mock_render.side_effect = TemplateError("Undefined variable 'missing'")
 
                 assert ctx.state_id is not None
-                result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id")
+                result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
 
                 assert result.status == "error"
                 assert result.reason is not None
