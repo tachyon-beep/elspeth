@@ -1262,7 +1262,7 @@ allow_hits:
   reason: isinstance() on list for recursive NaN/Infinity scan - type discrimination for serialization
   safety: Traverses JSON structure to find non-finite floats before audit recording
   expires: '2026-05-02'
-- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=f36e99f2308c0272
+- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=ba13e0d9177595d6
   owner: architecture
   reason: Tier 3 boundary - response.text is external data, extract_content() can fail unpredictably
   safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL
@@ -1599,11 +1599,6 @@ allow_hits:
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced
   expires: '2026-03-10'
-- key: plugins/transforms/web_scrape.py:R1:WebScrapeTransform:__init__:fp=6b27daeff28c2216
-  owner: architecture
-  reason: User YAML config boundary - http_config is parsed from pipeline settings
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
 - key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=7c5419575b2202aa
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware

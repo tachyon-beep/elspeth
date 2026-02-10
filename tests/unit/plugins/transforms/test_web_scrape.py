@@ -15,6 +15,7 @@ import respx
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
+from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.plugins.transforms.web_scrape_errors import (
     NetworkError,
@@ -739,3 +740,96 @@ def test_web_scrape_unicode_decode_error_returns_error(mock_ctx):
     assert result.status == "error"
     assert result.reason["reason"] == "content_extraction_failed"
     assert result.reason["error_type"] == "UnicodeDecodeError"
+
+
+# --- Config validation tests (WebScrapeHTTPConfig sub-model) ---
+
+
+def _base_config(**overrides: Any) -> dict[str, Any]:
+    """Build a valid WebScrapeTransform config dict, with overrides applied."""
+    cfg: dict[str, Any] = {
+        "schema": {"mode": "observed"},
+        "url_field": "url",
+        "content_field": "page_content",
+        "fingerprint_field": "page_fingerprint",
+        "http": {
+            "abuse_contact": "test@example.com",
+            "scraping_reason": "Testing",
+        },
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def test_http_config_missing_abuse_contact_raises() -> None:
+    """Missing required abuse_contact must raise PluginConfigError."""
+    with pytest.raises(PluginConfigError, match="abuse_contact"):
+        WebScrapeTransform(_base_config(http={"scraping_reason": "Testing"}))
+
+
+def test_http_config_missing_scraping_reason_raises() -> None:
+    """Missing required scraping_reason must raise PluginConfigError."""
+    with pytest.raises(PluginConfigError, match="scraping_reason"):
+        WebScrapeTransform(_base_config(http={"abuse_contact": "test@example.com"}))
+
+
+def test_http_config_extra_field_raises() -> None:
+    """Unknown fields in http config must be rejected (extra=forbid)."""
+    with pytest.raises(PluginConfigError, match="extra_field"):
+        WebScrapeTransform(
+            _base_config(
+                http={
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing",
+                    "extra_field": "should fail",
+                }
+            )
+        )
+
+
+def test_http_config_timeout_zero_raises() -> None:
+    """Timeout must be > 0."""
+    with pytest.raises(PluginConfigError, match="timeout"):
+        WebScrapeTransform(
+            _base_config(
+                http={
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing",
+                    "timeout": 0,
+                }
+            )
+        )
+
+
+def test_http_config_timeout_negative_raises() -> None:
+    """Negative timeout must be rejected."""
+    with pytest.raises(PluginConfigError, match="timeout"):
+        WebScrapeTransform(
+            _base_config(
+                http={
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing",
+                    "timeout": -5,
+                }
+            )
+        )
+
+
+def test_http_config_timeout_default() -> None:
+    """Timeout defaults to 30 when not specified."""
+    transform = WebScrapeTransform(_base_config())
+    assert transform._timeout == 30
+
+
+def test_http_config_timeout_custom() -> None:
+    """Custom timeout value is respected."""
+    transform = WebScrapeTransform(
+        _base_config(
+            http={
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing",
+                "timeout": 60,
+            }
+        )
+    )
+    assert transform._timeout == 60
