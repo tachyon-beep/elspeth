@@ -1679,6 +1679,195 @@ class TestExecutionGraphFromConfig:
             )
 
 
+class TestGateContinueEdgeMaterialization:
+    """Test that gate routes targeting 'continue' create proper graph edges.
+
+    Regression test for immq: gates with 'continue' route targets must have
+    a 'continue' edge in the graph, otherwise _record_routing raises MissingEdgeError.
+
+    These tests use instantiate_plugins_from_config_raw to bypass the test helper
+    that renames lone "continue" routes to named connections (which was masking
+    this bug in the first place).
+    """
+
+    def test_gate_continue_route_creates_continue_edge(self, plugin_manager) -> None:
+        """A gate route targeting 'continue' materializes a 'continue' edge to downstream gate."""
+        from elspeth.contracts.types import GateName, NodeID
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.config import (
+            GateSettings as GateSettingsModel,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettingsModel(
+                    name="router",
+                    input="source_out",
+                    condition="True",
+                    routes={"true": "checker_in", "false": "continue"},
+                ),
+                GateSettingsModel(
+                    name="checker",
+                    input="checker_in",
+                    condition="True",
+                    routes={"true": "output", "false": "flagged"},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        # The "router" gate must have a "continue" edge to the checker gate
+        router_id = graph.get_config_gate_id_map()[GateName("router")]
+        checker_id = graph.get_config_gate_id_map()[GateName("checker")]
+
+        next_node = graph.get_next_node(router_id)
+        assert next_node is not None, "router gate must have a 'continue' edge to a downstream node"
+        assert next_node == checker_id
+
+        # Verify the continue edge exists in the graph
+        edges = graph.get_edges()
+        continue_edges = [e for e in edges if NodeID(e.from_node) == router_id and e.label == "continue"]
+        assert len(continue_edges) == 1, f"Expected 1 continue edge from router, got {len(continue_edges)}"
+
+    def test_gate_continue_route_preserves_route_resolution(self, plugin_manager) -> None:
+        """Continue route creates both edge AND route resolution map entry."""
+        from elspeth.contracts import RouteDestination, RouteDestinationKind
+        from elspeth.contracts.types import GateName
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.config import (
+            GateSettings as GateSettingsModel,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettingsModel(
+                    name="router",
+                    input="source_out",
+                    condition="True",
+                    routes={"true": "checker_in", "false": "continue"},
+                ),
+                GateSettingsModel(
+                    name="checker",
+                    input="checker_in",
+                    condition="True",
+                    routes={"true": "output", "false": "flagged"},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        router_id = graph.get_config_gate_id_map()[GateName("router")]
+        resolution_map = graph.get_route_resolution_map()
+
+        # "false" → continue should be in the resolution map
+        assert (router_id, "false") in resolution_map
+        assert resolution_map[(router_id, "false")] == RouteDestination.continue_()
+
+        # "true" → processing_node (the checker gate) should also be there
+        assert (router_id, "true") in resolution_map
+        assert resolution_map[(router_id, "true")].kind == RouteDestinationKind.PROCESSING_NODE
+
+    def test_terminal_gate_continue_route_rejected(self, plugin_manager) -> None:
+        """A terminal gate (no downstream processing node) with 'continue' routes is rejected."""
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.config import (
+            GateSettings as GateSettingsModel,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettingsModel(
+                    name="terminal_gate",
+                    input="source_out",
+                    condition="True",
+                    routes={"true": "output", "false": "continue"},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"Terminal gate.*has 'continue' route"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+
 class TestExecutionGraphRouteMapping:
     """Test route label <-> sink name mapping for edge lookup."""
 

@@ -19,6 +19,7 @@ from networkx import MultiDiGraph
 from elspeth.contracts import (
     EdgeInfo,
     RouteDestination,
+    RouteDestinationKind,
     RoutingMode,
     check_compatibility,
     error_edge_label,
@@ -1080,6 +1081,31 @@ class ExecutionGraph:
                         f"but there is no downstream processing node. "
                         f"Terminal gates must route all paths to named sinks."
                     )
+
+        # Materialize "continue" edges for gates with "continue" route targets.
+        # The executor's _record_routing needs (gate_id, "continue") in the edge_map,
+        # and get_next_node traverses "continue" MOVE edges for node_to_next.
+        for gate_id, route_labels in gates_with_continue_routes.items():
+            downstream_nodes: set[NodeID] = set()
+            for (gid, _rl), dest in graph._route_resolution_map.items():
+                if gid == gate_id and dest.kind == RouteDestinationKind.PROCESSING_NODE:
+                    assert dest.next_node_id is not None  # guaranteed by RouteDestination.__post_init__
+                    downstream_nodes.add(dest.next_node_id)
+
+            if not downstream_nodes:
+                # Only "continue" + sink/fork routes — caught by terminal gate validation above.
+                continue
+
+            if len(downstream_nodes) > 1:
+                gate_info = graph.get_node_info(gate_id)
+                raise GraphValidationError(
+                    f"Gate '{gate_info.plugin_name}' has 'continue' route(s) ({route_labels}) "
+                    f"but routes to {len(downstream_nodes)} different downstream processing nodes. "
+                    f"A gate with 'continue' routes must have a unique downstream processing node."
+                )
+
+            (continue_target,) = downstream_nodes
+            graph.add_edge(gate_id, continue_target, label="continue", mode=RoutingMode.MOVE)
 
         # Ensure all declared gate route labels are resolvable before runtime.
         graph._validate_route_resolution_map_complete()

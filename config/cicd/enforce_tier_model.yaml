@@ -1553,17 +1553,17 @@ allow_hits:
   reason: setdefault used for route-label grouping while building gate continue-route diagnostics
   safety: Grouping is deterministic and validated before runtime routing
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=ce37fb7adebca001
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=b60b04e4e210bb69
   owner: architecture
   reason: Gate plugin exclusion for terminal on_success sink wiring requires explicit type narrowing
   safety: Routing config remains validated and errors are explicit
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=6d56c15183760c51
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=9f1d0a3421f58bf0
   owner: architecture
   reason: Gate plugin exclusion for transform on_error divert-edge wiring requires explicit type narrowing
   safety: Only non-gate transforms are eligible for on_error; invalid use fails validation
   expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=db333e731ae7b4ff
+- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=e651437d623e32d5
   owner: architecture
   reason: Optional gate pipeline index lookup for coalesce provenance wiring
   safety: Missing index paths are handled explicitly and fail graph validation when required
