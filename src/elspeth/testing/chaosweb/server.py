@@ -24,6 +24,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import structlog
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
@@ -51,6 +52,8 @@ from elspeth.testing.chaosweb.error_injector import (
     WebErrorInjector,
 )
 from elspeth.testing.chaosweb.metrics import WebMetricsRecorder
+
+logger = structlog.get_logger(__name__)
 
 # Web error type to human-readable message mapping.
 _WEB_ERROR_MESSAGES: dict[str, str] = {
@@ -704,22 +707,36 @@ class ChaosWebServer:
         redirect_target: str | None = None,
         redirect_hops: int | None = None,
     ) -> None:
-        """Record a request to metrics."""
-        self._metrics_recorder.record_request(
-            request_id=request_id,
-            timestamp_utc=timestamp_utc,
-            path=path,
-            outcome=outcome,
-            status_code=status_code,
-            error_type=error_type,
-            injection_type=injection_type,
-            latency_ms=latency_ms,
-            injected_delay_ms=injected_delay_ms,
-            content_type_served=content_type_served,
-            encoding_served=encoding_served,
-            redirect_target=redirect_target,
-            redirect_hops=redirect_hops,
-        )
+        """Record a request to metrics.
+
+        Metrics recording is best-effort: failures are logged but never
+        propagated to the caller, because a metrics side-effect must not
+        replace the intended chaos response with an unintended real 500.
+        """
+        try:
+            self._metrics_recorder.record_request(
+                request_id=request_id,
+                timestamp_utc=timestamp_utc,
+                path=path,
+                outcome=outcome,
+                status_code=status_code,
+                error_type=error_type,
+                injection_type=injection_type,
+                latency_ms=latency_ms,
+                injected_delay_ms=injected_delay_ms,
+                content_type_served=content_type_served,
+                encoding_served=encoding_served,
+                redirect_target=redirect_target,
+                redirect_hops=redirect_hops,
+            )
+        except Exception:
+            logger.warning(
+                "metrics_recording_failed",
+                request_id=request_id,
+                path=path,
+                outcome=outcome,
+                exc_info=True,
+            )
 
 
 class _StreamingDisconnect(Response):

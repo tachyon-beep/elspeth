@@ -23,6 +23,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import structlog
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -38,6 +39,8 @@ from elspeth.testing.chaosllm.error_injector import ErrorDecision, ErrorInjector
 from elspeth.testing.chaosllm.latency_simulator import LatencySimulator
 from elspeth.testing.chaosllm.metrics import MetricsRecorder
 from elspeth.testing.chaosllm.response_generator import ResponseGenerator
+
+logger = structlog.get_logger(__name__)
 
 # Error type to OpenAI error type mapping
 _ERROR_TYPE_MAPPING = {
@@ -712,24 +715,38 @@ class ChaosLLMServer:
         response_tokens: int | None = None,
         response_mode: str | None = None,
     ) -> None:
-        """Record a request to metrics."""
-        self._metrics_recorder.record_request(
-            request_id=request_id,
-            timestamp_utc=timestamp_utc,
-            endpoint=endpoint,
-            outcome=outcome,
-            deployment=deployment,
-            model=model,
-            status_code=status_code,
-            error_type=error_type,
-            injection_type=injection_type,
-            latency_ms=latency_ms,
-            injected_delay_ms=injected_delay_ms,
-            message_count=message_count,
-            prompt_tokens_approx=prompt_tokens_approx,
-            response_tokens=response_tokens,
-            response_mode=response_mode,
-        )
+        """Record a request to metrics.
+
+        Metrics recording is best-effort: failures are logged but never
+        propagated to the caller, because a metrics side-effect must not
+        replace the intended chaos response with an unintended real 500.
+        """
+        try:
+            self._metrics_recorder.record_request(
+                request_id=request_id,
+                timestamp_utc=timestamp_utc,
+                endpoint=endpoint,
+                outcome=outcome,
+                deployment=deployment,
+                model=model,
+                status_code=status_code,
+                error_type=error_type,
+                injection_type=injection_type,
+                latency_ms=latency_ms,
+                injected_delay_ms=injected_delay_ms,
+                message_count=message_count,
+                prompt_tokens_approx=prompt_tokens_approx,
+                response_tokens=response_tokens,
+                response_mode=response_mode,
+            )
+        except Exception:
+            logger.warning(
+                "metrics_recording_failed",
+                request_id=request_id,
+                endpoint=endpoint,
+                outcome=outcome,
+                exc_info=True,
+            )
 
 
 def create_app(config: ChaosLLMConfig) -> Starlette:

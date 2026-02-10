@@ -1457,40 +1457,45 @@ allow_hits:
   reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
   safety: Falls back to config default_content_type - preset pages may omit content_type
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=545da4c568c4de0d
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=b1a7475ca2ec6ad8
   owner: architecture
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
   safety: Missing path defaults to empty string - correct for catch-all route
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=dec84bd5a72b8e91
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=356e4e65a64206cd
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP request headers (optional header override)
   safety: Missing header defaults to None - no override applied
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=f65c8ec2e37c3ccc
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=e84a303908b0e6ad
   owner: architecture
   reason: isinstance check on content generator output (str vs bytes) for encoding
   safety: Both branches produce valid bytes for HTTP response body
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=781a6aa8dcf37c83
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=b4ed75053835fcaa
   owner: architecture
   reason: .get() on error message mapping - fallback for error types not in mapping
   safety: Falls back to generic status code message - never swallows errors
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=9536074d9cab3535
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=762539baa0bade9f
   owner: architecture
   reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
   safety: Bytes decoded with replace - corruption helpers always receive valid str input
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=055c287207693a79
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=6031dd683d80b200
   owner: architecture
   reason: isinstance check on content (str vs bytes) for wrong_content_type HTTP response encoding
   safety: Both branches produce valid bytes for Response body
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=436077d2e61ab23e
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=85671d97e81fc16d
   owner: architecture
   reason: isinstance check on content generator output (str vs bytes) for HTTP response encoding
   safety: Both branches produce valid bytes for Response body
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R4:ChaosWebServer:_record_request:fp=f02bc49b98ba1487
+  owner: architecture
+  reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
+  safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
   expires: '2026-05-13'
 - key: testing/chaosweb/cli.py:R6:_version_callback:fp=86387baacbcfc9ec
   owner: architecture
@@ -1537,35 +1542,40 @@ allow_hits:
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=612c2e7deebf1b1d
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=99aa4256034d0404
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=229cf4bb0986f52a
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=40d716b87ce5675c
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=9046d1d0a354e099
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=21a073b8bdc2c154
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=dc330836475fdbec
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=684c59dc629d693e
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=fb3895a14ac46a25
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=8ccabe4dfc512dc8
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=00fd6662cab664a8
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=9b9ba02d9dfdb908
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=16ec1dd670ebe4e1
+  owner: architecture
+  reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
+  safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
   expires: '2026-05-13'
 - key: testing/chaosllm/config.py:R5:ErrorInjectionConfig:parse_range:fp=9d09ec61470d8455
   owner: architecture

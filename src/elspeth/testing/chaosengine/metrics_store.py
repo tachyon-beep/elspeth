@@ -86,7 +86,7 @@ def _get_bucket_utc(timestamp_utc: str, bucket_sec: int) -> str:
     Returns:
         ISO-formatted bucket timestamp (truncated to bucket boundary).
     """
-    dt = datetime.fromisoformat(timestamp_utc.replace("Z", "+00:00"))
+    dt = datetime.fromisoformat(timestamp_utc.replace("Z", "+00:00")).astimezone(UTC)
     total_seconds = dt.hour * 3600 + dt.minute * 60 + dt.second
     bucket_seconds = (total_seconds // bucket_sec) * bucket_sec
     bucket_dt = dt.replace(
