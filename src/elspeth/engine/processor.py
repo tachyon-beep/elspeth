@@ -147,6 +147,7 @@ class RowProcessor:
         coalesce_executor: CoalesceExecutor | None = None,
         branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
         branch_to_sink: dict[BranchName, SinkName] | None = None,
+        sink_names: frozenset[str] | None = None,
         coalesce_on_success_map: dict[CoalesceName, str] | None = None,
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
         payload_store: PayloadStore | None = None,
@@ -169,6 +170,8 @@ class RowProcessor:
             retry_manager: Optional retry manager for transform execution
             coalesce_executor: Optional coalesce executor for fork/join operations
             branch_to_coalesce: Map of branch_name -> coalesce_name for fork/join routing
+            sink_names: Set of valid sink names for route resolution validation.
+                If None, sink validation on jump-target resolution is skipped.
             coalesce_on_success_map: Map of coalesce_name -> terminal sink_name
                 for COALESCED outcomes produced at terminal coalesce points
             restored_aggregation_state: Map of node_id -> state dict for crash recovery
@@ -198,6 +201,7 @@ class RowProcessor:
         }
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
         self._branch_to_sink: dict[BranchName, SinkName] = branch_to_sink or {}
+        self._sink_names: frozenset[str] = sink_names or frozenset()
         self._coalesce_on_success_map: dict[CoalesceName, str] = coalesce_on_success_map or {}
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
         self._clock = clock if clock is not None else DEFAULT_CLOCK
@@ -335,10 +339,21 @@ class RowProcessor:
             next_node_id = self._resolve_next_node_for_processing(node_id)
             if next_node_id is None and node_id in self._coalesce_name_by_node_id:
                 coalesce_name = self._coalesce_name_by_node_id[node_id]
+                if coalesce_name not in self._coalesce_on_success_map:
+                    raise OrchestrationInvariantError(
+                        f"Coalesce '{coalesce_name}' not in on_success map. "
+                        f"Available: {sorted(self._coalesce_on_success_map.keys())}. "
+                        f"Walk started at node '{start_node_id}'."
+                    )
                 resolved_sink = self._coalesce_on_success_map[coalesce_name]
 
             node_id = next_node_id
 
+        if resolved_sink is not None and self._sink_names and resolved_sink not in self._sink_names:
+            raise OrchestrationInvariantError(
+                f"Jump-target sink resolution returned '{resolved_sink}' which is not a configured sink. "
+                f"Available sinks: {sorted(self._sink_names)}. Walk started at node '{start_node_id}'."
+            )
         return resolved_sink
 
     def _create_continuation_work_item(

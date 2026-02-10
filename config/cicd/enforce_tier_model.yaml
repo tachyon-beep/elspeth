@@ -1528,62 +1528,62 @@ allow_hits:
   reason: Protocol dispatch - isinstance for GateSettings type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=e9a34bc4347e5a98
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=98184be4bbfc56fd
   owner: architecture
   reason: Framework-boundary type narrowing for mixed transform and gate plugin lists
   safety: Raises on incompatible plugin behavior; no silent fallback
   expires: '2026-03-09'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=356bc625c5cb172e
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=590a92b530a325e8
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
   safety: Missing metadata is handled as None; core schema enforcement still validates edges
   expires: '2026-03-09'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=51967bac358b82f8
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=0d54b562d91a3eff
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select aggregation plugins
   safety: Missing metadata is handled as None; aggregation schemas still validated via contracts
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=e4dc059227e7693c
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=31fa07dc6d7d9ee9
   owner: architecture
   reason: Gate plugin exclusion for producer registration requires explicit type narrowing
   safety: Non-gate plugins continue through contract-validated path; mismatches fail loudly
   expires: '2026-03-09'
-- key: core/dag.py:R8:ExecutionGraph:from_plugin_instances:fp=857b42815d9ba92d
+- key: core/dag.py:R8:ExecutionGraph:from_plugin_instances:fp=05ee445dee8a3af2
   owner: architecture
   reason: setdefault used for route-label grouping while building gate continue-route diagnostics
   safety: Grouping is deterministic and validated before runtime routing
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=a4b7b0f5e6ae08c1
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=ce37fb7adebca001
   owner: architecture
   reason: Gate plugin exclusion for terminal on_success sink wiring requires explicit type narrowing
   safety: Routing config remains validated and errors are explicit
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=0634d69485262d05
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=6d56c15183760c51
   owner: architecture
   reason: Gate plugin exclusion for transform on_error divert-edge wiring requires explicit type narrowing
   safety: Only non-gate transforms are eligible for on_error; invalid use fails validation
   expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=0bc3e187783ed99a
+- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=db333e731ae7b4ff
   owner: architecture
   reason: Optional gate pipeline index lookup for coalesce provenance wiring
   safety: Missing index paths are handled explicitly and fail graph validation when required
   expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=70fb64f195563be5
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=16ab974fee636509
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=5703b5189a038d23
+- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=ebbe9e4944d3fd2a
   owner: architecture
   reason: Runtime shape check before coercing schema dict to SchemaConfig
   safety: Non-dict payloads are rejected and converted to explicit validation failures
   expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=ca467dfda4126ebd
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=eea146069831464e
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
   expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=c6d2ea9acec9bc1c
+- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=27e8c8d48c84c6a7
   owner: architecture
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced
@@ -1608,7 +1608,7 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=c230ca496c8b9f48
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=b99e6bee5e64dbcf
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback

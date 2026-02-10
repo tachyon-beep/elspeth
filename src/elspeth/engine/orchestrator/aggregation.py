@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, cast
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.types import AggregationFlushResult, PipelineConfig
 
@@ -51,6 +52,11 @@ def _route_aggregation_outcome(
         checkpoint_callback: Optional callback after successful routing
     """
     sink_name = cast(str, result.sink_name)
+    if sink_name not in pending_tokens:
+        raise OrchestrationInvariantError(
+            f"Aggregation result sink '{sink_name}' not in configured sinks. "
+            f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+        )
     pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
 
     if checkpoint_callback is not None:

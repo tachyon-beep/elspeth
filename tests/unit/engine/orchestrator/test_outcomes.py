@@ -140,11 +140,13 @@ class TestAccumulateRowOutcomesRouted:
 
     def test_routed_without_sink_name_crashes(self) -> None:
         """ROUTED outcome without sink_name is a contract violation."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
         counters = _make_counters()
         pending = _make_pending()
         results = [_make_result(RowOutcome.ROUTED, sink_name=None)]
 
-        with pytest.raises(KeyError):
+        with pytest.raises(OrchestrationInvariantError, match="not in configured sinks"):
             accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
 

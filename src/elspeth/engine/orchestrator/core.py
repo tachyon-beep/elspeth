@@ -602,6 +602,7 @@ class Orchestrator:
             coalesce_executor=coalesce_executor,
             branch_to_coalesce=branch_to_coalesce,
             branch_to_sink=branch_to_sink,
+            sink_names=frozenset(config.sinks),
             coalesce_on_success_map=coalesce_on_success_map,
             restored_aggregation_state=restored_aggregation_state,
             payload_store=payload_store,

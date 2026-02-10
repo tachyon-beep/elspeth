@@ -22,6 +22,7 @@ from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.engine.orchestrator.types import ExecutionCounters, RowPlugin
 
@@ -61,11 +62,20 @@ def accumulate_row_outcomes(
             counters.rows_succeeded += 1
             # RowResult.__post_init__ guarantees sink_name is set for COMPLETED
             sink_name = cast(str, result.sink_name)
+            if sink_name not in pending_tokens:
+                raise OrchestrationInvariantError(
+                    f"Sink '{sink_name}' from result.sink_name not in configured sinks. "
+                    f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                )
             pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.ROUTED:
             counters.rows_routed += 1
             sink_name = cast(str, result.sink_name)
             counters.routed_destinations[sink_name] += 1
+            if sink_name not in pending_tokens:
+                raise OrchestrationInvariantError(
+                    f"Routed sink '{sink_name}' not in configured sinks. Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                )
             pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
         elif result.outcome == RowOutcome.FAILED:
             counters.rows_failed += 1
@@ -83,6 +93,11 @@ def accumulate_row_outcomes(
             sink_name = cast(str, result.sink_name)
             counters.rows_coalesced += 1
             counters.rows_succeeded += 1
+            if sink_name not in pending_tokens:
+                raise OrchestrationInvariantError(
+                    f"Coalesced sink '{sink_name}' not in configured sinks. "
+                    f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                )
             pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.EXPANDED:
             # Deaggregation parent token - children counted separately

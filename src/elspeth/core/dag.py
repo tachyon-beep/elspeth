@@ -23,6 +23,7 @@ from elspeth.contracts import (
     check_compatibility,
     error_edge_label,
 )
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import (
     AggregationName,
@@ -65,13 +66,13 @@ _NODE_ID_MAX_LENGTH = 64  # Must match landscape.schema nodes_table.c.node_id (S
 type NodeConfig = dict[str, Any]
 
 
-@dataclass
+@dataclass(frozen=True)
 class NodeInfo:
     """Information about a node in the execution graph.
 
-    Schemas are immutable after graph construction. Even dynamic schemas
-    (determined by data inspection) are locked at launch and never change
-    during the run. This guarantees audit trail consistency.
+    Frozen after construction — attribute reassignment is prevented to
+    guarantee audit trail consistency. Schemas are locked at launch and
+    never change during the run.
 
     Schema Contracts:
         input_schema_config and output_schema_config store the original
@@ -82,14 +83,18 @@ class NodeInfo:
     """
 
     node_id: NodeID
-    node_type: str  # source, transform, gate, aggregation, coalesce, sink
+    node_type: NodeType
     plugin_name: str
     config: NodeConfig = field(default_factory=dict)
-    input_schema: type[PluginSchema] | None = None  # Immutable after graph construction
-    output_schema: type[PluginSchema] | None = None  # Immutable after graph construction
-    # Schema configs for contract validation (guaranteed/required fields)
+    input_schema: type[PluginSchema] | None = None
+    output_schema: type[PluginSchema] | None = None
     input_schema_config: SchemaConfig | None = None
     output_schema_config: SchemaConfig | None = None
+
+    def __post_init__(self) -> None:
+        if len(self.node_id) > _NODE_ID_MAX_LENGTH:
+            msg = f"node_id exceeds {_NODE_ID_MAX_LENGTH} characters: '{self.node_id}' (length={len(self.node_id)})"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True)
@@ -180,7 +185,7 @@ class ExecutionGraph:
         self,
         node_id: str,
         *,
-        node_type: str,
+        node_type: NodeType,
         plugin_name: str,
         config: NodeConfig | None = None,
         input_schema: type[PluginSchema] | None = None,
@@ -192,7 +197,7 @@ class ExecutionGraph:
 
         Args:
             node_id: Unique node identifier
-            node_type: One of: source, transform, gate, aggregation, coalesce, sink
+            node_type: NodeType enum value
             plugin_name: Plugin identifier
             config: Node configuration (see NodeConfig type alias for per-node-type structure)
             input_schema: Input schema Pydantic type (None for dynamic or N/A like sources)
@@ -590,7 +595,7 @@ class ExecutionGraph:
         source_id = node_id("source", source.name, source_config)
         graph.add_node(
             source_id,
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_name=source.name,
             config=source_config,
             output_schema=source.output_schema,  # SourceProtocol requires this
@@ -604,7 +609,7 @@ class ExecutionGraph:
             sink_ids[SinkName(sink_name)] = sid
             graph.add_node(
                 sid,
-                node_type="sink",
+                node_type=NodeType.SINK,
                 plugin_name=sink.name,
                 config=sink_config,
                 input_schema=sink.input_schema,  # SinkProtocol requires this
@@ -628,7 +633,7 @@ class ExecutionGraph:
             transform_ids_by_seq[seq] = tid
 
             node_config = dict(transform_config)
-            node_type = "gate" if is_gate else "transform"
+            node_type = NodeType.GATE if is_gate else NodeType.TRANSFORM
 
             if is_gate:
                 # Type narrowing: we know it's a GateProtocol from isinstance check
@@ -704,7 +709,7 @@ class ExecutionGraph:
 
             graph.add_node(
                 aid,
-                node_type="aggregation",
+                node_type=NodeType.AGGREGATION,
                 plugin_name=agg_config.plugin,
                 config=agg_node_config,
                 input_schema=transform.input_schema,  # TransformProtocol requires this (aggregations use transforms)
@@ -731,7 +736,7 @@ class ExecutionGraph:
 
             graph.add_node(
                 gid,
-                node_type="gate",
+                node_type=NodeType.GATE,
                 plugin_name=f"config_gate:{gate_config.name}",
                 config=gate_node_config,
             )
@@ -801,7 +806,7 @@ class ExecutionGraph:
 
                 graph.add_node(
                     cid,
-                    node_type="coalesce",
+                    node_type=NodeType.COALESCE,
                     plugin_name=f"coalesce:{coalesce_config.name}",
                     config=config_dict,
                 )
@@ -1183,7 +1188,14 @@ class ExecutionGraph:
             if isinstance(wired.plugin, GateProtocol):
                 continue
             on_error = wired.settings.on_error
-            if on_error is not None and on_error != "discard" and SinkName(on_error) in sink_ids:
+            if on_error is not None and on_error != "discard":
+                if SinkName(on_error) not in sink_ids:
+                    suggestions = _suggest_similar(on_error, sorted(str(s) for s in sink_ids))
+                    hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                    raise GraphValidationError(
+                        f"Transform '{wired.settings.name}' on_error '{on_error}' references unknown sink.{hint} "
+                        f"Available sinks: {sorted(str(s) for s in sink_ids)}"
+                    )
                 graph.add_edge(
                     transform_ids_by_name[wired.settings.name],
                     sink_ids[SinkName(on_error)],

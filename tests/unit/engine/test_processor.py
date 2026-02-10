@@ -945,7 +945,7 @@ class TestProcessRowGateBranching:
             # Intentionally omit coalesce_on_success_map
         )
 
-        with pytest.raises(KeyError, match="merge"):
+        with pytest.raises(OrchestrationInvariantError, match="Coalesce 'merge' not in on_success map"):
             processor._resolve_jump_target_on_success_sink(router_node)
 
 

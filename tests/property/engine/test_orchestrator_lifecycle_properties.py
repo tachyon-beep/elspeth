@@ -16,7 +16,7 @@ Key invariants:
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import fields
 
 import pytest
@@ -501,7 +501,7 @@ class TestAccumulateRowOutcomesProperties:
         counters = ExecutionCounters()
         if sink_names is None:
             sink_names = {"default": object(), "alerts": object()}
-        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = defaultdict(list)
+        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in sink_names}
         accumulate_row_outcomes(outcomes, counters, sink_names, pending_tokens)
         return counters, pending_tokens
 
