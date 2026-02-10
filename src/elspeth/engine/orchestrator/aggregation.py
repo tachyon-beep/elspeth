@@ -39,8 +39,11 @@ def _route_aggregation_outcome(
 ) -> None:
     """Route a non-failed aggregation result to the appropriate sink.
 
-    Consolidates the routing logic that was previously duplicated across 4 blocks
-    in check_aggregation_timeouts() and flush_remaining_aggregation_buffers().
+    Consolidates COMPLETED outcome routing. ROUTED and COALESCED outcomes are
+    handled inline in check_aggregation_timeouts() and
+    flush_remaining_aggregation_buffers() because they require additional
+    counter updates (routed_destinations for ROUTED, both rows_coalesced and
+    rows_succeeded for COALESCED) that this helper cannot express.
 
     Routing uses result.sink_name which is set by on_success routing in the
     processor. The sink_name is authoritative for COMPLETED results (guaranteed

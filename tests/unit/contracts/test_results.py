@@ -391,6 +391,22 @@ class TestRowResult:
         assert result.outcome == RowOutcome.COALESCED
         assert result.sink_name == "output"
 
+    def test_is_frozen(self) -> None:
+        """RowResult is frozen — prevents post-construction mutation of sink_name/outcome."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        result = RowResult(
+            token=token,
+            final_data={"x": 1},
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output",
+        )
+
+        with pytest.raises(AttributeError):
+            result.sink_name = "tampered"  # type: ignore[misc]
+
+        with pytest.raises(AttributeError):
+            result.outcome = RowOutcome.FAILED  # type: ignore[misc]
+
 
 class TestArtifactDescriptor:
     """Tests for ArtifactDescriptor."""

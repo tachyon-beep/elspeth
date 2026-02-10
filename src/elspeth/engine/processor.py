@@ -129,19 +129,17 @@ class _WorkItem:
 
 
 class RowProcessor:
-    """Processes rows through the transform pipeline.
+    """Processes rows through the DAG-defined pipeline topology.
+
+    Processing follows the DAG topology built from explicit input/on_success
+    connections. Transforms, gates, and aggregations are interleaved per their
+    declared wiring — there is no fixed "transforms first, then gates" order.
 
     Handles:
     1. Creating initial tokens from source rows
-    2. Executing transforms in sequence
-    3. Executing config-driven gates (after transforms)
-    4. Accepting rows into aggregations
-    5. Recording final outcomes
-
-    Pipeline order:
-    - Transforms (from config.row_plugins)
-    - Config-driven gates (from config.gates)
-    - Output sink
+    2. Executing transforms, gates, and aggregations per DAG traversal order
+    3. Routing tokens to sinks or downstream processing nodes
+    4. Recording final outcomes via Landscape audit trail
 
     Example:
         processor = RowProcessor(
@@ -240,7 +238,7 @@ class RowProcessor:
         self._clock = clock if clock is not None else DEFAULT_CLOCK
 
         # Build error edge map: transform node_id -> DIVERT edge_id.
-        # Scans edge_map for __error_N__ labels (created by dag.py for transforms
+        # Scans edge_map for __error_{name}__ labels (created by dag.py for transforms
         # with on_error pointing to a real sink, not "discard").
         _edge_map = edge_map or {}
         error_edge_ids: dict[NodeID, str] = {}
@@ -460,8 +458,8 @@ class RowProcessor:
 
         status = NodeStateStatus.COMPLETED if transform_result.status == "success" else NodeStateStatus.FAILED
 
-        # node_id is assigned by orchestrator before execution (see _assign_node_ids_to_plugins)
-        assert transform.node_id is not None, "node_id must be assigned by orchestrator before execution"
+        # node_id is assigned during DAG construction in from_plugin_instances()
+        assert transform.node_id is not None, "node_id must be assigned by DAG construction before execution"
         self._emit_telemetry(
             TransformCompleted(
                 timestamp=datetime.now(UTC),
@@ -808,8 +806,8 @@ class RowProcessor:
             # Transform mode: N input rows -> M output rows with NEW tokens
             #
             # Bug P2-2026-02-01: Emit TokenCompleted for all buffered tokens AFTER
-            # TransformCompleted (emitted above at line 556-561). TokenCompleted was
-            # deferred from buffer time to maintain correct ordering.
+            # TransformCompleted (emitted in the TransformCompleted block above).
+            # TokenCompleted was deferred from buffer time to maintain correct ordering.
             for token in buffered_tokens:
                 self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
 
@@ -946,7 +944,7 @@ class RowProcessor:
         node_id = NodeID(raw_node_id)
 
         # Get output_mode from aggregation settings
-        # Caller guarantees node_id is in self._aggregation_settings (line 550 check)
+        # Caller guarantees node_id is in self._aggregation_settings (checked in _handle_aggregation_node)
         settings = self._aggregation_settings[node_id]
         output_mode = settings.output_mode
 
@@ -1191,8 +1189,8 @@ class RowProcessor:
 
                 # Bug P2-2026-02-01: Emit TokenCompleted for ALL buffered tokens
                 # TransformCompleted was already emitted for all tokens (including current_token)
-                # in the loop at line 837-842 (buffered_tokens includes the triggering token
-                # because buffer_row() adds it before should_flush() is checked).
+                # in the TransformCompleted emission loop (buffered_tokens includes the triggering
+                # token because buffer_row() adds it before should_flush() is checked).
                 #
                 # TokenCompleted was deferred from buffer time for non-triggering tokens to
                 # maintain correct ordering (TransformCompleted before TokenCompleted).
@@ -1351,8 +1349,8 @@ class RowProcessor:
                         destination=on_error,
                     )
 
-                    # Record DIVERT routing_event using ctx.state_id (set by executor
-                    # at executors.py:247 before the exception propagated).
+                    # Record DIVERT routing_event using ctx.state_id (set by
+                    # TransformExecutor.execute_transform before the exception propagated).
                     if on_error != "discard":
                         try:
                             error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
@@ -1399,8 +1397,8 @@ class RowProcessor:
                     destination=on_error,
                 )
 
-                # Record DIVERT routing_event using ctx.state_id (set by executor
-                # at executors.py:247 before the exception propagated).
+                # Record DIVERT routing_event using ctx.state_id (set by
+                # TransformExecutor.execute_transform before the exception propagated).
                 if on_error != "discard":
                     try:
                         error_edge_id = self._error_edge_ids[NodeID(transform.node_id)]
@@ -1936,8 +1934,8 @@ class RowProcessor:
 
                 # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
                 # (Landscape recording happens inside execute_gate)
-                # node_id is assigned by orchestrator before execution (see _assign_node_ids_to_plugins)
-                assert gate_plugin.node_id is not None, "node_id must be assigned by orchestrator before execution"
+                # node_id is assigned during DAG construction in from_plugin_instances()
+                assert gate_plugin.node_id is not None, "node_id must be assigned by DAG construction before execution"
                 self._emit_gate_evaluated(
                     token=current_token,
                     gate_name=gate_plugin.name,

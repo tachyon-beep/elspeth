@@ -68,7 +68,7 @@ _NODE_ID_MAX_LENGTH = NODE_ID_COLUMN_LENGTH
 type NodeConfig = dict[str, Any]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeInfo:
     """Information about a node in the execution graph.
 
@@ -124,11 +124,10 @@ class WiredTransform:
             )
 
 
-def _suggest_similar(name: str, candidates: list[str], max_distance: int = 3) -> list[str]:
+def _suggest_similar(name: str, candidates: list[str]) -> list[str]:
     """Suggest similar names for wiring validation errors."""
     import difflib
 
-    del max_distance  # Reserved for future distance-based matcher.
     return difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
 
 

@@ -3,9 +3,9 @@
 
 Each executor handles a specific plugin type:
 - TransformExecutor: Row transforms
-- GateExecutor: Routing gates (Task 14)
-- AggregationExecutor: Stateful aggregations (Task 15)
-- SinkExecutor: Output sinks (Task 16)
+- GateExecutor: Routing gates
+- AggregationExecutor: Stateful aggregations
+- SinkExecutor: Output sinks
 """
 
 import logging
@@ -508,7 +508,7 @@ class TransformExecutor:
                     raise OrchestrationInvariantError(
                         f"Transform '{transform.node_id}' has on_error={on_error!r} but no "
                         f"DIVERT edge registered. DAG construction should have created an "
-                        f"__error_N__ edge in from_plugin_instances()."
+                        f"__error_{{name}}__ edge in from_plugin_instances()."
                     ) from None
                 self._recorder.record_routing_event(
                     state_id=state.state_id,

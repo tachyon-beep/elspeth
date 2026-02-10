@@ -37,6 +37,7 @@ from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
 from elspeth.engine.executors import (
+    AGGREGATION_CHECKPOINT_VERSION,
     AggregationExecutor,
     GateExecutor,
     GateOutcome,
@@ -1677,3 +1678,38 @@ class TestSinkExecutor:
         recorder.register_artifact.assert_called_once()
         kwargs = recorder.register_artifact.call_args[1]
         assert kwargs["state_id"] == "state_001"  # First token's state
+
+
+# =============================================================================
+# AggregationExecutor checkpoint version tests
+# =============================================================================
+
+
+class TestAggregationCheckpointVersion:
+    """Tests for aggregation checkpoint version compatibility."""
+
+    def test_old_checkpoint_version_rejected(self) -> None:
+        """Old checkpoint version (2.1) is rejected — prevents silent state corruption."""
+        executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
+
+        old_checkpoint = {"_version": "2.1", "agg_1": {"tokens": []}}
+
+        with pytest.raises(ValueError, match="Incompatible checkpoint version"):
+            executor.restore_from_checkpoint(old_checkpoint)
+
+    def test_current_version_accepted(self) -> None:
+        """Current checkpoint version is accepted without error."""
+        executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
+
+        # Minimal valid v3.0 checkpoint with no buffered tokens
+        checkpoint = {"_version": AGGREGATION_CHECKPOINT_VERSION}
+
+        # Should not raise
+        executor.restore_from_checkpoint(checkpoint)
+
+    def test_missing_version_rejected(self) -> None:
+        """Checkpoint without _version key is rejected."""
+        executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
+
+        with pytest.raises(ValueError, match="Incompatible checkpoint version"):
+            executor.restore_from_checkpoint({"agg_1": {"tokens": []}})

@@ -15,7 +15,6 @@ transforms:
   plugin: passthrough
   input: source_out
   on_success: output
-  options:
 sinks:
   output:
     plugin: csv

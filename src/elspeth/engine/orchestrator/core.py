@@ -1311,8 +1311,8 @@ class Orchestrator:
                             )
 
                             # Record DIVERT routing_event for the quarantine edge.
-                            # The __quarantine__ edge MUST exist — DAG creates it when
-                            # on_validation_failure != "discard" (dag.py:798-806).
+                            # The __quarantine__ edge MUST exist — DAG creates it in
+                            # the source quarantine edge block of from_plugin_instances().
                             quarantine_edge_key = (source_id, "__quarantine__")
                             try:
                                 quarantine_edge_id = edge_map[quarantine_edge_key]

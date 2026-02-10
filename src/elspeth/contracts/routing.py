@@ -31,7 +31,7 @@ def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
     return copy.deepcopy(reason)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RoutingAction:
     """A routing decision from a gate.
 
@@ -157,7 +157,7 @@ class RouteDestinationKind(StrEnum):
     PROCESSING_NODE = "processing_node"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RouteDestination:
     """Resolved destination for a (gate_node_id, route_label) pair."""
 
@@ -201,7 +201,7 @@ class RouteDestination:
         return cls(kind=RouteDestinationKind.PROCESSING_NODE, next_node_id=next_node_id)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RoutingSpec:
     """Specification for a routing edge in the recorded audit trail.
 
@@ -213,7 +213,7 @@ class RoutingSpec:
     mode: RoutingMode
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class EdgeInfo:
     """Information about an edge in the execution graph.
 
