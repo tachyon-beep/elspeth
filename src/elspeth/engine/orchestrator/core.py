@@ -464,12 +464,6 @@ class Orchestrator:
     ) -> DAGTraversalContext:
         """Build traversal context for RowProcessor from graph + pipeline config."""
         node_step_map = graph.build_step_map()
-        # Assign coalesce nodes step numbers after all processing nodes.
-        # Coalesce executes after all branch processing completes, so its step
-        # must be higher than any branch node's step to avoid audit trail ambiguity.
-        max_step = max(node_step_map.values()) if node_step_map else 0
-        for i, coalesce_node_id in enumerate(graph.get_coalesce_id_map().values()):
-            node_step_map[coalesce_node_id] = max_step + 1 + i
         node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = {}
 
         for transform in config.transforms:

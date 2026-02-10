@@ -224,6 +224,78 @@ class TestOrchestrator:
         assert len(output_sink.results) == 2
         assert len(source_sink.results) == 0
 
+    def test_traversal_context_keeps_nonterminal_coalesce_in_graph_step_order(self) -> None:
+        """Traversal context must preserve graph step order for non-terminal coalesce nodes."""
+        from elspeth.contracts.types import CoalesceName, GateName
+        from elspeth.core.config import CoalesceSettings, GateSettings
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+        source = ListSource([{"value": 1}], on_success="source_sink")
+        transform = IdentityTransform()
+        output_sink = CollectSink(name="output")
+        source_sink = CollectSink(name="source_sink")
+
+        fork_gate = GateSettings(
+            name="fork_gate",
+            input="transform_out",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["path_a", "path_b"],
+        )
+        terminal_gate = GateSettings(
+            name="terminal_gate",
+            input="merge_paths",
+            condition="True",
+            routes={"true": "output", "false": "output"},
+        )
+        coalesce = CoalesceSettings(
+            name="merge_paths",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+        )
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={
+                "output": as_sink(output_sink),
+                "source_sink": as_sink(source_sink),
+            },
+            gates=[fork_gate, terminal_gate],
+            coalesce_settings=[coalesce],
+        )
+        graph = build_production_graph(config)
+
+        source_id = graph.get_source()
+        assert source_id is not None
+
+        orchestrator = Orchestrator(db)
+        orchestrator._assign_plugin_node_ids(
+            source=config.source,
+            transforms=config.transforms,
+            sinks=config.sinks,
+            source_id=source_id,
+            transform_id_map=graph.get_transform_id_map(),
+            sink_id_map=graph.get_sink_id_map(),
+        )
+
+        graph_step_map = graph.build_step_map()
+        coalesce_node_id = graph.get_coalesce_id_map()[CoalesceName("merge_paths")]
+        downstream_gate_node_id = graph.get_config_gate_id_map()[GateName("terminal_gate")]
+        assert graph_step_map[coalesce_node_id] < graph_step_map[downstream_gate_node_id]
+
+        traversal = orchestrator._build_dag_traversal_context(
+            graph=graph,
+            config=config,
+            config_gate_id_map=graph.get_config_gate_id_map(),
+        )
+        assert traversal.node_step_map[coalesce_node_id] == graph_step_map[coalesce_node_id]
+        assert traversal.node_step_map[downstream_gate_node_id] == graph_step_map[downstream_gate_node_id]
+        assert traversal.node_step_map[coalesce_node_id] < traversal.node_step_map[downstream_gate_node_id]
+
 
 class TestOrchestratorMultipleTransforms:
     """Test pipelines with multiple transforms."""

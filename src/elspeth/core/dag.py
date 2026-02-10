@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
-class GraphValidationError(Exception):
+class GraphValidationError(ValueError):
     """Raised when graph validation fails."""
 
     pass
@@ -1236,20 +1236,6 @@ class ExecutionGraph:
         topo_order = [NodeID(node_id) for node_id in nx.topological_sort(graph._graph)]
         pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
 
-        expected_yaml_nodes: list[NodeID] = []
-        expected_yaml_nodes.extend(transform_ids_by_seq[idx] for idx in sorted(transform_ids_by_seq))
-        expected_yaml_nodes.extend(aggregation_ids[AggregationName(agg_name)] for agg_name in aggregations)
-        expected_yaml_nodes.extend(config_gate_ids[GateName(gate_settings.name)] for gate_settings in gates)
-        expected_yaml_set = set(expected_yaml_nodes)
-        topo_yaml_nodes = [node_id for node_id in pipeline_nodes if node_id in expected_yaml_set]
-
-        if topo_yaml_nodes != expected_yaml_nodes:
-            raise GraphValidationError(
-                "YAML declaration order does not match graph topological order. "
-                f"Expected processing order: {expected_yaml_nodes}. "
-                f"Topological order: {topo_yaml_nodes}."
-            )
-
         pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
 
         coalesce_gate_index: dict[CoalesceName, int] = {}
@@ -1481,7 +1467,7 @@ class ExecutionGraph:
             to_node_id: Destination node ID
 
         Raises:
-            ValueError: If schemas are incompatible or contracts violated
+            GraphValidationError: If schemas are incompatible or contracts violated
         """
         to_info = self.get_node_info(to_node_id)
 
@@ -1497,7 +1483,7 @@ class ExecutionGraph:
             and to_info.output_schema is not None
             and to_info.input_schema != to_info.output_schema
         ):
-            raise ValueError(
+            raise GraphValidationError(
                 f"Gate '{to_node_id}' must preserve schema: "
                 f"input_schema={to_info.input_schema.__name__}, "
                 f"output_schema={to_info.output_schema.__name__}"
@@ -1515,7 +1501,7 @@ class ExecutionGraph:
             if missing:
                 # Build actionable error message
                 from_info = self.get_node_info(from_node_id)
-                raise ValueError(
+                raise GraphValidationError(
                     f"Schema contract violation: edge '{from_node_id}' → '{to_node_id}'\n"
                     f"  Consumer ({to_info.plugin_name}) requires fields: {sorted(consumer_required)}\n"
                     f"  Producer ({from_info.plugin_name}) guarantees: "
@@ -1568,7 +1554,7 @@ class ExecutionGraph:
             Output schema type, or None if dynamic
 
         Raises:
-            ValueError: If pass-through node has no incoming edges (graph construction bug)
+            GraphValidationError: If pass-through node has no incoming edges (graph construction bug)
         """
         node_info = self.get_node_info(node_id)
 
@@ -1583,7 +1569,7 @@ class ExecutionGraph:
 
             if not incoming:
                 # Pass-through node with no inputs is a graph construction bug - CRASH
-                raise ValueError(
+                raise GraphValidationError(
                     f"{node_info.node_type.capitalize()} node '{node_id}' has no incoming edges - "
                     f"this indicates a bug in graph construction"
                 )
@@ -1606,7 +1592,7 @@ class ExecutionGraph:
                     observed_names = [nid for nid, _ in observed_branches]
                     # Schema is guaranteed non-None here (explicit_branches filtered out observed/None)
                     explicit_names = [f"{nid} ({s.__name__})" for nid, s in explicit_branches if s is not None]
-                    raise ValueError(
+                    raise GraphValidationError(
                         f"{node_info.node_type.capitalize()} '{node_id}' has mixed observed/explicit schemas - "
                         f"this is not allowed because observed branches may produce rows missing fields "
                         f"expected by downstream consumers. "
@@ -1624,7 +1610,7 @@ class ExecutionGraph:
                             # Schemas are guaranteed non-None here (explicit_branches filtered out observed/None)
                             first_name = first_schema.__name__ if first_schema is not None else "observed"
                             other_name = other_schema.__name__ if other_schema is not None else "observed"
-                            raise ValueError(
+                            raise GraphValidationError(
                                 f"{node_info.node_type.capitalize()} '{node_id}' receives incompatible schemas from "
                                 f"multiple inputs - this is a graph construction bug. "
                                 f"First input: {first_name}, other input: {other_name}. {error_msg}"
@@ -1712,7 +1698,7 @@ class ExecutionGraph:
             coalesce_id: Coalesce node ID
 
         Raises:
-            ValueError: If branches have incompatible schemas
+            GraphValidationError: If branches have incompatible schemas
         """
         incoming = list(self._graph.in_edges(coalesce_id, data=True))
 
@@ -1731,7 +1717,7 @@ class ExecutionGraph:
             if not compatible:
                 first_name = first_schema.__name__ if first_schema else "observed"
                 other_name = other_schema.__name__ if other_schema else "observed"
-                raise ValueError(
+                raise GraphValidationError(
                     f"Coalesce '{coalesce_id}' receives incompatible schemas from "
                     f"multiple branches: first branch has {first_name}, "
                     f"branch from '{from_id}' has {other_name}. {error_msg}"

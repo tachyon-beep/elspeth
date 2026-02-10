@@ -4881,6 +4881,77 @@ class TestTerminalGateRouteValidation:
         )
         graph.validate()
 
+    def test_gate_route_to_transform_connection_passes(self, plugin_manager) -> None:
+        """Gate routes can target downstream transforms via connection names."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.types import GateName
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_gate",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    name="after_gate_transform",
+                    plugin="passthrough",
+                    input="after_gate",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="router",
+                    input="to_gate",
+                    condition="row['score'] > 0.5",
+                    routes={"true": "output", "false": "after_gate"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+        gate_id = graph.get_config_gate_id_map()[GateName("router")]
+        transform_id = graph.get_transform_id_map()[0]
+        assert any(
+            edge.from_node == gate_id
+            and edge.to_node == transform_id
+            and edge.label == "false"
+            and edge.mode == RoutingMode.MOVE
+            for edge in graph.get_edges()
+        )
+
 
 class TestAggregationOnSuccessValidation:
     """wp68: Aggregation on_success routing validation (3 error paths).
