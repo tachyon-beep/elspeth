@@ -1,0 +1,74 @@
+# Explicit Routing Example
+#
+# Demonstrates the declarative on_success wiring pattern:
+#
+#   source ─(validated)─> enrich ─(enriched)─> [gate] ─┬─ high_value sink
+#                                                       └─ standard sink
+#
+# Key concepts:
+#   - source.on_success names the connection that receives validated rows
+#   - transform.input declares which connection feeds it
+#   - transform.on_success names the outbound connection or sink
+#   - gate.input connects to an upstream on_success connection
+#   - No positional inference — every edge is explicitly declared
+
+source:
+  plugin: csv
+  on_success: validated
+  options:
+    path: examples/explicit_routing/input.csv
+    schema:
+      mode: fixed
+      fields:
+      - 'id: int'
+      - 'customer: str'
+      - 'amount: int'
+      - 'currency: str'
+      - 'region: str'
+    on_validation_failure: discard
+
+transforms:
+- name: enrich
+  plugin: passthrough
+  input: validated
+  on_success: enriched
+  options:
+    schema:
+      mode: observed
+
+gates:
+- name: value_check
+  input: enriched
+  condition: row['amount'] >= 5000
+  routes:
+    'true': high_value
+    'false': standard
+
+sinks:
+  high_value:
+    plugin: csv
+    options:
+      path: examples/explicit_routing/output/high_value.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'customer: str'
+        - 'amount: int'
+        - 'currency: str'
+        - 'region: str'
+  standard:
+    plugin: csv
+    options:
+      path: examples/explicit_routing/output/standard.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'customer: str'
+        - 'amount: int'
+        - 'currency: str'
+        - 'region: str'
+
+landscape:
+  url: sqlite:///examples/explicit_routing/runs/audit.db

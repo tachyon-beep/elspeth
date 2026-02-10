@@ -1,0 +1,130 @@
+# Error Routing Example — Multi-Gate Pipeline with on_error Diversion
+#
+# Demonstrates explicit on_success/on_error wiring across a complex DAG
+# with content filtering, amount-based routing, and category classification.
+#
+# DAG topology:
+#
+#   source ─(raw)─> content_filter ─┬─(clean)──> [amount_gate] ─┬─ high_value ─> [category_gate] ─┬─ enterprise
+#                                   │                            │                                  └─ commercial
+#                                   │                            └─ standard
+#                                   └─(on_error)──> quarantine
+#
+# Key concepts demonstrated:
+#   - on_error routes blocked rows to a quarantine sink (not dropped!)
+#   - on_success chains through named connections across transforms/gates
+#   - Multiple gates create a branching decision tree
+#   - Every row reaches exactly one terminal sink (no silent drops)
+#   - The audit trail records the full routing decision for every row
+
+source:
+  plugin: csv
+  on_success: raw
+  options:
+    path: examples/error_routing/input.csv
+    schema:
+      mode: fixed
+      fields:
+      - 'id: int'
+      - 'customer: str'
+      - 'amount: int'
+      - 'category: str'
+      - 'notes: str'
+    on_validation_failure: discard
+
+transforms:
+# Stage 1: Content filtering — blocked rows divert to quarantine
+- name: content_filter
+  plugin: keyword_filter
+  input: raw
+  on_success: clean
+  on_error: quarantine
+  options:
+    fields: [notes]
+    blocked_patterns:
+    - "(?i)\\bpassword\\b"
+    - "(?i)\\bconfidential\\b"
+    - "(?i)\\bsecret\\b"
+    schema:
+      mode: observed
+
+# Stage 2: Truncate notes for downstream processing (after filtering)
+- name: truncate_notes
+  plugin: truncate
+  input: clean
+  on_success: trimmed
+  options:
+    fields:
+      notes: 50
+    schema:
+      mode: observed
+
+gates:
+# Gate 1: Split by deal size
+- name: amount_gate
+  input: trimmed
+  condition: row['amount'] >= 10000
+  routes:
+    'true': high_value
+    'false': standard
+
+# Gate 2: High-value deals split by category
+- name: category_gate
+  input: high_value
+  condition: row['category'] == 'enterprise'
+  routes:
+    'true': enterprise
+    'false': commercial
+
+sinks:
+  enterprise:
+    plugin: csv
+    options:
+      path: examples/error_routing/output/enterprise_deals.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'customer: str'
+        - 'amount: int'
+        - 'category: str'
+        - 'notes: str'
+  commercial:
+    plugin: csv
+    options:
+      path: examples/error_routing/output/commercial_deals.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'customer: str'
+        - 'amount: int'
+        - 'category: str'
+        - 'notes: str'
+  standard:
+    plugin: csv
+    options:
+      path: examples/error_routing/output/standard_deals.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'customer: str'
+        - 'amount: int'
+        - 'category: str'
+        - 'notes: str'
+  quarantine:
+    plugin: csv
+    options:
+      path: examples/error_routing/output/quarantine.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'customer: str'
+        - 'amount: int'
+        - 'category: str'
+        - 'notes: str'
+
+landscape:
+  url: sqlite:///examples/error_routing/runs/audit.db

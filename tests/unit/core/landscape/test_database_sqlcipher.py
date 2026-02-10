@@ -229,6 +229,39 @@ class TestPlainSQLiteUnchanged:
             conn.close()
 
 
+class TestSQLCipherRejectsNonSQLite:
+    """SQLCipher with non-SQLite URLs raises a clear ValueError."""
+
+    def test_sqlcipher_rejects_postgresql_url(self) -> None:
+        """Regression: passphrase + PostgreSQL URL must not silently open a local file."""
+        from elspeth.core.landscape.database import LandscapeDB
+
+        with pytest.raises(ValueError, match="requires a SQLite database URL"):
+            LandscapeDB.from_url("postgresql://user:pass@host/mydb", passphrase="test-key")
+
+    def test_sqlcipher_rejects_mysql_url(self) -> None:
+        from elspeth.core.landscape.database import LandscapeDB
+
+        with pytest.raises(ValueError, match="requires a SQLite database URL"):
+            LandscapeDB.from_url("mysql://user:pass@host/mydb", passphrase="test-key")
+
+    def test_sqlcipher_rejects_postgresql_with_driver(self) -> None:
+        """Driver variants like postgresql+psycopg2 are also rejected."""
+        from elspeth.core.landscape.database import LandscapeDB
+
+        with pytest.raises(ValueError, match="requires a SQLite database URL"):
+            LandscapeDB.from_url("postgresql+psycopg2://host/db", passphrase="test-key")
+
+    def test_sqlcipher_accepts_sqlite_with_driver(self, tmp_path: Path) -> None:
+        """sqlite+pysqlite (explicit driver) should still work."""
+        from elspeth.core.landscape.database import LandscapeDB
+
+        db_path = tmp_path / "driver_variant.db"
+        # Should not raise — "sqlite+pysqlite" is SQLite-family
+        db = LandscapeDB.from_url(f"sqlite+pysqlite:///{db_path}", passphrase="test-key")
+        db.close()
+
+
 class TestSQLCipherRejectsMemory:
     """SQLCipher with :memory: raises a clear ValueError."""
 
@@ -237,3 +270,67 @@ class TestSQLCipherRejectsMemory:
 
         with pytest.raises(ValueError, match="file-backed database"):
             LandscapeDB.from_url("sqlite:///:memory:", passphrase="test-key")
+
+
+class TestSQLCipherPassphraseEscaping:
+    """Passphrases with special characters don't break PRAGMA key."""
+
+    def test_passphrase_with_double_quotes(self, tmp_path: Path) -> None:
+        """Regression: passphrase containing " must not cause SQL syntax error."""
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.schema import runs_table
+
+        db_path = tmp_path / "quoted_pass.db"
+        passphrase = 'my"secret"key'
+
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}", passphrase=passphrase)
+        try:
+            # Insert and read back to verify the connection works
+            with db.connection() as conn:
+                conn.execute(
+                    runs_table.insert().values(
+                        run_id="test-escape",
+                        status="RUNNING",
+                        started_at=datetime.now(UTC),
+                        config_hash="abc",
+                        settings_json="{}",
+                        canonical_version="1.0.0",
+                    )
+                )
+            with db.connection() as conn:
+                result = conn.execute(select(runs_table.c.run_id)).fetchone()
+                assert result is not None
+                assert result[0] == "test-escape"
+        finally:
+            db.close()
+
+        # Re-open with the same passphrase to confirm round-trip
+        db2 = LandscapeDB.from_url(f"sqlite:///{db_path}", passphrase=passphrase)
+        try:
+            with db2.connection() as conn:
+                result = conn.execute(select(runs_table.c.run_id)).fetchone()
+                assert result is not None
+                assert result[0] == "test-escape"
+        finally:
+            db2.close()
+
+    def test_passphrase_with_backslashes(self, tmp_path: Path) -> None:
+        """Backslashes in passphrase should not cause issues."""
+        from elspeth.core.landscape.database import LandscapeDB
+
+        db_path = tmp_path / "backslash_pass.db"
+        passphrase = r"C:\Users\admin\key"
+
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}", passphrase=passphrase)
+        try:
+            # Verify we can interact with the encrypted database
+            with db.connection() as conn:
+                from sqlalchemy import text
+
+                result = conn.execute(text("PRAGMA journal_mode")).fetchone()
+                assert result is not None
+                assert result[0] == "wal"
+        finally:
+            db.close()

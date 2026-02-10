@@ -1,0 +1,11 @@
+id,customer,amount,currency,region
+1,Acme Corp,15000,USD,north
+2,Globex Inc,800,EUR,south
+3,Initech,42000,USD,north
+4,Umbrella Ltd,3500,GBP,east
+5,Soylent Corp,120,USD,west
+6,Cyberdyne,95000,USD,north
+7,Wonka Industries,7200,EUR,south
+8,Stark Enterprises,250,GBP,east
+9,Wayne Holdings,61000,USD,north
+10,Oscorp,4800,USD,west

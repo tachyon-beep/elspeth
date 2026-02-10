@@ -598,11 +598,25 @@ def explain(
             typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
-    # Resolve SQLCipher passphrase
+    # Resolve SQLCipher passphrase.
+    # When --database is provided, resolve_database_url returns config=None
+    # (the CLI path overrides settings-based URL). But we still need the
+    # settings for passphrase resolution (custom encryption_key_env).
+    # Load settings separately if --settings was provided but config is None.
     from elspeth.cli_helpers import resolve_audit_passphrase
 
+    landscape_settings = config.landscape if config else None
+    if landscape_settings is None and settings_path is not None and settings_path.exists():
+        try:
+            from elspeth.core.config import load_settings
+
+            settings_for_passphrase = load_settings(settings_path)
+            landscape_settings = settings_for_passphrase.landscape
+        except Exception:
+            pass  # Fall through to opportunistic ELSPETH_AUDIT_KEY lookup
+
     try:
-        passphrase = resolve_audit_passphrase(config.landscape if config else None)
+        passphrase = resolve_audit_passphrase(landscape_settings)
     except RuntimeError as e:
         if json_output:
             typer.echo(json_module.dumps({"error": str(e)}))

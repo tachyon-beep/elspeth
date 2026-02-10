@@ -176,6 +176,19 @@ class LandscapeDB:
             ) from None
 
         parsed = make_url(url)
+
+        # SQLCipher only works with SQLite — reject other backends early
+        # to prevent silently opening a local file when the URL points elsewhere
+        # (e.g., postgresql://host/db with ELSPETH_AUDIT_KEY set in env).
+        driver = parsed.drivername.split("+")[0]  # "sqlite+aiosqlite" → "sqlite"
+        if driver != "sqlite":
+            raise ValueError(
+                f"SQLCipher encryption requires a SQLite database URL, "
+                f"got driver '{parsed.drivername}'. "
+                f"Either remove the passphrase/encryption_key_env or change "
+                f"the URL to sqlite:///path/to/audit.db"
+            )
+
         db_path = parsed.database
         if db_path is None or db_path == ":memory:":
             raise ValueError("SQLCipher requires a file-backed database (cannot encrypt :memory:)")
@@ -185,8 +198,12 @@ class LandscapeDB:
 
         def _creator() -> object:
             conn = sqlcipher3.connect(resolved_path)
-            # PRAGMA key MUST be the first statement — SQLCipher contract
-            conn.execute(f'PRAGMA key = "{passphrase}"')
+            # PRAGMA key MUST be the first statement — SQLCipher contract.
+            # Escape double quotes in the passphrase (SQLite literal syntax:
+            # a literal " inside a double-quoted string is written as "").
+            # PRAGMA doesn't support parameter binding, so escaping is required.
+            escaped = passphrase.replace('"', '""')
+            conn.execute(f'PRAGMA key = "{escaped}"')
             return conn
 
         return create_engine("sqlite:///", creator=_creator, echo=False)
