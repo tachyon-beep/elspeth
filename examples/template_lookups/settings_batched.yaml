@@ -2,6 +2,7 @@ landscape:
   url: sqlite:///examples/template_lookups/runs/audit_batched.db
 source:
   plugin: csv
+  on_success: batch_in
   options:
     path: examples/template_lookups/input.csv
     on_validation_failure: discard
@@ -13,15 +14,15 @@ source:
       - 'priority_id: str'
       - 'subject: str'
       - 'body: str'
-    on_success: output
 aggregations:
 - name: classify_batch
   plugin: openrouter_batch_llm
+  input: batch_in
+  on_success: output
   trigger:
     count: 5
   output_mode: passthrough
   options:
-    on_success: output
     model: anthropic/claude-3-haiku
     api_key: ${OPENROUTER_API_KEY}
     template_file: prompts/classify.j2

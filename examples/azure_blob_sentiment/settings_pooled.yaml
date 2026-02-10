@@ -1,5 +1,6 @@
 source:
   plugin: azure_blob
+  on_success: source_out
   options:
     sas_token: ${AZURE_STORAGE_SAS_TOKEN}
     account_url: ${AZURE_STORAGE_ACCOUNT_URL}
@@ -16,9 +17,11 @@ source:
       - 'id: int'
       - 'text: str'
     on_validation_failure: discard
-    on_success: output
 transforms:
 - plugin: azure_llm
+  name: sentiment_enrichment
+  input: source_out
+  on_success: output
   options:
     deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
     endpoint: ${AZURE_OPENAI_ENDPOINT}
@@ -40,7 +43,6 @@ transforms:
     schema:
       mode: observed
     pool_size: 3
-    on_success: output
 sinks:
   output:
     plugin: azure_blob

@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/openrouter_multi_query_assessment/input_overflow.csv
     schema:
@@ -13,9 +14,11 @@ source:
       - 'cs2_number: str'
       - 'cs2_color: str'
     on_validation_failure: discard
-    on_success: output
 transforms:
 - plugin: openrouter_multi_query_llm
+  name: assessment_multi_query
+  input: source_out
+  on_success: output
   options:
     model: anthropic/claude-3-5-sonnet
     api_key: ${OPENROUTER_API_KEY}
@@ -95,7 +98,6 @@ transforms:
     max_tokens: 200
     schema:
       mode: observed
-    on_success: output
 sinks:
   output:
     plugin: csv

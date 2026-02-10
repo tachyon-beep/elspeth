@@ -1,5 +1,6 @@
 source:
   plugin: csv
+  on_success: batch_in
   options:
     path: examples/openrouter_sentiment/input.csv
     schema:
@@ -8,15 +9,15 @@ source:
       - 'id: int'
       - 'text: str'
     on_validation_failure: discard
-    on_success: output
 aggregations:
 - name: sentiment_batch
   plugin: openrouter_batch_llm
+  input: batch_in
+  on_success: output
   trigger:
     count: 5
   output_mode: passthrough
   options:
-    on_success: output
     api_key: ${OPENROUTER_API_KEY}
     model: openai/gpt-4o-mini
     template: 'Analyze the sentiment of the following text and respond with ONLY a JSON object.
