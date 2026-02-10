@@ -1,10 +1,11 @@
 """CLI helper functions for plugin instantiation and database resolution."""
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from elspeth.core.config import ElspethSettings
+    from elspeth.core.config import ElspethSettings, LandscapeSettings
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
@@ -168,3 +169,38 @@ def resolve_run_id(run_id: str, recorder: "LandscapeRecorder") -> str | None:
     if run_id.lower() == "latest":
         return resolve_latest_run_id(recorder)
     return run_id
+
+
+def resolve_audit_passphrase(settings: "LandscapeSettings | None") -> str | None:
+    """Resolve the SQLCipher passphrase from the environment.
+
+    The passphrase is always read from an environment variable (never from config
+    files or URLs) to prevent it from appearing in logs, tracebacks, or the audit
+    trail itself.
+
+    Args:
+        settings: LandscapeSettings if available (determines which env var to read).
+            If None, attempts opportunistic lookup using the default env var.
+
+    Returns:
+        Passphrase string if backend is sqlcipher, None otherwise.
+
+    Raises:
+        RuntimeError: If backend is sqlcipher but the env var is not set.
+    """
+    if settings is not None and settings.backend == "sqlcipher":
+        env_var = settings.encryption_key_env
+        passphrase = os.environ.get(env_var)
+        if passphrase is None:
+            raise RuntimeError(
+                f'SQLCipher backend requires encryption passphrase.\nSet the environment variable: export {env_var}="your-passphrase"'
+            )
+        return passphrase
+
+    # Opportunistic: no settings or non-sqlcipher backend.
+    # Check default env var in case we're connecting to an encrypted DB
+    # without settings (e.g., elspeth explain --database).
+    if settings is None:
+        return os.environ.get("ELSPETH_AUDIT_KEY")
+
+    return None

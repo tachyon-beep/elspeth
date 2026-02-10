@@ -465,6 +465,15 @@ def run(
             typer.echo(f"\n{dir_error}", err=True)
         raise typer.Exit(1)
 
+    # Resolve SQLCipher passphrase (if backend=sqlcipher)
+    from elspeth.cli_helpers import resolve_audit_passphrase
+
+    try:
+        passphrase = resolve_audit_passphrase(config.landscape)
+    except RuntimeError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
     # Execute pipeline with pre-instantiated plugins
     try:
         _execute_pipeline_with_instances(
@@ -474,6 +483,7 @@ def run(
             verbose=verbose,
             output_format=output_format,
             secret_resolutions=secret_resolutions,
+            passphrase=passphrase,
         )
     except Exception as e:
         # Emit structured error for JSON mode, human-readable for console
@@ -580,8 +590,20 @@ def explain(
     # Resolve database URL
     settings_path = Path(settings) if settings else None
     try:
-        db_url, _ = resolve_database_url(database, settings_path)
+        db_url, config = resolve_database_url(database, settings_path)
     except ValueError as e:
+        if json_output:
+            typer.echo(json_module.dumps({"error": str(e)}))
+        else:
+            typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Resolve SQLCipher passphrase
+    from elspeth.cli_helpers import resolve_audit_passphrase
+
+    try:
+        passphrase = resolve_audit_passphrase(config.landscape if config else None)
+    except RuntimeError as e:
         if json_output:
             typer.echo(json_module.dumps({"error": str(e)}))
         else:
@@ -592,7 +614,7 @@ def explain(
     # Initialize db = None for proper cleanup in finally block
     db: LandscapeDB | None = None
     try:
-        db = LandscapeDB.from_url(db_url, create_tables=False)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase, create_tables=False)
     except Exception as e:
         if json_output:
             typer.echo(json_module.dumps({"error": f"Database connection failed: {e}"}))
@@ -678,6 +700,7 @@ def _execute_pipeline_with_instances(
     verbose: bool = False,
     output_format: Literal["console", "json"] = "console",
     secret_resolutions: list[dict[str, Any]] | None = None,
+    passphrase: str | None = None,
 ) -> ExecutionResult:
     """Execute pipeline using pre-instantiated plugin instances.
 
@@ -721,8 +744,19 @@ def _execute_pipeline_with_instances(
 
     # Get database
     db_url = config.landscape.url
+
+    # Warn if JSONL journal is enabled alongside SQLCipher — journal is plaintext
+    if passphrase is not None and config.landscape.dump_to_jsonl:
+        import structlog
+
+        structlog.get_logger().warning(
+            "JSONL journal is not encrypted",
+            hint="The JSONL change journal is written in plaintext even when the audit database is encrypted with SQLCipher.",
+        )
+
     db = LandscapeDB.from_url(
         db_url,
+        passphrase=passphrase,
         dump_to_jsonl=config.landscape.dump_to_jsonl,
         dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
         dump_to_jsonl_fail_on_error=config.landscape.dump_to_jsonl_fail_on_error,
@@ -1213,10 +1247,19 @@ def purge(
         typer.echo(f"Using retention_days from config: {effective_retention_days}")
     # else: use the fallback default of 90
 
+    # Resolve SQLCipher passphrase
+    from elspeth.cli_helpers import resolve_audit_passphrase
+
+    try:
+        passphrase = resolve_audit_passphrase(config.landscape if config else None)
+    except RuntimeError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
     # Initialize database and payload store
     # Note: purge is read-only for audit data, no JSONL journaling needed
     try:
-        db = LandscapeDB.from_url(db_url)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase)
     except Exception as e:
         typer.echo(f"Error connecting to database: {e}", err=True)
         raise typer.Exit(1) from None
@@ -1515,9 +1558,18 @@ def resume(
         db_url = settings_config.landscape.url
         typer.echo(f"Using database from settings.yaml: {db_url}")
 
+    # Resolve SQLCipher passphrase
+    from elspeth.cli_helpers import resolve_audit_passphrase
+
+    try:
+        passphrase = resolve_audit_passphrase(settings_config.landscape)
+    except RuntimeError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
     # Initialize database and recovery manager
     try:
-        db = LandscapeDB.from_url(db_url)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase)
     except Exception as e:
         typer.echo(f"Error connecting to database: {e}", err=True)
         raise typer.Exit(1) from None

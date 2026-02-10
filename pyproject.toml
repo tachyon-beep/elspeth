@@ -118,6 +118,11 @@ mcp = [
     "mcp>=1.0,<2",  # Model Context Protocol SDK
 ]
 
+security = [
+    # SQLCipher DBAPI2 binding for AES-256 encryption at rest
+    "sqlcipher3>=0.5.4,<1",
+]
+
 tracing-azure = [
     # Tier 2: Azure AI tracing for LLM plugins
     # Uses the "distro" package which bundles OpenTelemetry instrumentations
@@ -174,6 +179,8 @@ all = [
     # tracing dependencies
     "azure-monitor-opentelemetry>=1.6,<2",
     "langfuse>=3.12,<4",
+    # security dependencies
+    "sqlcipher3>=0.5.4,<1",
 ]
 
 [project.scripts]
@@ -264,6 +271,7 @@ module = [
     "azure.*",
     "mcp.*",
     "ddtrace.*",
+    "sqlcipher3.*",
 ]
 ignore_missing_imports = true
 

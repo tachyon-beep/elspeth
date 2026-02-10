@@ -356,7 +356,7 @@ class TestLandscapeSettings:
         assert ls.url == pg_url  # Preserved exactly
 
     def test_landscape_settings_backend_validation(self) -> None:
-        """Backend must be sqlite or postgresql."""
+        """Backend must be sqlite, sqlcipher, or postgresql."""
         from elspeth.core.config import LandscapeSettings
 
         with pytest.raises(ValidationError):
@@ -413,6 +413,35 @@ class TestLandscapeSettings:
         with pytest.raises(ValidationError) as exc_info:
             LandscapeSettings(url="")
         assert "Invalid database URL format" in str(exc_info.value) or "missing driver" in str(exc_info.value).lower()
+
+    def test_sqlcipher_backend_requires_sqlite_url(self) -> None:
+        """backend='sqlcipher' with a PostgreSQL URL is rejected."""
+        from elspeth.core.config import LandscapeSettings
+
+        with pytest.raises(ValidationError, match="requires a SQLite URL"):
+            LandscapeSettings(backend="sqlcipher", url="postgresql://user:pass@host/db")
+
+    def test_sqlcipher_backend_valid(self) -> None:
+        """backend='sqlcipher' with a SQLite URL is accepted."""
+        from elspeth.core.config import LandscapeSettings
+
+        ls = LandscapeSettings(backend="sqlcipher", url="sqlite:///./state/audit.db")
+        assert ls.backend == "sqlcipher"
+        assert ls.url == "sqlite:///./state/audit.db"
+
+    def test_encryption_key_env_default(self) -> None:
+        """Default encryption_key_env is ELSPETH_AUDIT_KEY."""
+        from elspeth.core.config import LandscapeSettings
+
+        ls = LandscapeSettings(backend="sqlcipher", url="sqlite:///./state/audit.db")
+        assert ls.encryption_key_env == "ELSPETH_AUDIT_KEY"
+
+    def test_encryption_key_env_custom(self) -> None:
+        """Custom encryption_key_env is accepted."""
+        from elspeth.core.config import LandscapeSettings
+
+        ls = LandscapeSettings(backend="sqlcipher", url="sqlite:///./state/audit.db", encryption_key_env="MY_CUSTOM_KEY")
+        assert ls.encryption_key_env == "MY_CUSTOM_KEY"
 
 
 class TestConcurrencySettings:

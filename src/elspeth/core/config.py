@@ -874,15 +874,19 @@ class LandscapeSettings(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(default=True, description="Enable audit trail recording")
-    backend: Literal["sqlite", "postgresql"] = Field(
+    backend: Literal["sqlite", "sqlcipher", "postgresql"] = Field(
         default="sqlite",
-        description="Database backend type",
+        description="Database backend type (sqlcipher requires the 'security' extra)",
     )
     # NOTE: Using str instead of Path - Path mangles PostgreSQL DSNs like
     # "postgresql://user:pass@host/db" (pathlib interprets // as UNC path)
     url: str = Field(
         default="sqlite:///./state/audit.db",
         description="Full SQLAlchemy database URL",
+    )
+    encryption_key_env: str = Field(
+        default="ELSPETH_AUDIT_KEY",
+        description="Environment variable holding the SQLCipher passphrase (backend=sqlcipher only)",
     )
     export: LandscapeExportSettings = Field(
         default_factory=LandscapeExportSettings,
@@ -928,6 +932,13 @@ class LandscapeSettings(BaseModel):
         except ArgumentError as e:
             raise ValueError(f"Invalid database URL format: {e}") from e
         return v
+
+    @model_validator(mode="after")
+    def validate_sqlcipher_backend(self) -> "LandscapeSettings":
+        """Validate that sqlcipher backend uses a SQLite-compatible URL."""
+        if self.backend == "sqlcipher" and not self.url.startswith("sqlite"):
+            raise ValueError("backend='sqlcipher' requires a SQLite URL (sqlcipher is wire-compatible with SQLite)")
+        return self
 
 
 class ConcurrencySettings(BaseModel):

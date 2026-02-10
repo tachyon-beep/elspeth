@@ -71,13 +71,14 @@ _dataclass_to_dict = dataclass_to_dict
 class LandscapeAnalyzer:
     """Read-only analyzer for the Landscape audit database."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, passphrase: str | None = None) -> None:
         """Initialize analyzer with database connection.
 
         Args:
             database_url: SQLAlchemy connection URL (e.g., sqlite:///./state/audit.db)
+            passphrase: SQLCipher encryption passphrase (if database is encrypted)
         """
-        self._db = LandscapeDB.from_url(database_url, create_tables=False)
+        self._db = LandscapeDB.from_url(database_url, passphrase=passphrase, create_tables=False)
         self._recorder = LandscapeRecorder(self._db)
 
     def close(self) -> None:
@@ -1927,17 +1928,18 @@ def _validate_tool_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return validated
 
 
-def create_server(database_url: str) -> Server:
+def create_server(database_url: str, *, passphrase: str | None = None) -> Server:
     """Create MCP server with Landscape analysis tools.
 
     Args:
         database_url: SQLAlchemy connection URL
+        passphrase: SQLCipher encryption passphrase (if database is encrypted)
 
     Returns:
         Configured MCP Server
     """
     server = Server("elspeth-landscape")
-    analyzer = LandscapeAnalyzer(database_url)
+    analyzer = LandscapeAnalyzer(database_url, passphrase=passphrase)
 
     @server.list_tools()  # type: ignore[misc, no-untyped-call, untyped-decorator]  # MCP SDK decorators lack type stubs
     async def list_tools() -> list[Tool]:
@@ -2379,9 +2381,9 @@ def create_server(database_url: str) -> Server:
     return server
 
 
-async def run_server(database_url: str) -> None:
+async def run_server(database_url: str, *, passphrase: str | None = None) -> None:
     """Run the MCP server with stdio transport."""
-    server = create_server(database_url)
+    server = create_server(database_url, passphrase=passphrase)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
@@ -2568,9 +2570,12 @@ Environment Variables:
 
         database_url = f"sqlite:///{db_path}"
 
+    # SQLCipher passphrase from environment (if database is encrypted)
+    passphrase = os.environ.get("ELSPETH_AUDIT_KEY")
+
     import asyncio
 
-    asyncio.run(run_server(database_url))
+    asyncio.run(run_server(database_url, passphrase=passphrase))
 
 
 if __name__ == "__main__":
