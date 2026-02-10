@@ -597,7 +597,6 @@ class ExecutionGraph:
         import hashlib
 
         from elspeth.core.canonical import canonical_json
-        from elspeth.plugins.protocols import GateProtocol
 
         graph = cls()
 
@@ -671,35 +670,21 @@ class ExecutionGraph:
 
         graph._sink_id_map = dict(sink_ids)
 
-        # Build transforms (including plugin gates)
+        # Build transforms
         transform_ids_by_name: dict[str, NodeID] = {}
         transform_ids_by_seq: dict[int, NodeID] = {}
         gate_entries: list[_GateEntry] = []
         gate_route_connections: list[tuple[NodeID, str, str]] = []
-        plugin_gate_schema_inputs: list[tuple[NodeID, str, str, object | None]] = []
 
         for seq, wired in enumerate(transforms):
             transform = wired.plugin
             transform_config = transform.config
-            is_gate = isinstance(transform, GateProtocol)
             tid = node_id("transform", wired.settings.name, transform_config)
             transform_ids_by_name[wired.settings.name] = tid
             transform_ids_by_seq[seq] = tid
 
             node_config = dict(transform_config)
-            node_type = NodeType.GATE if is_gate else NodeType.TRANSFORM
-
-            if is_gate:
-                # Type narrowing: we know it's a GateProtocol from isinstance check
-                gate = cast(GateProtocol, transform)
-                if "schema" in node_config:  # noqa: SIM401
-                    declared_schema = node_config["schema"]
-                else:
-                    declared_schema = None
-                plugin_gate_schema_inputs.append((tid, gate.name, wired.settings.input, declared_schema))
-                node_config["routes"] = dict(gate.routes)
-                if gate.fork_to is not None:
-                    node_config["fork_to"] = list(gate.fork_to)
+            node_type = NodeType.TRANSFORM
 
             # Extract computed output schema config if available (e.g., LLM transforms
             # compute guaranteed_fields and audit_fields from their configuration).
@@ -717,33 +702,6 @@ class ExecutionGraph:
                 output_schema=transform.output_schema,  # TransformProtocol requires this
                 output_schema_config=output_schema_config,
             )
-
-            if is_gate:
-                # Type narrowing: we know it's a GateProtocol from isinstance check
-                gate = cast(GateProtocol, transform)
-                gate_entries.append(
-                    _GateEntry(
-                        node_id=tid,
-                        name=gate.name,
-                        fork_to=tuple(gate.fork_to) if gate.fork_to is not None else None,
-                        routes=MappingProxyType(dict(gate.routes)),
-                    )
-                )
-
-                # Gate routes to sinks via route labels; connection-name routes are deferred.
-                for route_label, target in gate.routes.items():
-                    if target == "fork":
-                        raise GraphValidationError(
-                            f"Gate '{transform.name}' route '{route_label}' resolves to 'fork'. "
-                            "Plugin gates must use RoutingAction.fork_to_paths() for forks."
-                        )
-                    if SinkName(target) in sink_ids:
-                        target_sink_id = sink_ids[SinkName(target)]
-                        graph.add_edge(tid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
-                        graph._route_label_map[(tid, target)] = route_label
-                        graph._route_resolution_map[(tid, route_label)] = RouteDestination.sink(SinkName(target))
-                    else:
-                        gate_route_connections.append((tid, route_label, target))
 
         graph._transform_id_map = transform_ids_by_seq
 
@@ -964,8 +922,6 @@ class ExecutionGraph:
             )
 
         for wired in transforms:
-            if isinstance(wired.plugin, GateProtocol):
-                continue
             tid = transform_ids_by_name[wired.settings.name]
             on_success = wired.settings.on_success
             if on_success is None:
@@ -1042,24 +998,6 @@ class ExecutionGraph:
             check_dangling=False,
         )
 
-        # Resolve gate schema from explicit input connection.
-        for gate_id, gate_name, input_connection, declared_schema in plugin_gate_schema_inputs:
-            if input_connection not in producers:
-                suggestions = _suggest_similar(input_connection, sorted(producers.keys()))
-                hint = f" Did you mean: {suggestions}?" if suggestions else ""
-                raise GraphValidationError(
-                    f"Gate '{gate_name}' input '{input_connection}' has no producer.{hint}\n"
-                    f"Available connections: {sorted(producers.keys())}"
-                )
-            producer_id, _producer_label = producers[input_connection]
-            upstream_schema = graph.get_node_info(producer_id).config["schema"]
-            if declared_schema is not None and declared_schema != upstream_schema:
-                raise GraphValidationError(
-                    f"Gate '{gate_name}' declares schema config that differs from upstream. "
-                    f"Upstream schema config: {upstream_schema}, gate schema config: {declared_schema}"
-                )
-            graph.get_node_info(gate_id).config["schema"] = upstream_schema
-
         # Config gate schema resolution (pass 1): resolve gates whose upstream
         # producer already has a schema. Gates downstream of coalesce nodes are
         # deferred to pass 2 (after coalesce schema population).
@@ -1126,8 +1064,6 @@ class ExecutionGraph:
 
         # ===== TERMINAL ROUTING (on_success -> sinks) =====
         for wired in transforms:
-            if isinstance(wired.plugin, GateProtocol):
-                continue
             on_success = wired.settings.on_success
             if on_success is None:
                 continue
@@ -1225,13 +1161,7 @@ class ExecutionGraph:
             )
 
         # Transform error edges
-        # GateProtocol does NOT define _on_error, so skip gates.
-        # The isinstance check is framework-boundary type narrowing — the
-        # transforms list contains both TransformProtocol and GateProtocol
-        # instances.
         for wired in transforms:
-            if isinstance(wired.plugin, GateProtocol):
-                continue
             on_error = wired.settings.on_error
             if on_error is not None and on_error != "discard":
                 if SinkName(on_error) not in sink_ids:

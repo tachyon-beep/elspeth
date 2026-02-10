@@ -7,7 +7,6 @@ from typing import Any, TypedDict, cast
 
 import pytest
 
-from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import AggregationSettings, ElspethSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph, WiredTransform
 from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
@@ -2444,115 +2443,6 @@ class TestCoalesceNodes:
                 aggregations=plugins["aggregations"],
                 gates=list(settings.gates),
                 coalesce_settings=settings.coalesce,
-            )
-
-    def test_duplicate_fork_branches_rejected_in_plugin_gate(self) -> None:
-        """Duplicate branch names in fork_to should be rejected for plugin gates."""
-
-        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
-        from elspeth.plugins.base import BaseGate
-        from elspeth.plugins.results import GateResult, RoutingAction
-
-        class DummySchema(PluginSchema):
-            pass
-
-        class DummySource:
-            name = "dummy_source"
-            output_schema = DummySchema
-            node_id: str | None = None
-            determinism = Determinism.DETERMINISTIC
-            plugin_version = "1.0.0"
-            _on_validation_failure = "discard"
-            on_success = "output"
-
-            def __init__(self) -> None:
-                self.config = {"schema": {"mode": "observed"}}
-
-            def load(self, ctx: PluginContext) -> Any:
-                yield SourceRow.valid({"value": 1})
-
-            def close(self) -> None:
-                pass
-
-            def on_start(self, ctx: PluginContext) -> None:
-                pass
-
-            def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-        class DummySink:
-            input_schema = DummySchema
-            idempotent = True
-            node_id: str | None = None
-            determinism = Determinism.DETERMINISTIC
-            plugin_version = "1.0.0"
-
-            def __init__(self, name: str) -> None:
-                self.name = name
-                self.config = {"schema": {"mode": "observed"}}
-
-            def write(self, rows: Any, ctx: PluginContext) -> ArtifactDescriptor:
-                return ArtifactDescriptor.for_file(path="memory", content_hash="", size_bytes=0)
-
-            def flush(self) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
-
-            def on_start(self, ctx: PluginContext) -> None:
-                pass
-
-            def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-        class DummyGate(BaseGate):
-            name = "fork_gate"
-            input_schema = DummySchema
-            output_schema = DummySchema
-
-            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-                return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
-
-        from elspeth.core.config import SourceSettings, TransformSettings
-        from elspeth.core.dag import WiredTransform
-
-        source = DummySource()
-        source_settings = SourceSettings(plugin="dummy_source", on_success="source_out", options={})
-        sinks = {
-            "output": DummySink("output"),
-            "path_a": DummySink("path_a"),
-        }
-        # Plugin gates must NOT have "fork" as a route target - they use
-        # RoutingAction.fork_to_paths() in evaluate() instead.
-        # Routes here just define non-fork routing options.
-        gate = DummyGate(
-            {
-                "routes": {"default": "continue"},
-                "fork_to": ["path_a", "path_a"],  # Duplicate branch - should be rejected
-                "schema": {"mode": "observed"},
-            }
-        )
-        gate_settings = TransformSettings(
-            name="fork_gate_0",
-            plugin="fork_gate",
-            input="source_out",
-            on_success="output",
-            options={},
-        )
-        gate.on_success = "output"  # type: ignore[attr-defined]
-
-        with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
-            ExecutionGraph.from_plugin_instances(
-                source=source,  # type: ignore[arg-type]
-                source_settings=source_settings,
-                transforms=[WiredTransform(plugin=gate, settings=gate_settings)],  # type: ignore[arg-type]
-                sinks=sinks,  # type: ignore[arg-type]
-                aggregations={},
-                gates=[],
-                coalesce_settings=None,
             )
 
     def test_partial_branch_coverage_branches_not_in_coalesce_route_to_sink(

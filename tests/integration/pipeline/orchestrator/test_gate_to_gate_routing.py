@@ -13,72 +13,22 @@ Target code:
 
 Tests:
 1. Config gate routes to terminal config gate — must not crash
-2. Plugin gate routes to terminal config gate — must not crash
-3. Gate chain where downstream gate CONTINUEs to transform → sink
-4. Existing transform chain behavior preserved (regression guard)
+2. Gate chain where downstream gate CONTINUEs to transform → sink
+3. Existing transform chain behavior preserved (regression guard)
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from elspeth.contracts import (
-    Determinism,
-    RoutingAction,
-    RunStatus,
-)
-from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.results import GateResult
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts import RunStatus
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseGate
 from elspeth.testing import make_pipeline_row
-from tests.fixtures.base_classes import _TestSchema, as_gate, as_sink, as_source, as_transform
+from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.pipeline import build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
-
-# ---------------------------------------------------------------------------
-# Test Gates (plugin-based)
-# ---------------------------------------------------------------------------
-
-
-class ForwardingGate(BaseGate):
-    """Plugin gate that routes all rows to a named label.
-
-    Used to test gate-to-gate routing via PROCESSING_NODE destinations.
-    """
-
-    name = "forwarding_gate"
-    plugin_version = "1.0.0"
-    determinism = Determinism.DETERMINISTIC
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        super().__init__(config)
-        from elspeth.plugins.schema_factory import _create_dynamic_schema
-
-        schema = _create_dynamic_schema("ForwardingGateSchema")
-        self.input_schema = schema
-        self.output_schema = schema
-        self._route_label = config.get("default_route_label", "forward")
-
-    def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-        return GateResult(
-            row=row.to_dict(),
-            action=RoutingAction.route(self._route_label),
-        )
-
-    def on_start(self, ctx: PluginContext) -> None:
-        pass
-
-    def on_complete(self, ctx: PluginContext) -> None:
-        pass
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 class TestConfigGateToConfigGate:
@@ -165,79 +115,12 @@ class TestConfigGateToConfigGate:
         assert len(default_sink.results) == 1  # value=10
 
 
-class TestPluginGateToConfigGate:
-    """Plugin gate (GateProtocol) routes to a config gate — exercises first call site."""
-
-    def test_plugin_gate_routes_to_terminal_config_gate(self, payload_store) -> None:
-        """ForwardingGate routes to terminal config gate2."""
-        from elspeth.core.config import SourceSettings, TransformSettings
-        from elspeth.core.dag import ExecutionGraph, WiredTransform
-
-        db = LandscapeDB.in_memory()
-
-        plugin_gate = ForwardingGate(
-            config={
-                "routes": {"forward": "gate2_in"},
-                "default_route_label": "forward",
-                "schema": {"mode": "observed"},
-            }
-        )
-
-        # Terminal config gate — routes to sinks
-        config_gate = GateSettings(
-            name="config_gate",
-            input="gate2_in",
-            condition="row['value'] > 50",
-            routes={"true": "high", "false": "default"},
-        )
-
-        source = ListSource([{"value": 10}, {"value": 100}], on_success="gate1_in")
-        default_sink = CollectSink(name="default")
-        high_sink = CollectSink(name="high")
-
-        # Wire the plugin gate manually — it's a GateProtocol so build_production_graph
-        # doesn't handle it. Using from_plugin_instances directly is the production path.
-        source_settings = SourceSettings(plugin=source.name, on_success="gate1_in", options={})
-        wired_gate = WiredTransform(
-            plugin=as_gate(plugin_gate),  # type: ignore[arg-type]
-            settings=TransformSettings(
-                name="forwarding_gate",
-                plugin="forwarding_gate",
-                input="gate1_in",
-                on_success="gate2_in",
-                options={},
-            ),
-        )
-
-        graph = ExecutionGraph.from_plugin_instances(
-            source=as_source(source),
-            source_settings=source_settings,
-            transforms=[wired_gate],
-            sinks={"default": as_sink(default_sink), "high": as_sink(high_sink)},
-            aggregations={},
-            gates=[config_gate],
-        )
-
-        config = PipelineConfig(
-            source=as_source(source),
-            transforms=[as_gate(plugin_gate)],
-            sinks={"default": as_sink(default_sink), "high": as_sink(high_sink)},
-            gates=[config_gate],
-        )
-
-        orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
-
-        assert result.status == RunStatus.COMPLETED
-        assert len(high_sink.results) == 1  # value=100
-        assert len(default_sink.results) == 1  # value=10
-
-
 class TestGateToGateWithDownstreamTransform:
     """Source → transform → gate1, where gate1 routes to terminal gate2."""
 
     def test_transform_then_gate_routes_to_terminal_gate(self, payload_store) -> None:
         """source → transform → gate1 (routes to gate2) → gate2 (routes to sinks)."""
+        from elspeth.contracts.schema_contract import PipelineRow
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
 
