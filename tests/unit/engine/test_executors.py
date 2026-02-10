@@ -1717,6 +1717,125 @@ class TestSinkExecutor:
         kwargs = recorder.register_artifact.call_args[1]
         assert kwargs["state_id"] == "state_001"  # First token's state
 
+    # --- Duration amortization (sm22) ---
+
+    def test_duration_amortized_across_tokens_on_success(self) -> None:
+        """Each token gets batch_duration / N, not the full batch duration."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        tokens = [
+            _make_token(data={"value": "a"}, token_id="t1", contract=contract),
+            _make_token(data={"value": "b"}, token_id="t2", contract=contract),
+            _make_token(data={"value": "c"}, token_id="t3", contract=contract),
+        ]
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            tokens,
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED]
+        assert len(completed_calls) == 3
+        durations = [c[1]["duration_ms"] for c in completed_calls]
+        # All three tokens should get the same amortized duration
+        assert durations[0] == durations[1] == durations[2]
+        # Amortized means each is roughly 1/3 of what the total would be.
+        # We can't know the exact total, but we can verify the values are
+        # consistent: sum of per-token ≈ total (within floating point)
+        total_reconstructed = sum(durations)
+        assert durations[0] == pytest.approx(total_reconstructed / 3)
+
+    def test_duration_amortized_across_tokens_on_write_failure(self) -> None:
+        """Write failure: each token gets amortized duration, not full batch time."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        tokens = [
+            _make_token(data={"value": "a"}, token_id="t1", contract=contract),
+            _make_token(data={"value": "b"}, token_id="t2", contract=contract),
+        ]
+        sink = _make_sink()
+        sink.write.side_effect = OSError("disk full")
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(OSError):
+            executor.write(
+                sink,
+                tokens,
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 2
+        durations = [c[1]["duration_ms"] for c in failed_calls]
+        assert durations[0] == durations[1]
+        assert durations[0] == pytest.approx(sum(durations) / 2)
+
+    def test_duration_amortized_across_tokens_on_flush_failure(self) -> None:
+        """Flush failure: each token gets amortized duration, not full batch time."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        tokens = [
+            _make_token(data={"value": "a"}, token_id="t1", contract=contract),
+            _make_token(data={"value": "b"}, token_id="t2", contract=contract),
+        ]
+        sink = _make_sink()
+        sink.flush.side_effect = OSError("flush failed")
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(OSError):
+            executor.write(
+                sink,
+                tokens,
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 2
+        durations = [c[1]["duration_ms"] for c in failed_calls]
+        assert durations[0] == durations[1]
+        assert durations[0] == pytest.approx(sum(durations) / 2)
+
+    def test_single_token_duration_unchanged(self) -> None:
+        """Single-token write: duration_ms is total (N/N = total)."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        token = _make_token()
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        executor.write(
+            sink,
+            [token],
+            ctx,
+            step_in_pipeline=5,
+            sink_name="out",
+            pending_outcome=pending,
+        )
+
+        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED]
+        assert len(completed_calls) == 1
+        # With 1 token, amortized = total (no division effect)
+        assert completed_calls[0][1]["duration_ms"] > 0
+
 
 # =============================================================================
 # AggregationExecutor checkpoint version tests

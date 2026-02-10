@@ -150,7 +150,7 @@ class AzureBatchLLMTransform(BaseTransform):
         cfg = AzureBatchConfig.from_dict(config)
         self._deployment_name = cfg.deployment_name
         self._endpoint = cfg.endpoint.rstrip("/")
-        self._api_key = cfg.api_key
+        self._api_key: str | None = cfg.api_key
         self._api_version = cfg.api_version
         self._template = PromptTemplate(
             cfg.template,
@@ -355,6 +355,8 @@ class AzureBatchLLMTransform(BaseTransform):
                     api_key=self._api_key,
                     api_version=self._api_version,
                 )
+                # Clear plaintext key — SDK client holds its own copy internally
+                self._api_key = None
             return self._client
 
     def process(
@@ -1278,28 +1280,26 @@ class AzureBatchLLMTransform(BaseTransform):
                 }
             )
 
-        # Create OBSERVED contract from first output row
-        # Batch transforms don't have access to input contracts (architectural gap),
-        # so we infer an OBSERVED contract from the output data
+        # Create OBSERVED contract from union of ALL output row keys (not just first)
+        # Error rows may have extra fields (e.g. _error) that the first row lacks
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
-        if output_rows:
-            first_row = output_rows[0]
-            fields = tuple(
-                FieldContract(
-                    normalized_name=key,
-                    original_name=key,
-                    python_type=object,  # Use object for dynamic typing
-                    required=False,
-                    source="inferred",
-                )
-                for key in first_row
-            )
-            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-        else:
-            output_contract = None
+        all_keys: dict[str, None] = {}
+        for r in output_rows:
+            for key in r:
+                all_keys[key] = None
 
-        assert output_contract is not None, "output_rows is non-empty so contract was built"
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=object,  # OBSERVED mode - infer all as object type
+                required=False,
+                source="inferred",
+            )
+            for key in all_keys
+        )
+        output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={"action": "enriched", "fields_added": [self._response_field]},

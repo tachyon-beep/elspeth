@@ -97,8 +97,11 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
 
         cfg = OpenRouterMultiQueryConfig.from_dict(config)
 
-        # OpenRouter-specific connection settings
-        self._api_key = cfg.api_key
+        # Pre-build auth headers — avoids storing the raw API key as a named attribute
+        self._request_headers = {
+            "Authorization": f"Bearer {cfg.api_key}",
+            "HTTP-Referer": "https://github.com/elspeth-rapid",  # Required by OpenRouter
+        }
         self._base_url = cfg.base_url
         self._timeout = cfg.timeout_seconds
         self._model = cfg.model
@@ -435,10 +438,7 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                     telemetry_emit=self._telemetry_emit,
                     timeout=self._timeout,
                     base_url=self._base_url,
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "HTTP-Referer": "https://github.com/elspeth-rapid",  # Required by OpenRouter
-                    },
+                    headers=self._request_headers,
                     limiter=self._limiter,
                 )
             return self._http_clients[state_id]

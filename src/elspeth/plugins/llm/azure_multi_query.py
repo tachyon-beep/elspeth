@@ -88,7 +88,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
 
         # Azure-specific connection settings
         self._azure_endpoint = cfg.endpoint
-        self._azure_api_key = cfg.api_key
+        self._azure_api_key: str | None = cfg.api_key
         self._azure_api_version = cfg.api_version
         self._deployment_name = cfg.deployment_name
         self._model = cfg.model or cfg.deployment_name
@@ -381,6 +381,8 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                     api_key=self._azure_api_key,
                     api_version=self._azure_api_version,
                 )
+                # Clear plaintext key — SDK client holds its own copy internally
+                self._azure_api_key = None
             return self._underlying_client
 
     def _get_llm_client(self, state_id: str) -> AuditedLLMClient:

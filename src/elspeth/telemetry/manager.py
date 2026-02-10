@@ -187,19 +187,18 @@ class TelemetryManager:
         elif failures == len(self._exporters):
             # ALL exporters failed
             self._consecutive_total_failures += 1
-            # Lock required - pipeline thread also writes in DROP mode
+            # Lock required - pipeline thread also writes in DROP mode.
+            # Log check MUST be inside lock to prevent race on _last_logged_drop_count
             with self._dropped_lock:
                 self._events_dropped += 1
-
-            # Aggregate logging every _LOG_INTERVAL
-            if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
-                logger.error(
-                    "ALL telemetry exporters failing - events dropped",
-                    dropped_since_last_log=self._events_dropped - self._last_logged_drop_count,
-                    dropped_total=self._events_dropped,
-                    consecutive_failures=self._consecutive_total_failures,
-                )
-                self._last_logged_drop_count = self._events_dropped
+                if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
+                    logger.error(
+                        "ALL telemetry exporters failing - events dropped",
+                        dropped_since_last_log=self._events_dropped - self._last_logged_drop_count,
+                        dropped_total=self._events_dropped,
+                        consecutive_failures=self._consecutive_total_failures,
+                    )
+                    self._last_logged_drop_count = self._events_dropped
 
             # Check if we should crash or disable
             if self._consecutive_total_failures >= self._max_consecutive_failures:

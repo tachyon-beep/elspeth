@@ -361,6 +361,39 @@ class TestOpenRouterBatchProcessing:
         assert has_error
 
 
+class TestOpenRouterBatchOutputContract:
+    """Tests for output schema contract completeness."""
+
+    def test_contract_includes_error_fields_when_first_row_succeeds(self, chaosllm_server) -> None:
+        """Contract must include error fields even when first row succeeds.
+
+        Regression: contract was inferred from first row only, so error-specific
+        fields (e.g. llm_response_error) were missing when first row succeeded.
+        """
+        transform = OpenRouterBatchLLMTransform(_make_valid_config({"pool_size": 2}))
+        ctx = _create_mock_context()
+        rows = [
+            {"text": "Row 1"},
+            {"text": "Row 2"},
+        ]
+
+        success_response = _create_mock_response(chaosllm_server, content="OK")
+        error_response = _create_mock_response(chaosllm_server, status_code=500)
+
+        with mock_httpx_client(chaosllm_server, [success_response, error_response]):
+            result = transform.process([make_pipeline_row(r) for r in rows], ctx)
+
+        assert result.rows is not None
+        assert len(result.rows) == 2
+
+        # The error row has llm_response_error — contract must know about it
+        error_row = next(r for r in result.rows if r.get("llm_response_error") is not None)
+        contract = error_row.contract
+
+        field_names = {f.normalized_name for f in contract.fields}
+        assert "llm_response_error" in field_names, "Contract must include error fields from all rows, not just the first"
+
+
 class TestOpenRouterBatchErrorHandling:
     """Tests for error handling in batch processing."""
 

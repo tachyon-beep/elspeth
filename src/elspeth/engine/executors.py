@@ -2184,6 +2184,7 @@ class SinkExecutor:
                     duration_ms = (time.perf_counter() - start) * 1000
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000
+                    per_token_ms = duration_ms / len(tokens)
                     # Mark all token states as failed
                     error: ExecutionError = {
                         "exception": str(e),
@@ -2193,7 +2194,7 @@ class SinkExecutor:
                         self._recorder.complete_node_state(
                             state_id=state.state_id,
                             status=NodeStateStatus.FAILED,
-                            duration_ms=duration_ms,
+                            duration_ms=per_token_ms,
                             error=error,
                         )
                     raise
@@ -2212,11 +2213,12 @@ class SinkExecutor:
                     "phase": "flush",
                 }
                 flush_duration_ms = (time.perf_counter() - start) * 1000
+                per_token_flush_ms = flush_duration_ms / len(tokens)
                 for _, state in states:
                     self._recorder.complete_node_state(
                         state_id=state.state_id,
                         status=NodeStateStatus.FAILED,
-                        duration_ms=flush_duration_ms,
+                        duration_ms=per_token_flush_ms,
                         error=flush_error,
                     )
                 raise
@@ -2229,6 +2231,9 @@ class SinkExecutor:
 
         # Complete all token states - status=NodeStateStatus.COMPLETED means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference
+        # Amortize batch write time across tokens so aggregation math is correct:
+        # sum(per-token duration) ~ actual batch time, not N * batch time
+        per_token_ms = duration_ms / len(tokens)
         for token, state in states:
             # Extract dict from PipelineRow for Landscape output recording
             output_dict = token.row_data.to_dict()
@@ -2241,7 +2246,7 @@ class SinkExecutor:
                 state_id=state.state_id,
                 status=NodeStateStatus.COMPLETED,
                 output_data=sink_output,
-                duration_ms=duration_ms,
+                duration_ms=per_token_ms,
             )
 
         # Register artifact (linked to first state for audit lineage)

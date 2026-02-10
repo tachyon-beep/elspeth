@@ -128,8 +128,11 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # Parse OpenRouter-specific config
         cfg = OpenRouterBatchConfig.from_dict(config)
 
-        # Store OpenRouter-specific settings
-        self._api_key = cfg.api_key
+        # Pre-build auth headers — avoids storing the raw API key as a named attribute
+        self._request_headers = {
+            "Authorization": f"Bearer {cfg.api_key}",
+            "HTTP-Referer": "https://github.com/elspeth-rapid",
+        }
         self._base_url = cfg.base_url
         self._timeout = cfg.timeout_seconds
 
@@ -428,10 +431,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             httpx.Client(
                 base_url=self._base_url,
                 timeout=self._timeout,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "HTTP-Referer": "https://github.com/elspeth-rapid",
-                },
+                headers=self._request_headers,
             ) as client,
             ThreadPoolExecutor(max_workers=self._pool_size) as executor,
         ):
@@ -480,28 +480,26 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 # Success
                 output_rows.append(result)
 
-        # Create OBSERVED contract from first output row
-        # Batch transforms don't have access to input contracts (architectural gap),
-        # so we infer an OBSERVED contract from the output data
+        # Create OBSERVED contract from union of ALL output row keys (not just first)
+        # Error rows may have extra fields (e.g. _error) that the first row lacks
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
-        if output_rows:
-            first_row = output_rows[0]
-            fields = tuple(
-                FieldContract(
-                    normalized_name=key,
-                    original_name=key,
-                    python_type=object,  # Use object for dynamic typing
-                    required=False,
-                    source="inferred",
-                )
-                for key in first_row
-            )
-            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-        else:
-            output_contract = None
+        all_keys: dict[str, None] = {}
+        for r in output_rows:
+            for key in r:
+                all_keys[key] = None
 
-        assert output_contract is not None, "output_rows is non-empty so contract was built"
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=object,  # OBSERVED mode - infer all as object type
+                required=False,
+                source="inferred",
+            )
+            for key in all_keys
+        )
+        output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={"action": "enriched", "fields_added": [self._response_field]},

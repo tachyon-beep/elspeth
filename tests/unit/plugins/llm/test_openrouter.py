@@ -238,7 +238,7 @@ class TestOpenRouterLLMTransformInit:
         )
 
         assert transform._model == "anthropic/claude-3-opus"
-        assert transform._api_key == "sk-test-key"
+        assert transform._request_headers["Authorization"] == "Bearer sk-test-key"
         assert transform._base_url == "https://custom.example.com/api/v1"
         assert transform._timeout == 90.0
 

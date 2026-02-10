@@ -313,3 +313,48 @@ class TestBatchReplicateSchemaContract:
         output_row = {"original_field": "value", "copy_index": 2}
         # This should not raise
         transform.output_schema.model_validate(output_row)
+
+
+class TestBatchReplicateDeepCopy:
+    """Verify replicated rows don't share mutable nested references."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return PluginContext(run_id="test-run", config={})
+
+    def test_nested_list_mutation_does_not_cross_contaminate(self, ctx: PluginContext) -> None:
+        """Mutating a nested list in one copy must not affect other copies."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "copies_field": "copies", "include_copy_index": True})
+        row = make_pipeline_row({"id": 1, "tags": ["a", "b"], "copies": 3})
+
+        result = transform.process([row], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 3
+
+        # Mutate nested list in first copy
+        first = result.rows[0].to_dict()
+        first["tags"].append("MUTATED")
+
+        # Other copies must be unaffected
+        for copy_row in result.rows[1:]:
+            assert "MUTATED" not in copy_row["tags"]
+
+    def test_nested_dict_mutation_does_not_cross_contaminate(self, ctx: PluginContext) -> None:
+        """Mutating a nested dict in one copy must not affect other copies."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "copies_field": "copies", "include_copy_index": True})
+        row = make_pipeline_row({"id": 1, "meta": {"source": "csv"}, "copies": 2})
+
+        result = transform.process([row], ctx)
+
+        assert result.rows is not None
+        first = result.rows[0].to_dict()
+        first["meta"]["injected"] = True
+
+        second = result.rows[1].to_dict()
+        assert "injected" not in second["meta"]
