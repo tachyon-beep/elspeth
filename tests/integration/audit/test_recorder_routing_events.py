@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from elspeth.contracts import NodeType, RoutingMode, RoutingSpec
-from elspeth.contracts.errors import PluginGateReason
+from elspeth.contracts.errors import ConfigGateReason
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -76,7 +76,7 @@ class TestLandscapeRecorderRouting:
             state_id=state.state_id,
             edge_id=edge.edge_id,
             mode=RoutingMode.MOVE,
-            reason={"rule": "value > 1000", "matched_value": True},
+            reason={"condition": "value > 1000", "result": "true"},
         )
 
         assert event.event_id is not None
@@ -154,7 +154,7 @@ class TestLandscapeRecorderRouting:
                 RoutingSpec(edge_id=edge_a.edge_id, mode=RoutingMode.COPY),
                 RoutingSpec(edge_id=edge_b.edge_id, mode=RoutingMode.COPY),
             ],
-            reason={"rule": "fork_to_paths", "matched_value": "path_a,path_b"},
+            reason={"condition": "fork_to_paths", "result": "path_a,path_b"},
         )
 
         assert len(events) == 2
@@ -224,7 +224,7 @@ class TestLandscapeRecorderRouting:
                 input_data={},
             )
 
-            reason: PluginGateReason = {"rule": "value > 1000", "matched_value": True}
+            reason: ConfigGateReason = {"condition": "value > 1000", "result": "true"}
             event = recorder.record_routing_event(
                 state_id=state.state_id,
                 edge_id=edge.edge_id,
@@ -309,7 +309,7 @@ class TestLandscapeRecorderRouting:
                 input_data={},
             )
 
-            reason: PluginGateReason = {"rule": "fork_to_paths", "matched_value": "path_a,path_b"}
+            reason: ConfigGateReason = {"condition": "fork_to_paths", "result": "path_a,path_b"}
             events = recorder.record_routing_events(
                 state_id=state.state_id,
                 routes=[

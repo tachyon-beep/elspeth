@@ -182,11 +182,6 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/metrics.py:R7:MetricsRecorder:close:fp=cae006971eb80032
-  owner: architecture
-  reason: Suppressing ProgrammingError on already-closed connections during shutdown
-  safety: Connection objects may be closed by their owning thread before close() runs
-  expires: '2026-05-02'
 - key: testing/chaosllm_mcp/server.py:R6:_find_metrics_databases:fp=2bcfbfc1388cd9d8
   owner: architecture
   reason: Silent recovery with explicit error handling path
@@ -237,39 +232,34 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=0cc1786fd5b0c25b
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=cd3bb2ba3e3e5dbf
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=e8afd34422930941
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
+    yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=631f6f0ece1be2d9
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
+    yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=dc46811999243cd9
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
+    yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=8d28359a684be7ea
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
+    yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=c996c21c8f20ac1e
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
+    yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=6abc58c94f238b78
@@ -326,16 +316,6 @@ allow_hits:
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
-  expires: '2026-05-02'
-- key: engine/orchestrator/validation.py:R5:validate_route_destinations:fp=7f451dd3ea25d06c
-  owner: architecture
-  reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access correct attributes
-  safety: isinstance() check selects code path for GateProtocol-specific name lookup; no bug hiding
-  expires: '2026-05-02'
-- key: engine/orchestrator/validation.py:R5:validate_transform_error_sinks:fp=20e3a1053033bc0b
-  owner: architecture
-  reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish for _on_error access
-  safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
 - key: telemetry/manager.py:R1:TelemetryManager:_export_loop:fp=a8166fc10299a912
   owner: architecture
@@ -430,11 +410,6 @@ allow_hits:
 - key: plugins/discovery.py:R2:get_plugin_description:fp=0806b3aad609f380
   owner: architecture
   reason: getattr for optional attribute access
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/base.py:R1:BaseGate:__init__:fp=d557713317a8b557
-  owner: architecture
-  reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/utils.py:R5:get_nested_field:fp=65234e1b71a7a0fc
@@ -542,121 +517,6 @@ allow_hits:
   reason: List/tuple type detection for canonical JSON serialization after mypy typecheck
   safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=799383f3318c92d0
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=805b2168b55f994d
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=223134d03cb7c869
-  owner: architecture
-  reason: Optional HTTP header access - X-Fake-Response-Mode is an optional override header (Tier 3)
-  safety: Falls back to None when absent - correct for optional headers
-  expires: '2026-05-02'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=d0f2fafff977cf37
-  owner: architecture
-  reason: Optional HTTP header access - X-Fake-Template is an optional override header (Tier 3)
-  safety: Falls back to None when absent - correct for optional headers
-  expires: '2026-05-02'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=0d867cb3140ddc37
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=0725e49f88fcd8cc
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/config.py:R5:ErrorInjectionConfig:parse_range:fp=2657656f67c463e5
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/config.py:R5:load_preset:fp=f06b9c172dbf8e15
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/config.py:R5:_deep_merge:fp=62cd2711bdcee5fd
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/config.py:R5:_deep_merge:fp=771fcc2b1f364873
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R5:PresetBank:from_jsonl:fp=a86816a07f74c3f6
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=319727597ad71ac9
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=e27542ac4ab46102
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=0fa0eec2f5837ed3
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=d04051587b9b4e1c
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=216d32a283dd211a
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=ae7b944c3352fb61
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=7032350ebd1e2d01
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=0edfa9b30664cb15
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=fb007fb57e761ed1
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=9ccb09d5a6b09cbe
-  owner: architecture
-  reason: External HTTP request body - messages field is optional per OpenAI spec (Tier 3)
-  safety: Falls back to empty list - correct for optional request field
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=eab5668c5261146c
-  owner: architecture
-  reason: External HTTP request body - model field is optional per OpenAI spec (Tier 3)
-  safety: Falls back to "unknown" - correct for optional request field
-  expires: '2026-05-02'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=783f28b03b567ca6
-  owner: architecture
-  reason: External HTTP request body - model field is optional per OpenAI spec (Tier 3)
-  safety: Falls back to "gpt-4" default - correct for optional request field
-  expires: '2026-05-02'
 - key: testing/chaosllm/cli.py:R6:_version_callback:fp=e2b51655e4d22702
   owner: architecture
   reason: Silent recovery with explicit error handling path
@@ -854,102 +714,102 @@ allow_hits:
   expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R9:AzureContentSafety:_process_row:fp=b18b4272385d82ff
   owner: architecture
-  reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
+  reason: "Cleanup/pop with default \u2014 HTTP client cleanup may race with error paths"
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=8404ee8567c3b226
   owner: architecture
-  reason: Tier 3 boundary — validates row field is str before sending to Azure API
+  reason: "Tier 3 boundary \u2014 validates row field is str before sending to Azure API"
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_get_fields_to_scan:fp=9bb006a32eb07a28
   owner: architecture
-  reason: Tier 2 row filtering — isinstance selects str fields for content scanning
+  reason: "Tier 2 row filtering \u2014 isinstance selects str fields for content scanning"
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_get_fields_to_scan:fp=1617ec4ae04857b6
   owner: architecture
-  reason: Tier 2 row filtering — isinstance selects str fields for content scanning
+  reason: "Tier 2 row filtering \u2014 isinstance selects str fields for content scanning"
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_analyze_content:fp=9cbec0737e033ad0
   owner: architecture
-  reason: Tier 3 boundary — .get() on Azure API response to check unknown categories
+  reason: "Tier 3 boundary \u2014 .get() on Azure API response to check unknown categories"
   safety: Unknown categories logged, only mapped categories used. MalformedResponseError raised if expected categories missing.
   expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_analyze_content:fp=132e9c8653a9a14b
   owner: architecture
-  reason: Tier 3 boundary — validates severity type from Azure API response is int
+  reason: "Tier 3 boundary \u2014 validates severity type from Azure API response is int"
   safety: MalformedResponseError raised if type wrong, caught as non-retryable error
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R9:AzurePromptShield:_process_row:fp=5555041200ea3e5a
   owner: architecture
-  reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
+  reason: "Cleanup/pop with default \u2014 HTTP client cleanup may race with error paths"
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=69fe83d9ba6aa6e9
   owner: architecture
-  reason: Tier 3 boundary — validates row field is str before sending to Azure API
+  reason: "Tier 3 boundary \u2014 validates row field is str before sending to Azure API"
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_get_fields_to_scan:fp=6756f72f855a6bcf
   owner: architecture
-  reason: Tier 2 row filtering — isinstance selects str fields for scanning
+  reason: "Tier 2 row filtering \u2014 isinstance selects str fields for scanning"
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_get_fields_to_scan:fp=71955a9599f4811d
   owner: architecture
-  reason: Tier 2 row filtering — isinstance selects str fields for scanning
+  reason: "Tier 2 row filtering \u2014 isinstance selects str fields for scanning"
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=5ebfe1bb3a77f354
   owner: architecture
-  reason: Tier 3 boundary — validates Azure response structure before parsing
+  reason: "Tier 3 boundary \u2014 validates Azure response structure before parsing"
   safety: MalformedResponseError raised on wrong type, caught as non-retryable error
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=ec7bffed1b84a52f
   owner: architecture
-  reason: Tier 3 boundary — .get() on Azure API response to extract userPromptAnalysis
+  reason: "Tier 3 boundary \u2014 .get() on Azure API response to extract userPromptAnalysis"
   safety: MalformedResponseError raised if field missing or wrong type
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=9e2efc70e9c2a9dc
   owner: architecture
-  reason: Tier 3 boundary — validates userPromptAnalysis is dict from Azure response
+  reason: "Tier 3 boundary \u2014 validates userPromptAnalysis is dict from Azure response"
   safety: MalformedResponseError raised on wrong type, caught as non-retryable error
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=3b3f342da93a70a8
   owner: architecture
-  reason: Tier 3 boundary — .get() on Azure response to extract attackDetected field
+  reason: "Tier 3 boundary \u2014 .get() on Azure response to extract attackDetected field"
   safety: MalformedResponseError raised if field missing or wrong type
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=c841d2c305e52b38
   owner: architecture
-  reason: Tier 3 boundary — validates attackDetected is bool from Azure response
+  reason: "Tier 3 boundary \u2014 validates attackDetected is bool from Azure response"
   safety: MalformedResponseError raised on wrong type, caught as non-retryable error
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=40253c1ac93c9dee
   owner: architecture
-  reason: Tier 3 boundary — .get() on Azure response to extract documentsAnalysis
+  reason: "Tier 3 boundary \u2014 .get() on Azure response to extract documentsAnalysis"
   safety: MalformedResponseError raised if field missing or wrong type
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=f580cd433ba3ceaa
   owner: architecture
-  reason: Tier 3 boundary — validates documentsAnalysis is list from Azure response
+  reason: "Tier 3 boundary \u2014 validates documentsAnalysis is list from Azure response"
   safety: MalformedResponseError raised on wrong type, caught as non-retryable error
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=7253081edf54b8ad
   owner: architecture
-  reason: Tier 3 boundary — validates each document entry is dict from Azure response
+  reason: "Tier 3 boundary \u2014 validates each document entry is dict from Azure response"
   safety: MalformedResponseError raised on wrong type, caught as non-retryable error
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=6fc4cb2a3c9fe209
   owner: architecture
-  reason: Tier 3 boundary — .get() on document dict to extract attackDetected
+  reason: "Tier 3 boundary \u2014 .get() on document dict to extract attackDetected"
   safety: MalformedResponseError raised if field missing or wrong type
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=decde02c66d672a3
   owner: architecture
-  reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
+  reason: "Tier 3 boundary \u2014 validates document attackDetected is bool from Azure response"
   safety: MalformedResponseError raised on wrong type, caught as non-retryable error
   expires: '2026-05-02'
 - key: tui/screens/explain_screen.py:R6:ExplainScreen:_load_node_state:fp=ea0af175990905a8
@@ -1079,19 +939,9 @@ allow_hits:
   expires: null
 - key: core/security/secret_loader.py:R6:KeyVaultSecretLoader:get_secret:fp=0c397e0294f3db17
   owner: bugfix
-  reason: Sentinel class definition in except ImportError — not a runtime error handler
+  reason: "Sentinel class definition in except ImportError \u2014 not a runtime error handler"
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
   expires: null
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=ba5e8b50967a0614
-  owner: architecture
-  reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
-  safety: Code reviewed - legitimate pattern; else branch handles unexpected types via str() conversion
-  expires: '2026-05-02'
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=8ffe2a2eb3655de3
-  owner: architecture
-  reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
-  safety: Code reviewed - legitimate pattern; else branch handles unexpected types via str() conversion
-  expires: '2026-05-02'
 - key: contracts/config/runtime.py:R5:_validate_int_field:fp=6da358fbc674d735
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
@@ -1309,7 +1159,8 @@ allow_hits:
   expires: '2026-05-02'
 - key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=7df7fefcb2213125
   owner: architecture
-  reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for strict lookup'
+  reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for
+    strict lookup'
 - key: contracts/plugin_context.py:R5:PluginContext:get:fp=76de86ac35dafae4
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -1383,10 +1234,10 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
 - key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=3f32c48564ee23ba
   owner: architecture
-  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
+  reason: "KeyError from PayloadStore when payload purged by retention policy \u2014 expected, not corruption"
 - key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=0ccb1c8df3875bcb
   owner: architecture
-  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
+  reason: "KeyError from PayloadStore when payload purged by retention policy \u2014 expected, not corruption"
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9ca89eaa0e651dcf
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
@@ -1491,11 +1342,6 @@ allow_hits:
   reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=e92659236634f221
-  owner: architecture
-  reason: Protocol dispatch to detect self-routing gates during jump-target sink resolution
-  safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
-  expires: '2026-03-10'
 - key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=c8930ec890458ee9
   owner: architecture
   reason: Protocol dispatch to detect transforms with on_success during jump-target sink resolution
@@ -1509,21 +1355,6 @@ allow_hits:
 - key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=5e6c1ee5159312dd
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=833f2a1b62c73d14
-  owner: architecture
-  reason: Protocol dispatch - isinstance for GateProtocol type routing in unified node traversal
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=7b18476f2c7d27bf
-  owner: architecture
-  reason: Protocol dispatch - isinstance for TransformProtocol type routing in unified node traversal
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=689fe9e367024d9e
-  owner: architecture
-  reason: Protocol dispatch - isinstance for GateSettings type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
 - key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=b795c79c66a24d96
@@ -1544,12 +1375,12 @@ allow_hits:
 - key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=c2c848d2204e52cc
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
-  safety: Missing lookup returns None — handled explicitly by conditional check
+  safety: "Missing lookup returns None \u2014 handled explicitly by conditional check"
   expires: '2026-03-10'
 - key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=2d3bbc75e801fef6
   owner: architecture
   reason: Gate default-continue target lookup during fallthrough edge wiring
-  safety: Missing target is handled explicitly — ambiguous gates are skipped
+  safety: "Missing target is handled explicitly \u2014 ambiguous gates are skipped"
   expires: '2026-03-10'
 - key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=c5f0c5799f15aa20
   owner: architecture
@@ -1598,10 +1429,9 @@ allow_hits:
   expires: '2026-03-09'
 - key: core/checkpoint/serialization.py:R5:_restore_types:fp=4af58e44b9e1dded
   owner: architecture
-  reason: Tier 1 type restoration — isinstance on our own serialized checkpoint format to detect datetime type tags
-  safety: Non-str values fall through without coercion — no silent wrong behavior
+  reason: "Tier 1 type restoration \u2014 isinstance on our own serialized checkpoint format to detect datetime type tags"
+  safety: "Non-str values fall through without coercion \u2014 no silent wrong behavior"
   expires: '2026-03-13'
-# ChaosWeb - Tier 3 boundaries (external data: JSONL preset files, YAML config files, Pydantic range parsing)
 - key: testing/chaosweb/content_generator.py:R5:PresetBank:from_jsonl:fp=9b96b4652eaaa630
   owner: architecture
   reason: Tier 3 boundary - isinstance validates JSONL line is dict before constructing preset entry
@@ -1622,17 +1452,6 @@ allow_hits:
   reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
   safety: Falls back to config default_content_type - preset pages may omit content_type
   expires: '2026-05-13'
-- key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=cebbc77f26615c2a
-  owner: architecture
-  reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
-  safety: Non-matching types pass through to Pydantic float validator which raises on invalid input
-  expires: '2026-05-13'
-- key: testing/chaosweb/config.py:R5:load_preset:fp=3711f2e68e9e90ff
-  owner: architecture
-  reason: Tier 3 boundary - isinstance validates parsed YAML is dict before passing to Pydantic
-  safety: Non-dict YAML raises ValueError with clear message - no silent coercion
-  expires: '2026-05-13'
-# ChaosWeb server — Tier 3 boundaries (HTTP request params, content type dispatch)
 - key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=545da4c568c4de0d
   owner: architecture
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
@@ -1668,11 +1487,6 @@ allow_hits:
   reason: isinstance check on content generator output (str vs bytes) for HTTP response encoding
   safety: Both branches produce valid bytes for Response body
   expires: '2026-05-13'
-- key: testing/chaosweb/metrics.py:R7:WebMetricsRecorder:close:fp=053cc1eedb453e62
-  owner: architecture
-  reason: contextlib.suppress on ProgrammingError during connection cleanup
-  safety: Mirrors ChaosLLM pattern - suppression only during teardown of already-closed connections
-  expires: '2026-05-13'
 - key: testing/chaosweb/cli.py:R6:_version_callback:fp=86387baacbcfc9ec
   owner: architecture
   reason: Silent recovery with explicit error handling path
@@ -1682,4 +1496,164 @@ allow_hits:
   owner: architecture
   reason: Silent recovery with explicit error handling path - YAML optional fallback to JSON
   safety: Falls back to JSON format if yaml module unavailable - data still displayed
+  expires: '2026-05-13'
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=4c2151c04e745b11
+  owner: architecture
+  reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
+  safety: Explicit isinstance branching for AST eval result types
+  expires: '2026-05-13'
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=db330ed83b1d185b
+  owner: architecture
+  reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
+  safety: Explicit isinstance branching for AST eval result types
+  expires: '2026-05-13'
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=6f906b66bee82f87
+  owner: architecture
+  reason: Optional edge_id lookup - edge map may not have all node combinations during routing
+  safety: Falls back to generating edge_id when not in prebuilt map
+  expires: '2026-05-13'
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=f85d85215d3e8828
+  owner: architecture
+  reason: Optional edge_id lookup - edge map may not have all node combinations during routing
+  safety: Falls back to generating edge_id when not in prebuilt map
+  expires: '2026-05-13'
+- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=14c6ab0bb0a21592
+  owner: architecture
+  reason: Protocol dispatch to detect self-routing gates during jump-target sink resolution
+  safety: isinstance for NodeType discrimination in unified node processing
+  expires: '2026-05-13'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=ebd4d3689544a4d8
+  owner: architecture
+  reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
+  safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
+  expires: '2026-05-13'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=70519330cd97fa26
+  owner: architecture
+  reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
+  safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=612c2e7deebf1b1d
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional fields from external HTTP clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=229cf4bb0986f52a
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional fields from external HTTP clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=9046d1d0a354e099
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional fields from external HTTP clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=dc330836475fdbec
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional fields from external HTTP clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=fb3895a14ac46a25
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional response fields from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=00fd6662cab664a8
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional response fields from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/config.py:R5:ErrorInjectionConfig:parse_range:fp=9d09ec61470d8455
+  owner: architecture
+  reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
+  safety: Validates Tier 3 YAML input before Pydantic model creation
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R5:PresetBank:from_jsonl:fp=c14f6a959a0385a0
+  owner: architecture
+  reason: Tier 3 boundary - isinstance validates parsed JSONL line is dict
+  safety: Validates external file content structure
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=6ff12e014ac3cbd7
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=8bcf17d15986431d
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=d2a90a0c04d1f1b0
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=68fb557610a08852
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=cfdb493affb7fb83
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=fa01d45bd87c173d
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=af838a83c3fbd3d2
+  owner: architecture
+  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
+  safety: dict.get for optional content field in message objects
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=95e0276c1540d59b
+  owner: architecture
+  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
+  safety: dict.get for optional content field in message objects
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=028bad60809f8671
+  owner: architecture
+  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
+  safety: dict.get for optional content field in message objects
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=658faf2e31f47380
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in request body from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=0c97355ecc79a154
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in request body from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=0931b20c21d4268d
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in request body from external clients
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=0c670d81190e126c
+  owner: architecture
+  reason: contextlib.suppress on ProgrammingError during connection cleanup
+  safety: Only suppresses error for already-closed connections during teardown
+  expires: '2026-05-13'
+- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=d90637e14460de3a
+  owner: architecture
+  reason: Type dispatch for recursive merge - isinstance(dict) for nested structure
+  safety: Recursive merge must distinguish dict from leaf values
+  expires: '2026-05-13'
+- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=8b73206ee5e565c4
+  owner: architecture
+  reason: Type dispatch for recursive merge - isinstance(dict) for nested structure
+  safety: Recursive merge must distinguish dict from leaf values
+  expires: '2026-05-13'
+- key: testing/chaosengine/config_loader.py:R5:load_preset:fp=3103a5332f99a196
+  owner: architecture
+  reason: Tier 3 boundary - isinstance validates parsed YAML is dict before Pydantic
+  safety: Validates external file content structure type
+  expires: '2026-05-13'
+- key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=9c20553e8b6645d7
+  owner: architecture
+  reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
+  safety: Validates Tier 3 YAML input before Pydantic model creation
   expires: '2026-05-13'

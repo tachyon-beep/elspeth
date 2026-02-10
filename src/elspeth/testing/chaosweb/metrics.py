@@ -1,79 +1,53 @@
 # src/elspeth/testing/chaosweb/metrics.py
 """Metrics storage and aggregation for ChaosWeb server.
 
-Thread-safe SQLite storage for request metrics and time-series aggregation.
-Adapted from ChaosLLM's metrics.py with web-specific fields: content_type,
-encoding, redirect tracking, and web-centric outcome classification.
+The WebMetricsRecorder provides typed wrappers around the shared MetricsStore
+for web-specific request recording and outcome classification (forbidden,
+not_found, redirect tracking, encoding, content type).
 """
 
-import contextlib
-import sqlite3
-import threading
-import uuid
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
-from elspeth.testing.chaosllm.config import MetricsConfig
+from elspeth.testing.chaosengine.metrics_store import MetricsStore
+from elspeth.testing.chaosengine.types import ColumnDef, MetricsConfig, MetricsSchema
 
-# SQLite schema for web metrics tables.
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS requests (
-    request_id TEXT PRIMARY KEY,
-    timestamp_utc TEXT NOT NULL,
-    path TEXT NOT NULL,
-    outcome TEXT NOT NULL,
-    status_code INTEGER,
-    error_type TEXT,
-    injection_type TEXT,
-    latency_ms REAL,
-    injected_delay_ms REAL,
-    content_type_served TEXT,
-    encoding_served TEXT,
-    redirect_target TEXT,
-    redirect_hops INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS timeseries (
-    bucket_utc TEXT PRIMARY KEY,
-    requests_total INTEGER NOT NULL DEFAULT 0,
-    requests_success INTEGER NOT NULL DEFAULT 0,
-    requests_rate_limited INTEGER NOT NULL DEFAULT 0,
-    requests_forbidden INTEGER NOT NULL DEFAULT 0,
-    requests_not_found INTEGER NOT NULL DEFAULT 0,
-    requests_server_error INTEGER NOT NULL DEFAULT 0,
-    requests_connection_error INTEGER NOT NULL DEFAULT 0,
-    requests_malformed INTEGER NOT NULL DEFAULT 0,
-    requests_redirect INTEGER NOT NULL DEFAULT 0,
-    avg_latency_ms REAL,
-    p99_latency_ms REAL
-);
-
-CREATE TABLE IF NOT EXISTS run_info (
-    run_id TEXT PRIMARY KEY,
-    started_utc TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    preset_name TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp_utc);
-CREATE INDEX IF NOT EXISTS idx_requests_outcome ON requests(outcome);
-CREATE INDEX IF NOT EXISTS idx_requests_path ON requests(path);
-"""
-
-
-def _get_bucket_utc(timestamp_utc: str, bucket_sec: int) -> str:
-    """Calculate the time bucket for a given timestamp."""
-    dt = datetime.fromisoformat(timestamp_utc.replace("Z", "+00:00"))
-    total_seconds = dt.hour * 3600 + dt.minute * 60 + dt.second
-    bucket_seconds = (total_seconds // bucket_sec) * bucket_sec
-    bucket_dt = dt.replace(
-        hour=bucket_seconds // 3600,
-        minute=(bucket_seconds % 3600) // 60,
-        second=bucket_seconds % 60,
-        microsecond=0,
-    )
-    return bucket_dt.isoformat()
+# Schema definition for web metrics tables.
+WEB_METRICS_SCHEMA = MetricsSchema(
+    request_columns=(
+        ColumnDef("request_id", "TEXT", primary_key=True),
+        ColumnDef("timestamp_utc", "TEXT", nullable=False),
+        ColumnDef("path", "TEXT", nullable=False),
+        ColumnDef("outcome", "TEXT", nullable=False),
+        ColumnDef("status_code", "INTEGER"),
+        ColumnDef("error_type", "TEXT"),
+        ColumnDef("injection_type", "TEXT"),
+        ColumnDef("latency_ms", "REAL"),
+        ColumnDef("injected_delay_ms", "REAL"),
+        ColumnDef("content_type_served", "TEXT"),
+        ColumnDef("encoding_served", "TEXT"),
+        ColumnDef("redirect_target", "TEXT"),
+        ColumnDef("redirect_hops", "INTEGER"),
+    ),
+    timeseries_columns=(
+        ColumnDef("bucket_utc", "TEXT", primary_key=True),
+        ColumnDef("requests_total", "INTEGER", nullable=False, default="0"),
+        ColumnDef("requests_success", "INTEGER", nullable=False, default="0"),
+        ColumnDef("requests_rate_limited", "INTEGER", nullable=False, default="0"),
+        ColumnDef("requests_forbidden", "INTEGER", nullable=False, default="0"),
+        ColumnDef("requests_not_found", "INTEGER", nullable=False, default="0"),
+        ColumnDef("requests_server_error", "INTEGER", nullable=False, default="0"),
+        ColumnDef("requests_connection_error", "INTEGER", nullable=False, default="0"),
+        ColumnDef("requests_malformed", "INTEGER", nullable=False, default="0"),
+        ColumnDef("requests_redirect", "INTEGER", nullable=False, default="0"),
+        ColumnDef("avg_latency_ms", "REAL"),
+        ColumnDef("p99_latency_ms", "REAL"),
+    ),
+    request_indexes=(
+        ("idx_requests_timestamp", "timestamp_utc"),
+        ("idx_requests_outcome", "outcome"),
+        ("idx_requests_path", "path"),
+    ),
+)
 
 
 def _classify_web_outcome(
@@ -115,9 +89,28 @@ def _classify_web_outcome(
 class WebMetricsRecorder:
     """Thread-safe SQLite metrics recorder for ChaosWeb.
 
-    Mirrors ChaosLLM's MetricsRecorder with web-specific fields and
-    classification (forbidden/not_found/redirect instead of
-    capacity_error/client_error).
+    Composes a MetricsStore for all SQLite infrastructure, adding web-specific
+    typed wrappers for request recording and outcome classification (forbidden,
+    not_found, redirect instead of capacity_error, client_error).
+
+    Usage:
+        config = MetricsConfig(database="./metrics.db")
+        recorder = WebMetricsRecorder(config)
+
+        # Record a request
+        recorder.record_request(
+            request_id="abc123",
+            timestamp_utc="2024-01-15T10:30:00+00:00",
+            path="/page.html",
+            outcome="success",
+            latency_ms=150.5,
+        )
+
+        # Get statistics
+        stats = recorder.get_stats()
+
+        # Reset for new run
+        recorder.reset()
     """
 
     def __init__(
@@ -126,61 +119,24 @@ class WebMetricsRecorder:
         *,
         run_id: str | None = None,
     ) -> None:
+        """Initialize the web metrics recorder.
+
+        Args:
+            config: Metrics configuration
+            run_id: Optional run ID (default: auto-generated UUID)
+        """
         self._config = config
-        self._run_id = run_id if run_id is not None else str(uuid.uuid4())
-        self._started_utc = datetime.now(UTC).isoformat()
-
-        self._local = threading.local()
-        self._lock = threading.Lock()
-        self._connections: list[sqlite3.Connection] = []
-
-        self._use_uri = config.database.startswith("file:")
-        self._is_memory_db = config.database == ":memory:" or "mode=memory" in config.database
-
-        if not self._is_memory_db and not self._use_uri:
-            db_path = Path(config.database)
-            if db_path.parent != Path("."):
-                db_path.parent.mkdir(parents=True, exist_ok=True)
-
-        self._init_schema()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get or create a thread-local database connection."""
-        try:
-            connection: sqlite3.Connection = self._local.connection
-            return connection
-        except AttributeError:
-            conn = sqlite3.connect(
-                self._config.database,
-                check_same_thread=False,
-                timeout=30.0,
-                uri=self._use_uri,
-            )
-            if self._is_memory_db:
-                conn.execute("PRAGMA journal_mode=MEMORY")
-                conn.execute("PRAGMA synchronous=OFF")
-            else:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA synchronous=NORMAL")
-            conn.row_factory = sqlite3.Row
-            self._local.connection = conn
-            with self._lock:
-                self._connections.append(conn)
-            return conn
-
-    def _init_schema(self) -> None:
-        """Initialize database schema."""
-        conn = self._get_connection()
-        conn.executescript(_SCHEMA)
-        conn.commit()
+        self._store = MetricsStore(config, WEB_METRICS_SCHEMA, run_id=run_id)
 
     @property
     def run_id(self) -> str:
-        return self._run_id
+        """Get the current run ID."""
+        return self._store.run_id
 
     @property
     def started_utc(self) -> str:
-        return self._started_utc
+        """Get the run start time in UTC."""
+        return self._store.started_utc
 
     def record_request(
         self,
@@ -199,49 +155,44 @@ class WebMetricsRecorder:
         redirect_target: str | None = None,
         redirect_hops: int | None = None,
     ) -> None:
-        """Record a single request to the metrics database."""
-        conn = self._get_connection()
+        """Record a single request to the metrics database.
 
-        conn.execute(
-            """
-            INSERT INTO requests (
-                request_id, timestamp_utc, path, outcome, status_code,
-                error_type, injection_type, latency_ms, injected_delay_ms,
-                content_type_served, encoding_served, redirect_target, redirect_hops
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                request_id,
-                timestamp_utc,
-                path,
-                outcome,
-                status_code,
-                error_type,
-                injection_type,
-                latency_ms,
-                injected_delay_ms,
-                content_type_served,
-                encoding_served,
-                redirect_target,
-                redirect_hops,
-            ),
+        This method is thread-safe and non-blocking. It writes the request
+        to the requests table and updates the appropriate time-series bucket.
+
+        Args:
+            request_id: Unique identifier for this request
+            timestamp_utc: ISO-formatted timestamp in UTC
+            path: The request path (e.g., '/page.html')
+            outcome: Request outcome ('success', 'error_injected', 'error_malformed', 'error_redirect')
+            status_code: HTTP status code (optional)
+            error_type: Type of error if any (optional)
+            injection_type: Type of injected behavior if any (optional)
+            latency_ms: Total response latency in milliseconds (optional)
+            injected_delay_ms: Artificial delay injected in milliseconds (optional)
+            content_type_served: Content-Type header served (optional)
+            encoding_served: Encoding served (optional)
+            redirect_target: Redirect target URL (optional)
+            redirect_hops: Number of redirect hops (optional)
+        """
+        # Insert into requests table
+        self._store.record(
+            request_id=request_id,
+            timestamp_utc=timestamp_utc,
+            path=path,
+            outcome=outcome,
+            status_code=status_code,
+            error_type=error_type,
+            injection_type=injection_type,
+            latency_ms=latency_ms,
+            injected_delay_ms=injected_delay_ms,
+            content_type_served=content_type_served,
+            encoding_served=encoding_served,
+            redirect_target=redirect_target,
+            redirect_hops=redirect_hops,
         )
 
-        self._update_timeseries(conn, timestamp_utc, outcome, status_code, error_type, latency_ms)
-        conn.commit()
-
-    def _update_timeseries(
-        self,
-        conn: sqlite3.Connection,
-        timestamp_utc: str,
-        outcome: str,
-        status_code: int | None,
-        error_type: str | None,
-        latency_ms: float | None,
-    ) -> None:
-        """Update time-series aggregation for a request."""
-        bucket = _get_bucket_utc(timestamp_utc, self._config.timeseries_bucket_sec)
-
+        # Classify and update time-series
         (
             is_success,
             is_rate_limited,
@@ -253,81 +204,24 @@ class WebMetricsRecorder:
             is_redirect,
         ) = _classify_web_outcome(outcome, status_code, error_type)
 
-        conn.execute(
-            """
-            INSERT INTO timeseries (
-                bucket_utc, requests_total, requests_success, requests_rate_limited,
-                requests_forbidden, requests_not_found, requests_server_error,
-                requests_connection_error, requests_malformed, requests_redirect,
-                avg_latency_ms, p99_latency_ms
-            ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(bucket_utc) DO UPDATE SET
-                requests_total = requests_total + 1,
-                requests_success = requests_success + ?,
-                requests_rate_limited = requests_rate_limited + ?,
-                requests_forbidden = requests_forbidden + ?,
-                requests_not_found = requests_not_found + ?,
-                requests_server_error = requests_server_error + ?,
-                requests_connection_error = requests_connection_error + ?,
-                requests_malformed = requests_malformed + ?,
-                requests_redirect = requests_redirect + ?
-            """,
-            (
-                bucket,
-                int(is_success),
-                int(is_rate_limited),
-                int(is_forbidden),
-                int(is_not_found),
-                int(is_server_error),
-                int(is_connection_error),
-                int(is_malformed),
-                int(is_redirect),
-                latency_ms,
-                latency_ms,
-                # UPDATE part
-                int(is_success),
-                int(is_rate_limited),
-                int(is_forbidden),
-                int(is_not_found),
-                int(is_server_error),
-                int(is_connection_error),
-                int(is_malformed),
-                int(is_redirect),
-            ),
+        bucket = self._store.get_bucket_utc(timestamp_utc)
+        self._store.update_timeseries(
+            bucket,
+            requests_success=int(is_success),
+            requests_rate_limited=int(is_rate_limited),
+            requests_forbidden=int(is_forbidden),
+            requests_not_found=int(is_not_found),
+            requests_server_error=int(is_server_error),
+            requests_connection_error=int(is_connection_error),
+            requests_malformed=int(is_malformed),
+            requests_redirect=int(is_redirect),
         )
 
-        if latency_ms is not None:
-            self._update_bucket_latency_stats(conn, bucket)
+        # Update latency statistics for the bucket
+        self._store.update_bucket_latency(bucket, latency_ms)
 
-    def _update_bucket_latency_stats(
-        self,
-        conn: sqlite3.Connection,
-        bucket: str,
-    ) -> None:
-        """Recalculate latency statistics for a time-series bucket."""
-        bucket_dt = datetime.fromisoformat(bucket)
-        bucket_end = (bucket_dt + timedelta(seconds=self._config.timeseries_bucket_sec)).isoformat()
-
-        cursor = conn.execute(
-            """
-            SELECT latency_ms FROM requests
-            WHERE timestamp_utc >= ? AND timestamp_utc < ? AND latency_ms IS NOT NULL
-            ORDER BY latency_ms
-            """,
-            (bucket, bucket_end),
-        )
-        latencies = [row[0] for row in cursor.fetchall()]
-        if not latencies:
-            return
-
-        avg_latency = sum(latencies) / len(latencies)
-        p99_index = min(int(len(latencies) * 0.99), len(latencies) - 1)
-        p99_latency = latencies[p99_index]
-
-        conn.execute(
-            "UPDATE timeseries SET avg_latency_ms = ?, p99_latency_ms = ? WHERE bucket_utc = ?",
-            (avg_latency, p99_latency, bucket),
-        )
+        # Commit all three operations atomically
+        self._store.commit()
 
     def reset(
         self,
@@ -336,94 +230,15 @@ class WebMetricsRecorder:
         preset_name: str | None = None,
     ) -> None:
         """Reset all metrics tables and start a new run."""
-        with self._lock:
-            self._run_id = str(uuid.uuid4())
-            self._started_utc = datetime.now(UTC).isoformat()
-
-        conn = self._get_connection()
-
-        if config_json is None:
-            cursor = conn.execute("SELECT config_json, preset_name FROM run_info LIMIT 1")
-            row = cursor.fetchone()
-            if row is not None:
-                config_json = row["config_json"]
-                if preset_name is None:
-                    preset_name = row["preset_name"]
-
-        conn.execute("DELETE FROM requests")
-        conn.execute("DELETE FROM timeseries")
-
-        if config_json is not None:
-            conn.execute("DELETE FROM run_info")
-            conn.execute(
-                "INSERT INTO run_info (run_id, started_utc, config_json, preset_name) VALUES (?, ?, ?, ?)",
-                (self._run_id, self._started_utc, config_json, preset_name),
-            )
-        conn.commit()
+        self._store.reset(config_json=config_json, preset_name=preset_name)
 
     def get_stats(self) -> dict[str, Any]:
         """Get summary statistics for the current run."""
-        conn = self._get_connection()
-
-        cursor = conn.execute("SELECT COUNT(*) FROM requests")
-        total_requests = cursor.fetchone()[0]
-
-        cursor = conn.execute("SELECT outcome, COUNT(*) FROM requests GROUP BY outcome")
-        requests_by_outcome = {row[0]: row[1] for row in cursor.fetchall()}
-
-        cursor = conn.execute("SELECT status_code, COUNT(*) FROM requests WHERE status_code IS NOT NULL GROUP BY status_code")
-        requests_by_status_code = {row[0]: row[1] for row in cursor.fetchall()}
-
-        # Latency statistics
-        cursor = conn.execute("SELECT AVG(latency_ms), MAX(latency_ms) FROM requests WHERE latency_ms IS NOT NULL")
-        row = cursor.fetchone()
-        avg_latency = row[0]
-        max_latency = row[1]
-
-        cursor = conn.execute("SELECT latency_ms FROM requests WHERE latency_ms IS NOT NULL ORDER BY latency_ms")
-        latencies = [r[0] for r in cursor.fetchall()]
-
-        p50_latency = None
-        p95_latency = None
-        p99_latency = None
-
-        if latencies:
-            p50_latency = latencies[min(int(len(latencies) * 0.50), len(latencies) - 1)]
-            p95_latency = latencies[min(int(len(latencies) * 0.95), len(latencies) - 1)]
-            p99_latency = latencies[min(int(len(latencies) * 0.99), len(latencies) - 1)]
-
-        error_rate = 0.0
-        if total_requests > 0:
-            error_count = sum(count for outcome, count in requests_by_outcome.items() if outcome != "success")
-            error_rate = (error_count / total_requests) * 100
-
-        return {
-            "run_id": self._run_id,
-            "started_utc": self._started_utc,
-            "total_requests": total_requests,
-            "requests_by_outcome": requests_by_outcome,
-            "requests_by_status_code": requests_by_status_code,
-            "latency_stats": {
-                "avg_ms": avg_latency,
-                "p50_ms": p50_latency,
-                "p95_ms": p95_latency,
-                "p99_ms": p99_latency,
-                "max_ms": max_latency,
-            },
-            "error_rate": error_rate,
-        }
+        return self._store.get_stats()
 
     def export_data(self) -> dict[str, Any]:
         """Export raw requests and time-series data."""
-        conn = self._get_connection()
-        requests = [dict(row) for row in conn.execute("SELECT * FROM requests ORDER BY timestamp_utc")]
-        timeseries = [dict(row) for row in conn.execute("SELECT * FROM timeseries ORDER BY bucket_utc")]
-        return {
-            "run_id": self._run_id,
-            "started_utc": self._started_utc,
-            "requests": requests,
-            "timeseries": timeseries,
-        }
+        return self._store.export_data()
 
     def save_run_info(
         self,
@@ -431,12 +246,7 @@ class WebMetricsRecorder:
         preset_name: str | None = None,
     ) -> None:
         """Save run information to the database."""
-        conn = self._get_connection()
-        conn.execute(
-            "INSERT OR REPLACE INTO run_info (run_id, started_utc, config_json, preset_name) VALUES (?, ?, ?, ?)",
-            (self._run_id, self._started_utc, config_json, preset_name),
-        )
-        conn.commit()
+        self._store.save_run_info(config_json, preset_name)
 
     def get_requests(
         self,
@@ -446,18 +256,7 @@ class WebMetricsRecorder:
         outcome: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get request records from the database."""
-        conn = self._get_connection()
-        if outcome is not None:
-            cursor = conn.execute(
-                "SELECT * FROM requests WHERE outcome = ? ORDER BY timestamp_utc DESC LIMIT ? OFFSET ?",
-                (outcome, limit, offset),
-            )
-        else:
-            cursor = conn.execute(
-                "SELECT * FROM requests ORDER BY timestamp_utc DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
-        return [dict(row) for row in cursor.fetchall()]
+        return self._store.get_requests(limit=limit, offset=offset, outcome=outcome)
 
     def get_timeseries(
         self,
@@ -466,17 +265,8 @@ class WebMetricsRecorder:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Get time-series records from the database."""
-        conn = self._get_connection()
-        cursor = conn.execute(
-            "SELECT * FROM timeseries ORDER BY bucket_utc DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        return self._store.get_timeseries(limit=limit, offset=offset)
 
     def close(self) -> None:
         """Close all database connections across all threads."""
-        with self._lock:
-            for conn in self._connections:
-                with contextlib.suppress(sqlite3.ProgrammingError):
-                    conn.close()
-            self._connections.clear()
+        self._store.close()

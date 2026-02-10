@@ -186,8 +186,10 @@ all = [
 [project.scripts]
 elspeth = "elspeth.cli:app"
 elspeth-mcp = "elspeth.mcp:main"
+chaosengine = "elspeth.testing.chaosengine.cli:main"
 chaosllm = "elspeth.testing.chaosllm.cli:main"
 chaosllm-mcp = "elspeth.testing.chaosllm.cli:mcp_main_entry"
+chaosweb = "elspeth.testing.chaosweb.cli:main"
 check-contracts = "scripts.check_contracts:main"
 
 [project.urls]

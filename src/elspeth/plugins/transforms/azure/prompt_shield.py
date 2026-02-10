@@ -9,7 +9,7 @@ Unlike Content Safety, Prompt Shield is binary detection - no thresholds.
 Either an attack is detected or it isn't.
 
 Uses BatchTransformMixin for row-level pipelining (multiple rows in flight
-with FIFO output ordering) and PooledExecutor for internal concurrency.
+with FIFO output ordering).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, is_capacity_error
+from elspeth.plugins.pooling import CapacityError, is_capacity_error
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.azure.errors import MalformedResponseError
@@ -46,11 +46,6 @@ class AzurePromptShieldConfig(TransformDataConfig):
         schema: Schema configuration
 
     Optional:
-        pool_size: Number of concurrent API calls (1=sequential, >1=pooled)
-        min_dispatch_delay_ms: Minimum AIMD backoff delay (default 0)
-        max_dispatch_delay_ms: Maximum AIMD backoff delay (default 5000)
-        backoff_multiplier: Multiply delay on capacity error (default 2.0)
-        recovery_step_ms: Subtract from delay on success (default 50)
         max_capacity_retry_seconds: Timeout for capacity error retries (default 3600)
 
     Example YAML:
@@ -72,30 +67,8 @@ class AzurePromptShieldConfig(TransformDataConfig):
         description="Field name(s) to analyze, or 'all' for all string fields",
     )
 
-    # Pool configuration fields
-    pool_size: int = Field(1, ge=1, description="Number of concurrent API calls (1=sequential)")
-    min_dispatch_delay_ms: int = Field(0, ge=0, description="Minimum dispatch delay in milliseconds")
-    max_dispatch_delay_ms: int = Field(5000, ge=0, description="Maximum dispatch delay in milliseconds")
-    backoff_multiplier: float = Field(2.0, gt=1.0, description="Backoff multiplier on capacity error")
-    recovery_step_ms: int = Field(50, ge=0, description="Recovery step in milliseconds")
+    # Batch processing timeout
     max_capacity_retry_seconds: int = Field(3600, gt=0, description="Max seconds to retry capacity errors")
-
-    @property
-    def pool_config(self) -> PoolConfig | None:
-        """Get pool configuration if pooling is enabled.
-
-        Returns None if pool_size <= 1 (sequential mode).
-        """
-        if self.pool_size <= 1:
-            return None
-        return PoolConfig(
-            pool_size=self.pool_size,
-            min_dispatch_delay_ms=self.min_dispatch_delay_ms,
-            max_dispatch_delay_ms=self.max_dispatch_delay_ms,
-            backoff_multiplier=self.backoff_multiplier,
-            recovery_step_ms=self.recovery_step_ms,
-            max_capacity_retry_seconds=self.max_capacity_retry_seconds,
-        )
 
 
 class AzurePromptShield(BaseTransform, BatchTransformMixin):
@@ -145,7 +118,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self._endpoint = cfg.endpoint.rstrip("/")
         self._api_key = cfg.api_key
         self._fields = cfg.fields
-        self._pool_size = cfg.pool_size
         self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
 
         schema = create_schema_from_config(
@@ -168,12 +140,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = lambda event: None
         self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
-
-        # Create pooled executor if pool_size > 1 (for internal concurrency)
-        if cfg.pool_config is not None:
-            self._executor: PooledExecutor | None = PooledExecutor(cfg.pool_config)
-        else:
-            self._executor = None
 
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
@@ -292,10 +258,10 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
     ) -> TransformResult:
         """Process a single row with explicit state_id.
 
-        This is used by the pooled executor where each row has its own state.
+        Called by _process_row() in the BatchTransformMixin worker pool.
 
         Raises:
-            CapacityError: On rate limit errors (for pooled retry)
+            CapacityError: On rate limit errors (for worker pool retry)
         """
         # Get dict representation for field scanning
         row_dict = row.to_dict()
@@ -377,7 +343,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
         Clients are cached to preserve call_index across retries.
         This ensures uniqueness of (state_id, call_index) even when
-        the pooled executor retries after CapacityError.
+        the worker pool retries after CapacityError.
 
         Args:
             state_id: State ID for audit trail recording
@@ -481,10 +447,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         # Shutdown batch processing infrastructure first
         if self._batch_initialized:
             self.shutdown_batch_processing()
-
-        # Then shutdown query-level executor (if used for internal concurrency)
-        if self._executor is not None:
-            self._executor.shutdown(wait=True)
 
         # Close all cached HTTP clients
         with self._http_clients_lock:

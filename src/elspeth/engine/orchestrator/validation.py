@@ -26,9 +26,6 @@ from elspeth.contracts import RouteDestination, RouteDestinationKind
 from elspeth.contracts.types import GateName
 from elspeth.engine.orchestrator.types import RouteValidationError
 
-# Import protocols at runtime - needed for isinstance() checks
-from elspeth.plugins.protocols import GateProtocol, TransformProtocol
-
 if TYPE_CHECKING:
     from elspeth.contracts.types import NodeID
     from elspeth.core.config import GateSettings
@@ -61,14 +58,9 @@ def validate_route_destinations(
         RouteValidationError: If any route references a non-existent sink
     """
     # Build reverse lookup: node_id -> gate name
-    # All gates in transforms and config_gates MUST have entries in their ID maps
+    # All gates in config_gates MUST have entries in their ID maps
     # (graph construction bug if missing)
     node_id_to_gate_name: dict[str, str] = {}
-    for seq, transform in enumerate(transforms):
-        if isinstance(transform, GateProtocol):
-            # Graph must have ID for every transform - crash if missing
-            node_id = transform_id_map[seq]
-            node_id_to_gate_name[node_id] = transform.name
 
     # Add config gates to the lookup
     if config_gate_id_map and config_gates:
@@ -115,10 +107,6 @@ def validate_transform_error_sinks(
         RouteValidationError: If any transform on_error references a non-existent sink
     """
     for transform in transforms:
-        # Only TransformProtocol has _on_error; GateProtocol uses routing, not error sinks
-        if not isinstance(transform, TransformProtocol):
-            continue
-
         on_error = transform.on_error
 
         if on_error is None:

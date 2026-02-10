@@ -3,7 +3,7 @@
 from typing import get_type_hints
 
 from elspeth.contracts.schema_contract import PipelineRow
-from elspeth.plugins.base import BaseGate, BaseSink, BaseTransform
+from elspeth.plugins.base import BaseSink, BaseTransform
 
 
 class TestBaseClassSignatures:
@@ -12,11 +12,6 @@ class TestBaseClassSignatures:
     def test_base_transform_process_accepts_pipeline_row(self) -> None:
         """BaseTransform.process() should accept PipelineRow."""
         hints = get_type_hints(BaseTransform.process)
-        assert hints["row"] is PipelineRow
-
-    def test_base_gate_evaluate_accepts_pipeline_row(self) -> None:
-        """BaseGate.evaluate() should accept PipelineRow."""
-        hints = get_type_hints(BaseGate.evaluate)
         assert hints["row"] is PipelineRow
 
     def test_base_sink_write_accepts_list_of_dicts(self) -> None:

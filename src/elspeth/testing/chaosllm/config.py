@@ -11,46 +11,25 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from elspeth.testing.chaosengine.config_loader import (
+    deep_merge as _deep_merge,
+)
+from elspeth.testing.chaosengine.config_loader import (
+    list_presets as _list_presets,
+)
+from elspeth.testing.chaosengine.config_loader import (
+    load_preset as _load_preset,
+)
+
+# Re-export shared config types from chaosengine for backward compatibility.
+from elspeth.testing.chaosengine.types import (
+    LatencyConfig,
+    MetricsConfig,
+    ServerConfig,
+)
+
 # Default shared in-memory SQLite database for ephemeral metrics
 DEFAULT_MEMORY_DB = "file:chaosllm-metrics?mode=memory&cache=shared"
-
-
-class ServerConfig(BaseModel):
-    """Server binding and worker configuration."""
-
-    model_config = {"frozen": True, "extra": "forbid"}
-
-    host: str = Field(
-        default="127.0.0.1",
-        description="Host address to bind to",
-    )
-    port: int = Field(
-        default=8000,
-        gt=0,
-        le=65535,
-        description="Port to listen on",
-    )
-    workers: int = Field(
-        default=4,
-        gt=0,
-        description="Number of uvicorn workers",
-    )
-
-
-class MetricsConfig(BaseModel):
-    """Metrics storage configuration."""
-
-    model_config = {"frozen": True, "extra": "forbid"}
-
-    database: str = Field(
-        default=DEFAULT_MEMORY_DB,
-        description="SQLite database path for metrics storage (in-memory by default)",
-    )
-    timeseries_bucket_sec: int = Field(
-        default=1,
-        gt=0,
-        description="Time-series aggregation bucket size in seconds",
-    )
 
 
 class RandomResponseConfig(BaseModel):
@@ -139,23 +118,6 @@ class ResponseConfig(BaseModel):
     preset: PresetResponseConfig = Field(
         default_factory=PresetResponseConfig,
         description="Settings for preset mode",
-    )
-
-
-class LatencyConfig(BaseModel):
-    """Latency simulation configuration."""
-
-    model_config = {"frozen": True, "extra": "forbid"}
-
-    base_ms: int = Field(
-        default=50,
-        ge=0,
-        description="Base latency in milliseconds",
-    )
-    jitter_ms: int = Field(
-        default=30,
-        ge=0,
-        description="Random jitter added to base latency (+/- ms)",
     )
 
 
@@ -417,7 +379,7 @@ class ChaosLLMConfig(BaseModel):
         description="Server binding configuration",
     )
     metrics: MetricsConfig = Field(
-        default_factory=MetricsConfig,
+        default_factory=lambda: MetricsConfig(database=DEFAULT_MEMORY_DB),
         description="Metrics storage configuration",
     )
     response: ResponseConfig = Field(
@@ -448,57 +410,12 @@ def _get_presets_dir() -> Path:
 
 def list_presets() -> list[str]:
     """List available preset names."""
-    presets_dir = _get_presets_dir()
-    if not presets_dir.exists():
-        return []
-    return [p.stem for p in presets_dir.glob("*.yaml")]
+    return _list_presets(_get_presets_dir())
 
 
 def load_preset(preset_name: str) -> dict[str, Any]:
-    """Load a preset configuration by name.
-
-    Args:
-        preset_name: Name of the preset (e.g., 'gentle', 'stress_aimd')
-
-    Returns:
-        Raw configuration dict from the preset YAML
-
-    Raises:
-        FileNotFoundError: If preset does not exist
-        yaml.YAMLError: If preset YAML is malformed
-    """
-    presets_dir = _get_presets_dir()
-    preset_path = presets_dir / f"{preset_name}.yaml"
-
-    if not preset_path.exists():
-        available = list_presets()
-        raise FileNotFoundError(f"Preset '{preset_name}' not found. Available presets: {available}")
-
-    with preset_path.open() as f:
-        loaded = yaml.safe_load(f)
-        # safe_load returns Any, but preset files are always dicts
-        if not isinstance(loaded, dict):
-            raise ValueError(f"Preset '{preset_name}' must be a YAML mapping, got {type(loaded).__name__}")
-        return loaded
-
-
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Deep merge two dicts, with override taking precedence.
-
-    Args:
-        base: Base configuration dict
-        override: Override values (takes precedence)
-
-    Returns:
-        Merged configuration dict
-    """
-    result = dict(base)
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
+    """Load a preset configuration by name."""
+    return _load_preset(_get_presets_dir(), preset_name)
 
 
 def load_config(

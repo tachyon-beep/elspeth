@@ -20,10 +20,7 @@ from pathlib import Path
 import jinja2
 import jinja2.sandbox
 
-from elspeth.testing.chaosllm.response_generator import (
-    ENGLISH_VOCABULARY,
-    LOREM_VOCABULARY,
-)
+from elspeth.testing.chaosengine.vocabulary import ENGLISH_VOCABULARY, LOREM_VOCABULARY
 from elspeth.testing.chaosweb.config import WebContentConfig
 
 # HTML structural elements used in random generation.

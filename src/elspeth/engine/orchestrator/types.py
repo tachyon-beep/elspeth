@@ -32,13 +32,13 @@ from elspeth.contracts import RunStatus
 
 # Import protocols at runtime (not TYPE_CHECKING) because RowPlugin type alias
 # is used in runtime annotations and isinstance() checks
-from elspeth.plugins.protocols import GateProtocol, TransformProtocol
+from elspeth.plugins.protocols import TransformProtocol
 
 # Type alias for row-processing plugins in the transforms pipeline
 # NOTE: BaseAggregation was DELETED - aggregation is now handled by
 # batch-aware transforms (is_batch_aware=True on TransformProtocol)
-RowPlugin = TransformProtocol | GateProtocol
-"""Union of all row-processing plugin types for pipeline transforms list."""
+RowPlugin = TransformProtocol
+"""Row-processing plugin type for pipeline transforms list."""
 
 
 @dataclass

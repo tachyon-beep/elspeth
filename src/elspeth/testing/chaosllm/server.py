@@ -28,10 +28,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from elspeth.testing.chaosengine.types import LatencyConfig
 from elspeth.testing.chaosllm.config import (
     ChaosLLMConfig,
     ErrorInjectionConfig,
-    LatencyConfig,
     ResponseConfig,
 )
 from elspeth.testing.chaosllm.error_injector import ErrorDecision, ErrorInjector

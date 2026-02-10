@@ -27,8 +27,8 @@ Usage:
         ...
 """
 
-# Re-export shared types from ChaosLLM (future chaos_base extraction candidates)
-from elspeth.testing.chaosllm.config import LatencyConfig, MetricsConfig, ServerConfig
+# Re-export shared types from chaosengine
+from elspeth.testing.chaosengine.types import LatencyConfig, MetricsConfig, ServerConfig
 from elspeth.testing.chaosweb.config import (
     ChaosWebConfig,
     WebBurstConfig,

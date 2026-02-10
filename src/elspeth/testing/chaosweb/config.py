@@ -5,8 +5,7 @@ Uses Pydantic for validation with frozen (immutable) models.
 Configuration precedence: CLI > YAML file > preset > defaults.
 
 Shared config types (ServerConfig, MetricsConfig, LatencyConfig) are imported
-from ChaosLLM — these are identical and documented as future chaos_base
-extraction candidates. See elspeth-rapid-la0a.
+from chaosengine — the shared utility layer for all chaos plugins.
 """
 
 from pathlib import Path
@@ -15,13 +14,19 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Import shared config types from ChaosLLM (PC-3 decision: import, don't copy).
-# These are extraction candidates for a future chaos_base module.
-from elspeth.testing.chaosllm.config import (
+from elspeth.testing.chaosengine.config_loader import (
+    deep_merge as _deep_merge,
+)
+from elspeth.testing.chaosengine.config_loader import (
+    list_presets as _list_presets,
+)
+from elspeth.testing.chaosengine.config_loader import (
+    load_preset as _load_preset,
+)
+from elspeth.testing.chaosengine.types import (
     LatencyConfig,
     MetricsConfig,
     ServerConfig,
-    _deep_merge,
 )
 
 # Default shared in-memory SQLite database for ephemeral metrics
@@ -491,37 +496,12 @@ def _get_presets_dir() -> Path:
 
 def list_presets() -> list[str]:
     """List available preset names."""
-    presets_dir = _get_presets_dir()
-    if not presets_dir.exists():
-        return []
-    return sorted(p.stem for p in presets_dir.glob("*.yaml"))
+    return _list_presets(_get_presets_dir())
 
 
 def load_preset(preset_name: str) -> dict[str, Any]:
-    """Load a preset configuration by name.
-
-    Args:
-        preset_name: Name of the preset (e.g., 'gentle', 'stress_scraping')
-
-    Returns:
-        Raw configuration dict from the preset YAML
-
-    Raises:
-        FileNotFoundError: If preset does not exist
-        yaml.YAMLError: If preset YAML is malformed
-    """
-    presets_dir = _get_presets_dir()
-    preset_path = presets_dir / f"{preset_name}.yaml"
-
-    if not preset_path.exists():
-        available = list_presets()
-        raise FileNotFoundError(f"Preset '{preset_name}' not found. Available presets: {available}")
-
-    with preset_path.open() as f:
-        loaded = yaml.safe_load(f)
-        if not isinstance(loaded, dict):
-            raise ValueError(f"Preset '{preset_name}' must be a YAML mapping, got {type(loaded).__name__}")
-        return loaded
+    """Load a preset configuration by name."""
+    return _load_preset(_get_presets_dir(), preset_name)
 
 
 def load_config(

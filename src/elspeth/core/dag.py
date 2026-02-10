@@ -1123,7 +1123,7 @@ class ExecutionGraph:
                     mode=RoutingMode.MOVE,
                 )
         elif source_on_success not in consumers:
-            suggestions = _suggest_similar(source_on_success, sorted(consumers.keys()))
+            suggestions = _suggest_similar(source_on_success, sorted(str(s) for s in sink_ids))
             hint = f" Did you mean: {suggestions}?" if suggestions else ""
             raise GraphValidationError(
                 f"Source '{source.name}' on_success '{source_on_success}' is neither a sink nor a known connection.{hint}"
@@ -1185,7 +1185,7 @@ class ExecutionGraph:
         processing_node_ids.update(config_gate_ids.values())
         processing_node_ids.update(coalesce_ids.values())
 
-        topo_order = [NodeID(node_id) for node_id in nx.topological_sort(graph._graph)]
+        topo_order = [NodeID(raw_id) for raw_id in nx.topological_sort(graph._graph)]
         pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
 
         pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}

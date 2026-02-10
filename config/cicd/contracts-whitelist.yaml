@@ -381,11 +381,8 @@ allowed_dict_patterns:
   - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.update_config:updates"
   - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._get_current_config:return"
   - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._handle_success_response:body"
-  - "src/elspeth/testing/chaosllm/config.py:load_preset:return"
-  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:base"
-  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:override"
-  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:return"
   - "src/elspeth/testing/chaosllm/config.py:load_config:cli_overrides"
+  - "src/elspeth/testing/chaosllm/config.py:load_preset:return"
   - "src/elspeth/testing/chaosllm/response_generator.py:OpenAIResponse.to_dict:return"
   - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._generate_template_response:request"
   - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._generate_echo_response:request"
@@ -412,6 +409,18 @@ allowed_dict_patterns:
   - "src/elspeth/testing/chaosllm_mcp/server.py:call_tool:arguments"
   - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_success:b_list (list)"
   - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_latency:b_list (list)"
+
+  # ChaosEngine - shared utilities for chaos testing servers
+  # MetricsStore returns dynamic dicts for stats/export (schema-driven SQLite).
+  # Config loader uses dict[str, Any] for YAML config merging and preset loading.
+  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_stats:return"
+  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.export_data:return"
+  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_requests:return (list)"
+  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_timeseries:return (list)"
+  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:base"
+  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:override"
+  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:return"
+  - "src/elspeth/testing/chaosengine/config_loader.py:load_preset:return"
 
   # ChaosWeb - fault-injection test server for web scraping resilience testing
   # Mirrors ChaosLLM patterns: YAML config loading, JSONL preset parsing, and

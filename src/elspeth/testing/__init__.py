@@ -6,7 +6,9 @@ When a backbone type's constructor changes, update the factory here.
 Tests and benchmarks that use factories need ZERO changes.
 
 This package also contains:
+- chaosengine: Shared utilities for chaos testing (injection engine, metrics store, latency)
 - chaosllm: Fake LLM server for load testing and fault injection
+- chaosweb: Fake web server for scraping pipeline resilience testing
 - chaosllm_mcp: MCP server for analyzing ChaosLLM test results
 
 Usage:
@@ -477,8 +479,14 @@ def make_flush_result(
 
 def make_execution_counters(**overrides: int) -> ExecutionCounters:
     """Build ExecutionCounters with optional overrides."""
+    from dataclasses import fields
+
     from elspeth.engine.orchestrator.types import ExecutionCounters
 
+    valid_fields = {f.name for f in fields(ExecutionCounters)}
+    invalid = set(overrides) - valid_fields
+    if invalid:
+        raise TypeError(f"Invalid ExecutionCounters fields: {sorted(invalid)}. Valid fields: {sorted(valid_fields)}")
     counters = ExecutionCounters()
     for key, value in overrides.items():
         setattr(counters, key, value)

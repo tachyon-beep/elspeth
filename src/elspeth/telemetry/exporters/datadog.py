@@ -34,7 +34,6 @@ class DatadogExporter:
     Each telemetry event is exported as a span with appropriate tags.
 
     Configuration options:
-        api_key: Datadog API key (optional if using local agent)
         service_name: Service name for Datadog APM (default: "elspeth")
         env: Environment tag (default: "production")
         agent_host: Datadog agent hostname (default: "localhost")
@@ -45,16 +44,15 @@ class DatadogExporter:
         telemetry:
           exporters:
             - name: datadog
-              api_key: ${DD_API_KEY}  # Optional if local agent
               service_name: "elspeth-pipeline"
               env: "production"
               agent_host: "localhost"
               agent_port: 8126
 
     Note:
-        Config values come pre-resolved by Dynaconf (${DD_API_KEY} -> actual value).
-        The api_key is optional when using a local Datadog agent, which handles
-        authentication itself.
+        Authentication is handled by the Datadog agent itself (via DD_API_KEY
+        environment variable read by ddtrace). This exporter communicates with
+        the local agent, not the Datadog API directly.
     """
 
     _name = "datadog"
@@ -77,7 +75,6 @@ class DatadogExporter:
 
         Args:
             config: Exporter-specific configuration dict containing:
-                - api_key (optional): Datadog API key (not needed with local agent)
                 - service_name (optional): Service name for APM (default: "elspeth")
                 - env (optional): Environment tag (default: "production")
                 - agent_host (optional): Agent hostname (default: "localhost")

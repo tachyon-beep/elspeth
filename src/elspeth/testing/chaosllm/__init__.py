@@ -26,19 +26,18 @@ Usage:
         ...
 """
 
+from elspeth.testing.chaosengine.latency import LatencySimulator
+from elspeth.testing.chaosengine.types import LatencyConfig, MetricsConfig, ServerConfig
 from elspeth.testing.chaosllm.config import (
     DEFAULT_MEMORY_DB,
     ChaosLLMConfig,
     ErrorInjectionConfig,
-    LatencyConfig,
     ResponseConfig,
-    ServerConfig,
     list_presets,
     load_config,
     load_preset,
 )
 from elspeth.testing.chaosllm.error_injector import ErrorDecision, ErrorInjector
-from elspeth.testing.chaosllm.latency_simulator import LatencySimulator
 from elspeth.testing.chaosllm.metrics import MetricsRecorder
 from elspeth.testing.chaosllm.response_generator import OpenAIResponse, ResponseGenerator
 from elspeth.testing.chaosllm.server import ChaosLLMServer, create_app
@@ -52,6 +51,7 @@ __all__ = [
     "ErrorInjector",
     "LatencyConfig",
     "LatencySimulator",
+    "MetricsConfig",
     "MetricsRecorder",
     "OpenAIResponse",
     "ResponseConfig",

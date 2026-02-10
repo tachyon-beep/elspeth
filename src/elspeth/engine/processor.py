@@ -47,7 +47,7 @@ from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.plugins.protocols import BatchTransformProtocol, GateProtocol, TransformProtocol
+from elspeth.plugins.protocols import BatchTransformProtocol, TransformProtocol
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
@@ -320,7 +320,7 @@ class RowProcessor:
             )
         return max(self._node_step_map.values()) + 1
 
-    def _resolve_plugin_for_node(self, node_id: NodeID) -> TransformProtocol | GateProtocol | GateSettings | None:
+    def _resolve_plugin_for_node(self, node_id: NodeID) -> TransformProtocol | GateSettings | None:
         """Resolve the plugin/gate associated with a processing node.
 
         Returns None for structural nodes (e.g. coalesce points) that exist in
@@ -391,7 +391,7 @@ class RowProcessor:
                 )
 
             plugin = self._resolve_plugin_for_node(node_id)
-            if isinstance(plugin, (GateProtocol, GateSettings)):
+            if isinstance(plugin, GateSettings):
                 encountered_gate = True
             elif isinstance(plugin, TransformProtocol) and plugin.on_success is not None:
                 candidate_sink = plugin.on_success
@@ -1955,102 +1955,8 @@ class RowProcessor:
                 node_id = next_node_id
                 continue
 
-            # Type-safe plugin detection using protocols (supports protocol-only plugins)
-            if isinstance(plugin, GateProtocol):
-                gate_plugin = plugin
-                outcome = self._gate_executor.execute_gate(
-                    gate=gate_plugin,
-                    token=current_token,
-                    ctx=ctx,
-                    token_manager=self._token_manager,
-                )
-                current_token = outcome.updated_token
-
-                # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
-                # (Landscape recording happens inside execute_gate)
-                # node_id is assigned during DAG construction in from_plugin_instances()
-                assert gate_plugin.node_id is not None, "node_id must be assigned by DAG construction before execution"
-                self._emit_gate_evaluated(
-                    token=current_token,
-                    gate_name=gate_plugin.name,
-                    gate_node_id=gate_plugin.node_id,
-                    routing_mode=outcome.result.action.mode,
-                    destinations=self._get_gate_destinations(outcome),
-                )
-
-                # Check if gate routed to a sink (sink_name set by executor)
-                if outcome.sink_name is not None:
-                    # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
-                    # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                    # This prevents duplicate outcomes and ensures correct audit semantics:
-                    # outcome is recorded at actual completion, not at routing decision time.
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.ROUTED,
-                            sink_name=outcome.sink_name,
-                        ),
-                        child_items,
-                    )
-                elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
-                    for child_token in outcome.child_tokens:
-                        # Look up coalesce info for this branch
-                        branch_name = child_token.branch_name
-                        child_coalesce_name: CoalesceName | None = None
-
-                        if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
-                            child_coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
-
-                        # Branches targeting direct sinks (COPY edges) bypass
-                        # continuation to avoid traversing unintended downstream
-                        # nodes. The _branch_to_sink map is mutually exclusive with
-                        # _branch_to_coalesce (enforced by constructor invariant).
-                        if child_coalesce_name is None and branch_name and BranchName(branch_name) in self._branch_to_sink:
-                            child_items.append(
-                                self._create_work_item(
-                                    token=child_token,
-                                    current_node_id=None,
-                                )
-                            )
-                        else:
-                            # Children skip to coalesce node, or continue to the
-                            # gate's structural successor for non-sink branches.
-                            child_items.append(
-                                self._create_continuation_work_item(
-                                    token=child_token,
-                                    current_node_id=node_id,
-                                    coalesce_name=child_coalesce_name,
-                                )
-                            )
-
-                    # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
-                    # to eliminate crash window between child creation and outcome recording.
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.FORKED,
-                        ),
-                        child_items,
-                    )
-                elif outcome.next_node_id is not None:
-                    resolved_sink = self._resolve_jump_target_on_success_sink(outcome.next_node_id)
-                    if resolved_sink is not None:
-                        last_on_success_sink = resolved_sink
-                    node_id = outcome.next_node_id
-                    continue
-                else:
-                    # CONTINUE: gate says "proceed to next structural node."
-                    # Falls through to node_id = next_node_id below.
-                    if outcome.result.action.kind != RoutingKind.CONTINUE:
-                        raise OrchestrationInvariantError(
-                            f"Unhandled gate routing kind {outcome.result.action.kind!r} "
-                            f"for token {current_token.token_id} at node '{node_id}'. "
-                            f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
-                        )
-
-            elif isinstance(plugin, TransformProtocol):
+            # Type-safe plugin detection using protocols
+            if isinstance(plugin, TransformProtocol):
                 row_transform = plugin
                 # Check if this is a batch-aware transform at an aggregation node
                 transform_node_id = row_transform.node_id
@@ -2301,7 +2207,7 @@ class RowProcessor:
                         )
 
             else:
-                raise TypeError(f"Unknown transform type: {type(plugin).__name__}. Expected BaseTransform or BaseGate.")
+                raise TypeError(f"Unknown transform type: {type(plugin).__name__}. Expected TransformProtocol or GateSettings.")
 
             node_id = next_node_id
 

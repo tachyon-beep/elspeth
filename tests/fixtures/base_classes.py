@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.plugins.protocols import (
         BatchTransformProtocol,
-        GateProtocol,
         SinkProtocol,
         SourceProtocol,
         TransformProtocol,
@@ -217,11 +216,6 @@ def as_batch_transform(transform: Any) -> BatchTransformProtocol:
 def as_sink(sink: Any) -> SinkProtocol:
     """Cast a test sink to SinkProtocol."""
     return cast("SinkProtocol", sink)
-
-
-def as_gate(gate: Any) -> GateProtocol:
-    """Cast a test gate to GateProtocol."""
-    return cast("GateProtocol", gate)
 
 
 def create_observed_contract(row: dict[str, Any]) -> SchemaContract:

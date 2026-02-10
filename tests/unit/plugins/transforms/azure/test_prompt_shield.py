@@ -222,82 +222,6 @@ class TestAzurePromptShieldTransform:
             transform.process(make_pipeline_row({"prompt": "test"}), ctx)
 
 
-class TestPromptShieldPoolConfig:
-    """Tests for Prompt Shield pool configuration."""
-
-    def test_pool_size_default_is_one(self) -> None:
-        """Default pool_size is 1 (sequential)."""
-        from elspeth.plugins.transforms.azure.prompt_shield import (
-            AzurePromptShieldConfig,
-        )
-
-        cfg = AzurePromptShieldConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["prompt"],
-                "schema": {"mode": "observed"},
-            }
-        )
-
-        assert cfg.pool_size == 1
-
-    def test_pool_size_configurable(self) -> None:
-        """pool_size can be configured."""
-        from elspeth.plugins.transforms.azure.prompt_shield import (
-            AzurePromptShieldConfig,
-        )
-
-        cfg = AzurePromptShieldConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["prompt"],
-                "schema": {"mode": "observed"},
-                "pool_size": 5,
-            }
-        )
-
-        assert cfg.pool_size == 5
-
-    def test_pool_config_property_returns_none_when_sequential(self) -> None:
-        """pool_config returns None when pool_size=1."""
-        from elspeth.plugins.transforms.azure.prompt_shield import (
-            AzurePromptShieldConfig,
-        )
-
-        cfg = AzurePromptShieldConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["prompt"],
-                "schema": {"mode": "observed"},
-                "pool_size": 1,
-            }
-        )
-
-        assert cfg.pool_config is None
-
-    def test_pool_config_property_returns_config_when_pooled(self) -> None:
-        """pool_config returns PoolConfig when pool_size>1."""
-        from elspeth.plugins.transforms.azure.prompt_shield import (
-            AzurePromptShieldConfig,
-        )
-
-        cfg = AzurePromptShieldConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["prompt"],
-                "schema": {"mode": "observed"},
-                "pool_size": 3,
-            }
-        )
-
-        assert cfg.pool_config is not None
-        assert cfg.pool_config.pool_size == 3
-
-
 class TestPromptShieldBatchProcessing:
     """Tests for Prompt Shield with BatchTransformMixin."""
 
@@ -1018,7 +942,6 @@ class TestPromptShieldBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["prompt"],
                 "schema": {"mode": "observed"},
-                "pool_size": 3,
             }
         )
 
@@ -1216,7 +1139,6 @@ class TestResourceCleanup:
                     "api_key": "test-key",
                     "fields": ["prompt"],
                     "schema": {"mode": "observed"},
-                    "pool_size": 3,
                 }
             )
 

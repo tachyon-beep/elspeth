@@ -17,6 +17,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
 from elspeth.testing.chaosllm.config import (
     ChaosLLMConfig,
     ErrorInjectionConfig,
@@ -25,7 +26,7 @@ from elspeth.testing.chaosllm.config import (
     ServerConfig,
     _deep_merge,
 )
-from elspeth.testing.chaosllm.metrics import _classify_outcome, _get_bucket_utc
+from elspeth.testing.chaosllm.metrics import _classify_outcome
 
 # =============================================================================
 # _get_bucket_utc Properties

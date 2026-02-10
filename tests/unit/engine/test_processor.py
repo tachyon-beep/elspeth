@@ -47,7 +47,7 @@ from elspeth.engine.processor import (
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.clients.llm import LLMClientError
-from elspeth.plugins.protocols import GateProtocol, TransformProtocol
+from elspeth.plugins.protocols import TransformProtocol
 from elspeth.testing import make_contract, make_row, make_source_row, make_token_info
 
 # =============================================================================
@@ -189,18 +189,6 @@ def _make_mock_transform(
     if result is not None:
         transform.process.return_value = result
     return transform
-
-
-def _make_mock_gate(
-    *,
-    node_id: str = "gate-1",
-    name: str = "test-gate",
-) -> Mock:
-    """Create a mock gate satisfying GateProtocol."""
-    gate = Mock(spec=GateProtocol)
-    gate.node_id = node_id
-    gate.name = name
-    return gate
 
 
 # =============================================================================
@@ -907,168 +895,6 @@ class TestAggregationFailureMatrix:
 class TestProcessRowGateBranching:
     """Tests for non-linear gate branching through next_node_id."""
 
-    def test_gate_route_to_processing_node_continues_execution(self) -> None:
-        """GateOutcome.next_node_id should override missing continue edge traversal."""
-        _db, recorder = _make_recorder()
-        source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
-
-        gate = _make_mock_gate(node_id="gate-1", name="brancher")
-        transform = _make_mock_transform(node_id="transform-2", name="downstream", on_success="final_sink")
-
-        source_node = NodeID("source-0")
-        gate_node = NodeID("gate-1")
-        downstream_node = NodeID("transform-2")
-
-        processor = _make_processor(
-            recorder,
-            source_on_success="final_sink",
-            node_step_map={source_node: 0, gate_node: 1, downstream_node: 2},
-            node_to_next={source_node: gate_node, gate_node: None, downstream_node: None},
-            first_transform_node_id=gate_node,
-            node_to_plugin={gate_node: gate, downstream_node: transform},
-        )
-
-        gate_contract = _make_contract()
-        gate_result = GateResult(
-            row={"value": 10},
-            action=RoutingAction.route("branch_a"),
-            contract=gate_contract,
-        )
-
-        transform_result = TransformResult.success(
-            make_row({"value": 10, "handled": True}, contract=gate_contract),
-            success_reason={"action": "handled"},
-        )
-
-        def gate_side_effect(*, gate, token, ctx, token_manager=None):
-            return GateOutcome(
-                result=gate_result,
-                updated_token=token,
-                next_node_id=downstream_node,
-            )
-
-        def transform_side_effect(*, transform, token, ctx, attempt=0):
-            return (transform_result, token, None)
-
-        with (
-            patch.object(processor._gate_executor, "execute_gate", side_effect=gate_side_effect) as gate_exec,
-            patch.object(processor._transform_executor, "execute_transform", side_effect=transform_side_effect) as transform_exec,
-        ):
-            results = processor.process_row(
-                row_index=0,
-                source_row=source_row,
-                transforms=[gate, transform],
-                ctx=ctx,
-            )
-
-        assert gate_exec.call_count == 1
-        assert transform_exec.call_count == 1
-        assert len(results) == 1
-        assert results[0].outcome == RowOutcome.COMPLETED
-
-    def test_gate_processing_node_jump_preloads_subchain_sink_for_expanded_children(self) -> None:
-        """PROCESSING_NODE jumps should refresh inherited sink from jumped subchain."""
-        _db, recorder = _make_recorder()
-        source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
-
-        gate = _make_mock_gate(node_id="gate-1", name="brancher")
-        expander = _make_mock_transform(
-            node_id="expander-2",
-            name="expander",
-            creates_tokens=True,
-            on_success=None,
-        )
-        terminal = _make_mock_transform(
-            node_id="terminal-3",
-            name="terminal",
-            on_success="branch_sink",
-        )
-
-        source_node = NodeID("source-0")
-        gate_node = NodeID("gate-1")
-        expander_node = NodeID("expander-2")
-        terminal_node = NodeID("terminal-3")
-
-        processor = _make_processor(
-            recorder,
-            source_on_success="source_sink",
-            node_step_map={
-                source_node: 0,
-                gate_node: 1,
-                expander_node: 2,
-                terminal_node: 3,
-            },
-            node_to_next={
-                source_node: gate_node,
-                gate_node: None,
-                expander_node: terminal_node,
-                terminal_node: None,
-            },
-            first_transform_node_id=gate_node,
-            node_to_plugin={
-                gate_node: gate,
-                expander_node: expander,
-                terminal_node: terminal,
-            },
-        )
-
-        gate_contract = _make_contract()
-        gate_result = GateResult(
-            row={"value": 10},
-            action=RoutingAction.route("branch_a"),
-            contract=gate_contract,
-        )
-        expand_result = TransformResult.success_multi(
-            [
-                make_row({"value": 10, "idx": 1}, contract=gate_contract),
-                make_row({"value": 10, "idx": 2}, contract=gate_contract),
-            ],
-            success_reason={"action": "expand"},
-        )
-
-        def gate_side_effect(*, gate, token, ctx, token_manager=None):
-            return GateOutcome(
-                result=gate_result,
-                updated_token=token,
-                next_node_id=expander_node,
-            )
-
-        def transform_side_effect(*, transform, token, ctx, attempt=0):
-            if transform.name == "expander":
-                return (expand_result, token, None)
-            raise AssertionError("terminal transform should not execute in this regression harness")
-
-        inherited_sinks: list[str | None] = []
-
-        def continuation_side_effect(*, token, current_node_id, coalesce_name=None, on_success_sink=None):
-            inherited_sinks.append(on_success_sink)
-            return _WorkItem(
-                token=token,
-                current_node_id=None,
-                coalesce_node_id=None,
-                coalesce_name=coalesce_name,
-                on_success_sink=on_success_sink,
-            )
-
-        with (
-            patch.object(processor._gate_executor, "execute_gate", side_effect=gate_side_effect),
-            patch.object(processor._transform_executor, "execute_transform", side_effect=transform_side_effect),
-            patch.object(processor, "_create_continuation_work_item", side_effect=continuation_side_effect),
-        ):
-            results = processor.process_row(
-                row_index=0,
-                source_row=source_row,
-                transforms=[gate, expander, terminal],
-                ctx=ctx,
-            )
-
-        completed = [r for r in results if r.outcome == RowOutcome.COMPLETED]
-        assert len(completed) == 2
-        assert inherited_sinks == ["branch_sink", "branch_sink"]
-        assert all(r.sink_name == "branch_sink" for r in completed)
-
     def test_config_gate_processing_node_jump_preloads_subchain_sink_for_expanded_children(self) -> None:
         """Config gate PROCESSING_NODE jumps should refresh inherited sink from jumped subchain."""
         _db, recorder = _make_recorder()
@@ -1205,48 +1031,6 @@ class TestProcessRowGateBranching:
         with pytest.raises(OrchestrationInvariantError, match="Coalesce 'merge' not in on_success map"):
             processor._resolve_jump_target_on_success_sink(router_node)
 
-    def test_jump_target_resolution_returns_none_when_path_terminates_at_gate(self) -> None:
-        """Jump path ending at a gate returns None — gate self-routes at runtime."""
-        _db, recorder = _make_recorder()
-
-        source_node = NodeID("source-0")
-        jump_start_node = NodeID("branch-transform-1")
-        downstream_gate_node = NodeID("branch-gate-2")
-
-        branch_transform = _make_mock_transform(
-            node_id=str(jump_start_node),
-            name="branch_transform",
-            on_success="branch_conn",
-        )
-        branch_gate = _make_mock_gate(
-            node_id=str(downstream_gate_node),
-            name="branch_gate",
-        )
-
-        processor = _make_processor(
-            recorder,
-            source_on_success="source_sink",
-            sink_names=frozenset({"source_sink", "branch_sink"}),
-            node_step_map={
-                source_node: 0,
-                jump_start_node: 1,
-                downstream_gate_node: 2,
-            },
-            node_to_next={
-                source_node: jump_start_node,
-                jump_start_node: downstream_gate_node,
-                downstream_gate_node: None,
-            },
-            first_transform_node_id=jump_start_node,
-            node_to_plugin={
-                jump_start_node: branch_transform,
-                downstream_gate_node: branch_gate,
-            },
-        )
-
-        result = processor._resolve_jump_target_on_success_sink(jump_start_node)
-        assert result is None, "Gate at end of jump path should return None (self-routing)"
-
     def test_jump_target_resolution_raises_when_no_sink_and_no_gate(self) -> None:
         """Jump path with only transforms and no terminal sink must fail closed."""
         _db, recorder = _make_recorder()
@@ -1289,56 +1073,6 @@ class TestProcessRowGateBranching:
 
         with pytest.raises(OrchestrationInvariantError, match="no sink"):
             processor._resolve_jump_target_on_success_sink(jump_start_node)
-
-    def test_jump_target_resolution_prefers_terminal_sink_from_middle_transform(self) -> None:
-        """A multi-node jump chain should resolve sink from the terminal transform in that chain."""
-        _db, recorder = _make_recorder()
-
-        source_node = NodeID("source-0")
-        jump_start_node = NodeID("branch-transform-1")
-        middle_node = NodeID("branch-transform-2")
-        terminal_gate_node = NodeID("branch-gate-3")
-
-        branch_transform = _make_mock_transform(
-            node_id=str(jump_start_node),
-            name="branch_transform",
-            on_success="branch_conn",
-        )
-        middle_transform = _make_mock_transform(
-            node_id=str(middle_node),
-            name="middle_transform",
-            on_success="branch_sink",
-        )
-        terminal_gate = _make_mock_gate(
-            node_id=str(terminal_gate_node),
-            name="terminal_gate",
-        )
-
-        processor = _make_processor(
-            recorder,
-            source_on_success="source_sink",
-            sink_names=frozenset({"source_sink", "branch_sink"}),
-            node_step_map={
-                source_node: 0,
-                jump_start_node: 1,
-                middle_node: 2,
-                terminal_gate_node: 3,
-            },
-            node_to_next={
-                source_node: jump_start_node,
-                jump_start_node: middle_node,
-                middle_node: terminal_gate_node,
-                terminal_gate_node: None,
-            },
-            first_transform_node_id=jump_start_node,
-            node_to_plugin={
-                jump_start_node: branch_transform,
-                middle_node: middle_transform,
-                terminal_gate_node: terminal_gate,
-            },
-        )
-
-        assert processor._resolve_jump_target_on_success_sink(jump_start_node) == "branch_sink"
 
     def test_branch_to_sink_routing_applies_for_terminal_fork_children(self) -> None:
         """Branch-routed tokens bypassing coalesce should resolve sink via branch_to_sink."""
@@ -2551,7 +2285,7 @@ class TestUnknownTransformType:
     """Tests for the TypeError guard on unknown transform types."""
 
     def test_unknown_type_raises_type_error(self) -> None:
-        """Transform that is neither TransformProtocol nor GateProtocol raises TypeError."""
+        """Transform that is neither TransformProtocol nor GateSettings raises TypeError."""
         _db, recorder = _make_recorder()
         source_row = _make_source_row()
         ctx = PluginContext(run_id="test-run", config={})
@@ -2582,47 +2316,6 @@ class TestUnknownTransformType:
 
 class TestRoutingInvariantFailures:
     """Regression tests for strict fail-closed routing invariants."""
-
-    def test_unhandled_plugin_gate_routing_kind_raises(self) -> None:
-        """Gate branch must fail closed when neither sink/fork/next/continue is valid."""
-        _db, recorder = _make_recorder()
-        source_row = _make_source_row({"value": 10})
-        ctx = PluginContext(run_id="test-run", config={})
-        gate = _make_mock_gate(node_id="gate-1", name="bad_gate")
-
-        source_node = NodeID("source-0")
-        gate_node = NodeID("gate-1")
-        processor = _make_processor(
-            recorder,
-            source_on_success="source_sink",
-            node_step_map={source_node: 0, gate_node: 1},
-            node_to_next={source_node: gate_node, gate_node: None},
-            first_transform_node_id=gate_node,
-            node_to_plugin={gate_node: gate},
-        )
-
-        bad_outcome = GateOutcome(
-            result=GateResult(
-                row={"value": 10},
-                action=RoutingAction.route("branch_a"),
-                contract=_make_contract(),
-            ),
-            updated_token=make_token_info(data={"value": 10}),
-            sink_name=None,
-            next_node_id=None,
-            child_tokens=[],
-        )
-
-        with (
-            patch.object(processor._gate_executor, "execute_gate", return_value=bad_outcome),
-            pytest.raises(OrchestrationInvariantError, match="Unhandled gate routing kind"),
-        ):
-            processor.process_row(
-                row_index=0,
-                source_row=source_row,
-                transforms=[gate],
-                ctx=ctx,
-            )
 
     def test_unhandled_config_gate_routing_kind_raises(self) -> None:
         """Config gate branch must fail closed when CONTINUE invariants are violated."""

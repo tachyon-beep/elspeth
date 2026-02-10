@@ -25,7 +25,7 @@ from hypothesis import strategies as st
 
 from elspeth.contracts import PipelineRow, RoutingAction, TransformErrorReason, TransformResult
 from elspeth.contracts.enums import RoutingKind, RoutingMode
-from elspeth.contracts.errors import ConfigGateReason, PluginGateReason
+from elspeth.contracts.errors import ConfigGateReason
 from elspeth.testing import make_pipeline_row
 from tests.strategies.ids import branch_names, multiple_branches
 from tests.strategies.json import dict_keys, json_primitives, row_data
@@ -48,24 +48,10 @@ config_gate_reasons = st.fixed_dictionaries(
     }
 )
 
-# PluginGateReason: rule + matched_value + optional threshold fields
-plugin_gate_reasons: st.SearchStrategy[dict[str, Any]] = st.fixed_dictionaries(
-    {
-        "rule": st.text(min_size=1, max_size=100),
-        "matched_value": json_primitives,
-    },
-    optional={
-        "threshold": st.floats(allow_nan=False, allow_infinity=False),
-        "field": st.text(min_size=1, max_size=50, alphabet="abcdefghijklmnopqrstuvwxyz_"),
-        "comparison": st.sampled_from([">", "<", ">=", "<=", "==", "!="]),
-    },
-)
-
-# RoutingReason is ConfigGateReason | PluginGateReason
+# RoutingReason is ConfigGateReason | None
 routing_reasons = st.one_of(
     st.none(),
     config_gate_reasons,
-    plugin_gate_reasons,
 )
 
 # Valid route labels (non-empty strings for destinations)
@@ -292,7 +278,7 @@ class TestRoutingActionProperties:
 
     @given(reason=routing_reasons)
     @settings(max_examples=100)
-    def test_continue_action_has_no_destination(self, reason: ConfigGateReason | PluginGateReason | None) -> None:
+    def test_continue_action_has_no_destination(self, reason: ConfigGateReason | None) -> None:
         """Property: CONTINUE action always has empty destinations.
 
         Continue means "proceed to next node in pipeline" - there's no
@@ -307,7 +293,7 @@ class TestRoutingActionProperties:
 
     @given(label=route_labels, reason=routing_reasons)
     @settings(max_examples=100)
-    def test_route_action_contains_correct_sink_name(self, label: str, reason: ConfigGateReason | PluginGateReason | None) -> None:
+    def test_route_action_contains_correct_sink_name(self, label: str, reason: ConfigGateReason | None) -> None:
         """Property: ROUTE action contains exactly the specified sink name.
 
         Route labels are semantic identifiers (e.g., "above", "below") that
@@ -323,7 +309,7 @@ class TestRoutingActionProperties:
 
     @given(paths=multiple_branches, reason=routing_reasons)
     @settings(max_examples=100)
-    def test_fork_action_contains_all_branch_names(self, paths: list[str], reason: ConfigGateReason | PluginGateReason | None) -> None:
+    def test_fork_action_contains_all_branch_names(self, paths: list[str], reason: ConfigGateReason | None) -> None:
         """Property: FORK_TO_PATHS action contains all specified branch names.
 
         Fork operations create child tokens for each branch. All branch names
@@ -340,7 +326,7 @@ class TestRoutingActionProperties:
 
     @given(reason=routing_reasons)
     @settings(max_examples=50)
-    def test_continue_uses_move_mode(self, reason: ConfigGateReason | PluginGateReason | None) -> None:
+    def test_continue_uses_move_mode(self, reason: ConfigGateReason | None) -> None:
         """Property: CONTINUE always uses MOVE mode.
 
         Continue is semantically a move - the token proceeds on its current
@@ -434,9 +420,9 @@ class TestRoutingActionReasonImmutability:
         The frozen dataclass prevents reassignment; deep copy prevents
         external mutation via retained references.
         """
-        # Cast arbitrary dict to PluginGateReason for type checking
+        # Cast arbitrary dict to ConfigGateReason for type checking
         # This test verifies immutability behavior, not reason content
-        action = RoutingAction.continue_(reason=cast(PluginGateReason, reason))
+        action = RoutingAction.continue_(reason=cast(ConfigGateReason, reason))
 
         # Reason is a dict (TypedDict compatible)
         assert isinstance(action.reason, dict)
@@ -452,9 +438,9 @@ class TestRoutingActionReasonImmutability:
         shared mutable state corrupts audit records.
         """
         original_reason = dict(reason)
-        # Cast arbitrary dict to PluginGateReason for type checking
+        # Cast arbitrary dict to ConfigGateReason for type checking
         # This test verifies immutability behavior, not reason content
-        action = RoutingAction.continue_(reason=cast(PluginGateReason, reason))
+        action = RoutingAction.continue_(reason=cast(ConfigGateReason, reason))
 
         # Mutate the original
         reason["__after_creation__"] = True

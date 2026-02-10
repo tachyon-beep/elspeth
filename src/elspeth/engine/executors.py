@@ -35,7 +35,6 @@ from elspeth.contracts import (
 from elspeth.contracts.enums import (
     BatchStatus,
     NodeStateStatus,
-    RoutingKind,
     RoutingMode,
     TriggerType,
 )
@@ -52,7 +51,6 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
 from elspeth.plugins.protocols import (
     BatchTransformProtocol,
-    GateProtocol,
     SinkProtocol,
     TransformProtocol,
 )
@@ -540,11 +538,12 @@ class GateExecutor:
 
     Example:
         executor = GateExecutor(recorder, span_factory, step_resolver, edge_map)
-        outcome = executor.execute_gate(
-            gate=my_gate,
+        outcome = executor.execute_config_gate(
+            gate_config=gate_settings,
+            node_id=node_id,
             token=token,
             ctx=ctx,
-            token_manager=manager,  # Required for fork_to_paths
+            token_manager=manager,  # Required for fork destinations
         )
     """
 
@@ -645,215 +644,6 @@ class GateExecutor:
 
         raise OrchestrationInvariantError(f"Unsupported route destination kind '{destination.kind}' for gate {node_id}")
 
-    def execute_gate(
-        self,
-        gate: GateProtocol,
-        token: TokenInfo,
-        ctx: PluginContext,
-        token_manager: "TokenManager | None" = None,
-    ) -> GateOutcome:
-        """Execute a gate with full audit recording.
-
-        The step position in the DAG is resolved internally via StepResolver
-        using gate.node_id, rather than being passed as a parameter.
-
-        Args:
-            gate: Gate plugin to execute
-            token: Current token with row data
-            ctx: Plugin context (includes run_id for atomic fork outcome recording)
-            token_manager: TokenManager for fork operations (required for fork_to_paths)
-
-        Returns:
-            GateOutcome with result, updated token, and routing info
-
-        Raises:
-            MissingEdgeError: If routing refers to an unregistered edge
-            Exception: Re-raised from gate.evaluate() after recording failure
-        """
-        if gate.node_id is None:
-            raise OrchestrationInvariantError(f"Gate '{gate.name}' executed without node_id - orchestrator bug")
-
-        # Resolve step position from node_id (injected StepResolver)
-        step = self._step_resolver(NodeID(gate.node_id))
-
-        # Extract dict from PipelineRow for hashing and Landscape recording
-        # Landscape stores raw dicts, not PipelineRow objects
-        input_dict = token.row_data.to_dict()
-        input_hash = stable_hash(input_dict)
-
-        # Begin node state with dict (for Landscape recording)
-        state = self._recorder.begin_node_state(
-            token_id=token.token_id,
-            node_id=gate.node_id,
-            run_id=ctx.run_id,
-            step_index=step,
-            input_data=input_dict,
-        )
-
-        # BUG-RECORDER-01 fix: Set state_id on context for external call recording
-        # Gates may need to make external calls (e.g., LLM API for routing decisions)
-        ctx.state_id = state.state_id
-        ctx.node_id = gate.node_id
-        # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
-
-        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
-        # This allows gates to access original header names via ctx.contract.resolve_name()
-        ctx.contract = token.row_data.contract
-
-        # Execute with timing and span
-        # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
-        # P2-2026-01-21: Pass node_id for disambiguation when multiple plugin instances exist
-        with self._spans.gate_span(
-            gate.name,
-            node_id=gate.node_id,
-            input_hash=input_hash,
-            token_id=token.token_id,
-        ):
-            start = time.perf_counter()
-            try:
-                result = gate.evaluate(token.row_data, ctx)
-                duration_ms = (time.perf_counter() - start) * 1000
-            except Exception as e:
-                duration_ms = (time.perf_counter() - start) * 1000
-                # Record failure
-                error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                }
-                self._recorder.complete_node_state(
-                    state_id=state.state_id,
-                    status=NodeStateStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=error,
-                )
-                raise
-
-        # Populate audit fields
-        result.input_hash = input_hash
-        result.output_hash = stable_hash(result.row)
-        result.duration_ms = duration_ms
-
-        # Process routing based on action kind
-        action = result.action
-        child_tokens: list[TokenInfo] = []
-        sink_name: str | None = None
-        next_node_id: NodeID | None = None
-
-        try:
-            if action.kind == RoutingKind.CONTINUE:
-                # Record explicit continue routing for audit completeness (AUD-002)
-                # Preserve gate's reason and mode for full auditability
-                self._record_routing(
-                    state_id=state.state_id,
-                    node_id=gate.node_id,
-                    action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
-                )
-
-            elif action.kind == RoutingKind.ROUTE:
-                # Gate returned a route label - resolve via routes config
-                route_label = action.destinations[0]
-                destination = self._resolve_route_destination(node_id=gate.node_id, route_label=route_label)
-                dispatch = self._dispatch_resolved_destination(
-                    state_id=state.state_id,
-                    node_id=gate.node_id,
-                    route_label=route_label,
-                    destination=destination,
-                    token=token,
-                    ctx=ctx,
-                    token_manager=token_manager,
-                    reason=action.reason,
-                    mode=action.mode,
-                    fork_branches=None,
-                    continue_as_route=True,
-                )
-                child_tokens = dispatch.child_tokens
-                sink_name = dispatch.sink_name
-                next_node_id = dispatch.next_node_id
-
-            elif action.kind == RoutingKind.FORK_TO_PATHS:
-                if token_manager is None:
-                    raise OrchestrationInvariantError(
-                        f"Gate {gate.node_id} returned fork_to_paths but no TokenManager provided. "
-                        "Cannot create child tokens - audit integrity would be compromised."
-                    )
-                # Record routing events for all paths
-                self._record_routing(
-                    state_id=state.state_id,
-                    node_id=gate.node_id,
-                    action=action,
-                )
-                # Create PipelineRow from result for fork
-                # Use result.contract if provided, otherwise fallback to input contract
-                fork_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
-                if fork_contract is None:
-                    raise OrchestrationInvariantError(
-                        f"Cannot create PipelineRow for fork: no contract available. "
-                        f"GateResult.contract is None and input token has no contract. "
-                        f"This is a bug in gate '{gate.name}' or upstream pipeline."
-                    )
-                fork_row = PipelineRow(result.row, fork_contract)
-
-                # Create child tokens (ATOMIC: also records parent FORKED outcome)
-                child_tokens, _fork_group_id = token_manager.fork_token(
-                    parent_token=token,
-                    branches=list(action.destinations),
-                    node_id=NodeID(gate.node_id),
-                    run_id=ctx.run_id,
-                    row_data=fork_row,
-                )
-
-        except MissingEdgeError as e:
-            # Record failure before re-raising - ensures node_state is never left OPEN
-            routing_error: ExecutionError = {
-                "exception": str(e),
-                "type": type(e).__name__,
-            }
-            self._recorder.complete_node_state(
-                state_id=state.state_id,
-                status=NodeStateStatus.FAILED,
-                duration_ms=duration_ms,
-                error=routing_error,
-            )
-            raise
-
-        # Complete node state - always "completed" for successful execution
-        # Terminal state is DERIVED from routing_events, not stored here
-        self._recorder.complete_node_state(
-            state_id=state.state_id,
-            status=NodeStateStatus.COMPLETED,
-            output_data=result.row,
-            duration_ms=duration_ms,
-        )
-
-        # Update token with new PipelineRow, preserving all lineage metadata
-        # Use result.contract if provided, otherwise fallback to input contract
-        output_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
-        if output_contract is None:
-            raise OrchestrationInvariantError(
-                f"Cannot create PipelineRow: no contract available. "
-                f"GateResult.contract is None and input token has no contract. "
-                f"This is a bug in gate '{gate.name}' or upstream pipeline."
-            )
-        new_row = PipelineRow(result.row, output_contract)
-
-        # B2 fix: Log PipelineRow creation for observability
-        slog.debug(
-            "pipeline_row_created",
-            token_id=token.token_id,
-            gate=gate.name,
-            contract_mode=output_contract.mode,
-        )
-
-        updated_token = token.with_updated_data(new_row)
-
-        return GateOutcome(
-            result=result,
-            updated_token=updated_token,
-            child_tokens=child_tokens,
-            sink_name=sink_name,
-            next_node_id=next_node_id,
-        )
-
     def execute_config_gate(
         self,
         gate_config: GateSettings,
@@ -864,10 +654,8 @@ class GateExecutor:
     ) -> GateOutcome:
         """Execute a config-driven gate using ExpressionParser.
 
-        Unlike execute_gate() which uses a GateProtocol plugin,
-        this method evaluates the gate condition directly using
-        the expression parser. The condition expression is evaluated
-        against the token's row_data.
+        Evaluates the gate condition directly using the expression parser.
+        The condition expression is evaluated against the token's row_data.
 
         Route Resolution:
         - If condition returns a string, it's used as the route label directly

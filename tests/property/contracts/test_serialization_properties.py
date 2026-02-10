@@ -26,7 +26,7 @@ from hypothesis import strategies as st
 
 from elspeth.contracts import TransformErrorReason
 from elspeth.contracts.enums import RoutingKind, RoutingMode
-from elspeth.contracts.errors import ConfigGateReason, PluginGateReason, TransformSuccessReason
+from elspeth.contracts.errors import ConfigGateReason, TransformSuccessReason
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.routing import RoutingAction
@@ -113,28 +113,10 @@ config_gate_reasons = st.fixed_dictionaries(
     }
 )
 
-# PluginGateReason: rule + matched_value
-plugin_gate_reasons: st.SearchStrategy[dict[str, Any]] = st.fixed_dictionaries(
-    {
-        "rule": st.text(min_size=1, max_size=50),
-        "matched_value": st.one_of(
-            st.text(max_size=50),
-            st.integers(min_value=-1000, max_value=1000),
-            st.booleans(),
-        ),
-    },
-    optional={
-        "threshold": st.floats(min_value=-1000, max_value=1000, allow_nan=False),
-        "field": st.text(min_size=1, max_size=30),
-        "comparison": st.sampled_from([">", "<", ">=", "<="]),
-    },
-)
-
 # RoutingReason union for property tests
 routing_reasons = st.one_of(
     st.none(),
     config_gate_reasons,
-    plugin_gate_reasons,
 )
 
 # TransformErrorReason dictionaries for TransformResult.error()
@@ -471,7 +453,7 @@ class TestRoutingActionJsonSerializationProperties:
     @settings(max_examples=100)
     def test_routing_action_continue_serializes_to_valid_json(
         self,
-        reason: ConfigGateReason | PluginGateReason | None,
+        reason: ConfigGateReason | None,
     ) -> None:
         """Property: RoutingAction.continue_() serializes to valid JSON."""
         action = RoutingAction.continue_(reason=reason)
@@ -487,7 +469,7 @@ class TestRoutingActionJsonSerializationProperties:
     @settings(max_examples=100)
     def test_routing_action_continue_json_round_trip_preserves_invariants(
         self,
-        reason: ConfigGateReason | PluginGateReason | None,
+        reason: ConfigGateReason | None,
     ) -> None:
         """Property: RoutingAction.continue_() JSON round-trip preserves invariants."""
         action = RoutingAction.continue_(reason=reason)
@@ -504,7 +486,7 @@ class TestRoutingActionJsonSerializationProperties:
     def test_routing_action_route_json_round_trip_preserves_destination(
         self,
         label: str,
-        reason: ConfigGateReason | PluginGateReason | None,
+        reason: ConfigGateReason | None,
     ) -> None:
         """Property: RoutingAction.route() JSON round-trip preserves destination."""
         action = RoutingAction.route(label, reason=reason)
@@ -521,7 +503,7 @@ class TestRoutingActionJsonSerializationProperties:
     def test_routing_action_fork_json_round_trip_preserves_paths(
         self,
         paths: list[str],
-        reason: ConfigGateReason | PluginGateReason | None,
+        reason: ConfigGateReason | None,
     ) -> None:
         """Property: RoutingAction.fork_to_paths() JSON round-trip preserves paths."""
         action = RoutingAction.fork_to_paths(paths, reason=reason)
@@ -541,7 +523,7 @@ class TestRoutingActionReasonSerializationProperties:
     @settings(max_examples=100)
     def test_routing_action_reason_json_round_trip(
         self,
-        reason: ConfigGateReason | PluginGateReason | None,
+        reason: ConfigGateReason | None,
     ) -> None:
         """Property: RoutingAction reason field JSON round-trips correctly."""
         action = RoutingAction.continue_(reason=reason)

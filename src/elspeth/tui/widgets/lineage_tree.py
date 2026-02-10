@@ -112,7 +112,7 @@ class LineageTree:
                 node_type="token",
             )
             # Find which sink this token ended at
-            if path and len(path) > 0:
+            if path:
                 terminal_node_id = path[-1]
                 if terminal_node_id in sink_nodes:
                     sink_nodes[terminal_node_id].children.append(token_node)

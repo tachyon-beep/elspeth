@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
 from elspeth.testing.chaosllm.config import MetricsConfig
 from elspeth.testing.chaosweb.metrics import (
     WebMetricsRecorder,
     _classify_web_outcome,
-    _get_bucket_utc,
 )
 
 
@@ -630,7 +630,7 @@ class TestClose:
         recorder.close()
 
         # Connections list should be cleared
-        assert len(recorder._connections) == 0
+        assert len(recorder._store._connections) == 0
 
 
 class TestThreadSafety:

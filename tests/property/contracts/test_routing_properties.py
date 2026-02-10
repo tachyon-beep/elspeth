@@ -28,7 +28,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
-from elspeth.contracts.errors import ConfigGateReason, PluginGateReason, RoutingReason
+from elspeth.contracts.errors import ConfigGateReason, RoutingReason
 from elspeth.contracts.routing import RoutingAction
 
 # =============================================================================
@@ -53,11 +53,6 @@ routing_reasons: st.SearchStrategy[RoutingReason | None] = st.one_of(
         lambda condition, result: cast(RoutingReason, {"condition": condition, "result": result}),
         condition=st.text(max_size=50),
         result=st.text(max_size=20),
-    ),
-    st.builds(
-        lambda rule, matched_value: cast(RoutingReason, {"rule": rule, "matched_value": matched_value}),
-        rule=st.text(max_size=20),
-        matched_value=st.text(max_size=20),
     ),
 )
 
@@ -244,21 +239,21 @@ class TestReasonDeepCopyProperties:
 
     def test_route_reason_is_isolated(self) -> None:
         """Property: Mutating original reason dict does not affect action."""
-        reason: PluginGateReason = {"rule": "route", "matched_value": "high"}
+        reason: ConfigGateReason = {"condition": "score > 0.8", "result": "high"}
         action = RoutingAction.route("above", reason=reason)
 
-        reason["matched_value"] = "MUTATED"
+        reason["result"] = "MUTATED"
         assert action.reason is not None
-        assert cast(PluginGateReason, action.reason)["matched_value"] == "high"
+        assert cast(ConfigGateReason, action.reason)["result"] == "high"
 
     def test_fork_reason_is_isolated(self) -> None:
         """Property: Mutating original reason dict does not affect action."""
-        reason: PluginGateReason = {"rule": "fork", "matched_value": "3"}
+        reason: ConfigGateReason = {"condition": "fork_condition", "result": "3"}
         action = RoutingAction.fork_to_paths(["a", "b"], reason=reason)
 
-        reason["matched_value"] = "MUTATED"
+        reason["result"] = "MUTATED"
         assert action.reason is not None
-        assert cast(PluginGateReason, action.reason)["matched_value"] == "3"
+        assert cast(ConfigGateReason, action.reason)["result"] == "3"
 
     def test_none_reason_is_preserved(self) -> None:
         """Property: None reason stays None."""

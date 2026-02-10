@@ -354,86 +354,6 @@ class TestAzureContentSafetyTransform:
             transform.process(row, ctx)
 
 
-class TestContentSafetyPoolConfig:
-    """Tests for Content Safety pool configuration."""
-
-    def test_pool_size_default_is_one(self) -> None:
-        """Default pool_size is 1 (sequential)."""
-        from elspeth.plugins.transforms.azure.content_safety import (
-            AzureContentSafetyConfig,
-        )
-
-        cfg = AzureContentSafetyConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["content"],
-                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"mode": "observed"},
-            }
-        )
-
-        assert cfg.pool_size == 1
-
-    def test_pool_size_configurable(self) -> None:
-        """pool_size can be configured."""
-        from elspeth.plugins.transforms.azure.content_safety import (
-            AzureContentSafetyConfig,
-        )
-
-        cfg = AzureContentSafetyConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["content"],
-                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"mode": "observed"},
-                "pool_size": 5,
-            }
-        )
-
-        assert cfg.pool_size == 5
-
-    def test_pool_config_property_returns_none_when_sequential(self) -> None:
-        """pool_config returns None when pool_size=1."""
-        from elspeth.plugins.transforms.azure.content_safety import (
-            AzureContentSafetyConfig,
-        )
-
-        cfg = AzureContentSafetyConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["content"],
-                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"mode": "observed"},
-                "pool_size": 1,
-            }
-        )
-
-        assert cfg.pool_config is None
-
-    def test_pool_config_property_returns_config_when_pooled(self) -> None:
-        """pool_config returns PoolConfig when pool_size>1."""
-        from elspeth.plugins.transforms.azure.content_safety import (
-            AzureContentSafetyConfig,
-        )
-
-        cfg = AzureContentSafetyConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["content"],
-                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"mode": "observed"},
-                "pool_size": 3,
-            }
-        )
-
-        assert cfg.pool_config is not None
-        assert cfg.pool_config.pool_size == 3
-
-
 class TestContentSafetyBatchProcessing:
     """Tests for Content Safety with BatchTransformMixin."""
 
@@ -942,7 +862,6 @@ class TestContentSafetyBatchProcessing:
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
                 "schema": {"mode": "observed"},
-                "pool_size": 3,
             }
         )
 
@@ -1213,7 +1132,6 @@ class TestResourceCleanup:
                     "fields": ["content"],
                     "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
                     "schema": {"mode": "observed"},
-                    "pool_size": 3,
                 }
             )
 
