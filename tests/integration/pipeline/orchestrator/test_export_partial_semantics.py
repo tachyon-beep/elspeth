@@ -161,10 +161,7 @@ class TestExportFailurePartialRunSemantics:
             lambda event: isinstance(event, RunSummary) and event.status == RunCompletionStatus.PARTIAL,
         )
         assert export_started_idx < export_error_idx < summary_idx
-        assert not any(
-            isinstance(event, PhaseCompleted) and event.phase == PipelinePhase.EXPORT
-            for event in events
-        )
+        assert not any(isinstance(event, PhaseCompleted) and event.phase == PipelinePhase.EXPORT for event in events)
 
     def test_precompletion_execution_error_emits_failed_summary_exit_code_2(self, payload_store) -> None:
         """If execution fails before completion, summary is FAILED with exit_code=2."""
@@ -242,7 +239,5 @@ class TestExportFailurePartialRunSemantics:
         )
         assert source_error_idx < summary_idx
         assert not any(
-            isinstance(event, (PhaseStarted, PhaseError, PhaseCompleted))
-            and event.phase == PipelinePhase.EXPORT
-            for event in events
+            isinstance(event, (PhaseStarted, PhaseError, PhaseCompleted)) and event.phase == PipelinePhase.EXPORT for event in events
         )

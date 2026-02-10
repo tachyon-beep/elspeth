@@ -535,8 +535,11 @@ default_sink: results
         with pytest.raises(ValueError) as exc_info:
             load_settings(config_file)
 
-        assert "default_sink" in str(exc_info.value)
-        assert "on_success" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        assert "default_sink" in error_msg
+        assert "source.on_success" in error_msg
+        assert "transforms[].on_success" in error_msg
+        assert "not inside plugin options" in error_msg
 
 
 class TestExportSinkValidation:

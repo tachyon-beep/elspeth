@@ -1927,8 +1927,9 @@ def load_settings(config_path: Path) -> ElspethSettings:
     if "default_sink" in raw_config:
         raise ValueError(
             "'default_sink' has been removed. Use explicit 'on_success' routing instead.\n"
-            "Migration: Add 'on_success: <sink_name>' to your source options and to the "
-            "options of each terminal transform (the last transform before output).\n"
+            "Migration: Set top-level 'source.on_success: <sink_or_connection_name>' and "
+            "top-level 'transforms[].on_success: <sink_or_connection_name>' (not inside "
+            "plugin options). Ensure each terminal path routes to a sink.\n"
             "Then remove the 'default_sink' line from your pipeline YAML."
         )
 
