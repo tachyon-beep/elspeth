@@ -16,12 +16,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts.enums import OutputMode, RunMode
 
-# Reserved edge labels that cannot be used as route labels or fork branch names.
-# "continue" is used for sequential edges and "on_success" is used for
-# terminal routing edges in the DAG builder.
+# Reserved edge labels that cannot be used as user-defined routing names.
+# "continue" is used for sequential edges, "fork" is a gate-only routing action,
+# and "on_success" is used for terminal routing edges in the DAG builder.
 # Using these as user-defined labels would cause edge_map collisions in the orchestrator,
 # leading to routing events recorded against wrong edges (audit corruption).
-_RESERVED_EDGE_LABELS = frozenset({"continue", "on_success"})
+_RESERVED_EDGE_LABELS = frozenset({"continue", "fork", "on_success"})
 
 # Names used in node_id generation must stay short enough to fit
 # landscape.schema nodes_table.c.node_id (String(64)).
@@ -406,7 +406,7 @@ class GateSettings(BaseModel):
           - name: quality_check
             condition: "row['confidence'] >= 0.85"
             routes:
-              high: continue
+              high: quality_ok
               low: review_sink
           - name: parallel_analysis
             condition: "True"
@@ -503,11 +503,16 @@ class GateSettings(BaseModel):
                     f"Route label '{label}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
                 )
 
-            # Destinations must be "continue", "fork", or a sink name.
-            # Sink name validation is deferred to DAG compilation where we have
-            # access to the actual sink definitions.
-            if destination in ("continue", "fork"):
+            # "fork" is a special routing action consumed by fork_to branch wiring.
+            if destination == "fork":
                 continue
+            if destination == "continue":
+                raise ValueError(
+                    "Route destination 'continue' has been removed. "
+                    "Use an explicit connection name or sink name."
+                )
+            # Sink/connection-name validation is structural. Resolution to an
+            # actual sink or producer happens during DAG compilation.
             _validate_connection_or_sink_name(
                 destination,
                 field_label=f"Route destination for label '{label}'",
@@ -1829,7 +1834,7 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
     'routes' dicts must be preserved exactly as written - these contain
     case-sensitive keys that must match runtime values:
     - options: {"Score": "score"} where "Score" must match the LLM's JSON field name
-    - routes: {"High": "continue"} where "High" must match the gate condition result
+    - routes: {"High": "quality_ok"} where "High" must match the gate condition result
 
     Sink name handling:
     - FULLY UPPERCASE names (e.g., 'OUTPUT') are lowercased - these come from

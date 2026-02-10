@@ -473,7 +473,7 @@ gates:
     condition: "row['suspicious'] == True"
     routes:
       "true": flagged
-      "false": continue
+      "false": results
 
 
 
@@ -907,11 +907,11 @@ class TestGateSettings:
             name="quality_check",
             input="source_out",
             condition="row['confidence'] >= 0.85",
-            routes={"true": "continue", "false": "review_sink"},
+            routes={"true": "quality_ok", "false": "review_sink"},
         )
         assert gate.name == "quality_check"
         assert gate.condition == "row['confidence'] >= 0.85"
-        assert gate.routes == {"true": "continue", "false": "review_sink"}
+        assert gate.routes == {"true": "quality_ok", "false": "review_sink"}
         assert gate.fork_to is None
 
     def test_gate_settings_with_fork(self) -> None:
@@ -922,11 +922,11 @@ class TestGateSettings:
             name="parallel_analysis",
             input="source_out",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "fallback_path"},
             fork_to=["path_a", "path_b"],
         )
         assert gate.name == "parallel_analysis"
-        assert gate.routes == {"true": "fork", "false": "continue"}
+        assert gate.routes == {"true": "fork", "false": "fallback_path"}
         assert gate.fork_to == ["path_a", "path_b"]
 
     def test_gate_settings_invalid_condition_syntax(self) -> None:
@@ -938,7 +938,7 @@ class TestGateSettings:
                 name="bad_gate",
                 input="source_out",
                 condition="row['x' >=",  # Invalid syntax
-                routes={"yes": "continue"},
+                routes={"yes": "next_step"},
             )
         assert "Invalid condition syntax" in str(exc_info.value)
 
@@ -952,7 +952,7 @@ class TestGateSettings:
                 name="bad_gate",
                 input="source_out",
                 condition="(lambda x: x)(row['field'])",
-                routes={"yes": "continue"},
+                routes={"yes": "next_step"},
             )
         assert "Forbidden construct" in str(exc_info.value)
 
@@ -965,7 +965,7 @@ class TestGateSettings:
                 name="bad_gate",
                 input="source_out",
                 condition="os.system('rm -rf /')",  # Forbidden name
-                routes={"yes": "continue"},
+                routes={"yes": "next_step"},
             )
         assert "Forbidden" in str(exc_info.value)
 
@@ -996,7 +996,7 @@ class TestGateSettings:
             name="hyphen_gate",
             input="source_out",
             condition="row['x'] > 0",
-            routes={"true": "output-sink", "false": "continue"},
+            routes={"true": "output-sink", "false": "next_step"},
         )
         assert gate.routes["true"] == "output-sink"
 
@@ -1012,7 +1012,7 @@ class TestGateSettings:
             name="numeric_gate",
             input="source_out",
             condition="row['x'] > 0",
-            routes={"true": "123_sink", "false": "continue"},
+            routes={"true": "123_sink", "false": "next_step"},
         )
         assert gate.routes["true"] == "123_sink"
 
@@ -1039,7 +1039,7 @@ class TestGateSettings:
                 name="bad_gate",
                 input="source_out",
                 condition="row['x'] > 0",
-                routes={"yes": "continue"},
+                routes={"yes": "next_step"},
                 fork_to=["path_a", "path_b"],  # No fork route
             )
         assert "fork_to is only valid" in str(exc_info.value)
@@ -1057,7 +1057,7 @@ class TestGateSettings:
                 "a": "sink_a",
                 "b": "Sink_B",
                 "c": "_private_sink",
-                "d": "continue",
+                "d": "next_stage",
             },
         )
         assert len(gate.routes) == 4
@@ -1070,7 +1070,7 @@ class TestGateSettings:
             name="complex_gate",
             input="source_out",
             condition="row['confidence'] >= 0.85 and row.get('category', 'unknown') != 'spam'",
-            routes={"true": "continue", "false": "quarantine"},
+            routes={"true": "quality_ok", "false": "quarantine"},
         )
         assert "and" in gate.condition
 
@@ -1122,7 +1122,7 @@ class TestGateSettings:
                 name="bad_gate",
                 input="source_out",
                 condition="row['x'] > 0",
-                routes={"__quarantine__": "some_sink", "true": "continue"},
+                routes={"__quarantine__": "some_sink", "true": "next_step"},
             )
         assert "__" in str(exc_info.value)
         assert "reserved" in str(exc_info.value).lower()
@@ -1142,23 +1142,17 @@ class TestGateSettings:
         assert "__" in str(exc_info.value)
         assert "reserved" in str(exc_info.value).lower()
 
-    def test_gate_settings_continue_as_destination_allowed(self) -> None:
-        """'continue' as a route DESTINATION (not label) is still valid.
-
-        The restriction is on route LABELS (dict keys), not destinations.
-        'continue' as a destination means "proceed to next node" which is
-        the expected semantic.
-        """
+    def test_gate_settings_continue_as_destination_rejected(self) -> None:
+        """'continue' as a route destination has been removed."""
         from elspeth.core.config import GateSettings
 
-        # This should NOT raise - 'continue' is the destination, not the label
-        gate = GateSettings(
-            name="valid_gate",
-            input="source_out",
-            condition="row['valid']",
-            routes={"pass": "continue", "fail": "error_sink"},
-        )
-        assert gate.routes["pass"] == "continue"
+        with pytest.raises(ValidationError, match="has been removed"):
+            GateSettings(
+                name="invalid_gate",
+                input="source_out",
+                condition="row['valid']",
+                routes={"pass": "continue", "fail": "error_sink"},
+            )
 
     def test_gate_settings_boolean_condition_requires_true_false_routes(self) -> None:
         """Boolean conditions must use 'true'/'false' route labels.
@@ -1174,7 +1168,7 @@ class TestGateSettings:
                 name="threshold_gate",
                 input="source_out",
                 condition="row['amount'] > 1000",
-                routes={"above": "high_sink", "below": "continue"},
+                routes={"above": "high_sink", "below": "standard_sink"},
             )
         error_msg = str(exc_info.value)
         assert "boolean condition" in error_msg
@@ -1194,7 +1188,7 @@ class TestGateSettings:
             name="category_router",
             input="source_out",
             condition="row['priority']",
-            routes={"high": "urgent_sink", "medium": "continue", "low": "archive_sink"},
+            routes={"high": "urgent_sink", "medium": "standard_sink", "low": "archive_sink"},
         )
         assert len(gate.routes) == 3
 
@@ -1203,7 +1197,7 @@ class TestGateSettings:
             name="ternary_router",
             input="source_out",
             condition="'high' if row['score'] > 0.8 else 'low'",
-            routes={"high": "priority_sink", "low": "continue"},
+            routes={"high": "priority_sink", "low": "default_sink"},
         )
         assert gate2.condition.startswith("'high'")
 
@@ -1233,7 +1227,7 @@ class TestElspethSettingsWithGates:
                     "name": "quality_check",
                     "input": "source_out",
                     "condition": "row['confidence'] >= 0.85",
-                    "routes": {"true": "continue", "false": "review"},
+                    "routes": {"true": "quality_ok", "false": "review"},
                 },
             ],
         )
@@ -1252,13 +1246,13 @@ class TestElspethSettingsWithGates:
                     "name": "gate_1",
                     "input": "source_out",
                     "condition": "row['x'] > 0",
-                    "routes": {"true": "continue", "false": "continue"},
+                    "routes": {"true": "next_a", "false": "next_b"},
                 },
                 {
                     "name": "gate_2",
                     "input": "source_out",
                     "condition": "row['y'] < 100",
-                    "routes": {"true": "continue", "false": "continue"},
+                    "routes": {"true": "next_c", "false": "next_d"},
                 },
             ],
         )
@@ -1281,13 +1275,13 @@ class TestElspethSettingsWithGates:
                         "name": "my_gate",
                         "input": "source_out",
                         "condition": "row['x'] > 0",
-                        "routes": {"true": "continue", "false": "output"},
+                        "routes": {"true": "next_stage", "false": "output"},
                     },
                     {
                         "name": "my_gate",  # Duplicate!
                         "input": "source_out",
                         "condition": "row['y'] > 0",
-                        "routes": {"true": "continue", "false": "output"},
+                        "routes": {"true": "next_stage", "false": "output"},
                     },
                 ],
             )
@@ -1303,11 +1297,11 @@ class TestElspethSettingsWithGates:
                 source={"plugin": "csv", "on_success": "output"},
                 sinks={"output": {"plugin": "csv"}},
                 gates=[
-                    {"name": "gate_a", "input": "source_out", "condition": "True", "routes": {"true": "continue", "false": "output"}},
-                    {"name": "gate_a", "input": "source_out", "condition": "True", "routes": {"true": "continue", "false": "output"}},
-                    {"name": "gate_b", "input": "source_out", "condition": "True", "routes": {"true": "continue", "false": "output"}},
-                    {"name": "gate_b", "input": "source_out", "condition": "True", "routes": {"true": "continue", "false": "output"}},
-                    {"name": "gate_c", "input": "source_out", "condition": "True", "routes": {"true": "continue", "false": "output"}},
+                    {"name": "gate_a", "input": "source_out", "condition": "True", "routes": {"true": "next_a", "false": "output"}},
+                    {"name": "gate_a", "input": "source_out", "condition": "True", "routes": {"true": "next_a", "false": "output"}},
+                    {"name": "gate_b", "input": "source_out", "condition": "True", "routes": {"true": "next_b", "false": "output"}},
+                    {"name": "gate_b", "input": "source_out", "condition": "True", "routes": {"true": "next_b", "false": "output"}},
+                    {"name": "gate_c", "input": "source_out", "condition": "True", "routes": {"true": "next_c", "false": "output"}},
                 ],
             )
         error_message = str(exc_info.value)
@@ -1327,7 +1321,7 @@ class TestElspethSettingsWithGates:
                     "name": "quality_check",
                     "input": "source_out",
                     "condition": "row['confidence'] >= 0.85",
-                    "routes": {"true": "continue", "false": "output"},
+                    "routes": {"true": "quality_ok", "false": "output"},
                 },
             ],
         )
@@ -1366,7 +1360,7 @@ gates:
     input: source_out
     condition: "row['confidence'] >= 0.85"
     routes:
-      "true": continue
+      "true": quality_ok
       "false": review
 """)
         settings = load_settings(config_file)
@@ -1374,7 +1368,7 @@ gates:
         assert len(settings.gates) == 1
         assert settings.gates[0].name == "quality_check"
         assert settings.gates[0].condition == "row['confidence'] >= 0.85"
-        assert settings.gates[0].routes == {"true": "continue", "false": "review"}
+        assert settings.gates[0].routes == {"true": "quality_ok", "false": "review"}
 
     def test_load_settings_with_fork_gate(self, tmp_path: Path) -> None:
         """Load YAML with fork gate."""
@@ -1398,7 +1392,7 @@ gates:
     condition: "True"
     routes:
       "true": fork
-      "false": continue
+      "false": output
     fork_to:
       - path_a
       - path_b
@@ -1407,7 +1401,7 @@ gates:
 
         assert len(settings.gates) == 1
         assert settings.gates[0].name == "parallel_analysis"
-        assert settings.gates[0].routes == {"true": "fork", "false": "continue"}
+        assert settings.gates[0].routes == {"true": "fork", "false": "output"}
         assert settings.gates[0].fork_to == ["path_a", "path_b"]
 
     def test_load_settings_preserves_mixed_case_route_labels(self, tmp_path: Path) -> None:
@@ -1441,7 +1435,7 @@ gates:
     condition: "row['priority']"
     routes:
       High: urgent
-      Medium: continue
+      Medium: standard
       Low: archive
 """)
         settings = load_settings(config_file)
@@ -1450,7 +1444,7 @@ gates:
         gate = settings.gates[0]
         assert gate.name == "priority_router"
         # Route labels must preserve exact case - "High" not "high"
-        assert gate.routes == {"High": "urgent", "Medium": "continue", "Low": "archive"}
+        assert gate.routes == {"High": "urgent", "Medium": "standard", "Low": "archive"}
         assert "High" in gate.routes
         assert "high" not in gate.routes
 

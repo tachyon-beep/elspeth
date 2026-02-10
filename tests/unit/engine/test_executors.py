@@ -779,8 +779,8 @@ class TestGateExecutor:
     def test_config_gate_boolean_true_routes_via_true_label(self) -> None:
         """Boolean True condition evaluates to 'true' label."""
         recorder = _make_recorder()
-        edge_map = {(NodeID("cg_1"), "continue"): "edge_cont"}
-        route_map = {(NodeID("cg_1"), "true"): RouteDestination.continue_()}
+        edge_map = {(NodeID("cg_1"), "true"): "edge_true"}
+        route_map = {(NodeID("cg_1"), "true"): RouteDestination.processing_node(NodeID("next_node"))}
         executor = GateExecutor(
             recorder,
             _make_span_factory(),
@@ -792,7 +792,7 @@ class TestGateExecutor:
             name="my_gate",
             input="in_conn",
             condition="True",
-            routes={"true": "continue", "false": "error_sink"},
+            routes={"true": "next_conn", "false": "error_sink"},
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
@@ -805,7 +805,8 @@ class TestGateExecutor:
             ctx,
         )
 
-        assert outcome.sink_name is None  # "continue" means no sink
+        assert outcome.sink_name is None
+        assert outcome.next_node_id == NodeID("next_node")
 
     def test_config_gate_boolean_false_routes_via_false_label(self) -> None:
         """Boolean False condition evaluates to 'false' label."""
@@ -824,7 +825,7 @@ class TestGateExecutor:
             name="my_gate",
             input="in_conn",
             condition="False",
-            routes={"true": "continue", "false": "error_sink"},
+            routes={"true": "next_conn", "false": "error_sink"},
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
@@ -842,8 +843,8 @@ class TestGateExecutor:
     def test_config_gate_string_result_used_as_label(self) -> None:
         """String condition result used as route label directly."""
         recorder = _make_recorder()
-        edge_map = {(NodeID("cg_1"), "continue"): "edge_cont"}
-        route_map = {(NodeID("cg_1"), "high"): RouteDestination.continue_()}
+        edge_map = {(NodeID("cg_1"), "high"): "edge_high"}
+        route_map = {(NodeID("cg_1"), "high"): RouteDestination.processing_node(NodeID("next_node"))}
         executor = GateExecutor(
             recorder,
             _make_span_factory(),
@@ -855,7 +856,7 @@ class TestGateExecutor:
             name="my_gate",
             input="in_conn",
             condition="'high'",
-            routes={"high": "continue", "low": "error_sink"},
+            routes={"high": "next_conn", "low": "error_sink"},
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
@@ -869,6 +870,7 @@ class TestGateExecutor:
         )
 
         assert outcome.sink_name is None
+        assert outcome.next_node_id == NodeID("next_node")
 
     def test_config_gate_route_to_processing_node(self) -> None:
         """Config gate route label can branch to a processing node."""
@@ -910,7 +912,7 @@ class TestGateExecutor:
             name="my_gate",
             input="in_conn",
             condition="'unknown_label'",
-            routes={"high": "continue", "low": "error_sink"},
+            routes={"high": "next_conn", "low": "error_sink"},
         )
         contract = _make_contract()
         token = _make_token(contract=contract)
@@ -950,7 +952,7 @@ class TestGateExecutor:
             name="my_gate",
             input="in_conn",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "error_sink"},
             fork_to=["path_a", "path_b"],
         )
 
@@ -1015,7 +1017,7 @@ class TestGateExecutor:
             name="my_gate",
             input="in_conn",
             condition="row['nonexistent_field'] > 0",
-            routes={"true": "continue", "false": "continue"},
+            routes={"true": "next_conn", "false": "error_sink"},
         )
         contract = _make_contract()
         token = _make_token(contract=contract)

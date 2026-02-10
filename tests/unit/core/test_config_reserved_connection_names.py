@@ -29,6 +29,15 @@ def test_transform_input_rejects_reserved_continue() -> None:
         )
 
 
+def test_transform_input_rejects_reserved_fork() -> None:
+    with pytest.raises(ValidationError, match="reserved"):
+        TransformSettings(
+            name="t1",
+            plugin="passthrough",
+            input="fork",
+        )
+
+
 def test_transform_on_success_rejects_reserved_continue() -> None:
     with pytest.raises(ValidationError, match="reserved"):
         TransformSettings(

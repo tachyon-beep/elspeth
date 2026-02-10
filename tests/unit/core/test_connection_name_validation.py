@@ -75,7 +75,7 @@ class TestConnectionNameValidation:
                 name="g0",
                 input="__internal__",
                 condition="True",
-                routes={"true": "continue", "false": "continue"},
+                routes={"true": "next_a", "false": "next_b"},
             )
 
     def test_aggregation_input_rejects_dunder_prefix(self) -> None:

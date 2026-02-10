@@ -1560,8 +1560,8 @@ class TestExecutionGraphFromConfig:
                 ),
             ],
             gates=[
-                _gate_settings(GateSettings, name="g1", condition="True", routes={"true": "continue", "false": "flagged"}),
-                _gate_settings(GateSettings, name="g2", condition="True", routes={"true": "output", "false": "output"}),
+                _gate_settings(GateSettings, name="g1", condition="True", routes={"true": "g2_in", "false": "flagged"}),
+                _gate_settings(GateSettings, name="g2", input="g2_in", condition="True", routes={"true": "output", "false": "output"}),
             ],
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
@@ -1679,19 +1679,11 @@ class TestExecutionGraphFromConfig:
             )
 
 
-class TestGateContinueEdgeMaterialization:
-    """Test that gate routes targeting 'continue' create proper graph edges.
+class TestGateConnectionRouteMaterialization:
+    """Gate routes to named connections should wire explicit labeled edges."""
 
-    Regression test for immq: gates with 'continue' route targets must have
-    a 'continue' edge in the graph, otherwise _record_routing raises MissingEdgeError.
-
-    These tests use instantiate_plugins_from_config_raw to bypass the test helper
-    that renames lone "continue" routes to named connections (which was masking
-    this bug in the first place).
-    """
-
-    def test_gate_continue_route_creates_continue_edge(self, plugin_manager) -> None:
-        """A gate route targeting 'continue' materializes a 'continue' edge to downstream gate."""
+    def test_gate_connection_route_creates_labeled_edge(self, plugin_manager) -> None:
+        """A gate route targeting a named connection creates a labeled MOVE edge."""
         from elspeth.contracts.types import GateName, NodeID
         from elspeth.core.config import (
             ElspethSettings,
@@ -1718,7 +1710,7 @@ class TestGateContinueEdgeMaterialization:
                     name="router",
                     input="source_out",
                     condition="True",
-                    routes={"true": "checker_in", "false": "continue"},
+                    routes={"true": "checker_in", "false": "flagged"},
                 ),
                 GateSettingsModel(
                     name="checker",
@@ -1743,23 +1735,17 @@ class TestGateContinueEdgeMaterialization:
             gates=list(config.gates),
         )
 
-        # The "router" gate must have a "continue" edge to the checker gate
         router_id = graph.get_config_gate_id_map()[GateName("router")]
         checker_id = graph.get_config_gate_id_map()[GateName("checker")]
 
-        next_node = graph.get_next_node(router_id)
-        assert next_node is not None, "router gate must have a 'continue' edge to a downstream node"
-        assert next_node == checker_id
-
-        # Verify the continue edge exists in the graph
         edges = graph.get_edges()
-        continue_edges = [e for e in edges if NodeID(e.from_node) == router_id and e.label == "continue"]
-        assert len(continue_edges) == 1, f"Expected 1 continue edge from router, got {len(continue_edges)}"
+        true_edges = [e for e in edges if NodeID(e.from_node) == router_id and e.to_node == checker_id and e.label == "true"]
+        assert len(true_edges) == 1, f"Expected 1 'true' edge from router to checker, got {len(true_edges)}"
 
-    def test_gate_continue_route_preserves_route_resolution(self, plugin_manager) -> None:
-        """Continue route creates both edge AND route resolution map entry."""
+    def test_gate_connection_route_preserves_route_resolution(self, plugin_manager) -> None:
+        """Named-connection routes resolve to processing nodes; sink routes resolve to sinks."""
         from elspeth.contracts import RouteDestination, RouteDestinationKind
-        from elspeth.contracts.types import GateName
+        from elspeth.contracts.types import GateName, SinkName
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -1785,7 +1771,7 @@ class TestGateContinueEdgeMaterialization:
                     name="router",
                     input="source_out",
                     condition="True",
-                    routes={"true": "checker_in", "false": "continue"},
+                    routes={"true": "checker_in", "false": "flagged"},
                 ),
                 GateSettingsModel(
                     name="checker",
@@ -1813,16 +1799,16 @@ class TestGateContinueEdgeMaterialization:
         router_id = graph.get_config_gate_id_map()[GateName("router")]
         resolution_map = graph.get_route_resolution_map()
 
-        # "false" → continue should be in the resolution map
+        # "false" -> sink
         assert (router_id, "false") in resolution_map
-        assert resolution_map[(router_id, "false")] == RouteDestination.continue_()
+        assert resolution_map[(router_id, "false")] == RouteDestination.sink(SinkName("flagged"))
 
-        # "true" → processing_node (the checker gate) should also be there
+        # "true" -> processing_node (the checker gate)
         assert (router_id, "true") in resolution_map
         assert resolution_map[(router_id, "true")].kind == RouteDestinationKind.PROCESSING_NODE
 
-    def test_terminal_gate_continue_route_rejected(self, plugin_manager) -> None:
-        """A terminal gate (no downstream processing node) with 'continue' routes is rejected."""
+    def test_terminal_gate_unconsumed_connection_rejected(self, plugin_manager) -> None:
+        """A terminal gate route to an unconsumed connection fails validation."""
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -1848,7 +1834,7 @@ class TestGateContinueEdgeMaterialization:
                     name="terminal_gate",
                     input="source_out",
                     condition="True",
-                    routes={"true": "output", "false": "continue"},
+                    routes={"true": "output", "false": "orphan_conn"},
                 ),
             ],
             sinks={
@@ -1857,7 +1843,7 @@ class TestGateContinueEdgeMaterialization:
         )
 
         plugins = instantiate_plugins_from_config_raw(config)
-        with pytest.raises(GraphValidationError, match=r"Terminal gate.*has 'continue' route"):
+        with pytest.raises(GraphValidationError, match=r"neither a sink nor a known connection name"):
             ExecutionGraph.from_plugin_instances(
                 source=plugins["source"],
                 source_settings=plugins["source_settings"],
@@ -4713,18 +4699,11 @@ class TestDivertEdges:
         assert all(e.label.startswith("__error_") and e.label.endswith("__") for e in error_edges)
 
 
-class TestTerminalGateContinueValidation:
-    """vxy0: Terminal gate with 'continue' route must be rejected.
+class TestTerminalGateRouteValidation:
+    """Terminal gates must not emit unconsumed connection outputs."""
 
-    A gate that is the last processing node in the pipeline cannot have a
-    'continue' route because there is no downstream node to continue to.
-    Terminal gates must route all paths to named sinks.
-
-    Error path: dag.py:998
-    """
-
-    def test_terminal_gate_with_continue_route_raises(self, plugin_manager) -> None:
-        """Terminal gate with 'continue' in routes raises GraphValidationError."""
+    def test_terminal_gate_with_unconsumed_connection_raises(self, plugin_manager) -> None:
+        """Terminal gate route to an orphan connection raises GraphValidationError."""
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -4755,13 +4734,13 @@ class TestTerminalGateContinueValidation:
                     name="threshold",
                     input="to_gate",
                     condition="row['score'] > 0.5",
-                    routes={"true": "output", "false": "continue"},
+                    routes={"true": "output", "false": "orphan_conn"},
                 ),
             ],
         )
 
         plugins = instantiate_plugins_from_config_raw(config)
-        with pytest.raises(GraphValidationError, match=r"Terminal gate.*continue.*route|Dangling output"):
+        with pytest.raises(GraphValidationError, match=r"neither a sink nor a known connection name"):
             ExecutionGraph.from_plugin_instances(
                 source=plugins["source"],
                 source_settings=plugins["source_settings"],
@@ -4771,12 +4750,12 @@ class TestTerminalGateContinueValidation:
                 gates=list(config.gates),
             )
 
-    def test_non_terminal_gate_with_continue_route_passes(self, plugin_manager) -> None:
-        """Non-terminal gate with 'continue' route builds successfully.
+    def test_non_terminal_gate_with_connection_route_passes(self, plugin_manager) -> None:
+        """Non-terminal gate with explicit connection route builds successfully.
 
         Config gates are positioned AFTER transforms in the pipeline. A gate is
-        non-terminal when another config gate follows it. The first gate's
-        'continue' route leads to the second gate.
+        non-terminal when another config gate follows it. The first gate routes
+        to the second through a named connection.
         """
         from elspeth.core.config import (
             ElspethSettings,

@@ -19,7 +19,6 @@ from networkx import MultiDiGraph
 from elspeth.contracts import (
     EdgeInfo,
     RouteDestination,
-    RouteDestinationKind,
     RoutingMode,
     check_compatibility,
     error_edge_label,
@@ -380,6 +379,59 @@ class ExecutionGraph:
                         f"Gate '{info.plugin_name}' route label '{route_label}' has no destination in route resolution map. "
                         "All declared route labels must resolve during graph construction."
                     )
+
+    @staticmethod
+    def _validate_connection_namespaces(
+        *,
+        producers: dict[str, tuple[NodeID, str]],
+        consumers: dict[str, NodeID],
+        consumer_claims: list[tuple[str, NodeID, str]],
+        sink_names: set[str],
+        check_dangling: bool = True,
+    ) -> None:
+        """Validate declarative connection namespace integrity.
+
+        Enforces:
+        - Duplicate consumers are forbidden (fan-out requires explicit gate)
+        - Every consumed connection has a producer
+        - Connection and sink namespaces are disjoint
+        - Every produced connection is consumed (or emitted to sink directly)
+        """
+        consumer_counts = Counter(name for name, _node_id, _desc in consumer_claims)
+        duplicate_consumers = sorted(name for name, count in consumer_counts.items() if count > 1)
+        if duplicate_consumers:
+            for dup_name in duplicate_consumers:
+                dup_entries = [(node_id, desc) for name, node_id, desc in consumer_claims if name == dup_name]
+                first_node, first_desc = dup_entries[0]
+                second_node, second_desc = dup_entries[1]
+                raise GraphValidationError(
+                    f"Duplicate consumer for connection '{dup_name}': "
+                    f"{first_desc} ({first_node}) and {second_desc} ({second_node}). "
+                    "Use a gate for fan-out."
+                )
+
+        for connection_name in consumers:
+            if connection_name not in producers:
+                suggestions = _suggest_similar(connection_name, sorted(producers.keys()))
+                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                raise GraphValidationError(
+                    f"No producer for connection '{connection_name}'.{hint}\nAvailable connections: {sorted(producers.keys())}"
+                )
+
+        connection_names = set(producers.keys()) | set(consumers.keys())
+        overlap = connection_names & sink_names
+        if overlap:
+            raise GraphValidationError(
+                f"Connection names overlap with sink names: {sorted(overlap)}. Connection names and sink names must be disjoint."
+            )
+
+        if check_dangling:
+            dangling_connections = sorted(set(producers.keys()) - set(consumers.keys()))
+            if dangling_connections:
+                raise GraphValidationError(
+                    f"Dangling output connections with no consumer: {dangling_connections}. "
+                    "Every produced connection must be consumed or routed to a sink."
+                )
 
     def is_sink_node(self, node_id: NodeID) -> bool:
         """Check if a node is a sink node."""
@@ -938,10 +990,6 @@ class ExecutionGraph:
                     )
 
         for gate_id, route_label, target in gate_route_connections:
-            # "continue" routes don't produce named connections — they're resolved at
-            # runtime by the processor to mean "proceed to the next processing node."
-            if target == "continue":
-                continue
             # Multiple routes from the same gate may converge to the same target
             # (e.g., {"true": "next_gate", "false": "next_gate"}). Only register
             # the producer once — the connection is the same regardless of which
@@ -952,17 +1000,12 @@ class ExecutionGraph:
 
         # ===== BUILD CONSUMER REGISTRY =====
         consumers: dict[str, NodeID] = {}
-        consumer_desc: dict[str, str] = {}
+        consumer_claims: list[tuple[str, NodeID, str]] = []
 
         def register_consumer(connection_name: str, node_id: NodeID, description: str) -> None:
-            if connection_name in consumers:
-                raise GraphValidationError(
-                    f"Duplicate consumer for connection '{connection_name}': "
-                    f"{consumer_desc[connection_name]} ({consumers[connection_name]}) and {description} ({node_id}). "
-                    "Use a gate for fan-out."
-                )
-            consumers[connection_name] = node_id
-            consumer_desc[connection_name] = description
+            consumer_claims.append((connection_name, node_id, description))
+            if connection_name not in consumers:
+                consumers[connection_name] = node_id
 
         for wired in transforms:
             register_consumer(
@@ -985,13 +1028,14 @@ class ExecutionGraph:
                 f"gate '{gate_settings.name}'",
             )
 
-        # ===== VALIDATE DISJOINT NAMESPACES =====
-        connection_names = set(producers.keys()) | set(consumers.keys())
-        overlap = connection_names & _sink_name_set()
-        if overlap:
-            raise GraphValidationError(
-                f"Connection names overlap with sink names: {sorted(overlap)}. Connection names and sink names must be disjoint."
-            )
+        # ===== VALIDATE CONNECTION NAMESPACES =====
+        cls._validate_connection_namespaces(
+            producers=producers,
+            consumers=consumers,
+            consumer_claims=consumer_claims,
+            sink_names=_sink_name_set(),
+            check_dangling=False,
+        )
 
         # Resolve gate schema from explicit input connection.
         for gate_id, gate_name, input_connection, declared_schema in plugin_gate_schema_inputs:
@@ -1034,78 +1078,19 @@ class ExecutionGraph:
         gate_node_ids = {entry.node_id for entry in gate_entries}
 
         for connection_name, consumer_id in consumers.items():
-            if connection_name not in producers:
-                suggestions = _suggest_similar(connection_name, sorted(producers.keys()))
-                hint = f" Did you mean: {suggestions}?" if suggestions else ""
-                raise GraphValidationError(
-                    f"No producer for connection '{connection_name}'.{hint}\nAvailable connections: {sorted(producers.keys())}"
-                )
-
             producer_id, producer_label = producers[connection_name]
             if producer_id in gate_node_ids and producer_label != "continue":
-                # Preserve "destination: continue" semantics (continue edge label).
-                # Other connection targets keep route-label edges for unambiguous audit mapping.
-                if connection_name == "continue":
-                    graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
-                else:
-                    graph.add_edge(producer_id, consumer_id, label=producer_label, mode=RoutingMode.MOVE)
+                graph.add_edge(producer_id, consumer_id, label=producer_label, mode=RoutingMode.MOVE)
             else:
                 graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
 
         # ===== RESOLVE DEFERRED GATE ROUTES =====
-        # Track which gates have "continue" route targets (for terminal gate validation).
-        gates_with_continue_routes: dict[NodeID, list[str]] = {}
         for gate_id, route_label, target in gate_route_connections:
-            if target == "continue":
-                graph._route_resolution_map[(gate_id, route_label)] = RouteDestination.continue_()
-                gates_with_continue_routes.setdefault(gate_id, []).append(route_label)
-                continue
             if target not in consumers:
                 suggestions = _suggest_similar(target, sorted(consumers.keys()))
                 hint = f" Did you mean: {suggestions}?" if suggestions else ""
                 raise GraphValidationError(f"Gate route target '{target}' is neither a sink nor a known connection name.{hint}")
             graph._route_resolution_map[(gate_id, route_label)] = RouteDestination.processing_node(consumers[target])
-
-        # Validate: terminal gates must not have "continue" routes.
-        # A gate with "continue" routes must have a downstream processing node to
-        # continue to. If the gate has no outgoing edges to processing nodes
-        # (only sink edges or fork branches), "continue" is a dead-end.
-        if gates_with_continue_routes:
-            gates_with_downstream = {producers[conn][0] for conn in consumers if conn in producers and producers[conn][0] in gate_node_ids}
-            for gate_id, route_labels in gates_with_continue_routes.items():
-                if gate_id not in gates_with_downstream:
-                    gate_info = graph.get_node_info(gate_id)
-                    gate_name = gate_info.plugin_name
-                    raise GraphValidationError(
-                        f"Terminal gate '{gate_name}' has 'continue' route(s) ({route_labels}) "
-                        f"but there is no downstream processing node. "
-                        f"Terminal gates must route all paths to named sinks."
-                    )
-
-        # Materialize "continue" edges for gates with "continue" route targets.
-        # The executor's _record_routing needs (gate_id, "continue") in the edge_map,
-        # and get_next_node traverses "continue" MOVE edges for node_to_next.
-        for gate_id, route_labels in gates_with_continue_routes.items():
-            downstream_nodes: set[NodeID] = set()
-            for (gid, _rl), dest in graph._route_resolution_map.items():
-                if gid == gate_id and dest.kind == RouteDestinationKind.PROCESSING_NODE:
-                    assert dest.next_node_id is not None  # guaranteed by RouteDestination.__post_init__
-                    downstream_nodes.add(dest.next_node_id)
-
-            if not downstream_nodes:
-                # Only "continue" + sink/fork routes — caught by terminal gate validation above.
-                continue
-
-            if len(downstream_nodes) > 1:
-                gate_info = graph.get_node_info(gate_id)
-                raise GraphValidationError(
-                    f"Gate '{gate_info.plugin_name}' has 'continue' route(s) ({route_labels}) "
-                    f"but routes to {len(downstream_nodes)} different downstream processing nodes. "
-                    f"A gate with 'continue' routes must have a unique downstream processing node."
-                )
-
-            (continue_target,) = downstream_nodes
-            graph.add_edge(gate_id, continue_target, label="continue", mode=RoutingMode.MOVE)
 
         # Ensure all declared gate route labels are resolvable before runtime.
         graph._validate_route_resolution_map_complete()
@@ -1179,12 +1164,15 @@ class ExecutionGraph:
                 f"Source '{source.name}' on_success '{source_on_success}' is neither a sink nor a known connection.{hint}"
             )
 
-        dangling_connections = sorted(set(producers.keys()) - set(consumers.keys()))
-        if dangling_connections:
-            raise GraphValidationError(
-                f"Dangling output connections with no consumer: {dangling_connections}. "
-                "Every produced connection must be consumed or routed to a sink."
-            )
+        # Re-run namespace validation with dangling-output checks enabled now
+        # that terminal on_success sink/connection validation has completed.
+        cls._validate_connection_namespaces(
+            producers=producers,
+            consumers=consumers,
+            consumer_claims=consumer_claims,
+            sink_names=_sink_name_set(),
+            check_dangling=True,
+        )
 
         # ===== ADD DIVERT EDGES (quarantine/error sinks) =====
         # Divert edges represent error/quarantine data flows that bypass the
@@ -1256,20 +1244,6 @@ class ExecutionGraph:
             )
 
         pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
-
-        # ===== VALIDATE TERMINAL GATE "continue" ROUTES =====
-        # A "continue" route means "advance to the next processing node in
-        # pipeline order." If the gate is the last processing node, "continue"
-        # has nowhere to go — this is a configuration error.
-        for (gate_id, route_label), destination in graph._route_resolution_map.items():
-            if destination == RouteDestination.continue_():
-                gate_idx = pipeline_index.get(gate_id)
-                if gate_idx is not None and gate_idx == len(pipeline_nodes) - 1:
-                    gate_name = graph.get_node_info(gate_id).plugin_name
-                    raise GraphValidationError(
-                        f"Gate '{gate_name}' has a 'continue' route (label='{route_label}') but is the last "
-                        "processing node in the pipeline. Terminal gates must route all paths to named sinks."
-                    )
 
         coalesce_gate_index: dict[CoalesceName, int] = {}
         if coalesce_settings:
