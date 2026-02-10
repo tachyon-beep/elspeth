@@ -417,6 +417,11 @@ allowed_dict_patterns:
   - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_success:b_list (list)"
   - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_latency:b_list (list)"
 
+  # ChaosWeb - fault-injection test server for web scraping resilience testing
+  # Mirrors ChaosLLM patterns: YAML config loading and JSONL preset parsing are Tier 3 boundaries.
+  - "src/elspeth/testing/chaosweb/config.py:load_preset:return"
+  - "src/elspeth/testing/chaosweb/config.py:load_config:cli_overrides"
+
   # ═══════════════════════════════════════════════════════════════════════════
   # BATCHING INFRASTRUCTURE - Row buffering for batch operations
   # ═══════════════════════════════════════════════════════════════════════════

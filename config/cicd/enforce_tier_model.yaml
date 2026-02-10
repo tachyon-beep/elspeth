@@ -142,7 +142,7 @@ allow_hits:
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion
   expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:fp=d34e8d03902346bb
+- key: engine/executors.py:R4:SinkExecutor:write:fp=f6af09f714ec682c
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
@@ -747,7 +747,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=82656a27217db06a
+- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=7d0ded8e77f9f3ac
   owner: architecture
   reason: Tier 2 contract enforcement - isinstance validates copies_field type before arithmetic
   safety: Wrong types crash (upstream bug); wrong values quarantined via error result
@@ -1601,3 +1601,34 @@ allow_hits:
   reason: Tier 1 type restoration — isinstance on our own serialized checkpoint format to detect datetime type tags
   safety: Non-str values fall through without coercion — no silent wrong behavior
   expires: '2026-03-13'
+# ChaosWeb - Tier 3 boundaries (external data: JSONL preset files, YAML config files, Pydantic range parsing)
+- key: testing/chaosweb/content_generator.py:R5:PresetBank:from_jsonl:fp=9b96b4652eaaa630
+  owner: architecture
+  reason: Tier 3 boundary - isinstance validates JSONL line is dict before constructing preset entry
+  safety: Non-dict lines are skipped with warning - no silent data loss
+  expires: '2026-05-13'
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=0817f8db37beaf7c
+  owner: architecture
+  reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
+  safety: Missing url defaults to empty string - correct for optional preset metadata
+  expires: '2026-05-13'
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=42bd4603bea783bd
+  owner: architecture
+  reason: Tier 3 boundary - .get() on parsed JSONL object for optional content_type field
+  safety: Missing content_type defaults to text/html - correct for HTML preset pages
+  expires: '2026-05-13'
+- key: testing/chaosweb/content_generator.py:R1:ContentGenerator:_generate_preset_html:fp=f14d5eed4882098d
+  owner: architecture
+  reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
+  safety: Falls back to config default_content_type - preset pages may omit content_type
+  expires: '2026-05-13'
+- key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=cebbc77f26615c2a
+  owner: architecture
+  reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
+  safety: Non-matching types pass through to Pydantic float validator which raises on invalid input
+  expires: '2026-05-13'
+- key: testing/chaosweb/config.py:R5:load_preset:fp=3711f2e68e9e90ff
+  owner: architecture
+  reason: Tier 3 boundary - isinstance validates parsed YAML is dict before passing to Pydantic
+  safety: Non-dict YAML raises ValueError with clear message - no silent coercion
+  expires: '2026-05-13'
