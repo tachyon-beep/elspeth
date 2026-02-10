@@ -177,7 +177,7 @@ class ExecutionGraph:
             A frozen (immutable) copy of the internal MultiDiGraph.
             Mutation attempts raise nx.NetworkXError.
         """
-        return nx.freeze(self._graph.copy())
+        return nx.freeze(self._graph.copy())  # type: ignore[no-any-return]
 
     def add_node(
         self,

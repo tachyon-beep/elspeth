@@ -490,27 +490,13 @@ class GateSettings(BaseModel):
         for label, destination in v.items():
             if not label:
                 raise ValueError("Route labels must not be empty")
-            _validate_max_length(label, field_label="Route label", max_length=_MAX_ROUTE_LABEL_LENGTH)
-
-            # Check route label is not reserved
-            if label in _RESERVED_EDGE_LABELS:
-                raise ValueError(f"Route label '{label}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
-
-            # Labels starting with __ are reserved for system edges
-            # (__quarantine__, __error_N__) added by the DAG builder
-            if label.startswith("__"):
-                raise ValueError(
-                    f"Route label '{label}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
-                )
+            _validate_connection_or_sink_name(label, field_label="Route label")
 
             # "fork" is a special routing action consumed by fork_to branch wiring.
             if destination == "fork":
                 continue
             if destination == "continue":
-                raise ValueError(
-                    "Route destination 'continue' has been removed. "
-                    "Use an explicit connection name or sink name."
-                )
+                raise ValueError("Route destination 'continue' has been removed. Use an explicit connection name or sink name.")
             # Sink/connection-name validation is structural. Resolution to an
             # actual sink or producer happens during DAG compilation.
             _validate_connection_or_sink_name(
@@ -530,18 +516,14 @@ class GateSettings(BaseModel):
         if v is None:
             return v
 
+        stripped = []
         for branch in v:
             if not branch or not branch.strip():
                 raise ValueError("Fork branch names must not be empty")
-            branch = branch.strip()
-            _validate_max_length(branch, field_label="Fork branch name", max_length=_MAX_CONNECTION_NAME_LENGTH)
-            if branch in _RESERVED_EDGE_LABELS:
-                raise ValueError(f"Fork branch '{branch}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
-            if branch.startswith("__"):
-                raise ValueError(
-                    f"Fork branch '{branch}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
-                )
-        return v
+            value = branch.strip()
+            _validate_connection_or_sink_name(value, field_label="Fork branch name")
+            stripped.append(value)
+        return stripped
 
     @model_validator(mode="after")
     def validate_fork_consistency(self) -> "GateSettings":
@@ -678,12 +660,14 @@ class CoalesceSettings(BaseModel):
     @classmethod
     def validate_branch_names(cls, v: list[str]) -> list[str]:
         """Ensure coalesce branch names are bounded and non-reserved."""
+        stripped = []
         for branch in v:
             if not branch or not branch.strip():
                 raise ValueError("Coalesce branch names must not be empty")
             value = branch.strip()
             _validate_connection_or_sink_name(value, field_label="Coalesce branch name")
-        return v
+            stripped.append(value)
+        return stripped
 
     @model_validator(mode="after")
     def validate_policy_requirements(self) -> "CoalesceSettings":
@@ -1335,6 +1319,7 @@ class ElspethSettings(BaseModel):
 
         for sink_name in v:
             _validate_max_length(sink_name, field_label="Sink name", max_length=_MAX_NODE_NAME_LENGTH)
+            _validate_connection_name_chars(sink_name, field_label="Sink name")
             if sink_name in _RESERVED_EDGE_LABELS:
                 raise ValueError(f"Sink name '{sink_name}' is reserved. Reserved sink/edge labels: {sorted(_RESERVED_EDGE_LABELS)}")
             if sink_name.startswith("__"):

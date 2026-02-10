@@ -21,12 +21,14 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from elspeth.core.config import (
+    CoalesceSettings,
     ElspethSettings,
+    GateSettings,
     SinkSettings,
     SourceSettings,
     TransformSettings,
 )
-from elspeth.core.dag import ExecutionGraph, GraphValidationError
+from elspeth.core.dag import ExecutionGraph
 
 # =============================================================================
 # Constants mirrored from config.py for property assertions
@@ -41,45 +43,45 @@ _RESERVED_EDGE_LABELS = frozenset({"continue", "fork", "on_success"})
 # =============================================================================
 
 # Valid connection names: start with letter/digit/underscore, then alnum/underscore/hyphen
-valid_connection_names = st.from_regex(
-    r"^[a-zA-Z][a-zA-Z0-9_-]{0,30}$", fullmatch=True
-).filter(
+valid_connection_names = st.from_regex(r"^[a-zA-Z][a-zA-Z0-9_-]{0,30}$", fullmatch=True).filter(
     lambda s: s not in _RESERVED_EDGE_LABELS and not s.startswith("__")
 )
 
 # Dangerous strings that should be rejected
-dangerous_strings = st.sampled_from([
-    "",                          # empty
-    " ",                         # whitespace only
-    "  \t\n  ",                  # mixed whitespace
-    "\x00",                      # NUL byte
-    "name\x00evil",              # embedded NUL
-    "continue",                  # reserved
-    "fork",                      # reserved
-    "on_success",                # reserved
-    "__error_sink__",            # system-reserved prefix
-    "__internal",                # system-reserved prefix
-    "../../../etc/passwd",       # path traversal
-    "a" * 65,                    # exceeds max length
-    "a" * 100,                   # way over limit
-    "'; DROP TABLE nodes; --",   # SQL injection
-    "name<script>alert(1)</script>",  # XSS
-    "name\ninjected",            # newline injection
-    "name\rinjected",            # carriage return injection
-    "\u200b",                    # zero-width space
-    "\u200d",                    # zero-width joiner
-    "\u202e",                    # RTL override
-    "\u0300",                    # combining grave accent
-    "café",                      # non-ASCII (accented char)
-    "名前",                      # CJK characters
-    "💀",                        # emoji
-    "a b",                       # space in middle
-    ".hidden",                   # dot-prefixed
-    "@mention",                  # at-sign
-    "name=value",                # equals sign
-    "name;other",                # semicolon
-    "name|other",                # pipe
-])
+dangerous_strings = st.sampled_from(
+    [
+        "",  # empty
+        " ",  # whitespace only
+        "  \t\n  ",  # mixed whitespace
+        "\x00",  # NUL byte
+        "name\x00evil",  # embedded NUL
+        "continue",  # reserved
+        "fork",  # reserved
+        "on_success",  # reserved
+        "__error_sink__",  # system-reserved prefix
+        "__internal",  # system-reserved prefix
+        "../../../etc/passwd",  # path traversal
+        "a" * 65,  # exceeds max length
+        "a" * 100,  # way over limit
+        "'; DROP TABLE nodes; --",  # SQL injection
+        "name<script>alert(1)</script>",  # XSS
+        "name\ninjected",  # newline injection
+        "name\rinjected",  # carriage return injection
+        "\u200b",  # zero-width space
+        "\u200d",  # zero-width joiner
+        "\u202e",  # RTL override
+        "\u0300",  # combining grave accent
+        "café",  # non-ASCII (accented char)
+        "名前",  # CJK characters
+        "💀",  # emoji
+        "a b",  # space in middle
+        ".hidden",  # dot-prefixed
+        "@mention",  # at-sign
+        "name=value",  # equals sign
+        "name;other",  # semicolon
+        "name|other",  # pipe
+    ]
+)
 
 # Unicode edge cases from Hypothesis
 unicode_edge_cases = st.text(
@@ -151,6 +153,103 @@ class TestConnectionNameRejection:
                 input=name,
                 options={"schema": {"mode": "observed"}},
             )
+
+    @given(name=dangerous_strings)
+    @settings(max_examples=50)
+    def test_dangerous_names_rejected_as_route_label(self, name: str) -> None:
+        """Dangerous names must be rejected when used as gate route labels."""
+        with pytest.raises((ValueError, ValidationError)):
+            GateSettings(
+                name="safe_gate",
+                input="safe_input",
+                condition="True",
+                routes={name: "some_sink", "false": "some_sink"},
+            )
+
+    @given(name=dangerous_strings)
+    @settings(max_examples=50)
+    def test_dangerous_names_rejected_as_fork_branch(self, name: str) -> None:
+        """Dangerous names must be rejected when used as fork branch names."""
+        with pytest.raises((ValueError, ValidationError)):
+            GateSettings(
+                name="safe_gate",
+                input="safe_input",
+                condition="True",
+                routes={"true": "fork", "false": "some_sink"},
+                fork_to=[name],
+            )
+
+    @given(name=dangerous_strings)
+    @settings(max_examples=50)
+    def test_dangerous_names_rejected_as_coalesce_branch(self, name: str) -> None:
+        """Dangerous names must be rejected when used as coalesce branch names."""
+        with pytest.raises((ValueError, ValidationError)):
+            CoalesceSettings(
+                name="safe_coalesce",
+                branches=[name, "valid_branch"],
+                on_success="output",
+            )
+
+    @given(name=dangerous_strings)
+    @settings(max_examples=50)
+    def test_dangerous_names_rejected_as_sink_name(self, name: str) -> None:
+        """Dangerous names must be rejected when used as sink name keys."""
+        with pytest.raises((ValueError, ValidationError)):
+            ElspethSettings(
+                source=SourceSettings(
+                    plugin="csv",
+                    on_success="safe_out",
+                    options={
+                        "path": "test.csv",
+                        "on_validation_failure": "discard",
+                        "schema": {"mode": "observed"},
+                    },
+                ),
+                sinks={
+                    name: SinkSettings(
+                        plugin="json",
+                        options={"path": "output.json", "schema": {"mode": "observed"}},
+                    ),
+                },
+                transforms=[
+                    TransformSettings(
+                        name="t1",
+                        plugin="passthrough",
+                        input="safe_out",
+                        on_success=name if name else "fallback",
+                        options={"schema": {"mode": "observed"}},
+                    ),
+                ],
+            )
+
+
+# =============================================================================
+# Whitespace stripping tests — validators must return stripped values
+# =============================================================================
+
+
+class TestWhitespaceStripping:
+    """Verify that fork_to and coalesce branches strip whitespace (1wbw fix)."""
+
+    def test_fork_to_strips_whitespace(self) -> None:
+        """fork_to validator must return stripped branch names."""
+        gate = GateSettings(
+            name="forker",
+            input="safe_input",
+            condition="True",
+            routes={"true": "fork", "false": "some_sink"},
+            fork_to=["  branch_a  ", " branch_b"],
+        )
+        assert gate.fork_to == ["branch_a", "branch_b"]
+
+    def test_coalesce_branches_strips_whitespace(self) -> None:
+        """Coalesce branch validator must return stripped branch names."""
+        coal = CoalesceSettings(
+            name="merger",
+            branches=["  branch_a  ", " branch_b"],
+            on_success="output",
+        )
+        assert coal.branches == ["branch_a", "branch_b"]
 
 
 # =============================================================================
@@ -299,5 +398,3 @@ class TestConnectionNameRoundtrip:
             assert "\x00" not in node_info.node_id
             # Valid UTF-8 (always true for Python str, but explicit)
             node_info.node_id.encode("utf-8")
-
-

@@ -4945,10 +4945,7 @@ class TestTerminalGateRouteValidation:
         gate_id = graph.get_config_gate_id_map()[GateName("router")]
         transform_id = graph.get_transform_id_map()[0]
         assert any(
-            edge.from_node == gate_id
-            and edge.to_node == transform_id
-            and edge.label == "false"
-            and edge.mode == RoutingMode.MOVE
+            edge.from_node == gate_id and edge.to_node == transform_id and edge.label == "false" and edge.mode == RoutingMode.MOVE
             for edge in graph.get_edges()
         )
 

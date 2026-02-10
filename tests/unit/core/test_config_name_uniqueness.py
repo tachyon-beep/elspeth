@@ -53,7 +53,7 @@ class TestCrossTypeNameCollisions:
 
     def test_transform_name_equals_gate_name_rejected(self) -> None:
         """A transform and gate sharing the same name must be rejected."""
-        with pytest.raises(ValidationError, match="both.*transform.*and.*gate|both.*gate.*and.*transform"):
+        with pytest.raises(ValidationError, match=r"both.*transform.*and.*gate|both.*gate.*and.*transform"):
             ElspethSettings(
                 source=_source(),
                 sinks={"output": _sink()},
@@ -78,7 +78,7 @@ class TestCrossTypeNameCollisions:
 
     def test_transform_name_equals_aggregation_name_rejected(self) -> None:
         """A transform and aggregation sharing the same name must be rejected."""
-        with pytest.raises(ValidationError, match="both.*transform.*and.*aggregation|both.*aggregation.*and.*transform"):
+        with pytest.raises(ValidationError, match=r"both.*transform.*and.*aggregation|both.*aggregation.*and.*transform"):
             ElspethSettings(
                 source=_source(),
                 sinks={"output": _sink()},
@@ -105,7 +105,7 @@ class TestCrossTypeNameCollisions:
 
     def test_gate_name_equals_coalesce_name_rejected(self) -> None:
         """A gate and coalesce sharing the same name must be rejected."""
-        with pytest.raises(ValidationError, match="both.*gate.*and.*coalesce|both.*coalesce.*and.*gate"):
+        with pytest.raises(ValidationError, match=r"both.*gate.*and.*coalesce|both.*coalesce.*and.*gate"):
             ElspethSettings(
                 source=_source(),
                 sinks={"output": _sink()},
@@ -128,7 +128,7 @@ class TestCrossTypeNameCollisions:
 
     def test_transform_name_equals_sink_name_rejected(self) -> None:
         """A transform and sink sharing the same name must be rejected."""
-        with pytest.raises(ValidationError, match="both.*transform.*and.*sink|both.*sink.*and.*transform"):
+        with pytest.raises(ValidationError, match=r"both.*transform.*and.*sink|both.*sink.*and.*transform"):
             ElspethSettings(
                 source=_source(),
                 sinks={

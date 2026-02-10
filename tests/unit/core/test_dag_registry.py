@@ -12,7 +12,7 @@ and the real plugin instantiation path.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict, cast
+from typing import Any
 
 import pytest
 
@@ -23,7 +23,7 @@ from elspeth.core.config import (
     SourceSettings,
     TransformSettings,
 )
-from elspeth.core.dag import ExecutionGraph, GraphValidationError, WiredTransform
+from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
 
 def _build_graph(config: ElspethSettings) -> ExecutionGraph:
@@ -144,7 +144,7 @@ class TestDuplicateProducer:
                 _observed_transform("t2", input="other_conn", on_success="shared_conn"),
             ],
         )
-        with pytest.raises(GraphValidationError, match="Duplicate producer.*shared_conn"):
+        with pytest.raises(GraphValidationError, match=r"Duplicate producer.*shared_conn"):
             _build_graph(config)
 
     def test_duplicate_consumer_rejected(self) -> None:
@@ -157,7 +157,7 @@ class TestDuplicateProducer:
                 _observed_transform("t2", input="shared_input", on_success="output"),
             ],
         )
-        with pytest.raises(GraphValidationError, match="Duplicate consumer.*shared_input"):
+        with pytest.raises(GraphValidationError, match=r"Duplicate consumer.*shared_input"):
             _build_graph(config)
 
 

@@ -245,14 +245,14 @@ class TestRouteDestination:
         """SINK destination must include sink_name."""
         from elspeth.contracts import RouteDestination, RouteDestinationKind
 
-        with pytest.raises(ValueError, match="requires sink_name"):
+        with pytest.raises(ValueError, match="requires non-empty sink_name"):
             RouteDestination(kind=RouteDestinationKind.SINK)
 
     def test_processing_destination_requires_next_node_id(self) -> None:
         """PROCESSING_NODE destination must include next_node_id."""
         from elspeth.contracts import RouteDestination, RouteDestinationKind
 
-        with pytest.raises(ValueError, match="requires next_node_id"):
+        with pytest.raises(ValueError, match="requires non-empty next_node_id"):
             RouteDestination(kind=RouteDestinationKind.PROCESSING_NODE)
 
     def test_continue_destination_rejects_payload_fields(self) -> None:

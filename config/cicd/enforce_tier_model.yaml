@@ -86,7 +86,8 @@ per_file_rules:
 - pattern: engine/expression_parser.py
   rules:
   - R5
-  reason: AST-based expression parser requires isinstance() for node type dispatch - fundamental to safe expression evaluation
+  - R3
+  reason: AST-based expression parser requires isinstance() for node type dispatch and try/except for unknown AST node types
   expires: null
 - pattern: core/templates.py
   rules:
@@ -1528,66 +1529,66 @@ allow_hits:
   reason: Protocol dispatch - isinstance for GateSettings type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=98184be4bbfc56fd
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=6e0cfc3879ec14bc
   owner: architecture
   reason: Framework-boundary type narrowing for mixed transform and gate plugin lists
   safety: Raises on incompatible plugin behavior; no silent fallback
-  expires: '2026-03-09'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=590a92b530a325e8
+  expires: '2026-03-10'
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=d5ffb7eabc91845d
+  owner: architecture
+  reason: Gate vs transform dispatch for unified node traversal
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-10'
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=b1afa822e52b9ba2
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
   safety: Missing metadata is handled as None; core schema enforcement still validates edges
-  expires: '2026-03-09'
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=0d54b562d91a3eff
+  expires: '2026-03-10'
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=b3167081c993daeb
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select aggregation plugins
   safety: Missing metadata is handled as None; aggregation schemas still validated via contracts
-  expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=31fa07dc6d7d9ee9
-  owner: architecture
-  reason: Gate plugin exclusion for producer registration requires explicit type narrowing
-  safety: Non-gate plugins continue through contract-validated path; mismatches fail loudly
-  expires: '2026-03-09'
-- key: core/dag.py:R8:ExecutionGraph:from_plugin_instances:fp=05ee445dee8a3af2
-  owner: architecture
-  reason: setdefault used for route-label grouping while building gate continue-route diagnostics
-  safety: Grouping is deterministic and validated before runtime routing
-  expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=b60b04e4e210bb69
+  expires: '2026-03-10'
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=11afdd4bd8aa7c7f
   owner: architecture
   reason: Gate plugin exclusion for terminal on_success sink wiring requires explicit type narrowing
   safety: Routing config remains validated and errors are explicit
-  expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=9f1d0a3421f58bf0
+  expires: '2026-03-10'
+- key: core/dag.py:R8:ExecutionGraph:from_plugin_instances:fp=de78f7b9fe101113
+  owner: architecture
+  reason: setdefault used for route-label grouping while building gate continue-route diagnostics
+  safety: Grouping is deterministic and validated before runtime routing
+  expires: '2026-03-10'
+- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=cf7267ebc8b07d87
+  owner: architecture
+  reason: Optional gate connection route label lookup for coalesce provenance wiring
+  safety: Missing lookup returns None — handled explicitly by conditional check
+  expires: '2026-03-10'
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=d4a8dcf4b17775b6
   owner: architecture
   reason: Gate plugin exclusion for transform on_error divert-edge wiring requires explicit type narrowing
   safety: Only non-gate transforms are eligible for on_error; invalid use fails validation
-  expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=e651437d623e32d5
-  owner: architecture
-  reason: Optional gate pipeline index lookup for coalesce provenance wiring
-  safety: Missing index paths are handled explicitly and fail graph validation when required
-  expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=16ab974fee636509
+  expires: '2026-03-10'
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=6ad33187820a4320
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
-  expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=ebbe9e4944d3fd2a
+  expires: '2026-03-10'
+- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=76248ffde21d80bd
   owner: architecture
   reason: Runtime shape check before coercing schema dict to SchemaConfig
   safety: Non-dict payloads are rejected and converted to explicit validation failures
-  expires: '2026-03-09'
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=eea146069831464e
+  expires: '2026-03-10'
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=ca9d5b32e24b67a5
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
-  expires: '2026-03-09'
-- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=27e8c8d48c84c6a7
+  expires: '2026-03-10'
+- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=91555c5ddabbdaaf
   owner: architecture
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced
-  expires: '2026-03-09'
+  expires: '2026-03-10'
 - key: plugins/transforms/web_scrape.py:R1:WebScrapeTransform:__init__:fp=6b27daeff28c2216
   owner: architecture
   reason: User YAML config boundary - http_config is parsed from pipeline settings

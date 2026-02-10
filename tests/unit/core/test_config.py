@@ -711,7 +711,11 @@ class TestElspethSettingsArchitecture:
         assert settings.concurrency.max_workers == 4
 
     def test_elspeth_settings_rejects_default_sink(self) -> None:
-        """default_sink is rejected with migration message."""
+        """default_sink is rejected by extra='forbid' on ElspethSettings.
+
+        The helpful migration message mentioning on_success is generated in
+        load_settings() (YAML path), not at the Pydantic model level.
+        """
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -726,7 +730,6 @@ class TestElspethSettingsArchitecture:
             )
 
         assert "default_sink" in str(exc_info.value)
-        assert "on_success" in str(exc_info.value)
 
     def test_elspeth_settings_at_least_one_sink(self) -> None:
         """At least one sink is required."""

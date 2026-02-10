@@ -17,7 +17,8 @@ class TestDAGEdgeDataIntegrity:
         graph._sink_id_map = {SinkName("out"): NodeID("sink_1")}
         graph.add_edge("gate_1", "sink_1", label="branch_a", mode=RoutingMode.COPY)
 
-        edge_data = graph.get_nx_graph().get_edge_data("gate_1", "sink_1", "branch_a")
+        # Mutate internal graph directly — get_nx_graph() returns a frozen copy
+        edge_data = graph._graph.get_edge_data("gate_1", "sink_1", "branch_a")
         assert edge_data is not None
         del edge_data["mode"]
 
@@ -31,7 +32,8 @@ class TestDAGEdgeDataIntegrity:
         graph._sink_id_map = {SinkName("out"): NodeID("sink_1")}
         graph.add_edge("transform_1", "sink_1", label="on_success", mode=RoutingMode.MOVE)
 
-        edge_data = graph.get_nx_graph().get_edge_data("transform_1", "sink_1", "on_success")
+        # Mutate internal graph directly — get_nx_graph() returns a frozen copy
+        edge_data = graph._graph.get_edge_data("transform_1", "sink_1", "on_success")
         assert edge_data is not None
         del edge_data["label"]
 
