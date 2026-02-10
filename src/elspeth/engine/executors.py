@@ -607,9 +607,11 @@ class GateExecutor:
 
         if destination.kind == RouteDestinationKind.FORK:
             if fork_branches is None:
-                raise ValueError(f"Gate {node_id} route '{route_label}' resolved to fork but no fork branches are configured")
+                raise OrchestrationInvariantError(
+                    f"Gate {node_id} route '{route_label}' resolved to fork but no fork branches are configured"
+                )
             if token_manager is None:
-                raise RuntimeError(
+                raise OrchestrationInvariantError(
                     f"Gate {node_id} routes to fork but no TokenManager provided. "
                     "Cannot create child tokens - audit integrity would be compromised."
                 )
@@ -640,7 +642,7 @@ class GateExecutor:
         if destination.kind == RouteDestinationKind.PROCESSING_NODE:
             return _RouteDispatchOutcome(action=route_action, next_node_id=destination.next_node_id)
 
-        raise ValueError(f"Unsupported route destination kind '{destination.kind}' for gate {node_id}")
+        raise OrchestrationInvariantError(f"Unsupported route destination kind '{destination.kind}' for gate {node_id}")
 
     def execute_gate(
         self,
@@ -769,7 +771,7 @@ class GateExecutor:
 
             elif action.kind == RoutingKind.FORK_TO_PATHS:
                 if token_manager is None:
-                    raise RuntimeError(
+                    raise OrchestrationInvariantError(
                         f"Gate {gate.node_id} returned fork_to_paths but no TokenManager provided. "
                         "Cannot create child tokens - audit integrity would be compromised."
                     )
@@ -783,7 +785,7 @@ class GateExecutor:
                 # Use result.contract if provided, otherwise fallback to input contract
                 fork_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
                 if fork_contract is None:
-                    raise ValueError(
+                    raise OrchestrationInvariantError(
                         f"Cannot create PipelineRow for fork: no contract available. "
                         f"GateResult.contract is None and input token has no contract. "
                         f"This is a bug in gate '{gate.name}' or upstream pipeline."
@@ -799,7 +801,7 @@ class GateExecutor:
                     row_data=fork_row,
                 )
 
-        except (MissingEdgeError, RuntimeError, ValueError) as e:
+        except MissingEdgeError as e:
             # Record failure before re-raising - ensures node_state is never left OPEN
             routing_error: ExecutionError = {
                 "exception": str(e),
@@ -826,7 +828,7 @@ class GateExecutor:
         # Use result.contract if provided, otherwise fallback to input contract
         output_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
         if output_contract is None:
-            raise ValueError(
+            raise OrchestrationInvariantError(
                 f"Cannot create PipelineRow: no contract available. "
                 f"GateResult.contract is None and input token has no contract. "
                 f"This is a bug in gate '{gate.name}' or upstream pipeline."
@@ -993,7 +995,7 @@ class GateExecutor:
             sink_name = dispatch.sink_name
             next_node_id = dispatch.next_node_id
 
-        except (MissingEdgeError, RuntimeError, ValueError) as e:
+        except MissingEdgeError as e:
             # Record failure before re-raising - ensures node_state is never left OPEN
             routing_error: ExecutionError = {
                 "exception": str(e),

@@ -1171,6 +1171,14 @@ class TestRouteAggregationOutcome:
         with pytest.raises(OrchestrationInvariantError, match="not in configured sinks"):
             _route_aggregation_outcome(result, pending)
 
+    def test_missing_sink_name_raises_invariant_error(self) -> None:
+        """Missing sink_name must fail closed with invariant error."""
+        result = _make_result(RowOutcome.COMPLETED, sink_name=None)
+        pending = _make_pending()
+
+        with pytest.raises(OrchestrationInvariantError, match="missing sink_name"):
+            _route_aggregation_outcome(result, pending)
+
     def test_invokes_checkpoint_callback(self) -> None:
         """Calls checkpoint_callback with the routed token after successful routing."""
         result = _make_result(RowOutcome.COMPLETED, sink_name="output")

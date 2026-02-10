@@ -717,8 +717,8 @@ class TestGateExecutor:
         assert len(outcome.child_tokens) == 2
         token_manager.fork_token.assert_called_once()
 
-    def test_fork_without_token_manager_raises_runtime_error(self) -> None:
-        """FORK_TO_PATHS without token_manager raises RuntimeError."""
+    def test_fork_without_token_manager_raises_invariant_error(self) -> None:
+        """FORK_TO_PATHS without token_manager raises orchestration invariant."""
         recorder = _make_recorder()
         contract = _make_contract()
         edge_map = {
@@ -735,7 +735,7 @@ class TestGateExecutor:
         token = _make_token(contract=contract)
         ctx = _make_ctx()
 
-        with pytest.raises(RuntimeError, match="no TokenManager"):
+        with pytest.raises(OrchestrationInvariantError, match="no TokenManager"):
             executor.execute_gate(gate, token, ctx, token_manager=None)
 
     def test_exception_from_evaluate_records_failed_and_reraises(self) -> None:
@@ -976,6 +976,44 @@ class TestGateExecutor:
 
         assert len(outcome.child_tokens) == 2
         token_manager.fork_token.assert_called_once()
+
+    def test_config_gate_missing_token_manager_raises_without_failed_record(self) -> None:
+        """Routing-construction invariant should not be recorded as FAILED row state."""
+        recorder = _make_recorder()
+        edge_map = {
+            (NodeID("cg_1"), "path_a"): "edge_a",
+            (NodeID("cg_1"), "path_b"): "edge_b",
+            (NodeID("cg_1"), "continue"): "edge_cont",
+        }
+        route_map = {(NodeID("cg_1"), "true"): RouteDestination.fork()}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="True",
+            routes={"true": "fork", "false": "error_sink"},
+            fork_to=["path_a", "path_b"],
+        )
+        token = _make_token(contract=_make_contract())
+        ctx = _make_ctx()
+
+        with pytest.raises(OrchestrationInvariantError, match="no TokenManager"):
+            executor.execute_config_gate(
+                config,
+                "cg_1",
+                token,
+                ctx,
+                token_manager=None,
+            )
+
+        statuses = [call.kwargs.get("status") for call in recorder.complete_node_state.call_args_list]
+        assert NodeStateStatus.FAILED not in statuses
 
     def test_config_gate_missing_route_resolution_fails_closed(self) -> None:
         """Missing route resolution mapping raises MissingEdgeError (no fallback)."""

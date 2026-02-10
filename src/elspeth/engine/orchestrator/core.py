@@ -146,6 +146,7 @@ class Orchestrator:
         rate_limit_registry: RateLimitRegistry | None = None,
         concurrency_config: RuntimeConcurrencyConfig | None = None,
         telemetry_manager: TelemetryManager | None = None,
+        coalesce_completed_keys_limit: int = 10000,
     ) -> None:
         from elspeth.core.events import NullEventBus
         from elspeth.engine.clock import DEFAULT_CLOCK
@@ -159,6 +160,7 @@ class Orchestrator:
         self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._rate_limit_registry = rate_limit_registry
         self._concurrency_config = concurrency_config
+        self._coalesce_completed_keys_limit = coalesce_completed_keys_limit
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
         self._telemetry = telemetry_manager  # Optional, disabled by default
@@ -561,6 +563,7 @@ class Orchestrator:
                 run_id=run_id,
                 step_resolver=step_resolver,
                 clock=self._clock,
+                max_completed_keys=self._coalesce_completed_keys_limit,
             )
 
             for coalesce_settings_entry in settings.coalesce:

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.contracts import NodeID, RouteDestination, RoutingAction, RoutingKind, TokenInfo
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import SinkName
 from elspeth.engine.executors import GateExecutor, GateOutcome, MissingEdgeError
@@ -228,7 +229,7 @@ class TestGateExecutorRoutingBehavior:
         assert outcome.child_tokens[1].branch_name == "branch_b"
 
     def test_fork_without_token_manager_raises(self) -> None:
-        """Fork action without TokenManager raises RuntimeError."""
+        """Fork action without TokenManager raises orchestration invariant."""
         edge_map = {
             ("gate-1", "path_a"): "edge-a",
             ("gate-1", "path_b"): "edge-b",
@@ -246,7 +247,7 @@ class TestGateExecutorRoutingBehavior:
             action=RoutingAction.fork_to_paths(["path_a", "path_b"]),
         )
 
-        with pytest.raises(RuntimeError, match="fork_to_paths but no TokenManager"):
+        with pytest.raises(OrchestrationInvariantError, match="fork_to_paths but no TokenManager"):
             executor.execute_gate(
                 gate=gate,
                 token=token,

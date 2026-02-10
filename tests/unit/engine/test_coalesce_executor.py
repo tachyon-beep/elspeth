@@ -10,7 +10,7 @@ and audit trail recording.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 from uuid import uuid4
 
 import pytest
@@ -73,7 +73,7 @@ def _make_token(
     )
 
 
-def _make_executor(clock=None):
+def _make_executor(clock=None, max_completed_keys: int = 10000):
     """Build a CoalesceExecutor with mocked dependencies.
 
     Returns (executor, recorder, token_manager, clock).
@@ -99,7 +99,15 @@ def _make_executor(clock=None):
     def step_resolver(node_id: str) -> int:
         return 5
 
-    executor = CoalesceExecutor(recorder, span_factory, token_manager, "run_1", step_resolver=step_resolver, clock=clock)
+    executor = CoalesceExecutor(
+        recorder,
+        span_factory,
+        token_manager,
+        "run_1",
+        step_resolver=step_resolver,
+        clock=clock,
+        max_completed_keys=max_completed_keys,
+    )
     return executor, recorder, token_manager, clock
 
 
@@ -985,12 +993,31 @@ class TestNotifyBranchLost:
 
 
 class TestMarkCompleted:
+    def test_constructor_max_completed_keys_configurable(self):
+        executor, *_ = _make_executor(max_completed_keys=7)
+        assert executor._max_completed_keys == 7
+
+    def test_constructor_non_positive_max_completed_keys_raises(self):
+        with pytest.raises(OrchestrationInvariantError, match="must be > 0"):
+            _make_executor(max_completed_keys=0)
+
     def test_bounded_at_max(self):
         executor, *_ = _make_executor()
         executor._max_completed_keys = 5
         for i in range(10):
             executor._mark_completed(("c", f"row_{i}"))
         assert len(executor._completed_keys) == 5
+
+    def test_eviction_emits_structured_warning(self):
+        executor, *_ = _make_executor(max_completed_keys=2)
+        with patch("elspeth.engine.coalesce_executor.slog.warning") as warning_mock:
+            executor._mark_completed(("c", "row_0"))
+            executor._mark_completed(("c", "row_1"))
+            executor._mark_completed(("c", "row_2"))  # Triggers eviction
+
+        warning_mock.assert_called_once()
+        assert warning_mock.call_args.kwargs["max_completed_keys"] == 2
+        assert warning_mock.call_args.kwargs["evicted_count"] == 1
 
     def test_fifo_eviction_oldest_removed(self):
         executor, *_ = _make_executor()

@@ -985,6 +985,19 @@ class TestGateSettings:
             )
         assert "at least one entry" in str(exc_info.value)
 
+    def test_gate_settings_routes_max_length_enforced(self) -> None:
+        """Routes map is capped to prevent unbounded fan-out configuration."""
+        from elspeth.core.config import GateSettings
+
+        oversized_routes = {f"route_{i}": f"dest_{i}" for i in range(33)}
+        with pytest.raises(ValidationError, match="at most 32"):
+            GateSettings(
+                name="oversized_routes_gate",
+                input="source_out",
+                condition="row['category']",
+                routes=oversized_routes,
+            )
+
     def test_gate_settings_hyphenated_sink_destination_accepted(self) -> None:
         """Route destination can be any sink name, including hyphenated.
 
@@ -1046,6 +1059,20 @@ class TestGateSettings:
                 fork_to=["path_a", "path_b"],  # No fork route
             )
         assert "fork_to is only valid" in str(exc_info.value)
+
+    def test_gate_settings_fork_to_max_length_enforced(self) -> None:
+        """fork_to list is capped to prevent pathological branch explosions."""
+        from elspeth.core.config import GateSettings
+
+        oversized_branches = [f"path_{i}" for i in range(33)]
+        with pytest.raises(ValidationError, match="at most 32"):
+            GateSettings(
+                name="oversized_fork_gate",
+                input="source_out",
+                condition="True",
+                routes={"all": "fork"},
+                fork_to=oversized_branches,
+            )
 
     def test_gate_settings_valid_identifiers(self) -> None:
         """Valid identifier sink names are accepted."""

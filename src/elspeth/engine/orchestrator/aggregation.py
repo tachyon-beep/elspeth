@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import TriggerType
@@ -30,6 +30,13 @@ if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeRecorder
     from elspeth.engine.processor import RowProcessor
     from elspeth.plugins.protocols import TransformProtocol
+
+
+def _require_sink_name(result: RowResult) -> str:
+    """Require sink_name for outcomes that must route to a sink."""
+    if result.sink_name is None:
+        raise OrchestrationInvariantError(f"Result with outcome {result.outcome} missing sink_name")
+    return result.sink_name
 
 
 def _route_aggregation_outcome(
@@ -54,7 +61,7 @@ def _route_aggregation_outcome(
         pending_tokens: Dict of sink_name -> tokens to append results to
         checkpoint_callback: Optional callback after successful routing
     """
-    sink_name = cast(str, result.sink_name)
+    sink_name = _require_sink_name(result)
     if sink_name not in pending_tokens:
         raise OrchestrationInvariantError(
             f"Aggregation result sink '{sink_name}' not in configured sinks. "
@@ -252,7 +259,7 @@ def check_aggregation_timeouts(
                     rows_succeeded += 1
                 elif result.outcome == RowOutcome.ROUTED:
                     rows_routed += 1
-                    routed_sink = cast(str, result.sink_name)
+                    routed_sink = _require_sink_name(result)
                     routed_destinations[routed_sink] += 1
                     if routed_sink not in pending_tokens:
                         raise OrchestrationInvariantError(
@@ -263,7 +270,7 @@ def check_aggregation_timeouts(
                 elif result.outcome == RowOutcome.QUARANTINED:
                     rows_quarantined += 1
                 elif result.outcome == RowOutcome.COALESCED:
-                    sink_name = cast(str, result.sink_name)
+                    sink_name = _require_sink_name(result)
                     rows_coalesced += 1
                     rows_succeeded += 1
                     if sink_name not in pending_tokens:
@@ -388,7 +395,7 @@ def flush_remaining_aggregation_buffers(
                     rows_succeeded += 1
                 elif result.outcome == RowOutcome.ROUTED:
                     rows_routed += 1
-                    routed_sink = cast(str, result.sink_name)
+                    routed_sink = _require_sink_name(result)
                     routed_destinations[routed_sink] += 1
                     if routed_sink not in pending_tokens:
                         raise OrchestrationInvariantError(
@@ -401,7 +408,7 @@ def flush_remaining_aggregation_buffers(
                 elif result.outcome == RowOutcome.QUARANTINED:
                     rows_quarantined += 1
                 elif result.outcome == RowOutcome.COALESCED:
-                    sink_name = cast(str, result.sink_name)
+                    sink_name = _require_sink_name(result)
                     rows_coalesced += 1
                     rows_succeeded += 1
                     if sink_name not in pending_tokens:

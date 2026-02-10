@@ -355,7 +355,17 @@ class RowProcessor:
         """Resolve next processing node for continuation work."""
         return self._resolve_next_node_for_processing(current_node_id)
 
-    def _resolve_jump_target_on_success_sink(self, start_node_id: NodeID) -> str | None:
+    def _resolve_coalesce_on_success_sink(self, coalesce_name: CoalesceName, *, context: str) -> str:
+        """Resolve terminal sink for coalesce outcomes with invariant validation."""
+        if coalesce_name not in self._coalesce_on_success_map:
+            raise OrchestrationInvariantError(
+                f"Coalesce '{coalesce_name}' not in on_success map. "
+                f"Available: {sorted(self._coalesce_on_success_map.keys())}. "
+                f"Context: {context}"
+            )
+        return self._coalesce_on_success_map[coalesce_name]
+
+    def _resolve_jump_target_on_success_sink(self, start_node_id: NodeID) -> str:
         """Resolve terminal on_success sink reachable from a route jump target."""
         node_id: NodeID | None = start_node_id
         resolved_sink: str | None = None
@@ -379,17 +389,20 @@ class RowProcessor:
             next_node_id = self._resolve_next_node_for_processing(node_id)
             if next_node_id is None and node_id in self._coalesce_name_by_node_id:
                 coalesce_name = self._coalesce_name_by_node_id[node_id]
-                if coalesce_name not in self._coalesce_on_success_map:
-                    raise OrchestrationInvariantError(
-                        f"Coalesce '{coalesce_name}' not in on_success map. "
-                        f"Available: {sorted(self._coalesce_on_success_map.keys())}. "
-                        f"Walk started at node '{start_node_id}'."
-                    )
-                resolved_sink = self._coalesce_on_success_map[coalesce_name]
+                resolved_sink = self._resolve_coalesce_on_success_sink(
+                    coalesce_name,
+                    context=f"walk started at node '{start_node_id}'",
+                )
 
             node_id = next_node_id
 
-        if resolved_sink is not None and self._sink_names and resolved_sink not in self._sink_names:
+        if resolved_sink is None:
+            raise OrchestrationInvariantError(
+                f"Jump-target sink resolution reached terminal path with no sink from node '{start_node_id}'. "
+                "A gate route jump must resolve to a terminal sink to avoid stale routing state."
+            )
+
+        if self._sink_names and resolved_sink not in self._sink_names:
             raise OrchestrationInvariantError(
                 f"Jump-target sink resolution returned '{resolved_sink}' which is not a configured sink. "
                 f"Available sinks: {sorted(self._sink_names)}. Walk started at node '{start_node_id}'."
@@ -1640,7 +1653,10 @@ class RowProcessor:
             if self._resolve_next_node_for_processing(coalesce_node_id) is None:
                 if coalesce_name is None:
                     raise OrchestrationInvariantError("Terminal coalesce outcome missing coalesce_name")
-                sink_name = self._coalesce_on_success_map[coalesce_name]
+                sink_name = self._resolve_coalesce_on_success_sink(
+                    coalesce_name,
+                    context=f"terminal coalesce outcome for token '{coalesce_outcome.merged_token.token_id}'",
+                )
                 return (
                     True,
                     RowResult(
@@ -1738,7 +1754,10 @@ class RowProcessor:
 
         if outcome.merged_token is not None:
             if self._resolve_next_node_for_processing(coalesce_node_id) is None:
-                sink_name = self._coalesce_on_success_map[coalesce_name]
+                sink_name = self._resolve_coalesce_on_success_sink(
+                    coalesce_name,
+                    context=f"branch-loss notification for row '{current_token.row_id}'",
+                )
                 # Terminal coalesce — no downstream transforms.
                 # Do NOT emit TokenCompleted here: the merged token still
                 # needs to flow through the sink write for durable recording.
@@ -1872,7 +1891,10 @@ class RowProcessor:
         if coalesce_name is not None and current_node_id is not None:
             coalesce_node_id_for_name = self._coalesce_node_ids[coalesce_name]
             if coalesce_node_id_for_name == current_node_id and self._resolve_next_node_for_processing(current_node_id) is None:
-                last_on_success_sink = self._coalesce_on_success_map[coalesce_name]
+                last_on_success_sink = self._resolve_coalesce_on_success_sink(
+                    coalesce_name,
+                    context=f"start of token processing for token '{token.token_id}'",
+                )
 
         # Invariant: tokens with coalesce metadata must not start downstream of their coalesce point.
         # A malformed work item starting past the coalesce node would silently skip coalesce handling
@@ -1989,8 +2011,7 @@ class RowProcessor:
                     )
                 elif outcome.next_node_id is not None:
                     resolved_sink = self._resolve_jump_target_on_success_sink(outcome.next_node_id)
-                    if resolved_sink is not None:
-                        last_on_success_sink = resolved_sink
+                    last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
                     continue
                 else:
@@ -2231,8 +2252,7 @@ class RowProcessor:
                     )
                 elif outcome.next_node_id is not None:
                     resolved_sink = self._resolve_jump_target_on_success_sink(outcome.next_node_id)
-                    if resolved_sink is not None:
-                        last_on_success_sink = resolved_sink
+                    last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
                     continue
                 else:

@@ -1741,6 +1741,8 @@ class TestGateConnectionRouteMaterialization:
         edges = graph.get_edges()
         true_edges = [e for e in edges if NodeID(e.from_node) == router_id and e.to_node == checker_id and e.label == "true"]
         assert len(true_edges) == 1, f"Expected 1 'true' edge from router to checker, got {len(true_edges)}"
+        continue_edges = [e for e in edges if NodeID(e.from_node) == router_id and e.to_node == checker_id and e.label == "continue"]
+        assert len(continue_edges) == 1, f"Expected 1 'continue' edge from router to checker, got {len(continue_edges)}"
 
     def test_gate_converging_connection_routes_preserve_all_labels(self, plugin_manager) -> None:
         """Converging gate labels to one connection should materialize all route edges."""
@@ -1800,8 +1802,8 @@ class TestGateConnectionRouteMaterialization:
         checker_id = gate_ids[GateName("checker")]
 
         edges = [edge for edge in graph.get_edges() if edge.from_node == router_id and edge.to_node == checker_id]
-        assert len(edges) == 2
-        assert {edge.label for edge in edges} == {"true", "false"}
+        assert len(edges) == 3
+        assert {edge.label for edge in edges} == {"true", "false", "continue"}
 
         route_map = graph.get_route_resolution_map()
         for route_label in ("true", "false"):
@@ -5130,6 +5132,24 @@ class TestAggregationOnSuccessValidation:
             gates=list(config.gates),
         )
         graph.validate()
+
+
+class TestConnectionNamespaceValidation:
+    """Unit tests for _validate_connection_namespaces invariants."""
+
+    def test_sink_and_connection_name_collision_raises(self) -> None:
+        """Connection namespace must be disjoint from sink namespace."""
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        with pytest.raises(GraphValidationError, match="overlap with sink names"):
+            ExecutionGraph._validate_connection_namespaces(
+                producers={"shared_name": (NodeID("transform-1"), "continue")},
+                consumers={"shared_name": NodeID("transform-2")},
+                consumer_claims=[("shared_name", NodeID("transform-2"), "transform 'downstream'")],
+                sink_names={"shared_name"},
+                check_dangling=False,
+            )
 
 
 class TestCoalesceOnSuccessValidation:

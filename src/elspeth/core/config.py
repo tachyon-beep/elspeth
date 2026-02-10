@@ -422,9 +422,13 @@ class GateSettings(BaseModel):
     name: str = Field(description="Gate identifier (unique within pipeline)")
     input: str = Field(description="Named input connection (must match an upstream on_success value)")
     condition: str = Field(description="Expression to evaluate (validated by ExpressionParser)")
-    routes: dict[str, str] = Field(description="Maps route labels to destinations (connection name, sink name, or 'fork')")
+    routes: dict[str, str] = Field(
+        max_length=32,
+        description="Maps route labels to destinations (connection name, sink name, or 'fork')",
+    )
     fork_to: list[str] | None = Field(
         default=None,
+        max_length=32,
         description="List of paths for fork operations",
     )
 

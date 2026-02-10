@@ -1079,6 +1079,9 @@ class ExecutionGraph:
         # ===== MATCH PRODUCERS TO CONSUMERS =====
         gate_node_ids = {entry.node_id for entry in gate_entries}
 
+        gate_default_continue_targets: dict[NodeID, NodeID] = {}
+        ambiguous_continue_gates: set[NodeID] = set()
+
         for connection_name, consumer_id in consumers.items():
             producer_id, producer_label = producers[connection_name]
             if producer_id in gate_node_ids and producer_label != "continue":
@@ -1088,8 +1091,24 @@ class ExecutionGraph:
                         graph.add_edge(producer_id, consumer_id, label=route_label, mode=RoutingMode.MOVE)
                 else:
                     graph.add_edge(producer_id, consumer_id, label=producer_label, mode=RoutingMode.MOVE)
+                # Preserve gate fallthrough semantics for RoutingAction.continue_():
+                # when a gate has a single downstream processing target, continue
+                # should route there even if explicit route labels are present.
+                existing_target = gate_default_continue_targets.get(producer_id)
+                if existing_target is None:
+                    gate_default_continue_targets[producer_id] = consumer_id
+                elif existing_target != consumer_id:
+                    # Ambiguous continue fallthrough (multiple processing targets).
+                    # Leave unresolved; GateExecutor will fail closed if a gate
+                    # emits continue_() without a unique continuation edge.
+                    ambiguous_continue_gates.add(producer_id)
             else:
                 graph.add_edge(producer_id, consumer_id, label="continue", mode=RoutingMode.MOVE)
+
+        for gate_id, continue_target in gate_default_continue_targets.items():
+            if gate_id in ambiguous_continue_gates:
+                continue
+            graph.add_edge(gate_id, continue_target, label="continue", mode=RoutingMode.MOVE)
 
         # ===== RESOLVE DEFERRED GATE ROUTES =====
         for gate_id, route_label, target in gate_route_connections:

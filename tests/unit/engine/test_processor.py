@@ -34,7 +34,7 @@ from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
+from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import GateOutcome
@@ -107,6 +107,7 @@ def _make_processor(
     coalesce_executor: Any = None,
     coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
     branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
+    branch_to_sink: dict[BranchName, str] | None = None,
     node_step_map: dict[NodeID, int] | None = None,
     coalesce_on_success_map: dict[CoalesceName, str] | None = None,
     node_to_next: dict[NodeID, NodeID | None] | None = None,
@@ -159,6 +160,7 @@ def _make_processor(
         retry_manager=retry_manager,
         coalesce_executor=coalesce_executor,
         branch_to_coalesce=branch_to_coalesce,
+        branch_to_sink={BranchName(k): SinkName(v) for k, v in (branch_to_sink or {}).items()},
         coalesce_on_success_map=coalesce_on_success_map,
         restored_aggregation_state=restored_aggregation_state,
         telemetry_manager=telemetry_manager,
@@ -659,7 +661,7 @@ class TestProcessRowGateBranching:
         ctx = PluginContext(run_id="test-run", config={})
 
         gate = _make_mock_gate(node_id="gate-1", name="brancher")
-        transform = _make_mock_transform(node_id="transform-2", name="downstream")
+        transform = _make_mock_transform(node_id="transform-2", name="downstream", on_success="final_sink")
 
         source_node = NodeID("source-0")
         gate_node = NodeID("gate-1")
@@ -921,7 +923,7 @@ class TestProcessRowGateBranching:
         assert inherited_sinks == ["branch_sink", "branch_sink"]
         assert all(r.sink_name == "branch_sink" for r in completed)
 
-    def test_jump_target_terminal_coalesce_missing_on_success_mapping_raises_keyerror(self) -> None:
+    def test_jump_target_terminal_coalesce_missing_on_success_mapping_raises(self) -> None:
         """Terminal coalesce reached via jump must have an on_success sink mapping."""
         _db, recorder = _make_recorder()
 
@@ -950,8 +952,8 @@ class TestProcessRowGateBranching:
         with pytest.raises(OrchestrationInvariantError, match="Coalesce 'merge' not in on_success map"):
             processor._resolve_jump_target_on_success_sink(router_node)
 
-    def test_jump_target_resolution_ignores_non_sink_transform_on_success(self) -> None:
-        """Jump sink preloading should ignore transform on_success values that are connections."""
+    def test_jump_target_resolution_raises_when_terminal_sink_missing(self) -> None:
+        """Jump sink preloading must fail closed when the jump path has no sink."""
         _db, recorder = _make_recorder()
 
         source_node = NodeID("source-0")
@@ -989,7 +991,90 @@ class TestProcessRowGateBranching:
             },
         )
 
-        assert processor._resolve_jump_target_on_success_sink(jump_start_node) is None
+        with pytest.raises(OrchestrationInvariantError, match="no sink"):
+            processor._resolve_jump_target_on_success_sink(jump_start_node)
+
+    def test_jump_target_resolution_prefers_terminal_sink_from_middle_transform(self) -> None:
+        """A multi-node jump chain should resolve sink from the terminal transform in that chain."""
+        _db, recorder = _make_recorder()
+
+        source_node = NodeID("source-0")
+        jump_start_node = NodeID("branch-transform-1")
+        middle_node = NodeID("branch-transform-2")
+        terminal_gate_node = NodeID("branch-gate-3")
+
+        branch_transform = _make_mock_transform(
+            node_id=str(jump_start_node),
+            name="branch_transform",
+            on_success="branch_conn",
+        )
+        middle_transform = _make_mock_transform(
+            node_id=str(middle_node),
+            name="middle_transform",
+            on_success="branch_sink",
+        )
+        terminal_gate = _make_mock_gate(
+            node_id=str(terminal_gate_node),
+            name="terminal_gate",
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            sink_names=frozenset({"source_sink", "branch_sink"}),
+            node_step_map={
+                source_node: 0,
+                jump_start_node: 1,
+                middle_node: 2,
+                terminal_gate_node: 3,
+            },
+            node_to_next={
+                source_node: jump_start_node,
+                jump_start_node: middle_node,
+                middle_node: terminal_gate_node,
+                terminal_gate_node: None,
+            },
+            first_transform_node_id=jump_start_node,
+            node_to_plugin={
+                jump_start_node: branch_transform,
+                middle_node: middle_transform,
+                terminal_gate_node: terminal_gate,
+            },
+        )
+
+        assert processor._resolve_jump_target_on_success_sink(jump_start_node) == "branch_sink"
+
+    def test_branch_to_sink_routing_applies_for_terminal_fork_children(self) -> None:
+        """Branch-routed tokens bypassing coalesce should resolve sink via branch_to_sink."""
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="token-branch-1",
+            row_data=make_row({"value": 1}),
+            branch_name="path_a",
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            branch_to_sink={"path_a": "branch_sink"},
+            sink_names=frozenset({"source_sink", "branch_sink"}),
+            node_step_map={NodeID("source-0"): 0},
+            node_to_next={NodeID("source-0"): None},
+            first_transform_node_id=None,
+        )
+
+        results = processor.process_token(
+            token=token,
+            transforms=[],
+            ctx=ctx,
+            current_node_id=None,
+        )
+
+        assert len(results) == 1
+        assert results[0].outcome == RowOutcome.COMPLETED
+        assert results[0].sink_name == "branch_sink"
 
 
 # =============================================================================
@@ -1727,7 +1812,7 @@ class TestMaybeCoalesceToken:
         assert result is not None
         assert result.outcome == RowOutcome.COALESCED
 
-    def test_coalesce_merged_at_terminal_missing_sink_mapping_raises_keyerror(self) -> None:
+    def test_coalesce_merged_at_terminal_missing_sink_mapping_raises(self) -> None:
         """Terminal coalesce merge without sink mapping is an internal bug."""
         _, recorder = _make_recorder()
         merged_token = make_token_info(data={"merged": True})
@@ -1747,7 +1832,7 @@ class TestMaybeCoalesceToken:
             branch_name="path_a",
         )
 
-        with pytest.raises(KeyError, match="merge"):
+        with pytest.raises(OrchestrationInvariantError, match="Coalesce 'merge' not in on_success map"):
             processor._maybe_coalesce_token(
                 token,
                 current_node_id=NodeID("coalesce::merge"),
@@ -1931,7 +2016,7 @@ class TestNotifyCoalesceOfLostBranch:
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COALESCED
 
-    def test_lost_branch_terminal_merge_missing_sink_mapping_raises_keyerror(self) -> None:
+    def test_lost_branch_terminal_merge_missing_sink_mapping_raises(self) -> None:
         """Terminal coalesce merge from branch loss must have sink mapping."""
         _, recorder = _make_recorder()
         merged_token = make_token_info(data={"merged": True})
@@ -1956,7 +2041,7 @@ class TestNotifyCoalesceOfLostBranch:
             branch_name="path_a",
         )
 
-        with pytest.raises(KeyError, match="merge"):
+        with pytest.raises(OrchestrationInvariantError, match="Coalesce 'merge' not in on_success map"):
             processor._notify_coalesce_of_lost_branch(
                 token,
                 "quarantined:bad_value",

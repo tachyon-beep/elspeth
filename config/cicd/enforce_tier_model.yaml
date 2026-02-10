@@ -1479,47 +1479,47 @@ allow_hits:
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
   safety: TypeError raised if wrong URL type - explicit failure, not masking
   expires: null
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=2bf9f232eefa3b17
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=7f5948e29583a6c2
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=19074dff15926913
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=bd040cba51f112ec
   owner: architecture
   reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=911ab3c7209a7448
+- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=5ca1a55ebd86af96
   owner: architecture
   reason: Protocol dispatch while traversing jumped subchain to resolve inherited terminal sink
   safety: Traversal map invariants are enforced; raises on cycles or invalid nodes
   expires: '2026-03-10'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=e01ffdd09d8c0ff0
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d6d89baabae99abd
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=2db828b82026d639
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=5e6c1ee5159312dd
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=ac23dfc7bde5bcb9
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=833f2a1b62c73d14
   owner: architecture
   reason: Protocol dispatch - isinstance for GateProtocol type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=b09837470f376107
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=7b18476f2c7d27bf
   owner: architecture
   reason: Protocol dispatch - isinstance for TransformProtocol type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=d79935d16a26989d
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=689fe9e367024d9e
   owner: architecture
   reason: Protocol dispatch - isinstance for GateSettings type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=0dc6d04e8880e523
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=7b9dfb106e5b2d65
   owner: architecture
   reason: Framework-boundary type narrowing for mixed transform and gate plugin lists
   safety: Raises on incompatible plugin behavior; no silent fallback
@@ -1549,17 +1549,22 @@ allow_hits:
   reason: setdefault used for route-label grouping while building gate continue-route diagnostics
   safety: Grouping is deterministic and validated before runtime routing
   expires: '2026-03-10'
-- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=774e1c8ec82db2d1
+- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=41c724a0207eeb7e
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=c5f0c5799f15aa20
+- key: core/dag.py:R1:ExecutionGraph:from_plugin_instances:fp=739134103b69e2ba
+  owner: architecture
+  reason: Gate default-continue target lookup during fallthrough edge wiring
+  safety: Missing target is handled explicitly — ambiguous gates are skipped
+  expires: '2026-03-10'
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=0e378b256e75aa2c
   owner: architecture
   reason: Gate plugin exclusion for transform on_error divert-edge wiring requires explicit type narrowing
   safety: Only non-gate transforms are eligible for on_error; invalid use fails validation
   expires: '2026-03-10'
-- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=c2eddb4e8650382c
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=504eca8735932d58
   owner: architecture
   reason: Gate protocol dispatch for MappingProxyType config freeze requires isinstance narrowing
   safety: Crashes on type mismatch - no silent fallback
@@ -1604,7 +1609,7 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=b99e6bee5e64dbcf
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=3be2315780c311dd
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback

@@ -94,6 +94,7 @@ class CoalesceExecutor:
         run_id: str,
         step_resolver: StepResolver,
         clock: "Clock | None" = None,
+        max_completed_keys: int = 10000,
     ) -> None:
         """Initialize executor.
 
@@ -107,7 +108,11 @@ class CoalesceExecutor:
                            threading through public method signatures.
             clock: Optional clock for time access. Defaults to system clock.
                    Inject MockClock for deterministic testing.
+            max_completed_keys: Maximum late-arrival completion keys retained in memory.
         """
+        if max_completed_keys <= 0:
+            raise OrchestrationInvariantError(f"max_completed_keys must be > 0, got {max_completed_keys}")
+
         self._recorder = recorder
         self._spans = span_factory
         self._token_manager = token_manager
@@ -126,9 +131,9 @@ class CoalesceExecutor:
         # Uses OrderedDict as bounded FIFO set to prevent unbounded memory growth
         # (values are None, we only care about key presence and insertion order)
         self._completed_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
-        # Maximum completed keys to retain (prevents OOM in long-running pipelines)
-        # Late arrivals after eviction create new pending entries (timeout/flush correctly)
-        self._max_completed_keys: int = 10000
+        # Maximum completed keys to retain (prevents OOM in long-running pipelines).
+        # Configurable to match source cardinality and memory budget.
+        self._max_completed_keys: int = max_completed_keys
         # Temporary storage for union merge collision info (consumed by _execute_merge)
         self._last_union_collisions: dict[str, list[str]] = {}
 
@@ -169,8 +174,19 @@ class CoalesceExecutor:
         """
         self._completed_keys[key] = None
         # Evict oldest entries if over capacity
+        evicted_keys: list[tuple[str, str]] = []
         while len(self._completed_keys) > self._max_completed_keys:
-            self._completed_keys.popitem(last=False)
+            evicted_key, _ = self._completed_keys.popitem(last=False)
+            evicted_keys.append(evicted_key)
+        if evicted_keys:
+            slog.warning(
+                "coalesce_completed_keys_evicted",
+                max_completed_keys=self._max_completed_keys,
+                evicted_count=len(evicted_keys),
+                oldest_evicted=evicted_keys[0],
+                newest_evicted=evicted_keys[-1],
+                retained_count=len(self._completed_keys),
+            )
 
     def accept(
         self,
