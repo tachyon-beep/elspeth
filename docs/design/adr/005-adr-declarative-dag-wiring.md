@@ -13,6 +13,7 @@
 The `on_success` ADR (elspeth-rapid-o639) makes output routing explicit — every terminal node declares where its output goes. But input routing remains implicit: transforms receive data based on YAML list position. The DAG builder infers edges from ordering.
 
 This creates two description models coexisting in one YAML:
+
 - **Outputs**: Explicit (`on_success: sink_name`, gate `routes:`)
 - **Inputs**: Implicit (position in list, fork branch association via gate `fork_to:`)
 
@@ -104,6 +105,7 @@ transforms:
 ```
 
 The DAG builder matches `on_success` values to `input` values to create MOVE edges. Validation rules:
+
 - A connection name in `on_success` that appears in no `input` and is not a sink name → `GraphValidationError` (dangling output)
 - A connection name in `input` that appears in no `on_success` and is not a source output → `GraphValidationError` (missing input)
 - A connection name that collides with a sink name → `GraphValidationError` (namespace collision — see Q1 resolution below)
@@ -239,6 +241,7 @@ YAML order still matches topological order by convention, but the processor no l
 | **Estimated total** | **~900+ refs** | Larger than on_success ADR (~472 refs) |
 
 **Critical leverage points:**
+
 - `tests/fixtures/pipeline.py` — single highest-leverage file (cascades to 20+ test files)
 - `tests/unit/core/test_dag.py` — most affected test file (37 `from_plugin_instances`, 22 `fork_to`)
 - `tests/fixtures/factories.py` — factory infrastructure

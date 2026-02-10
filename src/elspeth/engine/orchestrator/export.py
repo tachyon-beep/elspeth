@@ -80,8 +80,14 @@ def export_landscape(
         raise ValueError(f"Export sink '{sink_name}' not found in sinks")
     sink = sinks[sink_name]
 
-    # Create context for sink writes
-    ctx = PluginContext(run_id=run_id, config={}, landscape=None)
+    # Create context for sink writes.
+    # LandscapeRecorder is needed by sinks that restore source headers
+    # (restore_source_headers=True calls ctx.landscape.get_source_field_resolution).
+    # Import inside function body to avoid circular imports (see module docstring).
+    from elspeth.core.landscape.recorder import LandscapeRecorder
+
+    recorder = LandscapeRecorder(db)
+    ctx = PluginContext(run_id=run_id, config={}, landscape=recorder)
 
     if export_config.format == "csv":
         # Multi-file CSV export: one file per record type
