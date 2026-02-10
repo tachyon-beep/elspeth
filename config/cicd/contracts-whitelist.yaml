@@ -41,7 +41,6 @@ allowed_dict_patterns:
   - "src/elspeth/engine/orchestrator/core.py:Orchestrator._maybe_checkpoint:aggregation_state"
 
   # Protocols - row data in plugin interface
-  - "src/elspeth/plugins/protocols.py:CoalesceProtocol.merge:return"
   - "src/elspeth/plugins/protocols.py:SinkProtocol.write:rows (list)"
 
   # Base classes - row data in plugin implementations
@@ -82,14 +81,11 @@ allowed_dict_patterns:
   # Protocols - config input
   - "src/elspeth/plugins/protocols.py:SourceProtocol.__init__:config"
   - "src/elspeth/plugins/protocols.py:TransformProtocol.__init__:config"
-  - "src/elspeth/plugins/protocols.py:GateProtocol.__init__:config"
-  - "src/elspeth/plugins/protocols.py:CoalesceProtocol.__init__:config"
   - "src/elspeth/plugins/protocols.py:SinkProtocol.__init__:config"
   - "src/elspeth/plugins/protocols.py:BatchTransformProtocol.__init__:config"
 
   # Base classes - config input
   - "src/elspeth/plugins/base.py:BaseTransform.__init__:config"
-  - "src/elspeth/plugins/base.py:BaseGate.__init__:config"
   - "src/elspeth/plugins/base.py:BaseSink.__init__:config"
   - "src/elspeth/plugins/base.py:BaseSource.__init__:config"
   - "src/elspeth/plugins/config_base.py:PluginConfig.from_dict:config"

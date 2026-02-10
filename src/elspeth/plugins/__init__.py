@@ -35,7 +35,6 @@ from elspeth.contracts import (
 # Context
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.base import (
-    BaseGate,
     BaseSink,
     BaseSource,
     BaseTransform,
@@ -59,9 +58,6 @@ from elspeth.plugins.manager import PluginManager
 
 # Protocols
 from elspeth.plugins.protocols import (
-    CoalescePolicy,
-    CoalesceProtocol,
-    GateProtocol,
     SinkProtocol,
     SourceProtocol,
     TransformProtocol,
@@ -90,14 +86,10 @@ __all__ = [  # Grouped by category for readability
     "check_compatibility",
     "validate_row",
     # Protocols
-    "CoalescePolicy",
-    "CoalesceProtocol",
-    "GateProtocol",
     "SinkProtocol",
     "SourceProtocol",
     "TransformProtocol",
     # Base classes
-    "BaseGate",
     "BaseSink",
     "BaseSource",
     "BaseTransform",

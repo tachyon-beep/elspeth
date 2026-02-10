@@ -1124,7 +1124,7 @@ Parent Token (T1)
 
 **Key property:** Waits for tokens from specified branches, combines based on policy.
 
-> **Note:** A `CoalesceProtocol` exists in `plugins/protocols.py` defining a plugin-level merge interface (`merge(branch_outputs, ctx)`). However, the current engine implementation uses config-driven merge strategies (union/nested/select) via the `CoalesceExecutor`. The protocol exists for future extensibility but is not currently exercised by the engine's merge path.
+> **Note:** Coalesce is fully structural — there is no plugin-level coalesce protocol. The engine uses config-driven merge strategies (union/nested/select) via the `CoalesceExecutor` in `engine/coalesce_executor.py`. Configure coalesce behavior via the `coalesce:` section in pipeline YAML.
 
 #### Configuration
 
