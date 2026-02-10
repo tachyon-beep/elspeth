@@ -1499,20 +1499,10 @@ allow_hits:
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=bb510aa4e6e38401
-  owner: architecture
-  reason: dict.get() correct - not all branch names have coalesce point mapping
-  safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-10'
 - key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=2db828b82026d639
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-10'
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=9245b873f09f8d95
-  owner: architecture
-  reason: dict.get() correct - coalesce node_id mapping may not exist for non-coalesce tokens
-  safety: Returns None which is checked immediately
   expires: '2026-03-10'
 - key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=ac23dfc7bde5bcb9
   owner: architecture

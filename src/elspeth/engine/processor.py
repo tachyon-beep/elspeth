@@ -1645,8 +1645,7 @@ class RowProcessor:
                     ),
                 )
 
-            if coalesce_name in self._coalesce_node_ids:
-                coalesce_node_id = self._coalesce_node_ids[coalesce_name]
+            coalesce_node_id = self._coalesce_node_ids[coalesce_name]
             child_items.append(
                 self._create_work_item(
                     token=coalesce_outcome.merged_token,
@@ -1683,7 +1682,12 @@ class RowProcessor:
                 ),
             )
 
-        return True, None
+        raise OrchestrationInvariantError(
+            f"CoalesceOutcome for token {current_token.token_id} in coalesce '{coalesce_name}' "
+            f"is in invalid state: held={coalesce_outcome.held}, "
+            f"merged_token={coalesce_outcome.merged_token is not None}, "
+            f"failure_reason={coalesce_outcome.failure_reason!r}"
+        )
 
     def _notify_coalesce_of_lost_branch(
         self,
@@ -1715,9 +1719,7 @@ class RowProcessor:
         if coalesce_name is None:
             return []
 
-        coalesce_node_id = self._coalesce_node_ids.get(coalesce_name)
-        if coalesce_node_id is None:
-            raise OrchestrationInvariantError(f"Coalesce node_id missing for coalesce '{coalesce_name}' during branch-loss handling")
+        coalesce_node_id = self._coalesce_node_ids[coalesce_name]
         outcome = self._coalesce_executor.notify_branch_lost(
             coalesce_name=coalesce_name,
             row_id=current_token.row_id,
@@ -1862,7 +1864,7 @@ class RowProcessor:
 
         last_on_success_sink: str = on_success_sink if on_success_sink is not None else self._source_on_success
         if coalesce_name is not None and current_node_id is not None:
-            coalesce_node_id_for_name = self._coalesce_node_ids.get(coalesce_name)
+            coalesce_node_id_for_name = self._coalesce_node_ids[coalesce_name]
             if coalesce_node_id_for_name == current_node_id and self._resolve_next_node_for_processing(current_node_id) is None:
                 last_on_success_sink = self._coalesce_on_success_map[coalesce_name]
 
