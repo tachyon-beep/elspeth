@@ -1478,52 +1478,52 @@ allow_hits:
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
   safety: TypeError raised if wrong URL type - explicit failure, not masking
   expires: null
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=f737e981949099fb
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=2bf9f232eefa3b17
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=3274eb654edefa69
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=19074dff15926913
   owner: architecture
   reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=61af0f4cee26539c
+- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=911ab3c7209a7448
   owner: architecture
   reason: Protocol dispatch while traversing jumped subchain to resolve inherited terminal sink
   safety: Traversal map invariants are enforced; raises on cycles or invalid nodes
   expires: '2026-03-10'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=e6379133979f91bd
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=e01ffdd09d8c0ff0
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=3a6723384793a05e
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=bb510aa4e6e38401
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=5face8b982f52859
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=2db828b82026d639
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=8fdd4d5114c8841e
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=9245b873f09f8d95
   owner: architecture
   reason: dict.get() correct - coalesce node_id mapping may not exist for non-coalesce tokens
   safety: Returns None which is checked immediately
   expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=e7717d25433e762c
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=ac23dfc7bde5bcb9
   owner: architecture
   reason: Protocol dispatch - isinstance for GateProtocol type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=0e3de2aa3413fea7
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=b09837470f376107
   owner: architecture
   reason: Protocol dispatch - isinstance for TransformProtocol type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=613e029cf704a878
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=d79935d16a26989d
   owner: architecture
   reason: Protocol dispatch - isinstance for GateSettings type routing in unified node traversal
   safety: Crashes on type mismatch - no silent fallback

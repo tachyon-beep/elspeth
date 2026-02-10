@@ -648,7 +648,10 @@ class ExecutionGraph:
                     node_config["fork_to"] = list(gate.fork_to)
 
             # Extract computed output schema config if available (e.g., LLM transforms
-            # compute guaranteed_fields and audit_fields from their configuration)
+            # compute guaranteed_fields and audit_fields from their configuration).
+            # getattr is appropriate here: this is a framework boundary where the DAG
+            # builder queries an optional plugin capability (not all transforms compute
+            # output schemas). See CLAUDE.md "Legitimate Uses: Framework boundaries."
             output_schema_config = getattr(transform, "_output_schema_config", None)
 
             graph.add_node(
@@ -703,8 +706,7 @@ class ExecutionGraph:
             aid = node_id("aggregation", agg_name, agg_node_config)
             aggregation_ids[AggregationName(agg_name)] = aid
 
-            # Extract computed output schema config if available (e.g., LLM aggregations
-            # compute guaranteed_fields and audit_fields from their configuration)
+            # Same framework-boundary getattr as transform case above.
             agg_output_schema_config = getattr(transform, "_output_schema_config", None)
 
             graph.add_node(

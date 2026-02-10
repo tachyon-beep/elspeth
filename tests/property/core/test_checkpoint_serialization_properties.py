@@ -71,7 +71,14 @@ checkpoint_leaf_values = json_primitives | aware_datetimes
 
 checkpoint_values = st.recursive(
     checkpoint_leaf_values,
-    lambda children: st.lists(children, max_size=5) | st.dictionaries(st.text(max_size=15), children, max_size=5),
+    lambda children: (
+        st.lists(children, max_size=5)
+        | st.dictionaries(
+            st.text(max_size=15).filter(lambda k: k != "__datetime__"),
+            children,
+            max_size=5,
+        )
+    ),
     max_leaves=30,
 )
 

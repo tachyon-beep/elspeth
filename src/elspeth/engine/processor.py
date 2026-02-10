@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import hashlib
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
@@ -53,17 +55,28 @@ MAX_WORK_QUEUE_ITERATIONS = 10_000
 
 @dataclass(frozen=True, slots=True)
 class DAGTraversalContext:
-    """Precomputed DAG traversal data for the processor. Built by orchestrator."""
+    """Precomputed DAG traversal data for the processor. Built by orchestrator.
 
-    node_step_map: dict[NodeID, int]
-    node_to_plugin: dict[NodeID, RowPlugin | GateSettings]
+    All dict fields are stored as MappingProxyType to enforce true
+    immutability — frozen=True only prevents attribute reassignment,
+    not mutation of mutable values held by those attributes.
+    """
+
+    node_step_map: Mapping[NodeID, int]
+    node_to_plugin: Mapping[NodeID, RowPlugin | GateSettings]
     first_transform_node_id: NodeID | None
-    node_to_next: dict[NodeID, NodeID | None]
-    coalesce_node_map: dict[CoalesceName, NodeID]
+    node_to_next: Mapping[NodeID, NodeID | None]
+    coalesce_node_map: Mapping[CoalesceName, NodeID]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "node_step_map", MappingProxyType(dict(self.node_step_map)))
+        object.__setattr__(self, "node_to_plugin", MappingProxyType(dict(self.node_to_plugin)))
+        object.__setattr__(self, "node_to_next", MappingProxyType(dict(self.node_to_next)))
+        object.__setattr__(self, "coalesce_node_map", MappingProxyType(dict(self.coalesce_node_map)))
 
 
 def make_step_resolver(
-    node_step_map: dict[NodeID, int],
+    node_step_map: Mapping[NodeID, int],
     source_node_id: NodeID,
 ) -> StepResolver:
     """Create a StepResolver from a precomputed step map.
@@ -201,6 +214,12 @@ class RowProcessor:
         }
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
         self._branch_to_sink: dict[BranchName, SinkName] = branch_to_sink or {}
+        overlap = set(self._branch_to_coalesce.keys()) & set(self._branch_to_sink.keys())
+        if overlap:
+            raise OrchestrationInvariantError(
+                f"Branch names {sorted(overlap)} appear in both branch_to_coalesce and branch_to_sink. "
+                "A fork branch must route to EITHER a coalesce node OR a direct sink, not both."
+            )
         self._sink_names: frozenset[str] = sink_names or frozenset()
         self._coalesce_on_success_map: dict[CoalesceName, str] = coalesce_on_success_map or {}
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
@@ -1951,6 +1970,15 @@ class RowProcessor:
                         last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
                     continue
+                else:
+                    # CONTINUE: gate says "proceed to next structural node."
+                    # Falls through to node_id = next_node_id below.
+                    if outcome.result.action.kind != RoutingKind.CONTINUE:
+                        raise OrchestrationInvariantError(
+                            f"Unhandled gate routing kind {outcome.result.action.kind!r} "
+                            f"for token {current_token.token_id} at node '{node_id}'. "
+                            f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
+                        )
 
             elif isinstance(plugin, TransformProtocol):
                 row_transform = plugin
@@ -2184,6 +2212,15 @@ class RowProcessor:
                         last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
                     continue
+                else:
+                    # CONTINUE: config gate says "proceed to next structural node."
+                    # Falls through to node_id = next_node_id below.
+                    if outcome.result.action.kind != RoutingKind.CONTINUE:
+                        raise OrchestrationInvariantError(
+                            f"Unhandled config gate routing kind {outcome.result.action.kind!r} "
+                            f"for token {current_token.token_id} at node '{node_id}'. "
+                            f"Expected CONTINUE when no sink_name, fork, or next_node_id is set."
+                        )
 
             else:
                 raise TypeError(f"Unknown transform type: {type(plugin).__name__}. Expected BaseTransform or BaseGate.")

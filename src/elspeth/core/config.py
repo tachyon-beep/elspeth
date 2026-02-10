@@ -43,9 +43,45 @@ def _validate_max_length(value: str, *, field_label: str, max_length: int) -> st
     return value
 
 
+# Node names become identifiers in the DAG and must start with a letter.
+_VALID_NODE_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+# Connection/sink names are routing labels — they can start with a digit
+# or single underscore (e.g., "123_sink", "_private_sink") but not double
+# underscore (checked separately).
+_VALID_CONNECTION_NAME_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_-]*$")
+
+
+def _validate_node_name_chars(value: str, *, field_label: str) -> None:
+    """Enforce character-class restriction on processing node names.
+
+    Node names must start with a letter and contain only letters, digits,
+    underscores, and hyphens. This prevents NUL injection, whitespace
+    smuggling, unicode confusables, and SQL/shell metacharacters.
+    """
+    if not _VALID_NODE_NAME_RE.match(value):
+        raise ValueError(
+            f"{field_label} '{value}' contains invalid characters. "
+            "Node names must start with a letter and contain only letters, digits, underscores, and hyphens."
+        )
+
+
+def _validate_connection_name_chars(value: str, *, field_label: str) -> None:
+    """Enforce character-class restriction on connection/sink names.
+
+    Connection names can start with a letter or digit and contain only
+    letters, digits, underscores, and hyphens.
+    """
+    if not _VALID_CONNECTION_NAME_RE.match(value):
+        raise ValueError(
+            f"{field_label} '{value}' contains invalid characters. "
+            "Names must start with a letter or digit and contain only letters, digits, underscores, and hyphens."
+        )
+
+
 def _validate_connection_or_sink_name(value: str, *, field_label: str) -> str:
     """Validate user-supplied connection/sink identifiers used for routing."""
     _validate_max_length(value, field_label=field_label, max_length=_MAX_CONNECTION_NAME_LENGTH)
+    _validate_connection_name_chars(value, field_label=field_label)
     if value in _RESERVED_EDGE_LABELS:
         raise ValueError(f"{field_label} '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
     if value.startswith("__"):
@@ -319,6 +355,7 @@ class AggregationSettings(BaseModel):
             raise ValueError("Aggregation name must not be empty")
         v = v.strip()
         _validate_max_length(v, field_label="Aggregation name", max_length=_MAX_NODE_NAME_LENGTH)
+        _validate_node_name_chars(v, field_label="Aggregation name")
         if v in _RESERVED_EDGE_LABELS:
             raise ValueError(f"Aggregation name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
         if v.startswith("__"):
@@ -399,6 +436,7 @@ class GateSettings(BaseModel):
             raise ValueError("Gate name must not be empty")
         v = v.strip()
         _validate_max_length(v, field_label="Gate name", max_length=_MAX_NODE_NAME_LENGTH)
+        _validate_node_name_chars(v, field_label="Gate name")
         if v in _RESERVED_EDGE_LABELS:
             raise ValueError(f"Gate name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
         if v.startswith("__"):
@@ -624,6 +662,7 @@ class CoalesceSettings(BaseModel):
             raise ValueError("Coalesce name must not be empty")
         value = v.strip()
         _validate_max_length(value, field_label="Coalesce name", max_length=_MAX_NODE_NAME_LENGTH)
+        _validate_node_name_chars(value, field_label="Coalesce name")
         if value in _RESERVED_EDGE_LABELS:
             raise ValueError(f"Coalesce name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
         if value.startswith("__"):
@@ -750,6 +789,7 @@ class TransformSettings(BaseModel):
             raise ValueError("Transform name must not be empty")
         v = v.strip()
         _validate_max_length(v, field_label="Transform name", max_length=_MAX_NODE_NAME_LENGTH)
+        _validate_node_name_chars(v, field_label="Transform name")
         if v in _RESERVED_EDGE_LABELS:
             raise ValueError(f"Transform name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
         if v.startswith("__"):
