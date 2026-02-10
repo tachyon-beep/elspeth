@@ -1242,42 +1242,6 @@ class ElspethSettings(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_unique_aggregation_names(self) -> "ElspethSettings":
-        """Ensure aggregation names are unique."""
-        names = [agg.name for agg in self.aggregations]
-        duplicates = [name for name in names if names.count(name) > 1]
-        if duplicates:
-            raise ValueError(f"Duplicate aggregation name(s): {set(duplicates)}")
-        return self
-
-    @model_validator(mode="after")
-    def validate_unique_gate_names(self) -> "ElspethSettings":
-        """Ensure gate names are unique."""
-        names = [gate.name for gate in self.gates]
-        duplicates = [name for name in names if names.count(name) > 1]
-        if duplicates:
-            raise ValueError(f"Duplicate gate name(s): {set(duplicates)}")
-        return self
-
-    @model_validator(mode="after")
-    def validate_unique_coalesce_names(self) -> "ElspethSettings":
-        """Ensure coalesce names are unique."""
-        names = [coal.name for coal in self.coalesce]
-        duplicates = [name for name in names if names.count(name) > 1]
-        if duplicates:
-            raise ValueError(f"Duplicate coalesce name(s): {set(duplicates)}")
-        return self
-
-    @model_validator(mode="after")
-    def validate_unique_transform_names(self) -> "ElspethSettings":
-        """Ensure transform names are unique."""
-        names = [t.name for t in self.transforms]
-        duplicates = [name for name in names if names.count(name) > 1]
-        if duplicates:
-            raise ValueError(f"Duplicate transform name(s): {set(duplicates)}")
-        return self
-
-    @model_validator(mode="after")
     def validate_globally_unique_node_names(self) -> "ElspethSettings":
         """Ensure all processing node names are unique across types.
 

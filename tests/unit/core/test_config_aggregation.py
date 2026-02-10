@@ -306,7 +306,7 @@ class TestElspethSettingsAggregations:
             TriggerConfig,
         )
 
-        with pytest.raises(ValidationError, match=r"(?i)duplicate.*name"):
+        with pytest.raises(ValidationError, match=r"Node name 'batch_stats' is used by both"):
             ElspethSettings(
                 source=SourceSettings(plugin="csv", on_success="output"),
                 sinks={"output": SinkSettings(plugin="csv")},

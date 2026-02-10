@@ -1328,7 +1328,7 @@ class TestElspethSettingsWithGates:
 
         from elspeth.core.config import ElspethSettings
 
-        with pytest.raises(ValidationError, match=r"(?i)duplicate.*gate.*name"):
+        with pytest.raises(ValidationError, match=r"Node name 'my_gate' is used by both"):
             ElspethSettings(
                 source={"plugin": "csv", "on_success": "output"},
                 sinks={"output": {"plugin": "csv"}},
@@ -1349,12 +1349,12 @@ class TestElspethSettingsWithGates:
             )
 
     def test_elspeth_settings_rejects_multiple_duplicate_gate_pairs(self) -> None:
-        """All duplicate gate names are reported in error message."""
+        """First duplicate gate name triggers rejection."""
         from pydantic import ValidationError
 
         from elspeth.core.config import ElspethSettings
 
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(ValidationError, match=r"Node name 'gate_a' is used by both"):
             ElspethSettings(
                 source={"plugin": "csv", "on_success": "output"},
                 sinks={"output": {"plugin": "csv"}},
@@ -1366,10 +1366,6 @@ class TestElspethSettingsWithGates:
                     {"name": "gate_c", "input": "source_out", "condition": "True", "routes": {"true": "next_c", "false": "output"}},
                 ],
             )
-        error_message = str(exc_info.value)
-        assert "gate_a" in error_message
-        assert "gate_b" in error_message
-        assert "gate_c" not in error_message  # gate_c is unique, should not be in error
 
     def test_resolve_config_includes_gates(self) -> None:
         """resolve_config preserves gates configuration."""
@@ -1797,7 +1793,7 @@ class TestElspethSettingsWithCoalesce:
 
         from elspeth.core.config import ElspethSettings
 
-        with pytest.raises(ValidationError, match=r"(?i)duplicate.*coalesce.*name"):
+        with pytest.raises(ValidationError, match=r"Node name 'my_coalesce' is used by both"):
             ElspethSettings(
                 source={"plugin": "csv", "on_success": "output"},
                 sinks={"output": {"plugin": "csv"}},
@@ -1818,12 +1814,12 @@ class TestElspethSettingsWithCoalesce:
             )
 
     def test_elspeth_settings_rejects_multiple_duplicate_coalesce_pairs(self) -> None:
-        """All duplicate coalesce names are reported in error message."""
+        """First duplicate coalesce name triggers rejection."""
         from pydantic import ValidationError
 
         from elspeth.core.config import ElspethSettings
 
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(ValidationError, match=r"Node name 'coal_a' is used by both"):
             ElspethSettings(
                 source={"plugin": "csv", "on_success": "output"},
                 sinks={"output": {"plugin": "csv"}},
@@ -1835,10 +1831,6 @@ class TestElspethSettingsWithCoalesce:
                     {"name": "coal_c", "branches": ["x", "y"], "policy": "require_all", "merge": "union"},
                 ],
             )
-        error_message = str(exc_info.value)
-        assert "coal_a" in error_message
-        assert "coal_b" in error_message
-        assert "coal_c" not in error_message  # coal_c is unique, should not be in error
 
 
 class TestSecretFieldFingerprinting:
