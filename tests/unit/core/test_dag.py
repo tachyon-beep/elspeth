@@ -3988,6 +3988,77 @@ sinks:
         config_file.unlink()
 
 
+def test_from_plugin_instances_cycle_raises_graph_validation_error(monkeypatch: pytest.MonkeyPatch):
+    """NetworkXUnfeasible during topo sort in from_plugin_instances yields GraphValidationError.
+
+    Regression: nx.topological_sort at the pipeline-ordering step was unguarded,
+    so a cycle raised raw NetworkXUnfeasible instead of GraphValidationError.
+    The single-producer invariant prevents cycles through normal config, but
+    this wrapping is defense-in-depth for future edge-building changes.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import networkx as nx
+
+    from elspeth.core.config import load_settings
+    from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+    config_yaml = """
+source:
+  plugin: csv
+  on_success: step_a
+  options:
+    path: test.csv
+    schema:
+      mode: observed
+    on_validation_failure: discard
+
+transforms:
+  - name: passthrough_0
+    plugin: passthrough
+    input: step_a
+    on_success: output
+    options:
+      schema:
+        mode: observed
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: observed
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        config = load_settings(config_file)
+        plugins = instantiate_plugins_from_config(config)
+
+        def raise_unfeasible(g):
+            raise nx.NetworkXUnfeasible("graph contains a cycle")
+
+        monkeypatch.setattr(nx, "topological_sort", raise_unfeasible)
+
+        with pytest.raises(GraphValidationError, match="cycle"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+                coalesce_settings=list(config.coalesce) if config.coalesce else None,
+            )
+    finally:
+        config_file.unlink()
+
+
 def test_validate_aggregation_dual_schema():
     """Verify aggregation edges validate against correct schemas."""
     from elspeth.contracts import NodeType

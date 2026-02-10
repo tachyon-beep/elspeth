@@ -95,6 +95,32 @@ class TestSchemaCompatibilityGuards:
         assert "To fix this, either:" in msg
         instance.close()
 
+    def test_validate_schema_translates_sqlcipher_error_on_get_table_names(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SQLCipher passphrase errors during get_table_names() must produce SchemaCompatibilityError.
+
+        Regression: The OperationalError guard only covered inspect(engine),
+        but SQLAlchemy's inspect is lazy — the actual DB read happens on
+        get_table_names(), where the same "file is not a database" error fires.
+        """
+        import sqlalchemy
+        from sqlalchemy.exc import OperationalError
+
+        instance = _make_instance(f"sqlite:///{tmp_path / 'encrypted.db'}")
+
+        mock_inspector = Mock()
+        mock_inspector.get_table_names.side_effect = OperationalError(
+            "SELECT name FROM sqlite_master",
+            {},
+            Exception("file is not a database"),
+        )
+
+        monkeypatch.setattr(sqlalchemy, "inspect", lambda engine: mock_inspector)
+
+        with pytest.raises(SchemaCompatibilityError, match="encrypted or passphrase is incorrect"):
+            instance._validate_schema()
+
+        instance.close()
+
 
 class TestJournalPathGuards:
     """Coverage for from_url journal path derivation failure modes."""

@@ -231,6 +231,7 @@ class LandscapeDB:
 
         try:
             inspector = inspect(self.engine)
+            existing_tables = set(inspector.get_table_names())
         except OperationalError as e:
             error_msg = str(e)
             if "file is not a database" in error_msg or "file is encrypted" in error_msg:
@@ -243,7 +244,6 @@ class LandscapeDB:
                     f"Database: {self.connection_string}"
                 ) from e
             raise
-        existing_tables = set(inspector.get_table_names())
         expected_tables = set(metadata.tables.keys())
         present_landscape_tables = existing_tables & expected_tables
 

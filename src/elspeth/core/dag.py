@@ -1185,7 +1185,15 @@ class ExecutionGraph:
         processing_node_ids.update(config_gate_ids.values())
         processing_node_ids.update(coalesce_ids.values())
 
-        topo_order = [NodeID(raw_id) for raw_id in nx.topological_sort(graph._graph)]
+        try:
+            topo_order = [NodeID(raw_id) for raw_id in nx.topological_sort(graph._graph)]
+        except nx.NetworkXUnfeasible:
+            try:
+                cycle = nx.find_cycle(graph._graph)
+                cycle_str = " -> ".join(f"{edge[0]}" for edge in cycle)
+                raise GraphValidationError(f"Pipeline contains a cycle: {cycle_str}")
+            except nx.NetworkXNoCycle:
+                raise GraphValidationError("Pipeline contains a cycle") from None
         pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
 
         pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
