@@ -31,6 +31,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.types import NodeID
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
 from elspeth.engine.coalesce_executor import CoalesceExecutor
@@ -160,7 +161,7 @@ class TestRequireAllPolicyProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
 
@@ -202,7 +203,7 @@ class TestRequireAllPolicyProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
         arriving_branches = branches[:-missing_count]
@@ -243,7 +244,7 @@ class TestFirstPolicyProperties:
             policy="first",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         # Send just one token
         token = make_token(
@@ -280,7 +281,7 @@ class TestQuorumPolicyProperties:
             quorum_count=quorum_count,
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
 
@@ -327,7 +328,7 @@ class TestQuorumPolicyProperties:
             quorum_count=quorum_count,
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
 
@@ -369,7 +370,7 @@ class TestBestEffortPolicyProperties:
             merge="union",
             timeout_seconds=10.0,
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
 
@@ -415,7 +416,7 @@ class TestLateArrivalProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
 
@@ -454,7 +455,7 @@ class TestLateArrivalProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
 
@@ -502,7 +503,7 @@ class TestMemoryBoundedProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         # Complete more merges than max_completed_keys
         for row_num in range(150):
@@ -531,7 +532,7 @@ class TestMemoryBoundedProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         # Complete 20 merges
         for row_num in range(20):
@@ -579,7 +580,7 @@ class TestMergeDataProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         # Send both tokens
         token_a = make_token("t-a", "row-001", "branch_a", data_a)
@@ -611,7 +612,7 @@ class TestMergeDataProperties:
             policy="require_all",
             merge="nested",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         token_a = make_token("t-a", "row-001", "branch_a", data_a)
         token_b = make_token("t-b", "row-001", "branch_b", data_b)
@@ -641,7 +642,7 @@ class TestMergeDataProperties:
             merge="select",
             select_branch="selected_branch",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         token_selected = make_token("t-sel", "row-001", "selected_branch", data_selected)
         token_other = make_token("t-oth", "row-001", "other_branch", data_other)
@@ -676,7 +677,7 @@ class TestTokenConservationProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
         sent_tokens = []
@@ -720,7 +721,7 @@ class TestCoalesceMetadataProperties:
             policy="require_all",
             merge="nested",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
         for i, branch in enumerate(branches):
@@ -746,7 +747,7 @@ class TestCoalesceMetadataProperties:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(coalesce_settings, node_id="node-001")
+        executor.register_coalesce(coalesce_settings, node_id=NodeID("node-001"))
 
         row_id = "row-001"
 

@@ -150,6 +150,7 @@ class TestRunLifecycleProperties:
             run = recorder.begin_run(config=config, canonical_version="1.0")
 
             completed = recorder.complete_run(run.run_id, RunStatus.COMPLETED)
+            assert completed.completed_at is not None
             assert completed.completed_at >= completed.started_at
 
     @given(config=simple_configs)

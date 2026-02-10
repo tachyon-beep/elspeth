@@ -13,7 +13,7 @@ from elspeth.contracts.header_modes import (
     resolve_headers,
 )
 from elspeth.contracts.schema_contract import SchemaContract
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 class TestParseHeaderMode:

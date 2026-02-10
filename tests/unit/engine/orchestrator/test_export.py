@@ -27,6 +27,7 @@ from elspeth.engine.orchestrator.export import (
     export_landscape,
     reconstruct_schema_from_json,
 )
+from elspeth.plugins.protocols import SinkProtocol
 
 # =============================================================================
 # export_landscape — JSON format
@@ -49,7 +50,7 @@ class TestExportLandscapeJSON:
         settings = self._make_settings()
         sink = Mock()
         sink.config = {}
-        sinks = {"output": sink}
+        sinks: dict[str, SinkProtocol] = {"output": sink}
 
         with patch("elspeth.core.landscape.exporter.LandscapeExporter") as MockExporter:
             exporter = MockExporter.return_value
@@ -67,7 +68,7 @@ class TestExportLandscapeJSON:
         settings = self._make_settings()
         sink = Mock()
         sink.config = {}
-        sinks = {"output": sink}
+        sinks: dict[str, SinkProtocol] = {"output": sink}
 
         with patch("elspeth.core.landscape.exporter.LandscapeExporter") as MockExporter:
             exporter = MockExporter.return_value
@@ -83,7 +84,7 @@ class TestExportLandscapeJSON:
         """Referencing non-existent sink raises clear error."""
         db = Mock()
         settings = self._make_settings(sink="nonexistent")
-        sinks = {"output": Mock()}
+        sinks: dict[str, SinkProtocol] = {"output": Mock()}
 
         with pytest.raises(ValueError, match=r"nonexistent.*not found"):
             export_landscape(db, "run-1", settings, sinks)
@@ -94,7 +95,7 @@ class TestExportLandscapeJSON:
         settings = self._make_settings(sign=True)
         sink = Mock()
         sink.config = {}
-        sinks = {"output": sink}
+        sinks: dict[str, SinkProtocol] = {"output": sink}
 
         with (
             patch("elspeth.core.landscape.exporter.LandscapeExporter") as MockExporter,
@@ -111,7 +112,7 @@ class TestExportLandscapeJSON:
         """Signing enabled without ELSPETH_SIGNING_KEY raises ValueError."""
         db = Mock()
         settings = self._make_settings(sign=True)
-        sinks = {"output": Mock()}
+        sinks: dict[str, SinkProtocol] = {"output": Mock()}
 
         with (
             patch.dict("os.environ", {}, clear=True),
@@ -141,7 +142,7 @@ class TestExportLandscapeCSV:
         settings = self._make_settings()
         sink = Mock()
         sink.config = {}  # No 'path' key
-        sinks = {"output": sink}
+        sinks: dict[str, SinkProtocol] = {"output": sink}
 
         with pytest.raises(ValueError, match="CSV export requires file-based sink"):
             export_landscape(db, "run-1", settings, sinks)
@@ -152,7 +153,7 @@ class TestExportLandscapeCSV:
         settings = self._make_settings()
         sink = Mock()
         sink.config = {"path": str(tmp_path / "export.csv")}
-        sinks = {"output": sink}
+        sinks: dict[str, SinkProtocol] = {"output": sink}
 
         with patch("elspeth.engine.orchestrator.export._export_csv_multifile") as mock_csv:
             export_landscape(db, "run-1", settings, sinks)

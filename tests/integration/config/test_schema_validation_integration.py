@@ -135,6 +135,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
     from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.results import TransformResult
+    from elspeth.testing import make_pipeline_row
     from tests.fixtures.base_classes import (
         _TestSinkBase,
         _TestSourceBase,
@@ -177,7 +178,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
         _on_success = "output"  # Terminal transform routes to output sink
 
         def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-            return TransformResult.success(row, success_reason={"action": "passthrough"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "passthrough"})
 
     class StaticSchemaSink(_TestSinkBase):
         """Sink with static class-level input_schema."""

@@ -7,7 +7,7 @@ from elspeth.contracts.schema_contract import (
     PipelineRow,
     SchemaContract,
 )
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 
 class TestPipelineRowAccess:

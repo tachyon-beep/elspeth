@@ -13,7 +13,6 @@ def test_validator_accepts_valid_source_config():
         "path": "/tmp/test.csv",
         "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
-        "on_success": "output",
     }
 
     errors = validator.validate_source_config("csv", config)
@@ -28,7 +27,6 @@ def test_validator_rejects_missing_required_field():
         # Missing 'path' - required by CSVSourceConfig
         "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
-        "on_success": "output",
     }
 
     errors = validator.validate_source_config("csv", config)
@@ -46,7 +44,6 @@ def test_validator_rejects_invalid_field_type():
         "skip_rows": "not_an_int",  # Should be int
         "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
-        "on_success": "output",
     }
 
     errors = validator.validate_source_config("csv", config)

@@ -3,18 +3,21 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.pipeline import build_aggregation_pipeline, build_fork_pipeline, build_linear_pipeline
 from tests.fixtures.plugins import CollectSink, PassTransform
 
 from elspeth.contracts.routing import RouteDestinationKind
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings, TriggerConfig
+from elspeth.plugins.protocols import TransformProtocol
 
 
 def test_wire_transforms_single_transform() -> None:
     transform = PassTransform()
 
-    wired = wire_transforms([transform], source_connection="source_out", final_sink="default")
+    wired = wire_transforms(cast("list[TransformProtocol]", [transform]), source_connection="source_out", final_sink="default")
 
     assert len(wired) == 1
     assert wired[0].settings.name == "pass_transform_0"
@@ -26,7 +29,7 @@ def test_wire_transforms_single_transform() -> None:
 def test_wire_transforms_linear_chain() -> None:
     transforms = [PassTransform() for _ in range(3)]
 
-    wired = wire_transforms(transforms, source_connection="source_out", final_sink="output")
+    wired = wire_transforms(cast("list[TransformProtocol]", transforms), source_connection="source_out", final_sink="output")
 
     assert [w.settings.input for w in wired] == ["source_out", "conn_0_1", "conn_1_2"]
     assert [w.settings.on_success for w in wired] == ["conn_0_1", "conn_1_2", "output"]
@@ -36,7 +39,7 @@ def test_wire_transforms_linear_chain() -> None:
 def test_wire_transforms_five_transform_stress() -> None:
     transforms = [PassTransform() for _ in range(5)]
 
-    wired = wire_transforms(transforms, source_connection="src", final_sink="sink")
+    wired = wire_transforms(cast("list[TransformProtocol]", transforms), source_connection="src", final_sink="sink")
 
     assert len(wired) == 5
     assert len({w.settings.name for w in wired}) == 5
@@ -48,7 +51,7 @@ def test_wire_transforms_allows_explicit_names() -> None:
     transforms = [PassTransform(), PassTransform()]
 
     wired = wire_transforms(
-        transforms,
+        cast("list[TransformProtocol]", transforms),
         source_connection="inbox",
         final_sink="outbox",
         names=["normalize", "classify"],

@@ -13,7 +13,7 @@ from elspeth.contracts import PipelineRow
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.transforms.batch_replicate import BatchReplicate
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 
 def test_batch_replicate_returns_contract_with_multi_row_output():

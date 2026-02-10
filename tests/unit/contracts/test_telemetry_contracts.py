@@ -46,8 +46,8 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
+from elspeth.testing import make_field
 from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
-from tests.fixtures.factories import make_field
 from tests.fixtures.telemetry import MockTelemetryConfig, TelemetryTestExporter
 
 if TYPE_CHECKING:

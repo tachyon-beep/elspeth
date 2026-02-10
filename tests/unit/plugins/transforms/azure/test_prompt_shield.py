@@ -12,8 +12,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.testing import make_pipeline_row
-from tests.fixtures.factories import make_row
+from elspeth.testing import make_pipeline_row, make_row
 
 if TYPE_CHECKING:
     pass
@@ -388,6 +387,7 @@ class TestPromptShieldBatchProcessing:
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
             assert result.status == "success"
+            assert result.row is not None
             assert result.row.to_dict() == row_data
         finally:
             transform.close()

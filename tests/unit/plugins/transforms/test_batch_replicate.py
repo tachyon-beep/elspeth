@@ -177,6 +177,7 @@ class TestBatchReplicateTypeEnforcement:
 
         result = transform.process(rows, ctx)
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "all_rows_failed"
         assert "1 rows quarantined" in result.reason["error"]
         assert result.reason["row_errors"][0]["reason"] == "invalid_copies"
@@ -196,6 +197,7 @@ class TestBatchReplicateTypeEnforcement:
 
         result = transform.process(rows, ctx)
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "all_rows_failed"
         assert result.reason["row_errors"][0]["reason"] == "invalid_copies"
 
@@ -224,6 +226,7 @@ class TestBatchReplicateTypeEnforcement:
         assert result.rows[1]["id"] == 2
         assert result.rows[1]["copy_index"] == 1
         # Quarantine info in success_reason.metadata
+        assert result.success_reason is not None
         assert result.success_reason["metadata"]["quarantined_count"] == 1
         assert result.success_reason["metadata"]["quarantined"][0]["reason"] == "invalid_copies"
         assert result.success_reason["metadata"]["quarantined"][0]["row_data"]["id"] == 1

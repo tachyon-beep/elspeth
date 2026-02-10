@@ -23,6 +23,8 @@ Properties tested:
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
@@ -35,12 +37,16 @@ from elspeth.contracts.schema_contract import (
 )
 from elspeth.contracts.type_normalization import ALLOWED_CONTRACT_TYPES
 
+# Type aliases for Literal parameters
+FieldSource = Literal["declared", "inferred"]
+SchemaMode = Literal["FIXED", "FLEXIBLE", "OBSERVED"]
+
 # =============================================================================
 # Strategies
 # =============================================================================
 
 # Contract modes
-modes = st.sampled_from(["FIXED", "FLEXIBLE", "OBSERVED"])
+modes: st.SearchStrategy[SchemaMode] = st.sampled_from(["FIXED", "FLEXIBLE", "OBSERVED"])
 
 # Allowed Python types for FieldContract
 allowed_types = st.sampled_from(list(ALLOWED_CONTRACT_TYPES))
@@ -56,7 +62,7 @@ normalized_names = st.text(
 original_names = st.text(min_size=1, max_size=30)
 
 # Source values
-sources = st.sampled_from(["declared", "inferred"])
+sources: st.SearchStrategy[FieldSource] = st.sampled_from(["declared", "inferred"])
 
 
 @st.composite
@@ -448,7 +454,7 @@ class TestFieldUniquenessProperties:
 
     @given(name=normalized_names, mode=modes)
     @settings(max_examples=50)
-    def test_duplicate_normalized_name_raises(self, name: str, mode: str) -> None:
+    def test_duplicate_normalized_name_raises(self, name: str, mode: SchemaMode) -> None:
         """Property: Duplicate normalized_name in fields raises ValueError."""
         field_a = FieldContract(normalized_name=name, original_name="A", python_type=int, required=True, source="declared")
         field_b = FieldContract(normalized_name=name, original_name="B", python_type=str, required=False, source="inferred")

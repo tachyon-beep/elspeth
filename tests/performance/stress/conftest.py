@@ -540,7 +540,7 @@ class CollectingOutputPort:
 
         # Handle TransformResult
         if result.status == "success":
-            row_data = result.row if result.row is not None else {}
+            row_data: dict[str, Any] | PipelineRow = result.row if result.row is not None else {}
             with self._lock:
                 self.results.append((row_data, token))
         else:

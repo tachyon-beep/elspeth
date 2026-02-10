@@ -12,9 +12,6 @@ DYNAMIC_SCHEMA = {"mode": "observed"}
 # Standard quarantine routing for tests
 QUARANTINE_SINK = "quarantine"
 
-# Standard success routing for tests
-OUTPUT_SINK = "output"
-
 
 class TestCSVSource:
     """Tests for CSVSource plugin."""
@@ -42,7 +39,6 @@ class TestCSVSource:
                 "path": "/tmp/test.csv",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         assert hasattr(source, "output_schema")
@@ -56,7 +52,6 @@ class TestCSVSource:
                 "path": str(sample_csv),
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         rows = list(source.load(ctx))
@@ -81,7 +76,6 @@ class TestCSVSource:
                 "delimiter": ";",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         rows = list(source.load(ctx))
@@ -102,7 +96,6 @@ class TestCSVSource:
                 "encoding": "latin-1",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         rows = list(source.load(ctx))
@@ -118,7 +111,6 @@ class TestCSVSource:
                 "path": str(sample_csv),
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         list(source.load(ctx))  # Consume iterator
@@ -134,7 +126,6 @@ class TestCSVSource:
                 "path": "/nonexistent/file.csv",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         with pytest.raises(FileNotFoundError):
@@ -165,7 +156,7 @@ class TestCSVSourceConfigValidation:
         from elspeth.plugins.sources.csv_source import CSVSource
 
         with pytest.raises(PluginConfigError, match="path"):
-            CSVSource({"schema": DYNAMIC_SCHEMA, "on_validation_failure": QUARANTINE_SINK, "on_success": OUTPUT_SINK})
+            CSVSource({"schema": DYNAMIC_SCHEMA, "on_validation_failure": QUARANTINE_SINK})
 
     def test_empty_path_raises_error(self) -> None:
         """Empty path string raises PluginConfigError."""
@@ -178,7 +169,6 @@ class TestCSVSourceConfigValidation:
                     "path": "",
                     "schema": DYNAMIC_SCHEMA,
                     "on_validation_failure": QUARANTINE_SINK,
-                    "on_success": OUTPUT_SINK,
                 }
             )
 
@@ -193,7 +183,6 @@ class TestCSVSourceConfigValidation:
                     "path": "/tmp/test.csv",
                     "schema": DYNAMIC_SCHEMA,
                     "on_validation_failure": QUARANTINE_SINK,
-                    "on_success": OUTPUT_SINK,
                     "unknown_field": "value",
                 }
             )
@@ -205,7 +194,7 @@ class TestCSVSourceConfigValidation:
 
         # DataPluginConfig requires schema_config - Pydantic enforces this natively
         with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
-            CSVSource({"path": "/tmp/test.csv", "on_validation_failure": QUARANTINE_SINK, "on_success": OUTPUT_SINK})
+            CSVSource({"path": "/tmp/test.csv", "on_validation_failure": QUARANTINE_SINK})
 
     def test_missing_on_validation_failure_raises_error(self) -> None:
         """Missing on_validation_failure raises PluginConfigError."""
@@ -213,7 +202,7 @@ class TestCSVSourceConfigValidation:
         from elspeth.plugins.sources.csv_source import CSVSource
 
         with pytest.raises(PluginConfigError, match="on_validation_failure"):
-            CSVSource({"path": "/tmp/test.csv", "schema": DYNAMIC_SCHEMA, "on_success": OUTPUT_SINK})
+            CSVSource({"path": "/tmp/test.csv", "schema": DYNAMIC_SCHEMA})
 
 
 class TestCSVSourceQuarantineYielding:
@@ -237,7 +226,6 @@ class TestCSVSourceQuarantineYielding:
             {
                 "path": str(csv_file),
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {
                     "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
@@ -278,7 +266,6 @@ class TestCSVSourceQuarantineYielding:
             {
                 "path": str(csv_file),
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": {
                     "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
@@ -305,7 +292,6 @@ class TestCSVSourceQuarantineYielding:
             {
                 "path": str(csv_file),
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": DYNAMIC_SCHEMA,
             }
         )
@@ -343,7 +329,6 @@ class TestCSVSourceQuarantineYielding:
             {
                 "path": str(csv_file),
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": DYNAMIC_SCHEMA,
             }
         )
@@ -377,7 +362,6 @@ class TestCSVSourceQuarantineYielding:
             {
                 "path": str(csv_file),
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": DYNAMIC_SCHEMA,
             }
         )
@@ -418,7 +402,6 @@ class TestCSVSourceQuarantineYielding:
                 "path": str(csv_file),
                 "skip_rows": 1,  # Skip the comment line
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": DYNAMIC_SCHEMA,
             }
         )
@@ -461,7 +444,6 @@ class TestCSVSourceQuarantineYielding:
             {
                 "path": str(csv_file),
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": DYNAMIC_SCHEMA,
             }
         )
@@ -502,7 +484,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "normalize_fields": True,
             }
         )
@@ -524,7 +505,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
             }
@@ -546,7 +526,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "columns": ["id", "name", "amount"],
             }
         )
@@ -568,7 +547,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "normalize_fields": True,
             }
         )
@@ -588,7 +566,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
             }
@@ -617,7 +594,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "normalize_fields": True,
             }
         )
@@ -637,7 +613,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "normalize_fields": True,
             }
         )
@@ -657,7 +632,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "columns": ["id", "name", "amount"],
             }
         )
@@ -680,7 +654,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "columns": ["id", "name", "amount"],
             }
         )
@@ -703,7 +676,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 # normalize_fields defaults to False
             }
         )
@@ -724,7 +696,6 @@ class TestCSVSourceFieldNormalization:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "normalize_fields": True,
             }
         )

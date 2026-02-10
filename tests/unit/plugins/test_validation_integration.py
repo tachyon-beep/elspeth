@@ -47,7 +47,6 @@ def test_valid_config_creates_working_plugin():
         "path": "/tmp/test.csv",
         "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
-        "on_success": "output",
     }
 
     source = manager.create_source("csv", valid_config)
@@ -87,7 +86,6 @@ def test_validator_provides_field_level_errors():
         "skip_rows": "not_an_int",  # Should be int
         "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
-        "on_success": "output",
     }
 
     with pytest.raises(ValueError) as exc_info:

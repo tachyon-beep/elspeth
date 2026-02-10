@@ -186,7 +186,11 @@ class TestInjectionRejectionProperties:
             ExpressionParser(pattern)
 
     @given(
-        name=st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L",))),
+        name=st.text(
+            min_size=1,
+            max_size=20,
+            alphabet=st.characters(whitelist_categories=("L",)),  # type: ignore[arg-type]  # hypothesis stubs accept tuple
+        ),
     )
     @settings(max_examples=100)
     def test_arbitrary_names_rejected(self, name: str) -> None:
@@ -200,7 +204,11 @@ class TestInjectionRejectionProperties:
             ExpressionParser(name)
 
     @given(
-        attr=st.text(min_size=1, max_size=15, alphabet=st.characters(whitelist_categories=("L",))),
+        attr=st.text(
+            min_size=1,
+            max_size=15,
+            alphabet=st.characters(whitelist_categories=("L",)),  # type: ignore[arg-type]  # hypothesis stubs accept tuple
+        ),
     )
     @settings(max_examples=50)
     def test_arbitrary_row_attributes_rejected(self, attr: str) -> None:

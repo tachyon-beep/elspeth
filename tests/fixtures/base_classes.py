@@ -8,7 +8,7 @@ and transforms. Migrated from tests/conftest.py with no behavioral changes.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 
@@ -39,7 +39,6 @@ class _TestSourceBase:
 
     name: str
     output_schema: type[PluginSchema]
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     node_id: str | None = None
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
@@ -47,7 +46,7 @@ class _TestSourceBase:
     on_success: str = "default"
 
     def __init__(self) -> None:
-        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
         self._schema_contract: SchemaContract | None = None
 
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
@@ -135,7 +134,6 @@ class _TestSinkBase:
     """Base class for test sinks implementing SinkProtocol."""
 
     name: str
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     input_schema: type[PluginSchema] = _TestSchema
     idempotent: bool = True
     node_id: str | None = None
@@ -143,7 +141,7 @@ class _TestSinkBase:
     plugin_version = "1.0.0"
 
     def __init__(self) -> None:
-        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -162,7 +160,6 @@ class _TestTransformBase:
     """Base class for test transforms implementing TransformProtocol."""
 
     name: str
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     input_schema: type[PluginSchema] = _TestSchema
     output_schema: type[PluginSchema] = _TestSchema
     node_id: str | None = None
@@ -185,7 +182,7 @@ class _TestTransformBase:
         return self._on_success
 
     def __init__(self) -> None:
-        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
 
     def on_start(self, ctx: Any) -> None:
         pass

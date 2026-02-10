@@ -45,7 +45,6 @@ class TestCSVSourceContract:
                 "path": str(temp_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
 
@@ -67,7 +66,6 @@ class TestCSVSourceContract:
                     "fields": ["id: int", "name: str", "score: float"],
                 },
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
 
@@ -85,7 +83,6 @@ class TestCSVSourceContract:
                 "path": str(temp_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
 
@@ -103,7 +100,6 @@ class TestCSVSourceContract:
                 "path": str(temp_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
 
@@ -132,7 +128,6 @@ class TestCSVSourceContract:
                 "path": str(csv_file),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "normalize_fields": True,
             }
         )
@@ -153,7 +148,6 @@ class TestCSVSourceContract:
                 "path": str(temp_csv),
                 "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
 
@@ -188,7 +182,6 @@ class TestCSVSourceContract:
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
             }
         )
 

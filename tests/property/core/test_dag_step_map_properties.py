@@ -7,7 +7,7 @@ source=0, transforms=1..N, aggregations next, config gates last.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -15,6 +15,7 @@ from hypothesis import strategies as st
 from elspeth.contracts.types import AggregationName, GateName
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph
+from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.plugins.results import TransformResult
 from tests.fixtures.base_classes import _TestTransformBase
 from tests.fixtures.factories import wire_transforms
@@ -74,7 +75,7 @@ def _build_graph(
             )
         )
     wired_transforms = wire_transforms(
-        transforms,
+        cast(list[TransformProtocol], transforms),
         source_connection="t0_in",
         final_sink=first_post_transform_connection,
         names=transform_names,
@@ -144,11 +145,11 @@ def _build_graph(
         ]
 
     graph = ExecutionGraph.from_plugin_instances(
-        source=source,
+        source=cast(SourceProtocol, source),
         source_settings=source_settings,
         transforms=wired_transforms,
-        sinks=sinks,
-        aggregations=aggregations,
+        sinks=cast("dict[str, SinkProtocol]", sinks),
+        aggregations=cast("dict[str, tuple[TransformProtocol, AggregationSettings]]", aggregations),
         gates=gates,
         coalesce_settings=coalesce_settings,
     )

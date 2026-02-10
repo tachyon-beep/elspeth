@@ -21,8 +21,7 @@ from elspeth.plugins.transforms.web_scrape_errors import (
     RateLimitError,
     ServerError,
 )
-from elspeth.testing import make_pipeline_row
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_pipeline_row, make_row
 
 # Stable test IP used for all DNS resolution mocks
 _TEST_IP = "104.18.27.120"
@@ -68,15 +67,13 @@ def mock_ctx(payload_store):
 
 
 def test_web_scrape_wires_on_success_and_on_error() -> None:
-    """WebScrapeTransform should expose routing config from TransformDataConfig."""
+    """WebScrapeTransform routing is set via BaseTransform properties (bridge injection)."""
     transform = WebScrapeTransform(
         {
             "schema": {"mode": "observed"},
             "url_field": "url",
             "content_field": "page_content",
             "fingerprint_field": "page_fingerprint",
-            "on_success": "output",
-            "on_error": "errors",
             "http": {
                 "abuse_contact": "test@example.com",
                 "scraping_reason": "Unit testing web scrape transform",
@@ -84,6 +81,13 @@ def test_web_scrape_wires_on_success_and_on_error() -> None:
         }
     )
 
+    # Routing is injected by the instantiation bridge, not config
+    assert transform.on_success is None
+    assert transform.on_error is None
+
+    # Verify bridge-style injection works
+    transform.on_success = "output"
+    transform.on_error = "errors"
     assert transform.on_success == "output"
     assert transform.on_error == "errors"
 

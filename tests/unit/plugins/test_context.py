@@ -431,7 +431,7 @@ class TestTokenField:
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema_contract import SchemaContract
-        from tests.fixtures.factories import make_field, make_row
+        from elspeth.testing import make_field, make_row
 
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
@@ -455,7 +455,7 @@ class TestTokenField:
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema_contract import SchemaContract
-        from tests.fixtures.factories import make_field, make_row
+        from elspeth.testing import make_field, make_row
 
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
@@ -479,7 +479,7 @@ class TestTokenField:
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema_contract import SchemaContract
-        from tests.fixtures.factories import make_field, make_row
+        from elspeth.testing import make_field, make_row
 
         ctx = PluginContext(run_id="test-run", config={})
         assert ctx.token is None

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 
@@ -37,6 +37,7 @@ from elspeth.core.landscape.schema import (
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.protocols import TransformProtocol
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
@@ -75,9 +76,8 @@ class _SelectiveErrorTransform(BaseTransform):
         if row["id"] in self._fail_ids:
             return TransformResult.error(
                 {
-                    "reason": "selective_error",
-                    "row_id": row["id"],
-                    "message": f"Row {row['id']} deliberately failed",
+                    "reason": "test_error",
+                    "error": f"Row {row['id']} deliberately failed",
                 }
             )
         return TransformResult.success(
@@ -100,7 +100,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     source_settings = SourceSettings(plugin=config.source.name, on_success=source_connection, options={})
 
     # Wire transforms with explicit routing
-    wired = wire_transforms(transforms, source_connection=source_connection, final_sink=sink_name)
+    wired = wire_transforms(cast("list[TransformProtocol]", transforms), source_connection=source_connection, final_sink=sink_name)
 
     graph = ExecutionGraph.from_plugin_instances(
         source=config.source,
@@ -159,8 +159,10 @@ class TestPartialFailure:
             errors = conn.execute(select(transform_errors_table).where(transform_errors_table.c.run_id == result.run_id)).fetchall()
 
         assert len(errors) == 3
-        error_reasons = {json.loads(e.error_details_json)["row_id"] for e in errors}
-        assert error_reasons == fail_ids
+        for e in errors:
+            details = json.loads(e.error_details_json)
+            assert details["reason"] == "test_error"
+            assert "deliberately failed" in details["error"]
 
         # 4. All 10 rows have terminal outcomes
         with db.engine.connect() as conn:
@@ -247,7 +249,8 @@ class TestPartialFailure:
 
         assert len(errors) == 1
         error_details = json.loads(errors[0].error_details_json)
-        assert error_details["row_id"] == 0
+        assert error_details["reason"] == "test_error"
+        assert "Row 0 deliberately failed" in error_details["error"]
 
         db.close()
 
@@ -290,7 +293,8 @@ class TestPartialFailure:
 
         assert len(errors) == 1
         error_details = json.loads(errors[0].error_details_json)
-        assert error_details["row_id"] == 4
+        assert error_details["reason"] == "test_error"
+        assert "Row 4 deliberately failed" in error_details["error"]
 
         # All 5 rows have terminal outcomes
         with db.engine.connect() as conn:

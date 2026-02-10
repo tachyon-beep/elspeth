@@ -38,7 +38,7 @@ from hypothesis import strategies as st
 
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.contracts.schema_contract import PipelineRow
-from tests.fixtures.factories import make_pipeline_row
+from elspeth.testing import make_pipeline_row
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext

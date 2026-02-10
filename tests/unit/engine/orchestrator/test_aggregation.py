@@ -12,6 +12,7 @@ These are pure delegation functions — no internal state — tested via mocks.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -26,7 +27,8 @@ from elspeth.engine.orchestrator.aggregation import (
     handle_incomplete_batches,
 )
 from elspeth.engine.orchestrator.types import PipelineConfig
-from tests.fixtures.factories import make_row, make_token_info
+from elspeth.plugins.protocols import TransformProtocol
+from elspeth.testing import make_row, make_token_info
 
 # =============================================================================
 # Helpers
@@ -46,8 +48,8 @@ def _make_batch_transform(*, node_id: str, is_batch_aware: bool = True) -> Mock:
 
 def _make_config(
     *,
-    transforms: list | None = None,
-    aggregation_settings: dict | None = None,
+    transforms: list[Any] | None = None,
+    aggregation_settings: dict[str, Any] | None = None,
 ) -> PipelineConfig:
     """Build a minimal PipelineConfig for aggregation tests."""
     source = Mock()
@@ -331,7 +333,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -359,7 +361,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([failed], [])
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -390,7 +392,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [downstream_result]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -424,7 +426,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = []
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         check_aggregation_timeouts(
             config=config,
@@ -454,8 +456,8 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([], [work_item])
         processor.process_token.return_value = [routed]
 
-        pending = {"output": [], "risk_sink": []}
-        lookup = {"agg-1": (agg_transform, 0)}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -486,7 +488,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [quarantined]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -515,7 +517,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [coalesced]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -545,7 +547,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [failed]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -575,7 +577,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [completed]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -609,7 +611,7 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = outcomes
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -639,7 +641,7 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
@@ -850,7 +852,7 @@ class TestFlushRemainingAggregationBuffers:
         processor.handle_timeout_flush.return_value = ([], [work_item])
         processor.process_token.return_value = [routed]
 
-        pending = {"output": [], "risk": []}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk": []}
         callback = Mock()
 
         result = flush_remaining_aggregation_buffers(
@@ -933,7 +935,7 @@ class TestFlushRemainingAggregationBuffers:
         processor.get_aggregation_buffer_count.return_value = 1
         processor.handle_timeout_flush.return_value = ([completed], [])
 
-        pending = {"output": [], "path_a": []}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "path_a": []}
 
         result = flush_remaining_aggregation_buffers(
             config=config,

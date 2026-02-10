@@ -9,7 +9,7 @@ import pytest
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.clients.llm import LLMResponse
 from elspeth.plugins.llm.base import BaseLLMTransform
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 
 class MockLLMTransform(BaseLLMTransform):

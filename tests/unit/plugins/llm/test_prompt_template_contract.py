@@ -5,7 +5,7 @@ import pytest
 
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.llm.templates import PromptTemplate, RenderedPrompt
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 class TestPromptTemplateWithContract:

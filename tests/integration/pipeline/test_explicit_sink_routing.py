@@ -15,16 +15,16 @@ ADR-required tests per bead amoc specification.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from elspeth.contracts import PipelineRow, RunStatus
 from elspeth.core.config import AggregationSettings, CoalesceSettings, ElspethSettings, GateSettings, SourceSettings, TriggerConfig
-from elspeth.core.dag import GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
@@ -74,7 +74,7 @@ class AddFieldTransform(BaseTransform):
         output = {**row.to_dict(), self._field_name: self._field_value}
         return TransformResult.success(
             make_pipeline_row(output),
-            success_reason={"action": "add_field", "field": self._field_name},
+            success_reason={"action": "add_field", "metadata": {"field": self._field_name}},
         )
 
 
@@ -89,7 +89,7 @@ class BatchPassthroughTransform(BaseTransform):
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
 
-    def process(self, rows: list[PipelineRow], ctx: Any) -> TransformResult:
+    def process(self, rows: list[PipelineRow], ctx: Any) -> TransformResult:  # type: ignore[override]  # Batch-aware process takes list[PipelineRow]
         from elspeth.plugins.results import TransformResult
 
         # Sum values from the batch
@@ -281,10 +281,10 @@ class TestExplicitSinkRouting:
 
         # Build graph with transform as regular transform (on_success wires to sink)
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
+            source=cast(SourceProtocol, source),
             source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
-            transforms=wire_transforms([transform], source_connection="source_out", final_sink="output"),
-            sinks={"output": sink},
+            transforms=wire_transforms(cast("list[TransformProtocol]", [transform]), source_connection="source_out", final_sink="output"),
+            sinks=cast("dict[str, SinkProtocol]", {"output": sink}),
             aggregations={},
             gates=[],
         )

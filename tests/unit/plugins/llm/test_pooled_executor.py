@@ -8,6 +8,7 @@ from typing import Any
 
 from elspeth.contracts import TransformResult
 from elspeth.plugins.pooling import BufferEntry, CapacityError, PoolConfig, PooledExecutor, RowContext
+from elspeth.testing import make_pipeline_row
 
 
 class TestPooledExecutorInit:
@@ -100,7 +101,7 @@ class TestPooledExecutorBatch:
             # Varying delays to cause out-of-order completion
             time.sleep(0.01 * (3 - idx))  # idx 0 slowest, idx 2 fastest
             return TransformResult.success(
-                {"idx": idx, "result": f"done_{idx}"},
+                make_pipeline_row({"idx": idx, "result": f"done_{idx}"}),
                 success_reason={"action": "processed"},
             )
 
@@ -139,7 +140,7 @@ class TestPooledExecutorBatch:
         def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
             with lock:
                 received_state_ids.append((row["idx"], state_id))
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": i}, state_id=f"unique_state_{i}", row_index=i) for i in range(3)]
 
@@ -183,7 +184,7 @@ class TestPooledExecutorBatch:
             with lock:
                 current_concurrent -= 1
 
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
 
@@ -242,7 +243,7 @@ class TestPooledExecutorStats:
 
         def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
             time.sleep(0.05)  # Long enough for concurrent execution
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         # Run 5 items through pool_size=3 - should see max_concurrent=3
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
@@ -275,7 +276,7 @@ class TestPooledExecutorStats:
             # First call raises capacity error to trigger throttle
             if current_count == 1:
                 raise CapacityError(429, "Rate limited")
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": 0}, state_id="state_0", row_index=0)]
         executor.execute_batch(contexts, mock_process)
@@ -293,7 +294,7 @@ class TestPooledExecutorStats:
 
         def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
             time.sleep(0.02)
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         # First batch with 4 items
         contexts1 = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(4)]
@@ -331,7 +332,7 @@ class TestPooledExecutorCapacityHandling:
             # First call raises capacity error, second succeeds
             if current_count == 1:
                 raise CapacityError(429, "Rate limited")
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": 0}, state_id="state_0", row_index=0)]
 
@@ -437,7 +438,7 @@ class TestPooledExecutorCapacityHandling:
                 row1_completed.wait(timeout=2)  # Wait for row 1 to complete
                 with lock:
                     execution_order.append(f"end_{idx}")
-                return TransformResult.success(row, success_reason={"action": "processed"})
+                return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
             else:
                 # Row 1: Wait until row 0 is in retry sleep, then complete
                 row0_in_retry_sleep.wait(timeout=2)
@@ -445,7 +446,7 @@ class TestPooledExecutorCapacityHandling:
                 with lock:
                     execution_order.append(f"end_{idx}")
                 row1_completed.set()
-                return TransformResult.success(row, success_reason={"action": "processed"})
+                return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [
             RowContext(row={"idx": 0}, state_id="state_0", row_index=0),
@@ -505,7 +506,7 @@ class TestPooledExecutorCapacityHandling:
             if current_count == 1:
                 raise CapacityError(429, f"Rate limited row {idx}")
             return TransformResult.success(
-                {"idx": idx, "attempts": current_count},
+                make_pipeline_row({"idx": idx, "attempts": current_count}),
                 success_reason={"action": "processed"},
             )
 
@@ -563,14 +564,14 @@ class TestPooledExecutorConcurrentBatches:
         def process_a(row: dict[str, Any], state_id: str) -> TransformResult:
             time.sleep(0.02)  # Simulate work
             return TransformResult.success(
-                {"batch": "A", "idx": row["idx"]},
+                make_pipeline_row({"batch": "A", "idx": row["idx"]}),
                 success_reason={"action": "processed"},
             )
 
         def process_b(row: dict[str, Any], state_id: str) -> TransformResult:
             time.sleep(0.02)  # Simulate work
             return TransformResult.success(
-                {"batch": "B", "idx": row["idx"]},
+                make_pipeline_row({"batch": "B", "idx": row["idx"]}),
                 success_reason={"action": "processed"},
             )
 
@@ -642,7 +643,7 @@ class TestPooledExecutorDispatchPacing:
             with lock:
                 dispatch_times.append(time.monotonic())
             time.sleep(0.01)  # Minimal work
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(8)]
 
@@ -678,7 +679,7 @@ class TestPooledExecutorDispatchPacing:
             with lock:
                 dispatch_times.append(time.monotonic())
             time.sleep(0.2)  # Longer than total delay budget
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         # Exactly pool_size rows - all would dispatch together in buggy version
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(4)]
@@ -714,7 +715,7 @@ class TestPooledExecutorOrderingMetadata:
         executor = PooledExecutor(config)
 
         def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(3)]
 
@@ -740,7 +741,7 @@ class TestPooledExecutorOrderingMetadata:
 
         def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
             time.sleep(0.01)
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
 
@@ -765,7 +766,7 @@ class TestPooledExecutorOrderingMetadata:
             idx = row["idx"]
             # Reverse delay: idx 0 slowest, idx 4 fastest
             time.sleep(0.05 * (5 - idx))
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
 
@@ -796,7 +797,7 @@ class TestPooledExecutorOrderingMetadata:
 
         def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
             time.sleep(0.01)
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(2)]
 
@@ -831,7 +832,7 @@ class TestPooledExecutorOrderingMetadata:
                 time.sleep(0.1)  # Slow - holds up emission of item 1
             else:
                 time.sleep(0.01)  # Fast - completes but waits for item 0
-            return TransformResult.success(row, success_reason={"action": "processed"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "processed"})
 
         contexts = [
             RowContext(row={"idx": 0}, state_id="state_0", row_index=0),
@@ -871,7 +872,7 @@ class TestPooledExecutorBugFixes:
 
             if current == 1:
                 raise CapacityError(429, "Rate limited")
-            return TransformResult.success(row, success_reason={"action": "ok"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "ok"})
 
         # Batch 1: triggers 1 capacity retry
         ctx1 = [RowContext(row={"v": 1}, state_id="s1", row_index=0)]
@@ -883,7 +884,7 @@ class TestPooledExecutorBugFixes:
         call_count = 0
 
         def always_succeed(row: dict[str, Any], state_id: str) -> TransformResult:
-            return TransformResult.success(row, success_reason={"action": "ok"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "ok"})
 
         ctx2 = [RowContext(row={"v": 2}, state_id="s2", row_index=0)]
         executor.execute_batch(ctx2, always_succeed)
@@ -920,6 +921,7 @@ class TestPooledExecutorBugFixes:
         # Should have stopped with a shutdown_requested error, not run for 30s
         assert len(entries) == 1
         assert entries[0].result.status == "error"
+        assert entries[0].result.reason is not None
         assert entries[0].result.reason["reason"] == "shutdown_requested"
 
     def test_dispatch_gate_uses_only_static_delay(self) -> None:
@@ -948,7 +950,7 @@ class TestPooledExecutorBugFixes:
 
         def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
             dispatch_times.append(time.monotonic())
-            return TransformResult.success(row, success_reason={"action": "ok"})
+            return TransformResult.success(make_pipeline_row(row), success_reason={"action": "ok"})
 
         ctx = [RowContext(row={"v": i}, state_id=f"s{i}", row_index=i) for i in range(3)]
         executor.execute_batch(ctx, mock_process)

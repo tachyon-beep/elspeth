@@ -259,6 +259,7 @@ class TestMultiQueryIntegration:
             # Verify audit trail - LLM calls were recorded via AuditedLLMClient
             from elspeth.contracts import CallStatus, CallType
 
+            assert ctx.state_id is not None
             calls = recorder.get_calls(ctx.state_id)
             llm_calls = [c for c in calls if c.call_type == CallType.LLM]
             assert len(llm_calls) == 10, f"Expected 10 LLM calls recorded, got {len(llm_calls)}"
@@ -353,6 +354,7 @@ class TestMultiQueryIntegration:
             # Verify audit trail - LLM calls recorded for at least the last state
             from elspeth.contracts import CallStatus, CallType
 
+            assert ctx.state_id is not None
             calls = recorder.get_calls(ctx.state_id)
             llm_calls = [c for c in calls if c.call_type == CallType.LLM]
             assert len(llm_calls) == 2, f"Expected 2 LLM calls for last row, got {len(llm_calls)}"

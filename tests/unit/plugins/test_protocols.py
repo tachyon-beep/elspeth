@@ -211,6 +211,7 @@ class TestTransformProtocol:
 
         result = transform.process(make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"value": 21, "doubled": 42}
 
 
@@ -240,6 +241,7 @@ class TestTransformBatchSupport:
         transform = SingleTransform({})
         ctx = PluginContext(run_id="test", config={})
         result = transform.process(make_pipeline_row({"value": 1}), ctx)
+        assert result.row is not None
         assert result.row.to_dict() == {"processed": 1}
 
     def test_transform_process_batch_rows(self) -> None:
@@ -275,6 +277,7 @@ class TestTransformBatchSupport:
 
         # Batch mode
         result = transform.process([make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx)
+        assert result.row is not None
         assert result.row.to_dict() == {"total": 6, "count": 3}
 
     def test_transform_is_batch_aware_default_false(self) -> None:

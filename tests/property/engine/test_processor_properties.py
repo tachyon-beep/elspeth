@@ -98,7 +98,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
         class _AggTransform(_TestTransformBase):
             name = agg_settings.plugin
 
-            def process(self, row: dict[str, Any], ctx: Any) -> Any:
+            def process(self, row: Any, ctx: Any) -> Any:
                 from elspeth.plugins.results import TransformResult
 
                 return TransformResult.success(row, success_reason={"action": "test"})

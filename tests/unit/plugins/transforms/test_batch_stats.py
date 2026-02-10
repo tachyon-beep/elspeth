@@ -15,7 +15,7 @@ import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -265,6 +265,7 @@ class TestBatchStatsFloatOverflow:
         result = transform.process(rows, ctx)
 
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "float_overflow"
 
     def test_no_skipped_field_when_all_finite(self, ctx: PluginContext) -> None:
@@ -281,6 +282,7 @@ class TestBatchStatsFloatOverflow:
         result = transform.process(rows, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert "skipped_non_finite" not in result.row.to_dict()
 
 
@@ -310,6 +312,7 @@ class TestBatchStatsGroupByHomogeneity:
         result = transform.process(rows, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["category"] == "sales"
 
     def test_heterogeneous_group_by_raises(self, ctx: PluginContext) -> None:
@@ -340,4 +343,5 @@ class TestBatchStatsGroupByHomogeneity:
         result = transform.process(rows, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert "category" not in result.row.to_dict()

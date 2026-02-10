@@ -63,6 +63,7 @@ class TestSharedBatchAdapter:
         result = waiter.wait(timeout=5.0)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"output": "done"}
 
         thread.join()
@@ -125,6 +126,9 @@ class TestSharedBatchAdapter:
         result2 = waiter2.wait(timeout=5.0)
         result3 = waiter3.wait(timeout=5.0)
 
+        assert result1.row is not None
+        assert result2.row is not None
+        assert result3.row is not None
         assert result1.row.to_dict() == {"value": 1}
         assert result2.row.to_dict() == {"value": 2}
         assert result3.row.to_dict() == {"value": 3}
@@ -152,6 +156,7 @@ class TestSharedBatchAdapter:
         elapsed = time.perf_counter() - start
 
         assert got_result.status == "success"
+        assert got_result.row is not None
         assert got_result.row.to_dict() == {"fast": True}
         assert elapsed < 0.1  # Should be nearly instant
 
@@ -273,7 +278,9 @@ class TestSharedBatchAdapter:
         assert len(errors) == 0, f"Errors occurred: {errors}"
         assert len(results) == 5
         for i in range(5):
-            assert results[f"token-{i}"].row.to_dict() == {"index": i}
+            row = results[f"token-{i}"].row
+            assert row is not None
+            assert row.to_dict() == {"index": i}
 
     def test_clear(self) -> None:
         """Test that clear() removes all state."""
@@ -334,10 +341,12 @@ class TestSharedBatchAdapter:
 
         # First waiter gets the stale result (it's still registered)
         result1 = waiter1.wait(timeout=1.0)
+        assert result1.row is not None
         assert result1.row.to_dict() == {"result": "stale"}
 
         # Retry waiter gets the fresh result (correct behavior!)
         result2 = waiter2.wait(timeout=1.0)
+        assert result2.row is not None
         assert result2.row.to_dict() == {"result": "fresh"}
 
     def test_timeout_race_cleans_up_late_result(self) -> None:

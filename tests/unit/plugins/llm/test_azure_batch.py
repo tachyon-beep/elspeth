@@ -151,7 +151,6 @@ class TestAzureBatchConfig:
         assert config.response_field == "llm_response"
         assert config.poll_interval_seconds == 300
         assert config.max_wait_hours == 24
-        assert config.on_error is None
 
     def test_custom_values(self) -> None:
         """Config accepts custom values."""
@@ -170,7 +169,6 @@ class TestAzureBatchConfig:
                 "response_field": "analysis",
                 "poll_interval_seconds": 600,
                 "max_wait_hours": 12,
-                "on_error": "error_sink",
             }
         )
 
@@ -181,7 +179,6 @@ class TestAzureBatchConfig:
         assert config.response_field == "analysis"
         assert config.poll_interval_seconds == 600
         assert config.max_wait_hours == 12
-        assert config.on_error == "error_sink"
 
     def test_temperature_bounds(self) -> None:
         """Temperature must be between 0.0 and 2.0."""

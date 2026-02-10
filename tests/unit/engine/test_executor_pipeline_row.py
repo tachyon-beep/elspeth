@@ -17,11 +17,11 @@ import pytest
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 
-def _make_contract():
+def _make_contract() -> SchemaContract:
     """Create a simple test contract."""
     return SchemaContract(
         fields=(
@@ -38,7 +38,7 @@ def _make_contract():
     )
 
 
-def _make_output_contract():
+def _make_output_contract() -> SchemaContract:
     """Create a contract for transform output (different from input)."""
     return SchemaContract(
         fields=(

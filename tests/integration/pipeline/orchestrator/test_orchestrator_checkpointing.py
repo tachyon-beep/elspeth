@@ -319,8 +319,8 @@ class TestOrchestratorCheckpointing:
         graph._transform_id_map = {0: NodeID("transform_0")}
         graph._config_gate_id_map = {GateName("split"): NodeID("config_gate_split")}
         graph._route_resolution_map = {
-            (NodeID("config_gate_split"), "true"): RouteDestination.sink("good"),
-            (NodeID("config_gate_split"), "false"): RouteDestination.sink("bad"),
+            (NodeID("config_gate_split"), "true"): RouteDestination.sink(SinkName("good")),
+            (NodeID("config_gate_split"), "false"): RouteDestination.sink(SinkName("bad")),
         }
         orchestrator = Orchestrator(
             db=landscape_db,

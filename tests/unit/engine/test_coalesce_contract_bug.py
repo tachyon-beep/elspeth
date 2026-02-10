@@ -9,7 +9,7 @@ for each branch name with python_type=object, instead of an empty FLEXIBLE contr
 """
 
 from elspeth.contracts.schema_contract import SchemaContract
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 
 def _make_nested_merge_contract(

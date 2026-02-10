@@ -8,7 +8,7 @@ import pytest
 
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field, make_pipeline_row
 
 
 class TestTransformResultWithPipelineRow:
@@ -42,11 +42,12 @@ class TestTransformResultWithPipelineRow:
     def test_success_with_dict(self) -> None:
         """TransformResult.success() still accepts plain dicts (internal use)."""
         result = TransformResult.success(
-            row={"id": 1},
+            row=make_pipeline_row({"id": 1}),
             success_reason={"action": "processed"},
         )
 
-        assert result.row == {"id": 1}
+        assert result.row is not None
+        assert result.row.to_dict() == {"id": 1}
 
     def test_success_multi_with_pipeline_rows(self, sample_contract: SchemaContract) -> None:
         """success_multi() accepts list of PipelineRow objects."""
@@ -83,6 +84,7 @@ class TestTransformResultWithPipelineRow:
             success_reason={"action": "processed"},
         )
 
+        assert result.row is not None
         assert result.row.contract.mode == "FIXED"
         assert len(result.row.contract.fields) == 2
 
@@ -97,5 +99,6 @@ class TestTransformResultWithPipelineRow:
             success_reason={"action": "split"},
         )
 
+        assert result.rows is not None
         for row in result.rows:
             assert row.contract is sample_contract

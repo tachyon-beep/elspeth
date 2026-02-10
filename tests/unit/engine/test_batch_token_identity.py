@@ -27,8 +27,7 @@ from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
-from elspeth.testing import make_pipeline_row
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field, make_pipeline_row
 from tests.unit.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 # ---------------------------------------------------------------------------
@@ -115,7 +114,7 @@ class SumTransform(BaseTransform):
             fields = tuple(make_field(key) for key in output_row)
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
             return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "sum"})
-        return TransformResult.success(rows.to_dict(), success_reason={"action": "passthrough"})
+        return TransformResult.success(rows, success_reason={"action": "passthrough"})
 
 
 class TestBatchTokenIdentity:

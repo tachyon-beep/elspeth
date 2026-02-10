@@ -78,12 +78,12 @@ def _insert_checkpoint_prereqs(
 
 def test_create_checkpoint_requires_graph(checkpoint_manager: CheckpointManager) -> None:
     with pytest.raises(ValueError, match="graph parameter is required"):
-        checkpoint_manager.create_checkpoint(  # type: ignore[arg-type]
+        checkpoint_manager.create_checkpoint(
             run_id="run-001",
             token_id="tok-001",
             node_id="node-001",
             sequence_number=1,
-            graph=None,
+            graph=None,  # type: ignore[arg-type]  # testing None rejection
         )
 
 

@@ -8,11 +8,11 @@ import pytest
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
-from tests.fixtures.factories import make_field, make_row, make_source_row
+from elspeth.testing import make_field, make_row, make_source_row
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 
-def _make_contract():
+def _make_contract() -> SchemaContract:
     """Create a minimal schema contract for testing."""
     return SchemaContract(
         fields=(

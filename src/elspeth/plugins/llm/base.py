@@ -36,7 +36,6 @@ class LLMConfig(TransformDataConfig):
 
     Extends TransformDataConfig to get:
     - schema: Input/output schema configuration (REQUIRED)
-    - on_error: Sink for failed rows (optional)
     - required_input_fields: Fields this transform requires (optional but recommended)
 
     IMPORTANT: Template Field Requirements

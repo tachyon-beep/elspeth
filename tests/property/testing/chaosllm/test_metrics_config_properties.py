@@ -10,6 +10,7 @@ Tests the invariants of:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 import pytest
 from hypothesis import assume, given, settings
@@ -322,7 +323,7 @@ class TestDeepMerge:
         ),
     )
     @settings(max_examples=50)
-    def test_merge_with_empty_is_identity(self, base: dict) -> None:
+    def test_merge_with_empty_is_identity(self, base: dict[str, Any]) -> None:
         """Property: Merging with empty dict returns base unchanged."""
         result = _deep_merge(base, {})
         assert result == base
@@ -336,7 +337,7 @@ class TestDeepMerge:
         ),
     )
     @settings(max_examples=50)
-    def test_merge_empty_with_override(self, override: dict) -> None:
+    def test_merge_empty_with_override(self, override: dict[str, Any]) -> None:
         """Property: Merging empty base with override returns override."""
         result = _deep_merge({}, override)
         assert result == override

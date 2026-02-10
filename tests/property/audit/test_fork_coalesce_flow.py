@@ -28,7 +28,6 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.testing import make_pipeline_row
-from tests.fixtures.factories import wire_transforms
 from tests.fixtures.base_classes import (
     _TestSchema,
     _TestSinkBase,
@@ -37,6 +36,7 @@ from tests.fixtures.base_classes import (
     as_source,
     as_transform,
 )
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.stores import MockPayloadStore
 
 if TYPE_CHECKING:
@@ -190,6 +190,7 @@ class _CollectSink(_TestSinkBase):
     name = "coalesce_test_sink"
 
     def __init__(self, sink_name: str = "default") -> None:
+        super().__init__()
         self.name = sink_name
         self.results: list[dict[str, Any]] = []
 

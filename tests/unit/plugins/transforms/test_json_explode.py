@@ -419,6 +419,7 @@ class TestJSONExplodeContractPropagation:
         result = transform.process(row, ctx)
 
         assert result.status == "success"
+        assert result.rows is not None
         assert isinstance(result.rows[0], PipelineRow)
 
         field_names = {f.normalized_name for f in result.rows[0].contract.fields}

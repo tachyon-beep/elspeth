@@ -47,7 +47,7 @@ class _AddFieldTransform(BaseTransform):
         enriched = {**data, "stages": stages, f"processed_{self._stage_name}": True}
         return TransformResult.success(
             PipelineRow(enriched, row.contract),
-            success_reason={"action": "add_field", "stage": self._stage_name},
+            success_reason={"action": "add_field", "metadata": {"stage": self._stage_name}},
         )
 
 

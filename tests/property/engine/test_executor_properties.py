@@ -26,6 +26,7 @@ from hypothesis import strategies as st
 from elspeth.contracts import PipelineRow, RoutingAction, TransformErrorReason, TransformResult
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import ConfigGateReason, PluginGateReason
+from elspeth.testing import make_pipeline_row
 from tests.strategies.ids import branch_names, multiple_branches
 from tests.strategies.json import dict_keys, json_primitives, row_data
 
@@ -113,10 +114,12 @@ class TestTransformResultProperties:
         was passed in. This is critical for audit integrity - any corruption
         would break lineage queries.
         """
-        result = TransformResult.success(data, success_reason={"action": "test"})
+        row = make_pipeline_row(data)
+        result = TransformResult.success(row, success_reason={"action": "test"})
 
         assert result.status == "success"
-        assert result.row == data
+        assert result.row is not None
+        assert result.row.to_dict() == data
         assert result.reason is None
         assert result.rows is None
         assert not result.is_multi_row
@@ -127,14 +130,15 @@ class TestTransformResultProperties:
     def test_success_result_row_is_same_object(self, data: dict[str, Any]) -> None:
         """Property: success() does not copy the row data.
 
-        The row dict is passed through by reference for efficiency.
-        This means mutations to the original dict would affect the result.
+        The PipelineRow is passed through by reference for efficiency.
+        This means mutations to the original would affect the result.
         Plugins must not mutate input data after returning.
         """
-        result = TransformResult.success(data, success_reason={"action": "test"})
+        row = make_pipeline_row(data)
+        result = TransformResult.success(row, success_reason={"action": "test"})
 
         # Same object identity
-        assert result.row is data
+        assert result.row is row
 
     @given(rows=st.lists(row_data, min_size=1, max_size=5))
     @settings(max_examples=100)

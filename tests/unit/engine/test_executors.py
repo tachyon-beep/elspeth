@@ -13,6 +13,7 @@ All tests mock the LandscapeRecorder and SpanFactory to isolate executor logic.
 from __future__ import annotations
 
 from contextlib import nullcontext
+from typing import Any
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -33,7 +34,7 @@ from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
 from elspeth.engine.executors import (
     AggregationExecutor,
@@ -43,7 +44,7 @@ from elspeth.engine.executors import (
     SinkExecutor,
     TransformExecutor,
 )
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 # =============================================================================
@@ -69,7 +70,7 @@ def _make_contract() -> SchemaContract:
 
 
 def _make_token(
-    data: dict | None = None,
+    data: dict[str, Any] | None = None,
     contract: SchemaContract | None = None,
     row_id: str = "row_1",
     token_id: str = "tok_1",
@@ -107,7 +108,7 @@ def _make_span_factory() -> MagicMock:
 
 def _make_transform(
     name: str = "test_transform",
-    node_id: str = "node_1",
+    node_id: str | None = "node_1",
     on_error: str | None = None,
     adds_fields: bool = False,
 ) -> MagicMock:
@@ -123,7 +124,7 @@ def _make_transform(
 
 def _make_gate(
     name: str = "test_gate",
-    node_id: str = "gate_1",
+    node_id: str | None = "gate_1",
 ) -> MagicMock:
     """Create a mock gate."""
     gate = MagicMock()
@@ -134,7 +135,7 @@ def _make_gate(
 
 def _make_sink(
     name: str = "test_sink",
-    node_id: str = "sink_1",
+    node_id: str | None = "sink_1",
 ) -> MagicMock:
     """Create a mock sink."""
     sink = MagicMock()
@@ -149,7 +150,7 @@ def _make_sink(
     return sink
 
 
-def _make_ctx(run_id: str = "test-run") -> MagicMock:
+def _make_ctx(run_id: str = "test-run") -> Any:
     """Create a PluginContext for testing."""
     from elspeth.contracts.plugin_context import PluginContext
 
@@ -386,7 +387,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids)
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
-            reason={"reason": "bad_data"},
+            reason={"reason": "test_error"},
         )
         token = _make_token()
         ctx = _make_ctx()
@@ -408,7 +409,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
-            reason={"reason": "bad_data"},
+            reason={"reason": "test_error"},
         )
         token = _make_token()
         ctx = _make_ctx()
@@ -427,7 +428,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error=None)
         transform.process.return_value = TransformResult.error(
-            reason={"reason": "bad_data"},
+            reason={"reason": "test_error"},
         )
         token = _make_token()
         ctx = _make_ctx()
@@ -441,7 +442,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
-            reason={"reason": "bad_data"},
+            reason={"reason": "test_error"},
         )
         token = _make_token()
         ctx = _make_ctx()
@@ -458,7 +459,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
-            reason={"reason": "bad_data"},
+            reason={"reason": "test_error"},
         )
         token = _make_token()
         ctx = _make_ctx()
@@ -475,7 +476,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids)
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
-            reason={"reason": "bad_data"},
+            reason={"reason": "test_error"},
         )
         token = _make_token()
         ctx = _make_ctx()
@@ -494,7 +495,7 @@ class TestTransformExecutor:
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
         transform = _make_transform(on_error="quarantine_sink")
         transform.process.return_value = TransformResult.error(
-            reason={"reason": "bad_data"},
+            reason={"reason": "test_error"},
         )
         token = _make_token()
         ctx = _make_ctx()
@@ -610,7 +611,7 @@ class TestGateExecutor:
         recorder = _make_recorder()
         contract = _make_contract()
         edge_map = {(NodeID("gate_1"), "low"): "edge_low"}
-        route_map = {(NodeID("gate_1"), "low"): RouteDestination.sink("quarantine")}
+        route_map = {(NodeID("gate_1"), "low"): RouteDestination.sink(SinkName("quarantine"))}
         executor = GateExecutor(
             recorder,
             _make_span_factory(),
@@ -811,7 +812,7 @@ class TestGateExecutor:
         recorder = _make_recorder()
         # Edge map must have the route label that will be used for recording
         edge_map = {(NodeID("cg_1"), "false"): "edge_false"}
-        route_map = {(NodeID("cg_1"), "false"): RouteDestination.sink("error_sink")}
+        route_map = {(NodeID("cg_1"), "false"): RouteDestination.sink(SinkName("error_sink"))}
         executor = GateExecutor(
             recorder,
             _make_span_factory(),
@@ -1272,7 +1273,7 @@ class TestAggregationExecutor:
         transform = MagicMock()
         transform.name = "agg_transform"
         transform.process.return_value = TransformResult.error(
-            reason={"reason": "agg_failed"},
+            reason={"reason": "test_error"},
         )
         ctx = _make_ctx()
 

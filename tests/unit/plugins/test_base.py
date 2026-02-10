@@ -24,7 +24,7 @@ class TestBaseTransform:
             output_schema = None  # type: ignore[assignment]
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         transform = SimpleTransform({})
         assert transform.creates_tokens is False
@@ -43,7 +43,9 @@ class TestBaseTransform:
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 row_dict = row.to_dict()
-                return TransformResult.success_multi([row_dict, row_dict], success_reason={"action": "expand"})
+                return TransformResult.success_multi(
+                    [make_pipeline_row(row_dict), make_pipeline_row(row_dict)], success_reason={"action": "expand"}
+                )
 
         transform = ExpandingTransform({})
         assert transform.creates_tokens is True
@@ -94,10 +96,12 @@ class TestBaseTransform:
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
-                    {
-                        "x": row["x"],
-                        "doubled": row["x"] * 2,
-                    },
+                    make_pipeline_row(
+                        {
+                            "x": row["x"],
+                            "doubled": row["x"] * 2,
+                        }
+                    ),
                     success_reason={"action": "test"},
                 )
 
@@ -105,7 +109,8 @@ class TestBaseTransform:
         ctx = PluginContext(run_id="test", config={})
 
         result = transform.process(make_pipeline_row({"x": 21}), ctx)
-        assert result.row == {"x": 21, "doubled": 42}
+        assert result.row is not None
+        assert result.row.to_dict() == {"x": 21, "doubled": 42}
 
     def test_lifecycle_hooks_exist(self) -> None:
         from elspeth.plugins.base import BaseTransform
@@ -328,7 +333,7 @@ class TestNoValidationEnforcement:
                 # NOT calling self._validate_self_consistency()
 
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row.to_dict(), success_reason={"action": "test"})
+                return TransformResult.success(make_pipeline_row(row.to_dict()), success_reason={"action": "test"})
 
         # Should instantiate without RuntimeError
         plugin = NoValidationTransform({})

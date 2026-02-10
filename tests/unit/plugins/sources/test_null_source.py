@@ -17,7 +17,7 @@ class TestNullSource:
         """NullSource.load() yields no rows."""
         from elspeth.plugins.sources.null_source import NullSource
 
-        source = NullSource({"on_success": "default"})
+        source = NullSource({})
 
         rows = list(source.load(ctx))
 
@@ -27,7 +27,7 @@ class TestNullSource:
         """NullSource has 'null' as its name."""
         from elspeth.plugins.sources.null_source import NullSource
 
-        source = NullSource({"on_success": "default"})
+        source = NullSource({})
         assert source.name == "null"
 
     def test_null_source_has_output_schema(self) -> None:
@@ -35,7 +35,7 @@ class TestNullSource:
         from elspeth.contracts import PluginSchema
         from elspeth.plugins.sources.null_source import NullSource
 
-        source = NullSource({"on_success": "default"})
+        source = NullSource({})
         # Direct access - no hasattr() per CLAUDE.md
         assert issubclass(source.output_schema, PluginSchema)
 
@@ -43,7 +43,7 @@ class TestNullSource:
         """close() can be called multiple times safely."""
         from elspeth.plugins.sources.null_source import NullSource
 
-        source = NullSource({"on_success": "default"})
+        source = NullSource({})
         source.close()
         source.close()  # Should not raise
 
@@ -52,7 +52,7 @@ class TestNullSource:
         from elspeth.contracts import Determinism
         from elspeth.plugins.sources.null_source import NullSource
 
-        source = NullSource({"on_success": "default"})
+        source = NullSource({})
         # NullSource is deterministic - always yields nothing
         assert source.determinism == Determinism.DETERMINISTIC
 
@@ -60,17 +60,20 @@ class TestNullSource:
         """NullSource has a plugin_version."""
         from elspeth.plugins.sources.null_source import NullSource
 
-        source = NullSource({"on_success": "default"})
+        source = NullSource({})
         assert hasattr(source, "plugin_version")
         assert isinstance(source.plugin_version, str)
         assert source.plugin_version != ""
 
-    def test_null_source_requires_on_success(self) -> None:
-        """NullSource raises ValueError when on_success is missing from config."""
+    def test_null_source_on_success_via_bridge(self) -> None:
+        """NullSource on_success is set by instantiation bridge, not config."""
         from elspeth.plugins.sources.null_source import NullSource
 
-        with pytest.raises(ValueError, match="on_success"):
-            NullSource({})
+        # NullSource no longer validates on_success from config dict;
+        # it's injected post-construction by the instantiation bridge.
+        source = NullSource({})
+        source.on_success = "output"
+        assert source.on_success == "output"
 
     def test_null_source_schema_is_observed(self) -> None:
         """NullSourceSchema must be recognized as observed by DAG validation.

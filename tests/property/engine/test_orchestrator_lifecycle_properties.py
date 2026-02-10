@@ -23,7 +23,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
+from elspeth.contracts import PendingOutcome, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.results import RowResult
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.engine.orchestrator.outcomes import accumulate_row_outcomes
@@ -496,7 +496,7 @@ class TestAccumulateRowOutcomesProperties:
         self,
         outcomes: list[RowResult],
         sink_names: dict[str, object] | None = None,
-    ) -> tuple[ExecutionCounters, dict[str, list]]:
+    ) -> tuple[ExecutionCounters, dict[str, list[tuple[TokenInfo, PendingOutcome | None]]]]:
         """Helper: run accumulate_row_outcomes and return counters + pending_tokens."""
         counters = ExecutionCounters()
         if sink_names is None:
@@ -665,7 +665,7 @@ class TestRunResultFieldProperties:
         """Property: Optional counter fields default to zero."""
         result = RunResult(
             run_id="run-1",
-            status="running",
+            status=RunStatus.RUNNING,
             rows_processed=10,
             rows_succeeded=8,
             rows_failed=1,

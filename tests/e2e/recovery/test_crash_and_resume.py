@@ -188,6 +188,7 @@ class _ResumeSink(_TestSinkBase):
     results: ClassVar[list[dict[str, Any]]] = []
 
     def __init__(self) -> None:
+        super().__init__()
         _ResumeSink.results = []
 
     def on_start(self, ctx: Any) -> None:

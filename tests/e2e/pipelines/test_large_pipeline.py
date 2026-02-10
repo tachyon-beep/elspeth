@@ -8,6 +8,7 @@ Uses direct SQL queries against the audit database for verification.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from sqlalchemy import func, select
 
@@ -18,6 +19,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import rows_table, token_outcomes_table
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource, PassTransform
@@ -38,10 +40,10 @@ class TestLargePipeline:
         sink = CollectSink()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
+            source=cast(SourceProtocol, source),
             source_settings=source_settings,
             transforms=wired,
-            sinks={"default": sink},
+            sinks=cast("dict[str, SinkProtocol]", {"default": sink}),
             aggregations={},
             gates=[],
         )
@@ -81,10 +83,10 @@ class TestLargePipeline:
         sink = CollectSink()
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
+            source=cast(SourceProtocol, source),
             source_settings=source_settings,
             transforms=wired,
-            sinks={"default": sink},
+            sinks=cast("dict[str, SinkProtocol]", {"default": sink}),
             aggregations={},
             gates=[],
         )

@@ -8,10 +8,10 @@ import pytest
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.engine.processor import DAGTraversalContext
-from tests.fixtures.factories import make_field, make_row, make_source_row
+from elspeth.testing import make_field, make_row, make_source_row
 
 
-def _make_contract():
+def _make_contract() -> SchemaContract:
     """Create a minimal schema contract for testing."""
     return SchemaContract(
         fields=(

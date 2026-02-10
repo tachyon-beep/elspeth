@@ -195,7 +195,7 @@ class TestCheckpointVersionValidation:
     def test_checkpoint_state_excludes_work_item_fields(self) -> None:
         """Checkpoint payload must never persist transient _WorkItem traversal fields."""
         from elspeth.contracts import TokenInfo
-        from tests.fixtures.factories import make_row
+        from elspeth.testing import make_row
 
         span_factory = SpanFactory()
         node_id = NodeID("test_node")

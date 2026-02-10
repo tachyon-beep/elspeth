@@ -57,7 +57,7 @@ class TestRouteResolutionIntegrity:
             plugin_name="config_gate:router",
             config={"routes": {"true": "output", "false": "output"}},
         )
-        graph._route_resolution_map[(NodeID("gate_1"), "true")] = RouteDestination.sink("output")
+        graph._route_resolution_map[(NodeID("gate_1"), "true")] = RouteDestination.sink(SinkName("output"))
 
         with pytest.raises(GraphValidationError, match="has no destination in route resolution map"):
             graph._validate_route_resolution_map_complete()

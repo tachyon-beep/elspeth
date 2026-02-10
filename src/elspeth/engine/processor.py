@@ -1804,10 +1804,7 @@ class RowProcessor:
         # current_node_id=None skips traversal loop entirely, so only allow it
         # when sink routing is explicit (inherited sink or branch->sink map).
         if current_node_id is None:
-            has_branch_sink = (
-                current_token.branch_name is not None
-                and BranchName(current_token.branch_name) in self._branch_to_sink
-            )
+            has_branch_sink = current_token.branch_name is not None and BranchName(current_token.branch_name) in self._branch_to_sink
             if on_success_sink is None and not has_branch_sink:
                 raise OrchestrationInvariantError(
                     f"Token {token.token_id} has current_node_id=None without explicit terminal sink context. "

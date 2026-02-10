@@ -251,6 +251,7 @@ class TestConstructorErrorEdgeMap:
                 NodeID("agg-1"): AggregationSettings(
                     name="test-agg",
                     plugin="test-plugin",
+                    input="agg_in",
                     trigger={"count": 3},
                 ),
             },
@@ -569,7 +570,7 @@ class TestProcessRowSingleTransform:
         ctx = PluginContext(run_id="test-run", config={})
 
         error_result = TransformResult.error(
-            {"reason": "bad_value"},
+            {"reason": "test_error"},
             retryable=False,
         )
 
@@ -599,7 +600,7 @@ class TestProcessRowSingleTransform:
         ctx = PluginContext(run_id="test-run", config={})
 
         error_result = TransformResult.error(
-            {"reason": "bad_value"},
+            {"reason": "test_error"},
             retryable=False,
         )
 
@@ -2036,7 +2037,7 @@ class TestAggregationFacades:
         _, recorder = _make_recorder()
         processor = _make_processor(recorder)
 
-        checkpoint = {"agg-1": {"buffer": [], "trigger_state": {}}}
+        checkpoint: dict[str, Any] = {"agg-1": {"buffer": [], "trigger_state": {}}}
         with patch.object(
             processor._aggregation_executor,
             "get_checkpoint_state",
@@ -2385,5 +2386,6 @@ class TestTerminalWorkItemInvariant:
         )
 
         assert result is not None
+        assert not isinstance(result, list)
         assert result.outcome == RowOutcome.COMPLETED
         assert result.sink_name == "terminal_sink"

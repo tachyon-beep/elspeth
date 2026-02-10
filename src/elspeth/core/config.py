@@ -1302,9 +1302,7 @@ class ElspethSettings(BaseModel):
         for sink_name in v:
             _validate_max_length(sink_name, field_label="Sink name", max_length=_MAX_NODE_NAME_LENGTH)
             if sink_name in _RESERVED_EDGE_LABELS:
-                raise ValueError(
-                    f"Sink name '{sink_name}' is reserved. Reserved sink/edge labels: {sorted(_RESERVED_EDGE_LABELS)}"
-                )
+                raise ValueError(f"Sink name '{sink_name}' is reserved. Reserved sink/edge labels: {sorted(_RESERVED_EDGE_LABELS)}")
             if sink_name.startswith("__"):
                 raise ValueError(f"Sink name '{sink_name}' starts with '__', which is reserved for system edges")
         return v

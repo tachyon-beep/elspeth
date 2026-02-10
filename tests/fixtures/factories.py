@@ -203,7 +203,7 @@ def make_graph_fork(
 
 
 def _set_transform_routing(
-    transform: TransformProtocol,
+    transform: Any,
     *,
     on_success: str | None,
     on_error: str | None,

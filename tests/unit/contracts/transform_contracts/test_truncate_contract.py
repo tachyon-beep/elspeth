@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.plugins.transforms.truncate import Truncate
-from tests.fixtures.factories import make_context, make_pipeline_row
+from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 from .test_transform_protocol import (
     TransformContractPropertyTestBase,

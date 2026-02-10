@@ -14,7 +14,7 @@ from elspeth.contracts.transform_contract import (
     create_output_contract_from_schema,
     validate_output_against_contract,
 )
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 class OutputSchema(PluginSchema):

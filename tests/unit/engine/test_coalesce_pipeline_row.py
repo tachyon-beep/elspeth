@@ -1,6 +1,7 @@
 # tests/unit/engine/test_coalesce_pipeline_row.py
 """Tests for CoalesceExecutor with PipelineRow support (Task 6)."""
 
+from typing import Any
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -8,11 +9,12 @@ import pytest
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID
 from elspeth.core.config import CoalesceSettings
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 
-def _make_contract(fields=None):
+def _make_contract(fields: list[Any] | None = None) -> SchemaContract:
     """Create a schema contract for testing."""
     if fields is None:
         fields = [
@@ -126,7 +128,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         # Create tokens with PipelineRow for each branch
         token_a = TokenInfo(
@@ -192,7 +194,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         # Token A has contract, Token B has None contract (bug scenario)
         token_a = TokenInfo(
@@ -274,7 +276,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         token_a = TokenInfo(
             row_id="row_001",
@@ -325,7 +327,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="first",
             merge="union",
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         token_a = TokenInfo(
             row_id="row_001",
@@ -368,7 +370,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="require_all",
             merge="union",  # Union merge combines all fields
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         token_a = TokenInfo(
             row_id="row_001",

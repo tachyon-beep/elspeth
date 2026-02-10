@@ -5,7 +5,7 @@ from jinja2 import StrictUndefined, UndefinedError
 from jinja2.sandbox import SandboxedEnvironment
 
 from elspeth.contracts.schema_contract import SchemaContract
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 
 class TestJinja2Integration:

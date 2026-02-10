@@ -1,11 +1,25 @@
 # tests/core/test_dag.py
 """Tests for DAG validation and operations."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import Any, TypedDict, cast
 
 import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.core.config import AggregationSettings, ElspethSettings, GateSettings, SourceSettings
+from elspeth.core.dag import ExecutionGraph, WiredTransform
+from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+
+
+class _PluginInstances(TypedDict):
+    source: SourceProtocol
+    source_settings: SourceSettings
+    transforms: list[WiredTransform]
+    sinks: dict[str, SinkProtocol]
+    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]]
+
 
 _AUTO_SOURCE_ON_SUCCESS = "_auto_source_on_success"
 _AUTO_GATE_INPUT = "_auto_gate_input"
@@ -116,7 +130,7 @@ def _apply_explicit_success_routing(settings: Any) -> Any:
         updated_transforms.append(updated_transform)
         previous_connection = on_success
 
-    updated_aggregations = []
+    updated_aggregations: list[Any] = []
     for index, aggregation in enumerate(aggregations):
         input_connection = aggregation.input
         if input_connection == _AUTO_AGG_INPUT:
@@ -147,7 +161,7 @@ def _apply_explicit_success_routing(settings: Any) -> Any:
     elif updated_aggregations:
         upstream_for_gates = updated_aggregations[-1].on_success
 
-    updated_gates = []
+    updated_gates: list[Any] = []
     for index, gate in enumerate(gates):
         input_connection = gate.input
         if input_connection == _AUTO_GATE_INPUT:
@@ -160,8 +174,7 @@ def _apply_explicit_success_routing(settings: Any) -> Any:
                 # connection name). If all routes are "continue", the DAG model
                 # resolves them at runtime; the next gate shares the same input.
                 prev_named_outputs = [
-                    d for d in prev_gate.routes.values()
-                    if d != "continue" and d not in {str(s) for s in sinks.keys()} and d != "fork"
+                    d for d in prev_gate.routes.values() if d != "continue" and d not in {str(s) for s in sinks} and d != "fork"
                 ]
                 if prev_named_outputs:
                     input_connection = prev_named_outputs[0]
@@ -176,8 +189,7 @@ def _apply_explicit_success_routing(settings: Any) -> Any:
             continue_count = sum(1 for d in routes.values() if d == "continue")
             if continue_count <= 1:
                 routes = {
-                    label: (f"{gate.name}_out" if destination == "continue" else destination)
-                    for label, destination in routes.items()
+                    label: (f"{gate.name}_out" if destination == "continue" else destination) for label, destination in routes.items()
                 }
 
         updated_gates.append(
@@ -220,14 +232,14 @@ def _apply_explicit_success_routing(settings: Any) -> Any:
     return routed_settings
 
 
-def instantiate_plugins_from_config_raw(settings: Any) -> dict[str, object]:
+def instantiate_plugins_from_config_raw(settings: Any) -> _PluginInstances:
     """Instantiate plugins without any test-time routing injection."""
     from elspeth.cli_helpers import instantiate_plugins_from_config as _real_instantiate
 
-    return _real_instantiate(settings)
+    return cast(_PluginInstances, _real_instantiate(settings))
 
 
-def instantiate_plugins_from_config(settings: Any) -> dict[str, object]:
+def instantiate_plugins_from_config(settings: Any) -> _PluginInstances:
     """Centralized test factory wrapper for plugin instantiation."""
     routed_settings = _apply_explicit_success_routing(settings)
     # Back-patch routed settings onto the original settings object so callers
@@ -898,7 +910,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -935,7 +948,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -971,7 +985,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1018,7 +1033,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1056,7 +1072,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="source_out",
                 options={
@@ -1069,14 +1086,16 @@ class TestExecutionGraphFromConfig:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             transforms=[
-                _transform_settings(TransformSettings,
+                _transform_settings(
+                    TransformSettings,
                     name="passthrough_0",
                     plugin="passthrough",
                     input="source_out",
                     on_success="conn_0_1",
                     options={"schema": {"mode": "observed"}},
                 ),
-                _transform_settings(TransformSettings,
+                _transform_settings(
+                    TransformSettings,
                     name="passthrough_1",
                     plugin="passthrough",
                     input="conn_0_1",
@@ -1103,7 +1122,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1116,7 +1136,8 @@ class TestExecutionGraphFromConfig:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             transforms=[
-                _transform_settings(TransformSettings,
+                _transform_settings(
+                    TransformSettings,
                     plugin="passthrough",
                     input="source_out",
                     on_success="nowhere",
@@ -1142,7 +1163,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1155,7 +1177,8 @@ class TestExecutionGraphFromConfig:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             transforms=[
-                _transform_settings(TransformSettings,
+                _transform_settings(
+                    TransformSettings,
                     plugin="passthrough",
                     input="source_out",
                     on_success="output",
@@ -1181,7 +1204,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1194,8 +1218,16 @@ class TestExecutionGraphFromConfig:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             transforms=[
-                _transform_settings(TransformSettings, name="passthrough_0", plugin="passthrough", input="source_out", on_success="conn_pt_fm", options={"schema": {"mode": "observed"}}),
-                _transform_settings(TransformSettings,
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    input="source_out",
+                    on_success="conn_pt_fm",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
                     name="field_mapper_0",
                     plugin="field_mapper",
                     input="conn_pt_fm",
@@ -1229,7 +1261,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1239,13 +1272,15 @@ class TestExecutionGraphFromConfig:
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             transforms=[
-                _transform_settings(TransformSettings, 
+                _transform_settings(
+                    TransformSettings,
                     plugin="passthrough",
                     options={"schema": {"mode": "observed"}},
                 ),
             ],
             aggregations=[
-                _aggregation_settings(AggregationSettings, 
+                _aggregation_settings(
+                    AggregationSettings,
                     name="batch_stats",
                     plugin="batch_stats",
                     trigger=TriggerConfig(count=10),
@@ -1275,14 +1310,14 @@ class TestExecutionGraphFromConfig:
         """Build graph with config-driven gate routing to multiple sinks."""
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1295,7 +1330,8 @@ class TestExecutionGraphFromConfig:
                 "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="safety_gate",
                     condition="row['suspicious'] == True",
                     routes={"true": "flagged", "false": "results"},
@@ -1324,14 +1360,14 @@ class TestExecutionGraphFromConfig:
         """Config gate routes must reference existing sinks."""
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1341,7 +1377,8 @@ class TestExecutionGraphFromConfig:
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="bad_gate",
                     condition="True",
                     routes={"true": "nonexistent_sink", "false": "output"},
@@ -1373,7 +1410,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1414,7 +1452,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1456,7 +1495,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1489,10 +1529,9 @@ class TestExecutionGraphFromConfig:
 
     def test_build_step_map_matches_schema_contract(self, plugin_manager) -> None:
         """Step numbering must satisfy Landscape DB schema contract (UniqueConstraint on token_id, step_index, attempt)."""
-        from elspeth.contracts.types import GateName
+        from elspeth.contracts.types import GateName, SinkName
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
             TransformSettings,
@@ -1500,7 +1539,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1509,9 +1549,15 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             transforms=[
-                _transform_settings(TransformSettings, name="passthrough_0", plugin="passthrough", options={"schema": {"mode": "observed"}}),
-                _transform_settings(TransformSettings, name="passthrough_1", plugin="passthrough", options={"schema": {"mode": "observed"}}),
-                _transform_settings(TransformSettings, name="field_mapper_0", plugin="field_mapper", options={"schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings, name="passthrough_0", plugin="passthrough", options={"schema": {"mode": "observed"}}
+                ),
+                _transform_settings(
+                    TransformSettings, name="passthrough_1", plugin="passthrough", options={"schema": {"mode": "observed"}}
+                ),
+                _transform_settings(
+                    TransformSettings, name="field_mapper_0", plugin="field_mapper", options={"schema": {"mode": "observed"}}
+                ),
             ],
             gates=[
                 _gate_settings(GateSettings, name="g1", condition="True", routes={"true": "continue", "false": "flagged"}),
@@ -1557,7 +1603,7 @@ class TestExecutionGraphFromConfig:
         }
         assert step_map == expected_step_map
 
-        sink_id = graph.get_sink_id_map()["output"]
+        sink_id = graph.get_sink_id_map()[SinkName("output")]
         assert graph.is_sink_node(sink_id) is True
         assert graph.is_sink_node(transform_map[0]) is False
         from elspeth.contracts.types import NodeID
@@ -1575,7 +1621,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1606,7 +1653,8 @@ class TestExecutionGraphFromConfig:
         assert terminal_map[source_node] == "results"
 
         bad_config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1639,14 +1687,14 @@ class TestExecutionGraphRouteMapping:
         from elspeth.contracts import GateName
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1659,7 +1707,8 @@ class TestExecutionGraphRouteMapping:
                 "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="classifier",
                     condition="row['suspicious'] == True",
                     routes={"true": "flagged", "false": "results"},
@@ -1690,14 +1739,14 @@ class TestExecutionGraphRouteMapping:
         from elspeth.contracts import GateName
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1710,12 +1759,14 @@ class TestExecutionGraphRouteMapping:
                 "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="gate1",
                     condition="True",
                     routes={"true": "gate1_pass", "false": "flagged"},
                 ),
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     input="gate1_pass",
                     name="gate2",
                     condition="True",
@@ -1748,14 +1799,14 @@ class TestExecutionGraphRouteMapping:
         from elspeth.contracts import GateName, SinkName
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1768,7 +1819,8 @@ class TestExecutionGraphRouteMapping:
                 "quarantine-bucket": SinkSettings(plugin="json", options={"path": "quarantine.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="quality_check",
                     condition="row['score'] >= 0.5",
                     routes={"true": "output-sink", "false": "quarantine-bucket"},
@@ -1892,14 +1944,14 @@ class TestMultiEdgeScenarios:
         """
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1913,7 +1965,8 @@ class TestMultiEdgeScenarios:
                 "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="fork_gate",
                     condition="True",  # Always forks
                     routes={"true": "fork", "false": "output"},
@@ -1980,14 +2033,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1999,7 +2052,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2043,14 +2097,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2062,7 +2116,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2106,11 +2161,12 @@ class TestCoalesceNodes:
 
     def test_duplicate_fork_branches_rejected_in_config_gate(self, plugin_manager) -> None:
         """Duplicate branch names in fork_to should be rejected for config gates."""
-        from elspeth.core.config import ElspethSettings, GateSettings, SinkSettings, SourceSettings
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2123,7 +2179,8 @@ class TestCoalesceNodes:
                 "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2147,7 +2204,6 @@ class TestCoalesceNodes:
 
     def test_duplicate_fork_branches_rejected_in_plugin_gate(self) -> None:
         """Duplicate branch names in fork_to should be rejected for plugin gates."""
-        from typing import Any
 
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
         from elspeth.contracts.plugin_context import PluginContext
@@ -2264,14 +2320,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2284,7 +2340,8 @@ class TestCoalesceNodes:
                 "path_c": SinkSettings(plugin="json", options={"path": "path_c.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2335,14 +2392,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2354,7 +2411,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2406,14 +2464,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2425,7 +2483,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2472,14 +2531,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2491,7 +2550,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2536,14 +2596,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2555,7 +2615,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2605,7 +2666,8 @@ class TestCoalesceNodes:
         # Pydantic validates min_length=2 for branches field
         with pytest.raises(ValidationError, match="at least 2 items"):
             ElspethSettings(
-                source=_source_settings(SourceSettings, 
+                source=_source_settings(
+                    SourceSettings,
                     plugin="csv",
                     options={
                         "path": "test.csv",
@@ -2631,14 +2693,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2651,7 +2713,8 @@ class TestCoalesceNodes:
                 "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2691,7 +2754,6 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
             TransformSettings,
@@ -2699,7 +2761,8 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2714,7 +2777,8 @@ class TestCoalesceNodes:
                 _transform_settings(TransformSettings, plugin="passthrough", options={"schema": {"mode": "observed"}}),
             ],
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="analysis_fork",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2773,14 +2837,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2792,7 +2856,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -2837,14 +2902,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2856,14 +2921,16 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="forker1",
                     input="source_out",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],
                 ),
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="gate2",
                     input="merge_results",
                     condition="True",
@@ -2907,14 +2974,14 @@ class TestCoalesceNodes:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2926,7 +2993,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -3137,14 +3205,14 @@ class TestSchemaValidation:
         from elspeth.contracts import GateName, RouteDestinationKind
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_router",
                 options={
@@ -3158,19 +3226,22 @@ class TestSchemaValidation:
                 "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="router",
                     input="to_router",
                     condition="row['score'] > 0.5",
                     routes={"true": "high_path", "false": "low_path"},
                 ),
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="high_gate",
                     input="high_path",
                     condition="True",
                     routes={"true": "output", "false": "output"},
                 ),
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="low_gate",
                     input="low_path",
                     condition="True",
@@ -4009,7 +4080,8 @@ class TestDeterministicNodeIDs:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4018,7 +4090,8 @@ class TestDeterministicNodeIDs:
                 },
             ),
             transforms=[
-                _transform_settings(TransformSettings, 
+                _transform_settings(
+                    TransformSettings,
                     plugin="passthrough",
                     options={"schema": {"mode": "observed"}},
                 )
@@ -4063,7 +4136,8 @@ class TestDeterministicNodeIDs:
         from elspeth.core.dag import ExecutionGraph
 
         config1 = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4076,7 +4150,8 @@ class TestDeterministicNodeIDs:
         )
 
         config2 = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4114,42 +4189,26 @@ class TestDeterministicNodeIDs:
 
         assert source_id_1 != source_id_2
 
-    def test_overlong_node_id_is_rejected(self) -> None:
-        """Overlong node IDs fail fast before audit-record persistence."""
-        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+    def test_overlong_node_name_is_rejected_at_settings_level(self) -> None:
+        """Overlong transform names fail fast at settings validation.
 
-        # transform_ + 49 chars + _ + 12-char hash = 73 chars (> 64 column limit)
-        long_transform_name = "x" * 49
-        settings = ElspethSettings(
-            source=_source_settings(
-                SourceSettings,
-                plugin="csv",
-                on_success="source_out",
-                options={"path": "test.csv", "on_validation_failure": "discard", "schema": {"mode": "observed"}},
-            ),
-            transforms=[
-                _transform_settings(
-                    TransformSettings,
-                    name=long_transform_name,
-                    plugin="passthrough",
-                    input="source_out",
-                    on_success="out",
-                    options={"schema": {"mode": "observed"}},
-                )
-            ],
-            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
-        )
+        The _MAX_NODE_NAME_LENGTH=38 constraint on TransformSettings ensures
+        generated node IDs stay within the 64-char landscape column limit.
+        This is the primary protection layer; the DAG-level node_id length
+        check is defense-in-depth that is unreachable with valid settings.
+        """
+        from pydantic import ValidationError
 
-        plugins = instantiate_plugins_from_config_raw(settings)
-        with pytest.raises(GraphValidationError, match=r"node_id exceeds 64 characters"):
-            ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
-                gates=list(settings.gates),
+        from elspeth.core.config import TransformSettings
+
+        long_name = "x" * 39  # Exceeds _MAX_NODE_NAME_LENGTH (38)
+        with pytest.raises(ValidationError, match=r"exceeds max length 38"):
+            TransformSettings(
+                name=long_name,
+                plugin="passthrough",
+                input="source_out",
+                on_success="out",
+                options={"schema": {"mode": "observed"}},
             )
 
 
@@ -4162,7 +4221,6 @@ class TestCoalesceGateIndex:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
@@ -4171,7 +4229,8 @@ class TestCoalesceGateIndex:
         settings = ElspethSettings(
             source=_source_settings(SourceSettings, plugin="null"),
             gates=[
-                _gate_settings(GateSettings, 
+                _gate_settings(
+                    GateSettings,
                     name="fork_gate",
                     condition="True",
                     routes={"true": "fork", "false": "output"},
@@ -4247,7 +4306,7 @@ class TestDivertEdges:
     reachable in the graph without participating in normal DAG traversal.
     """
 
-    def _build_graph(self, settings):
+    def _build_graph(self, settings: ElspethSettings) -> ExecutionGraph:
         """Build ExecutionGraph via production factory path."""
         from elspeth.core.dag import ExecutionGraph
 
@@ -4267,7 +4326,8 @@ class TestDivertEdges:
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4294,7 +4354,8 @@ class TestDivertEdges:
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4322,7 +4383,8 @@ class TestDivertEdges:
         )
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4331,7 +4393,9 @@ class TestDivertEdges:
                 },
             ),
             transforms=[
-                _transform_settings(TransformSettings, plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings, plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}
+                ),
             ],
             sinks={
                 "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
@@ -4357,7 +4421,8 @@ class TestDivertEdges:
         )
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4366,7 +4431,9 @@ class TestDivertEdges:
                 },
             ),
             transforms=[
-                _transform_settings(TransformSettings, plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings, plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}
+                ),
             ],
             sinks={
                 "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
@@ -4391,7 +4458,8 @@ class TestDivertEdges:
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4422,7 +4490,8 @@ class TestDivertEdges:
         )
 
         settings = ElspethSettings(
-            source=_source_settings(SourceSettings, 
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -4431,8 +4500,12 @@ class TestDivertEdges:
                 },
             ),
             transforms=[
-                _transform_settings(TransformSettings, name="pt_a", plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
-                _transform_settings(TransformSettings, name="pt_b", plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings, name="pt_a", plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}
+                ),
+                _transform_settings(
+                    TransformSettings, name="pt_b", plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}
+                ),
             ],
             sinks={
                 "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
@@ -4465,14 +4538,14 @@ class TestTerminalGateContinueValidation:
         """Terminal gate with 'continue' in routes raises GraphValidationError."""
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_gate",
                 options={
@@ -4488,7 +4561,8 @@ class TestTerminalGateContinueValidation:
                 ),
             },
             gates=[
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="threshold",
                     input="to_gate",
                     condition="row['score'] > 0.5",
@@ -4517,14 +4591,14 @@ class TestTerminalGateContinueValidation:
         """
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_gates",
                 options={
@@ -4544,13 +4618,15 @@ class TestTerminalGateContinueValidation:
                 ),
             },
             gates=[
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="first_gate",
                     input="to_gates",
                     condition="row['score'] > 0.5",
                     routes={"true": "flagged", "false": "to_second"},
                 ),
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="second_gate",
                     input="to_second",
                     condition="True",
@@ -4592,7 +4668,8 @@ class TestAggregationOnSuccessValidation:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_agg",
                 options={
@@ -4608,7 +4685,8 @@ class TestAggregationOnSuccessValidation:
                 ),
             },
             aggregations=[
-                _aggregation_settings(AggregationSettings,
+                _aggregation_settings(
+                    AggregationSettings,
                     name="batch_stats",
                     plugin="batch_stats",
                     input="to_agg",
@@ -4646,7 +4724,8 @@ class TestAggregationOnSuccessValidation:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_agg",
                 options={
@@ -4662,7 +4741,8 @@ class TestAggregationOnSuccessValidation:
                 ),
             },
             aggregations=[
-                _aggregation_settings(AggregationSettings,
+                _aggregation_settings(
+                    AggregationSettings,
                     name="batch_stats",
                     plugin="batch_stats",
                     input="to_agg",
@@ -4704,7 +4784,8 @@ class TestAggregationOnSuccessValidation:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_agg",
                 options={
@@ -4720,7 +4801,8 @@ class TestAggregationOnSuccessValidation:
                 ),
             },
             aggregations=[
-                _aggregation_settings(AggregationSettings,
+                _aggregation_settings(
+                    AggregationSettings,
                     name="batch_stats",
                     plugin="batch_stats",
                     input="to_agg",
@@ -4761,14 +4843,14 @@ class TestCoalesceOnSuccessValidation:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_gate",
                 options={
@@ -4784,7 +4866,8 @@ class TestCoalesceOnSuccessValidation:
                 ),
             },
             gates=[
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     input="to_gate",
                     condition="True",
@@ -4824,14 +4907,14 @@ class TestCoalesceOnSuccessValidation:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_gate",
                 options={
@@ -4847,7 +4930,8 @@ class TestCoalesceOnSuccessValidation:
                 ),
             },
             gates=[
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     input="to_gate",
                     condition="True",
@@ -4884,14 +4968,14 @@ class TestCoalesceOnSuccessValidation:
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=_source_settings(SourceSettings,
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 on_success="to_gate",
                 options={
@@ -4907,7 +4991,8 @@ class TestCoalesceOnSuccessValidation:
                 ),
             },
             gates=[
-                _gate_settings(GateSettings,
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     input="to_gate",
                     condition="True",

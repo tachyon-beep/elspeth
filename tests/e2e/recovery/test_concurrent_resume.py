@@ -103,6 +103,7 @@ class TestConcurrentResume:
 
         check = recovery_mgr.can_resume(result.run_id, graph)
         assert check.can_resume is False
+        assert check.reason is not None
         assert "completed" in check.reason.lower()
 
         db.close()
@@ -132,6 +133,7 @@ class TestConcurrentResume:
 
         check = recovery_mgr.can_resume("non-existent-run-id-12345", graph)
         assert check.can_resume is False
+        assert check.reason is not None
         assert "not found" in check.reason.lower()
 
         db.close()
@@ -214,6 +216,7 @@ class TestConcurrentResume:
 
         check = recovery_mgr.can_resume(run_id, graph)
         assert check.can_resume is False
+        assert check.reason is not None
         assert "checkpoint" in check.reason.lower()
 
         db.close()

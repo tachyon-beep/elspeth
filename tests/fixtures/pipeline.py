@@ -11,12 +11,13 @@ use make_graph_linear/make_graph_fork from fixtures/factories.py instead.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import CollectSink, ListSource
 
@@ -67,10 +68,10 @@ def build_linear_pipeline(
     sinks = {sink_name: sink}
 
     graph = ExecutionGraph.from_plugin_instances(
-        source=source,
+        source=cast(SourceProtocol, source),
         source_settings=source_settings,
         transforms=wired_transforms,
-        sinks=sinks,
+        sinks=cast("dict[str, SinkProtocol]", sinks),
         aggregations={},
         gates=[],
     )
@@ -115,10 +116,10 @@ def build_fork_pipeline(
         sinks = {sink_name: CollectSink(sink_name)}
 
     graph = ExecutionGraph.from_plugin_instances(
-        source=source,
+        source=cast(SourceProtocol, source),
         source_settings=source_settings,
         transforms=all_wired_transforms,
-        sinks=sinks,
+        sinks=cast("dict[str, SinkProtocol]", sinks),
         aggregations={},
         gates=[gate],
         coalesce_settings=coalesce_settings,
@@ -154,10 +155,10 @@ def build_aggregation_pipeline(
     aggregations = {agg_name: (aggregation_transform, aggregation_settings)}
 
     graph = ExecutionGraph.from_plugin_instances(
-        source=source,
+        source=cast(SourceProtocol, source),
         source_settings=source_settings,
         transforms=[],
-        sinks=sinks,
+        sinks=cast("dict[str, SinkProtocol]", sinks),
         aggregations=aggregations,
         gates=[],
     )
@@ -214,10 +215,10 @@ def build_production_graph(
         class _AggTransform(_TestTransformBase):
             name = agg_settings.plugin
 
-            def process(self, row: dict[str, Any], ctx: Any) -> Any:
+            def process(self, row: Any, ctx: Any) -> Any:
                 from elspeth.plugins.results import TransformResult
 
-                return TransformResult.success(row, success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         agg_transform = _AggTransform()
         if agg_settings.on_success is None:

@@ -89,6 +89,7 @@ class TestTransformResult:
 
         result = TransformResult.success(make_pipeline_row({"value": 42}), success_reason={"action": "test"})
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"value": 42}
         assert result.retryable is False
 

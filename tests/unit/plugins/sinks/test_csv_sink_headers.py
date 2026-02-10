@@ -13,7 +13,7 @@ import pytest
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.sinks.csv_sink import CSVSink
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 # CSVSink requires fixed-column structure (strict mode)
 STRICT_SCHEMA = {"mode": "fixed", "fields": ["amount_usd: int", "customer_id: str"]}

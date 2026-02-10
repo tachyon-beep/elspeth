@@ -11,6 +11,7 @@ import pytest
 
 from elspeth.contracts import NodeID, RouteDestination, RoutingAction, RoutingKind, TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.types import SinkName
 from elspeth.engine.executors import GateExecutor, GateOutcome, MissingEdgeError
 from elspeth.testing import make_pipeline_row
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
@@ -52,7 +53,7 @@ class TestGateExecutorRoutingBehavior:
                 elif v == "fork":
                     typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.fork()
                 else:
-                    typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.sink(v)
+                    typed_route_map[(NodeID(k[0]), k[1])] = RouteDestination.sink(SinkName(v))
 
         return GateExecutor(
             recorder=recorder,
@@ -110,7 +111,7 @@ class TestGateExecutorRoutingBehavior:
     def test_route_action_resolves_to_sink(self) -> None:
         """When gate returns ROUTE with label, executor should resolve to sink name."""
         # Route resolution map: (gate_id, label) -> sink_name
-        route_map = {("gate-1", "above"): "high_value_sink"}
+        route_map: dict[tuple[str, str], str | RouteDestination] = {("gate-1", "above"): "high_value_sink"}
         # Edge map for audit recording
         edge_map = {("gate-1", "above"): "edge-above"}
         executor = self._make_executor(route_resolution_map=route_map, edge_map=edge_map)
@@ -137,7 +138,7 @@ class TestGateExecutorRoutingBehavior:
 
     def test_route_action_to_continue_label(self) -> None:
         """When gate routes to label that resolves to 'continue', should not set sink_name."""
-        route_map = {("gate-1", "pass"): "continue"}
+        route_map: dict[tuple[str, str], str | RouteDestination] = {("gate-1", "pass"): "continue"}
         edge_map = {("gate-1", "continue"): "edge-continue"}
         executor = self._make_executor(route_resolution_map=route_map, edge_map=edge_map)
         token = self._make_token()
@@ -163,7 +164,9 @@ class TestGateExecutorRoutingBehavior:
 
     def test_route_action_to_processing_node(self) -> None:
         """When gate route label resolves to a processing node, executor returns next_node_id."""
-        route_map = {("gate-1", "branch"): RouteDestination.processing_node(NodeID("transform-2"))}
+        route_map: dict[tuple[str, str], str | RouteDestination] = {
+            ("gate-1", "branch"): RouteDestination.processing_node(NodeID("transform-2"))
+        }
         edge_map = {("gate-1", "branch"): "edge-branch"}
         executor = self._make_executor(route_resolution_map=route_map, edge_map=edge_map)
         token = self._make_token()

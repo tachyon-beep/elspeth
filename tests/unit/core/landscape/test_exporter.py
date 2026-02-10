@@ -12,6 +12,7 @@ Tests cover:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -283,20 +284,20 @@ def _make_exporter(
     *,
     signing_key: bytes | None = None,
     run: Run | None = None,
-    secret_resolutions: list | None = None,
-    nodes: list | None = None,
-    edges: list | None = None,
-    operations: list | None = None,
-    operation_calls: list | None = None,
-    rows: list | None = None,
-    tokens: list | None = None,
-    token_parents: list | None = None,
-    node_states: list | None = None,
-    routing_events: list | None = None,
-    state_calls: list | None = None,
-    batches: list | None = None,
-    batch_members: list | None = None,
-    artifacts: list | None = None,
+    secret_resolutions: list[Any] | None = None,
+    nodes: list[Any] | None = None,
+    edges: list[Any] | None = None,
+    operations: list[Any] | None = None,
+    operation_calls: list[Any] | None = None,
+    rows: list[Any] | None = None,
+    tokens: list[Any] | None = None,
+    token_parents: list[Any] | None = None,
+    node_states: list[Any] | None = None,
+    routing_events: list[Any] | None = None,
+    state_calls: list[Any] | None = None,
+    batches: list[Any] | None = None,
+    batch_members: list[Any] | None = None,
+    artifacts: list[Any] | None = None,
 ) -> LandscapeExporter:
     """Create an exporter with mocked database and recorder."""
     mock_db = Mock()
@@ -304,21 +305,21 @@ def _make_exporter(
 
     # Mock all recorder methods used by _iter_records
     recorder = exporter._recorder
-    recorder.get_run = Mock(return_value=run if run is not None else _RUN)
-    recorder.get_secret_resolutions_for_run = Mock(return_value=secret_resolutions or [])
-    recorder.get_nodes = Mock(return_value=nodes or [])
-    recorder.get_edges = Mock(return_value=edges or [])
-    recorder.get_operations_for_run = Mock(return_value=operations or [])
-    recorder.get_all_operation_calls_for_run = Mock(return_value=operation_calls or [])
-    recorder.get_rows = Mock(return_value=rows or [])
-    recorder.get_all_tokens_for_run = Mock(return_value=tokens or [])
-    recorder.get_all_token_parents_for_run = Mock(return_value=token_parents or [])
-    recorder.get_all_node_states_for_run = Mock(return_value=node_states or [])
-    recorder.get_all_routing_events_for_run = Mock(return_value=routing_events or [])
-    recorder.get_all_calls_for_run = Mock(return_value=state_calls or [])
-    recorder.get_batches = Mock(return_value=batches or [])
-    recorder.get_all_batch_members_for_run = Mock(return_value=batch_members or [])
-    recorder.get_artifacts = Mock(return_value=artifacts or [])
+    object.__setattr__(recorder, "get_run", Mock(return_value=run if run is not None else _RUN))
+    object.__setattr__(recorder, "get_secret_resolutions_for_run", Mock(return_value=secret_resolutions or []))
+    object.__setattr__(recorder, "get_nodes", Mock(return_value=nodes or []))
+    object.__setattr__(recorder, "get_edges", Mock(return_value=edges or []))
+    object.__setattr__(recorder, "get_operations_for_run", Mock(return_value=operations or []))
+    object.__setattr__(recorder, "get_all_operation_calls_for_run", Mock(return_value=operation_calls or []))
+    object.__setattr__(recorder, "get_rows", Mock(return_value=rows or []))
+    object.__setattr__(recorder, "get_all_tokens_for_run", Mock(return_value=tokens or []))
+    object.__setattr__(recorder, "get_all_token_parents_for_run", Mock(return_value=token_parents or []))
+    object.__setattr__(recorder, "get_all_node_states_for_run", Mock(return_value=node_states or []))
+    object.__setattr__(recorder, "get_all_routing_events_for_run", Mock(return_value=routing_events or []))
+    object.__setattr__(recorder, "get_all_calls_for_run", Mock(return_value=state_calls or []))
+    object.__setattr__(recorder, "get_batches", Mock(return_value=batches or []))
+    object.__setattr__(recorder, "get_all_batch_members_for_run", Mock(return_value=batch_members or []))
+    object.__setattr__(recorder, "get_artifacts", Mock(return_value=artifacts or []))
 
     return exporter
 
@@ -389,7 +390,7 @@ class TestExportRunUnsigned:
 
     def test_unknown_run_raises(self) -> None:
         exporter = _make_exporter(run=None)
-        exporter._recorder.get_run.return_value = None
+        object.__setattr__(exporter._recorder, "get_run", Mock(return_value=None))
         with pytest.raises(ValueError, match="Run not found"):
             list(exporter.export_run("unknown-run"))
 
@@ -866,7 +867,7 @@ class TestFullPipelineExport:
         )
 
         records = list(exporter.export_run("run-1"))
-        type_counts = {}
+        type_counts: dict[str, int] = {}
         for r in records:
             rt = r["record_type"]
             type_counts[rt] = type_counts.get(rt, 0) + 1

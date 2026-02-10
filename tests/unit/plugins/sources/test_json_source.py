@@ -13,9 +13,6 @@ DYNAMIC_SCHEMA = {"mode": "observed"}
 # Standard quarantine routing for tests
 QUARANTINE_SINK = "quarantine"
 
-# Standard success routing for tests
-OUTPUT_SINK = "output"
-
 
 class TestJSONSource:
     """Tests for JSONSource plugin."""
@@ -36,7 +33,6 @@ class TestJSONSource:
                 "path": "/tmp/test.json",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         assert hasattr(source, "output_schema")
@@ -57,7 +53,6 @@ class TestJSONSource:
                 "path": str(json_file),
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         rows = list(source.load(ctx))
@@ -81,7 +76,6 @@ class TestJSONSource:
                 "format": "jsonl",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         rows = list(source.load(ctx))
@@ -101,7 +95,6 @@ class TestJSONSource:
                 "path": str(jsonl_file),
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )  # No format specified
         rows = list(source.load(ctx))
@@ -125,7 +118,6 @@ class TestJSONSource:
                 "data_key": "results",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         rows = list(source.load(ctx))
@@ -146,7 +138,6 @@ class TestJSONSource:
                 "format": "jsonl",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         rows = list(source.load(ctx))
@@ -162,7 +153,6 @@ class TestJSONSource:
                 "path": "/nonexistent/file.json",
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         with pytest.raises(FileNotFoundError):
@@ -184,7 +174,6 @@ class TestJSONSource:
                 "path": str(json_file),
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         # Should NOT raise - should quarantine instead
@@ -208,7 +197,6 @@ class TestJSONSource:
                 "path": str(json_file),
                 "schema": DYNAMIC_SCHEMA,
                 "on_validation_failure": QUARANTINE_SINK,
-                "on_success": OUTPUT_SINK,
             }
         )
         list(source.load(ctx))
@@ -240,7 +228,7 @@ class TestJSONSourceConfigValidation:
         from elspeth.plugins.sources.json_source import JSONSource
 
         with pytest.raises(PluginConfigError, match="path"):
-            JSONSource({"schema": DYNAMIC_SCHEMA, "on_validation_failure": QUARANTINE_SINK, "on_success": OUTPUT_SINK})
+            JSONSource({"schema": DYNAMIC_SCHEMA, "on_validation_failure": QUARANTINE_SINK})
 
     def test_empty_path_raises_error(self) -> None:
         """Empty path string raises PluginConfigError."""
@@ -253,7 +241,6 @@ class TestJSONSourceConfigValidation:
                     "path": "",
                     "schema": DYNAMIC_SCHEMA,
                     "on_validation_failure": QUARANTINE_SINK,
-                    "on_success": OUTPUT_SINK,
                 }
             )
 
@@ -268,7 +255,6 @@ class TestJSONSourceConfigValidation:
                     "path": "/tmp/test.json",
                     "schema": DYNAMIC_SCHEMA,
                     "on_validation_failure": QUARANTINE_SINK,
-                    "on_success": OUTPUT_SINK,
                     "unknown_field": "value",
                 }
             )
@@ -279,7 +265,7 @@ class TestJSONSourceConfigValidation:
         from elspeth.plugins.sources.json_source import JSONSource
 
         with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
-            JSONSource({"path": "/tmp/test.json", "on_validation_failure": QUARANTINE_SINK, "on_success": OUTPUT_SINK})
+            JSONSource({"path": "/tmp/test.json", "on_validation_failure": QUARANTINE_SINK})
 
     def test_missing_on_validation_failure_raises_error(self) -> None:
         """Missing on_validation_failure raises PluginConfigError."""
@@ -287,7 +273,7 @@ class TestJSONSourceConfigValidation:
         from elspeth.plugins.sources.json_source import JSONSource
 
         with pytest.raises(PluginConfigError, match="on_validation_failure"):
-            JSONSource({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA, "on_success": OUTPUT_SINK})
+            JSONSource({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA})
 
 
 class TestJSONSourceQuarantineYielding:
@@ -318,7 +304,6 @@ class TestJSONSourceQuarantineYielding:
             {
                 "path": str(json_file),
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {
                     "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
@@ -366,7 +351,6 @@ class TestJSONSourceQuarantineYielding:
             {
                 "path": str(json_file),
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": {
                     "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
@@ -397,7 +381,6 @@ class TestJSONSourceQuarantineYielding:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {
                     "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
@@ -447,7 +430,6 @@ class TestJSONSourceParseErrors:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -484,7 +466,6 @@ class TestJSONSourceParseErrors:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -510,7 +491,6 @@ class TestJSONSourceParseErrors:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -537,7 +517,6 @@ class TestJSONSourceParseErrors:
                 "path": str(json_file),
                 "format": "json",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -566,7 +545,6 @@ class TestJSONSourceParseErrors:
                 "path": str(json_file),
                 "format": "json",
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -616,7 +594,6 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -658,7 +635,6 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -688,7 +664,6 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(json_file),
                 "format": "json",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -713,7 +688,6 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "discard",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -739,7 +713,6 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -787,7 +760,6 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",  # Expects object with "results" key
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -822,7 +794,6 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",  # Key doesn't exist
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -857,7 +828,6 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",  # Points to object, not list
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -886,7 +856,6 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",
                 "on_validation_failure": "discard",  # Don't yield quarantined
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )
@@ -918,7 +887,6 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",
                 "on_validation_failure": "quarantine",
-                "on_success": "output",
                 "schema": {"mode": "observed"},
             }
         )

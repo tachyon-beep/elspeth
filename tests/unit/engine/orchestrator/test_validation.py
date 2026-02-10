@@ -14,7 +14,7 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import RouteDestination
-from elspeth.contracts.types import GateName, NodeID
+from elspeth.contracts.types import GateName, NodeID, SinkName
 from elspeth.engine.orchestrator.types import RouteValidationError
 from elspeth.engine.orchestrator.validation import (
     validate_route_destinations,
@@ -65,8 +65,8 @@ class TestValidateRouteDestinations:
         """Routes to existing sinks pass without error."""
         gate = _make_gate_transform(node_id="gate-1", name="risk_gate")
         route_map = {
-            ("gate-1", "high"): RouteDestination.sink("high_risk_sink"),
-            ("gate-1", "low"): RouteDestination.sink("low_risk_sink"),
+            (NodeID("gate-1"), "high"): RouteDestination.sink(SinkName("high_risk_sink")),
+            (NodeID("gate-1"), "low"): RouteDestination.sink(SinkName("low_risk_sink")),
         }
         sinks = {"high_risk_sink", "low_risk_sink"}
         transform_id_map = {0: NodeID("gate-1")}
@@ -80,7 +80,7 @@ class TestValidateRouteDestinations:
 
     def test_continue_routes_always_pass(self) -> None:
         """'continue' is a special value, not a sink name."""
-        route_map = {("gate-1", "default"): RouteDestination.continue_()}
+        route_map = {(NodeID("gate-1"), "default"): RouteDestination.continue_()}
         gate = _make_gate_transform(node_id="gate-1", name="pass_gate")
         transform_id_map = {0: NodeID("gate-1")}
 
@@ -93,7 +93,7 @@ class TestValidateRouteDestinations:
 
     def test_fork_routes_always_pass(self) -> None:
         """'fork' is a special value, not a sink name."""
-        route_map = {("gate-1", "split"): RouteDestination.fork()}
+        route_map = {(NodeID("gate-1"), "split"): RouteDestination.fork()}
         gate = _make_gate_transform(node_id="gate-1", name="fork_gate")
         transform_id_map = {0: NodeID("gate-1")}
 
@@ -106,7 +106,7 @@ class TestValidateRouteDestinations:
 
     def test_processing_node_routes_always_pass(self) -> None:
         """Processing-node destinations are not validated as sink names."""
-        route_map = {("gate-1", "branch"): RouteDestination.processing_node(NodeID("transform-2"))}
+        route_map = {(NodeID("gate-1"), "branch"): RouteDestination.processing_node(NodeID("transform-2"))}
         gate = _make_gate_transform(node_id="gate-1", name="branch_gate")
         transform_id_map = {0: NodeID("gate-1")}
 
@@ -120,7 +120,7 @@ class TestValidateRouteDestinations:
     def test_invalid_route_raises_with_gate_name(self) -> None:
         """Route to non-existent sink raises with gate name in message."""
         gate = _make_gate_transform(node_id="gate-1", name="risk_gate")
-        route_map = {("gate-1", "high"): RouteDestination.sink("nonexistent_sink")}
+        route_map = {(NodeID("gate-1"), "high"): RouteDestination.sink(SinkName("nonexistent_sink"))}
         sinks = {"output"}
         transform_id_map = {0: NodeID("gate-1")}
 
@@ -135,7 +135,7 @@ class TestValidateRouteDestinations:
     def test_error_lists_available_sinks(self) -> None:
         """Error message includes available sinks for user debugging."""
         gate = _make_gate_transform(node_id="gate-1", name="g")
-        route_map = {("gate-1", "x"): RouteDestination.sink("bad")}
+        route_map = {(NodeID("gate-1"), "x"): RouteDestination.sink(SinkName("bad"))}
         sinks = {"alpha", "beta"}
         transform_id_map = {0: NodeID("gate-1")}
 
@@ -152,7 +152,7 @@ class TestValidateRouteDestinations:
         config_gate = Mock()
         config_gate.name = "config_gate"
         gate_id_map = {GateName("config_gate"): NodeID("cfg-gate-1")}
-        route_map = {("cfg-gate-1", "route_a"): RouteDestination.sink("missing_sink")}
+        route_map = {(NodeID("cfg-gate-1"), "route_a"): RouteDestination.sink(SinkName("missing_sink"))}
         sinks = {"output"}
 
         with pytest.raises(RouteValidationError, match=r"config_gate.*missing_sink"):
@@ -178,7 +178,7 @@ class TestValidateRouteDestinations:
         """Non-gate transforms in the transforms list don't interfere."""
         transform = _make_transform(node_id="t-1", name="mapper")
         gate = _make_gate_transform(node_id="gate-1", name="g")
-        route_map = {("gate-1", "x"): RouteDestination.sink("output")}
+        route_map = {(NodeID("gate-1"), "x"): RouteDestination.sink(SinkName("output"))}
         sinks = {"output"}
         transform_id_map = {0: NodeID("t-1"), 1: NodeID("gate-1")}
 

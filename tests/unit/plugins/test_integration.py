@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import Any, ClassVar
 
 from elspeth.contracts.schema_contract import PipelineRow
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field, make_pipeline_row
 
 
 class TestPluginSystemIntegration:
@@ -60,10 +60,12 @@ class TestPluginSystemIntegration:
             def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 row_dict = row.to_dict()
                 return TransformResult.success(
-                    {
-                        "value": row_dict["value"],
-                        "doubled": row_dict["value"] * 2,
-                    },
+                    make_pipeline_row(
+                        {
+                            "value": row_dict["value"],
+                            "doubled": row_dict["value"] * 2,
+                        }
+                    ),
                     success_reason={"action": "double"},
                 )
 

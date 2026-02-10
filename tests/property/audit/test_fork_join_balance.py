@@ -20,6 +20,8 @@ Fork terminology:
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -31,12 +33,13 @@ from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from tests.fixtures.factories import wire_transforms
+from elspeth.plugins.protocols import TransformProtocol
 from tests.fixtures.base_classes import (
     as_sink,
     as_source,
     as_transform,
 )
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import (
     CollectSink,
     ListSource,
@@ -197,7 +200,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     source_on_success = "source_out" if transforms else sink_name
     wired_transforms = (
         wire_transforms(
-            transforms,
+            cast(list[TransformProtocol], transforms),
             source_connection=source_on_success,
             final_sink=sink_name,
         )

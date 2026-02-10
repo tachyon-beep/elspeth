@@ -9,6 +9,7 @@ and audit trail recording.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, Mock
 from uuid import uuid4
 
@@ -21,7 +22,7 @@ from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
 from elspeth.engine.coalesce_executor import CoalesceExecutor, CoalesceOutcome, _PendingCoalesce
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,7 +37,7 @@ def _next_state_id() -> str:
     return f"state_{_state_counter:04d}"
 
 
-def _make_contract(fields=None):
+def _make_contract(fields: list[Any] | None = None) -> SchemaContract:
     """Create an OBSERVED contract for testing."""
     if fields is None:
         fields = [

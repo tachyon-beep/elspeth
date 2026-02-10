@@ -325,7 +325,6 @@ class TestSourceDataConfig:
             path="data.csv",
             schema_config=SchemaConfig.from_dict({"fields": ["id: int", "name: str"], "mode": "fixed"}),
             on_validation_failure="quarantine_sink",
-            on_success="output",
         )
 
         assert config.on_validation_failure == "quarantine_sink"
@@ -339,7 +338,6 @@ class TestSourceDataConfig:
             path="data.csv",
             schema_config=SchemaConfig.from_dict({"fields": ["id: int"], "mode": "flexible"}),
             on_validation_failure="discard",
-            on_success="output",
         )
 
         assert config.on_validation_failure == "discard"
@@ -354,7 +352,6 @@ class TestSourceDataConfig:
                 path="data.csv",
                 schema_config=SchemaConfig.from_dict({"fields": ["id: int"], "mode": "fixed"}),
                 on_validation_failure="",
-                on_success="output",
             )
 
     def test_source_config_inherits_path_and_schema(self) -> None:
@@ -366,7 +363,6 @@ class TestSourceDataConfig:
             path="data/input.csv",
             schema_config=SchemaConfig.from_dict({"fields": ["name: str"], "mode": "fixed"}),
             on_validation_failure="bad_rows",
-            on_success="output",
         )
 
         assert config.path == "data/input.csv"
@@ -375,10 +371,16 @@ class TestSourceDataConfig:
 
 
 class TestTransformDataConfig:
-    """Tests for TransformDataConfig with on_error."""
+    """Tests for TransformDataConfig.
 
-    def test_on_error_is_optional(self) -> None:
-        """on_error can be omitted for transforms that never error."""
+    Note: on_error/on_success routing is now at the settings level
+    (TransformSettings in core/config.py), not in plugin config.
+    Routing properties are on BaseTransform, injected by the
+    instantiation bridge in cli_helpers.py.
+    """
+
+    def test_transform_config_accepts_schema(self) -> None:
+        """TransformDataConfig accepts schema_config."""
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.config_base import TransformDataConfig
 
@@ -386,42 +388,42 @@ class TestTransformDataConfig:
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
-        assert config.on_error is None
+        assert config.schema_config is not None
+        assert config.schema_config.is_observed is True
 
-    def test_on_error_accepts_sink_name(self) -> None:
-        """on_error accepts a sink name."""
-        from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
-
-        config = TransformDataConfig(
-            schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
-            on_error="failed_transforms",
-        )
-
-        assert config.on_error == "failed_transforms"
-
-    def test_on_error_accepts_discard(self) -> None:
-        """on_error accepts 'discard' for explicit drop."""
-        from elspeth.contracts.schema import SchemaConfig
-        from elspeth.plugins.config_base import TransformDataConfig
-
-        config = TransformDataConfig(
-            schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
-            on_error="discard",
-        )
-
-        assert config.on_error == "discard"
-
-    def test_on_error_rejects_empty_string(self) -> None:
-        """on_error rejects empty string - use None or valid sink."""
+    def test_transform_config_rejects_routing_fields(self) -> None:
+        """on_error/on_success are not config-level fields (extra=forbid)."""
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.config_base import TransformDataConfig
 
         with pytest.raises(ValidationError):
             TransformDataConfig(
-                schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
-                on_error="",
+                schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+                on_error="sink",  # type: ignore[call-arg]
             )
+
+    def test_transform_config_accepts_required_input_fields(self) -> None:
+        """TransformDataConfig accepts required_input_fields declaration."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.config_base import TransformDataConfig
+
+        config = TransformDataConfig(
+            schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
+            required_input_fields=["id", "name"],
+        )
+
+        assert config.required_input_fields == ["id", "name"]
+
+    def test_transform_config_required_input_fields_optional(self) -> None:
+        """required_input_fields defaults to None when not specified."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.config_base import TransformDataConfig
+
+        config = TransformDataConfig(
+            schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
+        )
+
+        assert config.required_input_fields is None
 
     def test_transform_config_inherits_schema_requirement(self) -> None:
         """TransformDataConfig inherits schema requirement from DataPluginConfig."""

@@ -31,6 +31,7 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.testing import make_pipeline_row
 from tests.strategies.ids import id_strings
 from tests.strategies.json import row_data
 
@@ -358,9 +359,11 @@ class TestTransformResultJsonSerializationProperties:
         data: dict[str, Any],
     ) -> None:
         """Property: TransformResult.success() serializes to valid JSON."""
-        result = TransformResult.success(data, success_reason={"action": "test"})
+        result = TransformResult.success(make_pipeline_row(data), success_reason={"action": "test"})
 
-        serialized = json.dumps(asdict(result))
+        result_dict = asdict(result)
+        result_dict["row"] = result.row.to_dict() if result.row is not None else None
+        serialized = json.dumps(result_dict)
         parsed = json.loads(serialized)
 
         assert isinstance(parsed, dict)
@@ -374,9 +377,11 @@ class TestTransformResultJsonSerializationProperties:
         success_reason: TransformSuccessReason,
     ) -> None:
         """Property: TransformResult.success() JSON round-trip preserves row."""
-        result = TransformResult.success(data, success_reason=success_reason)
+        result = TransformResult.success(make_pipeline_row(data), success_reason=success_reason)
 
-        serialized = json.dumps(asdict(result))
+        result_dict = asdict(result)
+        result_dict["row"] = result.row.to_dict() if result.row is not None else None
+        serialized = json.dumps(result_dict)
         parsed = json.loads(serialized)
 
         assert parsed["status"] == "success"

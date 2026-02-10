@@ -485,6 +485,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert error_sink is None
 
         # Verify audit trail - HTTP call was recorded via AuditedHTTPClient
+        assert ctx.state_id is not None
         calls = recorder.get_calls(ctx.state_id)
         assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
         http_call = calls[0]
@@ -541,6 +542,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert "500" in str(exc_info.value)
 
         # Verify audit trail - error call was recorded via AuditedHTTPClient
+        assert ctx.state_id is not None
         calls = recorder.get_calls(ctx.state_id)
         assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
         assert calls[0].call_type == CallType.HTTP
@@ -594,6 +596,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert "429" in str(exc_info.value)
 
         # Verify audit trail - rate limit error call was recorded
+        assert ctx.state_id is not None
         calls = recorder.get_calls(ctx.state_id)
         assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
         assert calls[0].call_type == CallType.HTTP

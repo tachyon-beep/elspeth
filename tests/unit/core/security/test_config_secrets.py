@@ -699,6 +699,7 @@ class TestCLILoadSettingsWithSecrets:
         settings_file.write_text("""
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
     schema:
@@ -746,6 +747,7 @@ secrets:
 
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
     schema:

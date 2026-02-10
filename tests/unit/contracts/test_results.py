@@ -32,7 +32,7 @@ from elspeth.contracts.results import (
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 from elspeth.engine.retry import MaxRetriesExceeded
-from tests.fixtures.factories import make_pipeline_row
+from elspeth.testing import make_pipeline_row
 
 
 def _make_observed_contract() -> SchemaContract:
@@ -65,6 +65,7 @@ class TestTransformResultMultiRow:
         result = TransformResult.success(make_pipeline_row({"id": 1}), success_reason={"action": "test"})
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"id": 1}
         assert result.rows is None
 
@@ -197,7 +198,7 @@ class TestTransformResult:
         """
         with pytest.raises(ValueError, match="MUST provide success_reason"):
             # Using the dataclass directly to bypass factory's keyword-only arg
-            TransformResult(status="success", row={"x": 1}, reason=None)
+            TransformResult(status="success", row=make_pipeline_row({"x": 1}), reason=None)
 
     def test_error_factory(self) -> None:
         """Error factory creates result with status='error' and reason."""

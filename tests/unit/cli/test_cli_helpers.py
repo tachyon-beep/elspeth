@@ -235,7 +235,9 @@ def test_aggregation_rejects_transform_without_is_batch_aware_attribute():
 
     config_dict = {
         "source": {"plugin": "csv", "on_success": "broken_agg", "options": {"path": "t.csv", "on_validation_failure": "discard"}},
-        "aggregations": [{"name": "broken_agg", "plugin": "mock", "input": "broken_agg", "on_success": "out", "options": {}, "trigger": {"count": 5}}],
+        "aggregations": [
+            {"name": "broken_agg", "plugin": "mock", "input": "broken_agg", "on_success": "out", "options": {}, "trigger": {"count": 5}}
+        ],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
     }
 

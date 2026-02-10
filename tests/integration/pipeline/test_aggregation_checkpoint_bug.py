@@ -38,6 +38,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
+from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
     CallbackSource,
     _TestSchema,
@@ -79,12 +80,12 @@ class BatchCollectorTransform(BaseTransform):
             )
 
             return TransformResult.success(
-                PipelineRow(output, contract) if contract else output,
+                PipelineRow(output, contract),
                 success_reason={"action": "batch"},
             )
         else:
             # Single row - passthrough
-            return TransformResult.success(dict(row), success_reason={"action": "single"})
+            return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "single"})
 
 
 class CollectingSink(_TestSinkBase):
@@ -93,6 +94,7 @@ class CollectingSink(_TestSinkBase):
     name = "collecting_sink"
 
     def __init__(self) -> None:
+        super().__init__()
         self.rows: list[dict[str, Any]] = []
 
     def on_start(self, ctx: Any) -> None:

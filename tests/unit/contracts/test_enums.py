@@ -121,7 +121,7 @@ class TestRoutingMode:
         """DIVERT mode serializes to string for database storage."""
         from elspeth.contracts import RoutingMode
 
-        assert RoutingMode.DIVERT == "divert"
+        assert RoutingMode.DIVERT == "divert"  # type: ignore[comparison-overlap]  # str enum
 
 
 class TestEnumCoercion:
@@ -167,7 +167,7 @@ class TestTriggerType:
 
         # (str, Enum) allows direct string comparison for database serialization
         assert TriggerType.COUNT == "count"  # type: ignore[comparison-overlap]
-        assert TriggerType.TIMEOUT == "timeout"  # type: ignore[unreachable]
+        assert TriggerType.TIMEOUT == "timeout"  # type: ignore[comparison-overlap,unreachable]  # str enum
         # Can be created from string values (for DB reads)
         assert TriggerType("count") == TriggerType.COUNT
         assert TriggerType("end_of_source") == TriggerType.END_OF_SOURCE

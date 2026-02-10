@@ -257,22 +257,22 @@ class TestRouteDestination:
 
     def test_continue_destination_rejects_payload_fields(self) -> None:
         """CONTINUE destination cannot carry sink or node payloads."""
-        from elspeth.contracts import NodeID, RouteDestination, RouteDestinationKind
+        from elspeth.contracts import NodeID, RouteDestination, RouteDestinationKind, SinkName
 
         with pytest.raises(ValueError, match="must not include sink_name or next_node_id"):
-            RouteDestination(kind=RouteDestinationKind.CONTINUE, sink_name="out")
+            RouteDestination(kind=RouteDestinationKind.CONTINUE, sink_name=SinkName("out"))
 
         with pytest.raises(ValueError, match="must not include sink_name or next_node_id"):
             RouteDestination(kind=RouteDestinationKind.CONTINUE, next_node_id=NodeID("transform-1"))
 
     def test_processing_destination_rejects_sink_name(self) -> None:
         """PROCESSING_NODE destination cannot carry sink_name."""
-        from elspeth.contracts import NodeID, RouteDestination, RouteDestinationKind
+        from elspeth.contracts import NodeID, RouteDestination, RouteDestinationKind, SinkName
 
         with pytest.raises(ValueError, match="must not include sink_name"):
             RouteDestination(
                 kind=RouteDestinationKind.PROCESSING_NODE,
-                sink_name="out",
+                sink_name=SinkName("out"),
                 next_node_id=NodeID("transform-1"),
             )
 

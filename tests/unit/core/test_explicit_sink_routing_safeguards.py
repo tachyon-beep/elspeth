@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -24,6 +24,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.config import SourceSettings, TransformSettings
 from elspeth.core.dag import WiredTransform
 from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
@@ -233,7 +234,7 @@ class TestOnSuccessConfigAlignment:
         source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
         # Create WiredTransform with on_success=None (dangling — no route to sink)
         wired = WiredTransform(
-            plugin=transform,
+            plugin=cast(TransformProtocol, transform),
             settings=TransformSettings(
                 name="tracer_0",
                 plugin=transform.name,
@@ -244,10 +245,10 @@ class TestOnSuccessConfigAlignment:
 
         with pytest.raises(GraphValidationError, match="Dangling output connections"):
             ExecutionGraph.from_plugin_instances(
-                source=source,
+                source=cast(SourceProtocol, source),
                 source_settings=source_settings,
                 transforms=[wired],
-                sinks={"output": sink},
+                sinks=cast("dict[str, SinkProtocol]", {"output": sink}),
                 aggregations={},
                 gates=[],
             )
@@ -271,7 +272,7 @@ class TestOnSuccessConfigAlignment:
 
         source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
         wired_t1 = WiredTransform(
-            plugin=t1,
+            plugin=cast(TransformProtocol, t1),
             settings=TransformSettings(
                 name="tracer_0",
                 plugin=t1.name,
@@ -281,7 +282,7 @@ class TestOnSuccessConfigAlignment:
         )
         # t2 IS terminal but we deliberately omit on_success
         wired_t2 = WiredTransform(
-            plugin=t2,
+            plugin=cast(TransformProtocol, t2),
             settings=TransformSettings(
                 name="tracer_1",
                 plugin=t2.name,
@@ -292,10 +293,10 @@ class TestOnSuccessConfigAlignment:
 
         with pytest.raises(GraphValidationError, match="Dangling output connections"):
             ExecutionGraph.from_plugin_instances(
-                source=source,
+                source=cast(SourceProtocol, source),
                 source_settings=source_settings,
                 transforms=[wired_t1, wired_t2],
-                sinks={"out": sink},
+                sinks=cast("dict[str, SinkProtocol]", {"out": sink}),
                 aggregations={},
                 gates=[],
             )
@@ -315,16 +316,16 @@ class TestOnSuccessConfigAlignment:
 
         source_settings = SourceSettings(plugin=source.name, on_success="source_out", options={})
         wired = wire_transforms(
-            [transform],
+            [cast(TransformProtocol, transform)],
             source_connection="source_out",
             final_sink="sink_b",
         )
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=source,
+            source=cast(SourceProtocol, source),
             source_settings=source_settings,
             transforms=wired,
-            sinks={"sink_a": sink_a, "sink_b": sink_b},
+            sinks=cast("dict[str, SinkProtocol]", {"sink_a": sink_a, "sink_b": sink_b}),
             aggregations={},
             gates=[],
         )

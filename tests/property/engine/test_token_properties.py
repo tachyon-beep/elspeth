@@ -33,6 +33,7 @@ from hypothesis import strategies as st
 
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID
 from elspeth.engine.tokens import TokenManager
 from tests.strategies.ids import multiple_branches
 from tests.strategies.json import row_data
@@ -89,7 +90,7 @@ class TestForkIsolationProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            node_id="node_fork",
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
         )
 
@@ -139,7 +140,7 @@ class TestForkIsolationProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            node_id="node_fork",
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
         )
 
@@ -217,7 +218,7 @@ class TestForkParentPreservationProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            node_id="node_fork",
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
         )
 
@@ -261,7 +262,7 @@ class TestForkParentPreservationProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            node_id="node_fork",
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
         )
 
@@ -314,7 +315,7 @@ class TestForkRowDataOverrideProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            node_id="node_fork",
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
             row_data=_wrap_dict_as_pipeline_row(override_data),  # Explicit override
         )
@@ -352,7 +353,7 @@ class TestForkRowDataOverrideProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            node_id="node_fork",
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
             # No row_data override
         )
@@ -436,7 +437,7 @@ class TestExpandIsolationProperties:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=output_contract,
-            node_id="node_expand",
+            node_id=NodeID("node_expand"),
             run_id="test_run_1",
         )
 
@@ -481,7 +482,7 @@ class TestExpandIsolationProperties:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=output_contract,
-            node_id="node_expand",
+            node_id=NodeID("node_expand"),
             run_id="test_run_1",
         )
 
@@ -539,7 +540,7 @@ class TestExpandParentPreservationProperties:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=output_contract,
-            node_id="node_expand",
+            node_id=NodeID("node_expand"),
             run_id="test_run_1",
         )
 
@@ -578,7 +579,7 @@ class TestExpandParentPreservationProperties:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=output_contract,
-            node_id="node_expand",
+            node_id=NodeID("node_expand"),
             run_id="test_run_1",
         )
 
@@ -627,6 +628,6 @@ class TestExpandParentPreservationProperties:
                 parent_token=parent,
                 expanded_rows=expanded_rows,
                 output_contract=unlocked_contract,
-                node_id="node_expand",
+                node_id=NodeID("node_expand"),
                 run_id="test_run_1",
             )

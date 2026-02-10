@@ -48,20 +48,22 @@ test_datetimes = st.datetimes(
 )
 
 
-def _nest_in_dicts(value: Any, depth: int) -> dict:
+def _nest_in_dicts(value: Any, depth: int) -> dict[str, Any]:
     """Wrap a value in nested dicts to a given depth."""
     result: Any = value
     for i in range(depth):
         result = {f"level_{i}": result}
-    return result
+    out: dict[str, Any] = result
+    return out
 
 
-def _nest_in_lists(value: Any, depth: int) -> list:
+def _nest_in_lists(value: Any, depth: int) -> list[Any]:
     """Wrap a value in nested lists to a given depth."""
     result: Any = value
     for _ in range(depth):
         result = [result]
-    return result
+    out: list[Any] = result
+    return out
 
 
 # =============================================================================
