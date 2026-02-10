@@ -365,29 +365,62 @@ def test_header_fingerprinting_in_dev_mode(http_client, mock_recorder):
 
 
 def test_sensitive_header_detection(http_client):
-    """Verify sensitive header detection logic."""
-    # Test various sensitive header patterns
-    sensitive = [
+    """Verify sensitive header detection logic.
+
+    Uses word-boundary matching (dash-delimited segments) to avoid
+    false positives from substring matching.
+    """
+    # Well-known sensitive headers (exact match)
+    sensitive_exact = [
         "authorization",
         "Authorization",
         "X-API-Key",
         "api-key",
         "X-Auth-Token",
         "proxy-authorization",
-        "Custom-Auth-Header",  # Contains "auth"
-        "Secret-Key",  # Contains "secret"
-        "Bearer-Token",  # Contains "token"
+        "cookie",
+        "Cookie",
+        "set-cookie",
+        "www-authenticate",
+        "proxy-authenticate",
+        "x-access-token",
+        "x-csrf-token",
+        "x-xsrf-token",
+        "Ocp-Apim-Subscription-Key",
     ]
 
-    for header in sensitive:
-        assert http_client._is_sensitive_header(header), f"{header} should be sensitive"
+    for header in sensitive_exact:
+        assert http_client._is_sensitive_header(header), f"{header} should be sensitive (exact)"
 
-    # Non-sensitive headers
+    # Sensitive via word-segment matching (dash-delimited)
+    sensitive_word = [
+        "Custom-Auth-Header",  # segment "auth"
+        "Secret-Key",  # segments "secret" and "key"
+        "Bearer-Token",  # segment "token"
+        "X-Session-Token",  # segment "token"
+        "X-Secret-Value",  # segment "secret"
+        "X-Password-Hash",  # segment "password"
+        "X-Credential-Id",  # segment "credential"
+    ]
+
+    for header in sensitive_word:
+        assert http_client._is_sensitive_header(header), f"{header} should be sensitive (word)"
+
+    # Non-sensitive headers — must NOT be flagged
     non_sensitive = [
         "Content-Type",
         "User-Agent",
         "Accept",
         "X-Request-ID",
+        # Regression: these were false positives with substring matching
+        "X-Author",  # "author" ≠ "auth"
+        "X-Authored-By",  # "authored" ≠ "auth"
+        "X-Monkey-Patch",  # "monkey" ≠ "key"
+        "X-Turkey-Id",  # "turkey" ≠ "key"
+        "X-Keyboard-Layout",  # "keyboard" ≠ "key"
+        "X-Hotkey-Name",  # "hotkey" ≠ "key"
+        "X-Secretary-Id",  # "secretary" ≠ "secret"
+        "X-Tokenizer-Version",  # "tokenizer" ≠ "token"
     ]
 
     for header in non_sensitive:

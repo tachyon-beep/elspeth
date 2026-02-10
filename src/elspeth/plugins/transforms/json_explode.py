@@ -156,29 +156,11 @@ class JSONExplode(BaseTransform):
         row_dict = row.to_dict()
         base = {k: v for k, v in row_dict.items() if k != self._array_field}
 
-        # Handle empty array - return single row, not multi
+        # Empty array: nothing to deaggregate — quarantine with clear audit trail
         if len(array_value) == 0:
-            output = base.copy()
-            output[self._output_field] = None
-            if self._include_index:
-                output["item_index"] = None
-            fields_added = [self._output_field]
-            if self._include_index:
-                fields_added.append("item_index")
-
-            # Update contract: array_field removed, output_field/item_index added
-            output_contract = narrow_contract_to_output(
-                input_contract=row.contract,
-                output_row=output,
-            )
-
-            return TransformResult.success(
-                PipelineRow(output, output_contract),
-                success_reason={
-                    "action": "transformed",
-                    "fields_added": fields_added,
-                    "fields_removed": [self._array_field],
-                },
+            return TransformResult.error(
+                {"reason": "invalid_input", "field": self._array_field, "error": "empty array"},
+                retryable=False,
             )
 
         # Explode array into multiple rows

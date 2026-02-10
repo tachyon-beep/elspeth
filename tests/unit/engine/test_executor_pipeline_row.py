@@ -722,6 +722,7 @@ class TestGateExecutorPipelineRow:
 
     def test_execute_gate_crashes_if_no_contract_available(self) -> None:
         """Should crash if neither result nor input has contract (B6 fix)."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.results import GateResult
         from elspeth.contracts.routing import RoutingAction
@@ -766,8 +767,8 @@ class TestGateExecutorPipelineRow:
         with patch.object(type(token.row_data), "contract", new_callable=PropertyMock) as mock_contract:
             mock_contract.return_value = None
 
-            # Execute - should raise ValueError
-            with pytest.raises(ValueError) as exc_info:
+            # Execute - should raise OrchestrationInvariantError
+            with pytest.raises(OrchestrationInvariantError) as exc_info:
                 executor.execute_gate(
                     gate=mock_gate,
                     token=token,

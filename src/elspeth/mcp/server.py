@@ -2570,8 +2570,12 @@ Environment Variables:
 
         database_url = f"sqlite:///{db_path}"
 
-    # SQLCipher passphrase from environment (if database is encrypted)
-    passphrase = os.environ.get("ELSPETH_AUDIT_KEY")
+    # SQLCipher passphrase from environment — only applies to SQLite backends.
+    # Non-SQLite URLs (e.g. postgresql://) ignore the key even if it's set
+    # in the environment for other ELSPETH commands.
+    passphrase: str | None = None
+    if database_url.startswith("sqlite"):
+        passphrase = os.environ.get("ELSPETH_AUDIT_KEY")
 
     import asyncio
 

@@ -1619,3 +1619,8 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
+- key: core/checkpoint/serialization.py:R5:_restore_types:fp=4af58e44b9e1dded
+  owner: architecture
+  reason: Tier 1 type restoration — isinstance on our own serialized checkpoint format to detect datetime type tags
+  safety: Non-str values fall through without coercion — no silent wrong behavior
+  expires: '2026-03-13'

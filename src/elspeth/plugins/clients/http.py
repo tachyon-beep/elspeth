@@ -149,12 +149,48 @@ class AuditedHTTPClient(AuditedClientBase):
             follow_redirects=False,
         )
 
-    # Headers that may contain secrets - fingerprinted in audit trail
-    _SENSITIVE_REQUEST_HEADERS = frozenset({"authorization", "x-api-key", "api-key", "x-auth-token", "proxy-authorization"})
-    _SENSITIVE_RESPONSE_HEADERS = frozenset({"set-cookie", "www-authenticate", "proxy-authenticate", "x-auth-token"})
+    # Well-known sensitive headers (exact match, case-insensitive).
+    # Checked first for O(1) lookup before falling back to word matching.
+    _SENSITIVE_HEADERS_EXACT = frozenset(
+        {
+            # Request headers
+            "authorization",
+            "proxy-authorization",
+            "cookie",
+            "x-api-key",
+            "api-key",
+            "x-auth-token",
+            "x-access-token",
+            "x-csrf-token",
+            "x-xsrf-token",
+            "ocp-apim-subscription-key",
+            # Response headers
+            "set-cookie",
+            "www-authenticate",
+            "proxy-authenticate",
+        }
+    )
+
+    # Words that indicate sensitive content when they appear as complete
+    # dash-delimited segments in header names.
+    # e.g. "X-Auth-Token" splits to {"x","auth","token"} → matches "auth","token"
+    # but "X-Author" splits to {"x","author"} → no match (avoids false positives)
+    _SENSITIVE_HEADER_WORDS = frozenset(
+        {
+            "auth",
+            "key",
+            "secret",
+            "token",
+            "password",
+            "credential",
+        }
+    )
 
     def _is_sensitive_header(self, header_name: str) -> bool:
         """Check if a header name indicates sensitive content.
+
+        Uses dash-delimited word matching to avoid false positives from
+        substring matching (e.g. "key" in "monkey", "auth" in "author").
 
         Args:
             header_name: Header name to check
@@ -163,13 +199,10 @@ class AuditedHTTPClient(AuditedClientBase):
             True if header likely contains secrets
         """
         lower_name = header_name.lower()
-        return (
-            lower_name in self._SENSITIVE_REQUEST_HEADERS
-            or "auth" in lower_name
-            or "key" in lower_name
-            or "secret" in lower_name
-            or "token" in lower_name
-        )
+        if lower_name in self._SENSITIVE_HEADERS_EXACT:
+            return True
+        segments = lower_name.split("-")
+        return any(seg in self._SENSITIVE_HEADER_WORDS for seg in segments)
 
     def _filter_request_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """Fingerprint sensitive request headers for audit recording.
@@ -230,7 +263,8 @@ class AuditedHTTPClient(AuditedClientBase):
         """Filter out sensitive response headers from audit recording.
 
         Response headers that may contain secrets (cookies, auth challenges)
-        are not recorded.
+        are not recorded. Uses the same word-boundary matching as request
+        header filtering.
 
         Args:
             headers: Full headers dict
@@ -238,15 +272,7 @@ class AuditedHTTPClient(AuditedClientBase):
         Returns:
             Headers dict with sensitive headers removed
         """
-        return {
-            k: v
-            for k, v in headers.items()
-            if k.lower() not in self._SENSITIVE_RESPONSE_HEADERS
-            and "auth" not in k.lower()
-            and "key" not in k.lower()
-            and "secret" not in k.lower()
-            and "token" not in k.lower()
-        }
+        return {k: v for k, v in headers.items() if not self._is_sensitive_header(k)}
 
     def _extract_provider(self, url: str) -> str:
         """Extract provider (host) from URL for telemetry.

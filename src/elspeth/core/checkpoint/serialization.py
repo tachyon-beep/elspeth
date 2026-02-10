@@ -118,8 +118,10 @@ def _restore_types(obj: Any) -> Any:
         Data with restored Python types
     """
     if isinstance(obj, dict):
-        # Check for type tag
-        if "__datetime__" in obj and len(obj) == 1:
+        # Check for type tag — our encoder always writes str values,
+        # so only match when the value is str. Non-str values (e.g. None)
+        # indicate user data that coincidentally uses our reserved key.
+        if "__datetime__" in obj and len(obj) == 1 and isinstance(obj["__datetime__"], str):
             return datetime.fromisoformat(obj["__datetime__"])
         # Recurse into dict values
         return {k: _restore_types(v) for k, v in obj.items()}

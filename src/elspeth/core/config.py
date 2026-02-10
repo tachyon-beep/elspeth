@@ -1354,7 +1354,7 @@ class ElspethSettings(BaseModel):
 
 
 # Regex pattern for ${VAR} or ${VAR:-default} syntax
-_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}")
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 
 def _expand_env_vars(config: dict[str, Any]) -> dict[str, Any]:

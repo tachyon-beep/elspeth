@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
+    from elspeth.contracts.errors import ContractViolation
     from elspeth.contracts.identity import TokenInfo
     from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -366,6 +367,8 @@ class PluginContext:
         error: str,
         schema_mode: str,
         destination: str,
+        *,
+        contract_violation: ContractViolation | None = None,
     ) -> ValidationErrorToken:
         """Record a validation error for audit trail.
 
@@ -379,6 +382,7 @@ class PluginContext:
             error: Description of the validation failure
             schema_mode: "fixed", "flexible", "observed", or "parse" (parse = file-level parse error)
             destination: Sink name where row is routed, or "discard"
+            contract_violation: Optional contract violation details for structured auditing
 
         Returns:
             ValidationErrorToken for tracking the quarantined row
@@ -425,6 +429,7 @@ class PluginContext:
             error=error,
             schema_mode=schema_mode,
             destination=destination,
+            contract_violation=contract_violation,
         )
 
         return ValidationErrorToken(

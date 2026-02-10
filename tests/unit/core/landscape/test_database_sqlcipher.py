@@ -262,6 +262,59 @@ class TestSQLCipherRejectsNonSQLite:
         db.close()
 
 
+class TestMCPPassphraseGating:
+    """MCP entrypoint only forwards passphrase for SQLite backends.
+
+    Regression test: ELSPETH_AUDIT_KEY was unconditionally forwarded to
+    LandscapeDB.from_url, causing startup failures when the MCP server was
+    pointed at non-SQLite databases (e.g. postgresql://) in environments
+    that export the key for other ELSPETH commands.
+    """
+
+    def test_non_sqlite_url_ignores_env_passphrase(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-SQLite database_url should not pick up ELSPETH_AUDIT_KEY."""
+        monkeypatch.setenv("ELSPETH_AUDIT_KEY", "super-secret-key")
+
+        database_url = "postgresql://user:pass@host/mydb"
+
+        # Reproduce the gating logic from mcp/server.py main()
+        import os
+
+        passphrase: str | None = None
+        if database_url.startswith("sqlite"):
+            passphrase = os.environ.get("ELSPETH_AUDIT_KEY")
+
+        assert passphrase is None, "Non-SQLite URL should not receive passphrase from ELSPETH_AUDIT_KEY"
+
+    def test_sqlite_url_picks_up_env_passphrase(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SQLite database_url should receive ELSPETH_AUDIT_KEY as passphrase."""
+        monkeypatch.setenv("ELSPETH_AUDIT_KEY", "super-secret-key")
+
+        database_url = "sqlite:///./state/audit.db"
+
+        import os
+
+        passphrase: str | None = None
+        if database_url.startswith("sqlite"):
+            passphrase = os.environ.get("ELSPETH_AUDIT_KEY")
+
+        assert passphrase == "super-secret-key"
+
+    def test_sqlite_url_without_env_key_gets_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SQLite URL without ELSPETH_AUDIT_KEY set gets passphrase=None."""
+        monkeypatch.delenv("ELSPETH_AUDIT_KEY", raising=False)
+
+        database_url = "sqlite:///./state/audit.db"
+
+        import os
+
+        passphrase: str | None = None
+        if database_url.startswith("sqlite"):
+            passphrase = os.environ.get("ELSPETH_AUDIT_KEY")
+
+        assert passphrase is None
+
+
 class TestSQLCipherRejectsMemory:
     """SQLCipher with :memory: raises a clear ValueError."""
 

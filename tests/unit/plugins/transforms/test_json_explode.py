@@ -69,8 +69,8 @@ class TestJSONExplodeHappyPath:
 
         assert transform.creates_tokens is True
 
-    def test_empty_array_returns_single_row(self, ctx: PluginContext) -> None:
-        """Empty array returns single row with None item."""
+    def test_empty_array_returns_error(self, ctx: PluginContext) -> None:
+        """Empty array produces error (nothing to deaggregate)."""
         from elspeth.plugins.transforms.json_explode import JSONExplode
 
         transform = JSONExplode(
@@ -84,10 +84,11 @@ class TestJSONExplodeHappyPath:
 
         result = transform.process(make_pipeline_row(row), ctx)
 
-        assert result.status == "success"
-        assert not result.is_multi_row  # Single row result
-        assert result.row is not None
-        assert result.row.to_dict() == {"id": 1, "item": None, "item_index": None}
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "invalid_input"
+        assert result.reason["field"] == "items"
+        assert not result.retryable
 
     def test_custom_output_field_name(self, ctx: PluginContext) -> None:
         """Custom output_field name is respected."""
@@ -429,7 +430,7 @@ class TestJSONExplodeContractPropagation:
         assert "id" in field_names  # Other fields preserved
 
     def test_contract_empty_array_case(self, ctx: PluginContext) -> None:
-        """Output contract for empty array contains output_field with None type."""
+        """Empty array returns error — no contract to propagate."""
         from elspeth.plugins.transforms.json_explode import JSONExplode
 
         transform = JSONExplode(
@@ -443,13 +444,10 @@ class TestJSONExplodeContractPropagation:
         row = make_pipeline_row({"id": 1, "items": []})
         result = transform.process(row, ctx)
 
-        assert result.status == "success"
-        assert isinstance(result.row, PipelineRow)
-
-        field_names = {f.normalized_name for f in result.row.contract.fields}
-        assert "item" in field_names
-        assert "item_index" in field_names
-        assert "items" not in field_names
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "invalid_input"
+        assert result.row is None
 
     def test_downstream_can_access_exploded_fields(self, ctx: PluginContext) -> None:
         """Downstream transforms can access exploded fields via contract."""
