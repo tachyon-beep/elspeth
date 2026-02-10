@@ -338,12 +338,19 @@ allowed_dict_patterns:
   - "src/elspeth/core/logging.py:_remove_internal_fields:return"
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # MCP SERVER - Genuinely dynamic patterns
+  # MCP SERVER + ANALYZER - Genuinely dynamic patterns
   # SQL query results have user-defined columns; call_tool receives MCP protocol input.
   # All other MCP returns are now typed via TypedDicts in mcp/types.py.
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:params"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:return (list)"
+  # Facade (mcp/analyzer.py) - delegates to submodules
+  - "src/elspeth/mcp/analyzer.py:LandscapeAnalyzer.query:params"
+  - "src/elspeth/mcp/analyzer.py:LandscapeAnalyzer.query:return (list)"
+  # Submodule functions (mcp/analyzers/)
+  - "src/elspeth/mcp/analyzers/queries.py:explain_token:return"
+  - "src/elspeth/mcp/analyzers/queries.py:get_errors:return"
+  - "src/elspeth/mcp/analyzers/queries.py:query:params"
+  - "src/elspeth/mcp/analyzers/queries.py:query:return (list)"
+  # MCP server machinery
   - "src/elspeth/mcp/server.py:call_tool:arguments"
   # _validate_tool_args bridges Tier 3 (MCP protocol) to validated args.
   # Input is dict[str, Any] by protocol; return is validated but dynamic per-tool.

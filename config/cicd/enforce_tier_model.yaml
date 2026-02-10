@@ -38,6 +38,11 @@ per_file_rules:
   - R1
   reason: MCP tool arguments are external client data (Tier 3) - defensive access is correct
   expires: null
+- pattern: mcp/analyzers/*
+  rules:
+  - R1
+  reason: Analyzer submodule functions process Tier 3 MCP data - defensive access is correct
+  expires: null
 - pattern: plugins/sources/*
   rules:
   - R1
@@ -1185,51 +1190,51 @@ allow_hits:
 - key: plugins/validation.py:R1:PluginConfigValidator:_extract_errors:fp=76f7694624d8cfcc
   owner: architecture
   reason: Optional field access at trust boundary
-- key: mcp/server.py:R5:_validate_tool_args:fp=69c3d598495199e8
+- key: mcp/server.py:R5:_validate_tool_args:fp=f4181517feee6c11
   owner: architecture
   reason: MCP tool argument validation - Tier 3 external protocol boundary
   safety: Invalid arguments raise ValueError with descriptive message
   expires: '2026-05-02'
-- key: mcp/server.py:R5:_validate_tool_args:fp=1d4be1fd73596be4
+- key: mcp/server.py:R5:_validate_tool_args:fp=cbdeed2f422db866
   owner: architecture
   reason: MCP tool argument validation - Tier 3 external protocol boundary
   safety: Invalid arguments raise ValueError with descriptive message
   expires: '2026-05-02'
-- key: mcp/server.py:R5:_validate_tool_args:fp=b3a076df12512a98
+- key: mcp/server.py:R5:_validate_tool_args:fp=c8ac5223101ffbc2
   owner: architecture
   reason: MCP tool argument validation - Tier 3 external protocol boundary
   safety: Invalid arguments raise ValueError with descriptive message
   expires: '2026-05-02'
-- key: mcp/server.py:R5:_validate_tool_args:fp=0110a14d5673741b
+- key: mcp/server.py:R5:_validate_tool_args:fp=4bb05783ddeb348b
   owner: architecture
   reason: MCP tool argument validation - Tier 3 external protocol boundary
   safety: Invalid arguments raise ValueError with descriptive message
   expires: '2026-05-02'
-- key: mcp/server.py:R5:_validate_tool_args:fp=7877fba47c3e1861
+- key: mcp/server.py:R5:_validate_tool_args:fp=8c9a782a5cb9799f
   owner: architecture
   reason: MCP tool argument validation - Tier 3 external protocol boundary
   safety: Invalid arguments raise ValueError with descriptive message
   expires: '2026-05-02'
-- key: mcp/server.py:R5:_validate_tool_args:fp=7c7262d14d75a68d
+- key: mcp/server.py:R5:_validate_tool_args:fp=127b6543a22bb7e2
   owner: architecture
   reason: MCP tool argument validation - Tier 3 external protocol boundary
   safety: Invalid arguments raise ValueError with descriptive message
   expires: '2026-05-02'
-- key: mcp/server.py:R5:_validate_tool_args:fp=6a4c72ce1cfff6a7
+- key: mcp/server.py:R5:_validate_tool_args:fp=42166080acd3ead9
   owner: architecture
   reason: MCP tool argument validation - Tier 3 external protocol boundary
   safety: Invalid arguments raise ValueError with descriptive message
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_find_audit_databases:fp=6e1b6fb8610a9c80
+- key: mcp/server.py:R6:_find_audit_databases:fp=fccf4fac39739e52
   owner: architecture
   reason: Silent recovery with explicit error handling path
-- key: mcp/server.py:R6:_prompt_for_database:fp=fb3e25ee3e686cfa
+- key: mcp/server.py:R6:_prompt_for_database:fp=a8b3ff484b45e25e
   owner: architecture
   reason: Silent recovery with explicit error handling path
-- key: mcp/server.py:R6:_prompt_for_database:fp=58a72039b4c8c3f8
+- key: mcp/server.py:R6:_prompt_for_database:fp=a39509c48dbe6078
   owner: architecture
   reason: Silent recovery with explicit error handling path
-- key: mcp/server.py:R6:_prompt_for_database:fp=89f95e856b85e04f
+- key: mcp/server.py:R6:_prompt_for_database:fp=e071114879cbebc5
   owner: architecture
   reason: Silent recovery with explicit error handling path
 - key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=3f32c48564ee23ba
