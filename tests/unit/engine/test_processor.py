@@ -1119,6 +1119,21 @@ class TestProcessRowGateBranching:
         assert results[0].outcome == RowOutcome.COMPLETED
         assert results[0].sink_name == "branch_sink"
 
+    def test_overlapping_branch_to_coalesce_and_branch_to_sink_raises(self) -> None:
+        """A branch name in both branch_to_coalesce and branch_to_sink is an invariant violation."""
+        _db, recorder = _make_recorder()
+        with pytest.raises(OrchestrationInvariantError, match="both branch_to_coalesce and branch_to_sink"):
+            _make_processor(
+                recorder,
+                source_on_success="output",
+                branch_to_coalesce={"path_a": CoalesceName("merge_point")},
+                branch_to_sink={"path_a": "direct_sink"},
+                coalesce_node_ids={CoalesceName("merge_point"): NodeID("coalesce-0")},
+                sink_names=frozenset({"output", "direct_sink"}),
+                node_step_map={NodeID("source-0"): 0, NodeID("coalesce-0"): 1},
+                node_to_next={NodeID("source-0"): None},
+            )
+
 
 # =============================================================================
 # process_row: Multi-row output (deaggregation)

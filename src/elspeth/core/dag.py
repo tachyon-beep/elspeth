@@ -88,6 +88,9 @@ class NodeInfo:
     node_type: NodeType
     plugin_name: str
     config: NodeConfig = field(default_factory=dict)
+    # NOTE: config is typed as dict for construction compatibility, but is
+    # frozen to MappingProxyType by from_plugin_instances() after graph build.
+    # See line ~1320 in from_plugin_instances() for the freeze.
     input_schema: type[PluginSchema] | None = None
     output_schema: type[PluginSchema] | None = None
     input_schema_config: SchemaConfig | None = None
@@ -150,7 +153,7 @@ class ExecutionGraph:
         self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
         self._route_resolution_map: dict[tuple[NodeID, str], RouteDestination] = {}
         self._coalesce_gate_index: dict[CoalesceName, int] = {}  # coalesce_name -> gate pipeline index
-        self._pipeline_nodes: list[NodeID] = []  # Ordered processing nodes (no source/sinks)
+        self._pipeline_nodes: list[NodeID] | None = None  # Ordered processing nodes (no source/sinks); None = not yet populated
         self._node_step_map: dict[NodeID, int] = {}  # node_id -> audit step (source=0)
 
     @property
@@ -398,15 +401,15 @@ class ExecutionGraph:
         consumer_counts = Counter(name for name, _node_id, _desc in consumer_claims)
         duplicate_consumers = sorted(name for name, count in consumer_counts.items() if count > 1)
         if duplicate_consumers:
+            error_parts: list[str] = []
             for dup_name in duplicate_consumers:
                 dup_entries = [(node_id, desc) for name, node_id, desc in consumer_claims if name == dup_name]
                 first_node, first_desc = dup_entries[0]
                 second_node, second_desc = dup_entries[1]
-                raise GraphValidationError(
-                    f"Duplicate consumer for connection '{dup_name}': "
-                    f"{first_desc} ({first_node}) and {second_desc} ({second_node}). "
-                    "Use a gate for fan-out."
-                )
+                error_parts.append(f"'{dup_name}': {first_desc} ({first_node}) and {second_desc} ({second_node})")
+            raise GraphValidationError(
+                f"Duplicate consumers for {len(duplicate_consumers)} connection(s): " + "; ".join(error_parts) + ". Use a gate for fan-out."
+            )
 
         for connection_name in consumers:
             if connection_name not in producers:
@@ -472,7 +475,7 @@ class ExecutionGraph:
 
     def get_pipeline_node_sequence(self) -> list[NodeID]:
         """Get ordered processing nodes in pipeline traversal order."""
-        if self._pipeline_nodes:
+        if self._pipeline_nodes is not None:
             return list(self._pipeline_nodes)
 
         first_node = self.get_first_transform_node()
@@ -527,8 +530,8 @@ class ExecutionGraph:
         # Note: _key is unused but required for MultiDiGraph iteration signature
         return [
             EdgeInfo(
-                from_node=u,
-                to_node=v,
+                from_node=NodeID(u),
+                to_node=NodeID(v),
                 label=data["label"],
                 mode=data["mode"],  # Already RoutingMode after add_edge change
             )
@@ -547,8 +550,8 @@ class ExecutionGraph:
         # NetworkX in_edges returns (from, to, key) tuples for MultiDiGraph
         return [
             EdgeInfo(
-                from_node=u,
-                to_node=v,
+                from_node=NodeID(u),
+                to_node=NodeID(v),
                 label=data["label"],
                 mode=data["mode"],
             )

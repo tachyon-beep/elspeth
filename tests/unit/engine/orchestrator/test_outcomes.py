@@ -146,7 +146,7 @@ class TestAccumulateRowOutcomesRouted:
         pending = _make_pending()
         results = [_make_result(RowOutcome.ROUTED, sink_name=None)]
 
-        with pytest.raises(OrchestrationInvariantError, match="not in configured sinks"):
+        with pytest.raises(OrchestrationInvariantError, match="missing sink_name"):
             accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
 

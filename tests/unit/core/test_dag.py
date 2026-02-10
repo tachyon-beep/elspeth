@@ -5345,3 +5345,54 @@ class TestCoalesceOnSuccessValidation:
                 gates=list(config.gates),
                 coalesce_settings=config.coalesce,
             )
+
+
+class TestNodeInfoImmutability:
+    """Tests for NodeInfo config immutability after graph construction."""
+
+    def test_config_frozen_after_from_plugin_instances(self, plugin_manager) -> None:
+        """NodeInfo.config should be MappingProxyType after from_plugin_instances.
+
+        The DAG builder freezes all NodeInfo configs to MappingProxyType after
+        construction to prevent accidental mutation of node configs. Attempting
+        to set a key should raise TypeError.
+        """
+        from types import MappingProxyType
+
+        from elspeth.core.config import SinkSettings, SourceSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+            },
+        )
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            coalesce_settings=config.coalesce,
+        )
+        frozen_count = 0
+        for info in graph.get_nodes():
+            if info.config:
+                assert isinstance(info.config, MappingProxyType), (
+                    f"Node '{info.node_id}' config should be MappingProxyType after construction, got {type(info.config).__name__}"
+                )
+                with pytest.raises(TypeError):
+                    info.config["injected_key"] = "should_fail"  # type: ignore[index]
+                frozen_count += 1
+        assert frozen_count > 0, "Expected at least one node with non-empty config"

@@ -19,7 +19,7 @@ timeout continuations (lines 2124, 2139-2143 in the original).
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.errors import OrchestrationInvariantError
@@ -30,6 +30,18 @@ if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.processor import RowProcessor
+
+
+def _require_sink_name(result: Any) -> str:
+    """Require sink_name for outcomes that must route to a sink.
+
+    Replaces cast(str, result.sink_name) which is a no-op at runtime.
+    If sink_name is None, this is a Tier 1 invariant violation (our data).
+    """
+    name: str | None = result.sink_name
+    if name is None:
+        raise OrchestrationInvariantError(f"Result with outcome {result.outcome} missing sink_name. Token: {result.token}")
+    return name
 
 
 def accumulate_row_outcomes(
@@ -61,7 +73,7 @@ def accumulate_row_outcomes(
         if result.outcome == RowOutcome.COMPLETED:
             counters.rows_succeeded += 1
             # RowResult.__post_init__ guarantees sink_name is set for COMPLETED
-            sink_name = cast(str, result.sink_name)
+            sink_name = _require_sink_name(result)
             if sink_name not in pending_tokens:
                 raise OrchestrationInvariantError(
                     f"Sink '{sink_name}' from result.sink_name not in configured sinks. "
@@ -70,7 +82,7 @@ def accumulate_row_outcomes(
             pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.ROUTED:
             counters.rows_routed += 1
-            sink_name = cast(str, result.sink_name)
+            sink_name = _require_sink_name(result)
             counters.routed_destinations[sink_name] += 1
             if sink_name not in pending_tokens:
                 raise OrchestrationInvariantError(
@@ -90,7 +102,7 @@ def accumulate_row_outcomes(
         elif result.outcome == RowOutcome.COALESCED:
             # Merged token from coalesce - route to output sink
             # Use result.sink_name set by on_success routing
-            sink_name = cast(str, result.sink_name)
+            sink_name = _require_sink_name(result)
             counters.rows_coalesced += 1
             counters.rows_succeeded += 1
             if sink_name not in pending_tokens:

@@ -314,6 +314,10 @@ class RowProcessor:
         Sinks are always the last step in processing, after all transforms,
         gates, aggregations, and coalesce nodes. Returns max(step_map) + 1.
         """
+        if not self._node_step_map:
+            raise OrchestrationInvariantError(
+                "Cannot resolve sink step: node step map is empty. Pipeline must have at least one processing node."
+            )
         return max(self._node_step_map.values()) + 1
 
     def _resolve_plugin_for_node(self, node_id: NodeID) -> TransformProtocol | GateProtocol | GateSettings | None:
@@ -1999,6 +2003,10 @@ class RowProcessor:
                             child_coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
 
                         # Children skip directly to coalesce node (or continue to next node).
+                        # NOTE: on_success_sink is not propagated to fork children. Terminal
+                        # sink resolution for fork children uses _branch_to_sink (explicit per-branch
+                        # routing from DAG COPY edges) or falls back to source_on_success. This is
+                        # intentional: fork branches are independent paths with their own routing.
                         child_items.append(
                             self._create_continuation_work_item(
                                 token=child_token,
@@ -2240,7 +2248,8 @@ class RowProcessor:
                         if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
                             cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
 
-                        # Children skip directly to coalesce step (or next processing node if no coalesce)
+                        # Children skip directly to coalesce step (or next processing node if no coalesce).
+                        # See plugin gate fork handler above for on_success_sink propagation note.
                         child_items.append(
                             self._create_continuation_work_item(
                                 token=child_token,

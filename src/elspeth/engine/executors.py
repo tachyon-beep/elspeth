@@ -595,15 +595,16 @@ class GateExecutor:
     ) -> _RouteDispatchOutcome:
         """Dispatch CONTINUE/FORK/SINK/PROCESSING_NODE destinations."""
         if destination.kind == RouteDestinationKind.CONTINUE:
+            if continue_as_route:
+                action = RoutingAction.route("continue", mode=mode, reason=reason)
+            else:
+                action = RoutingAction.continue_(reason=reason)
             self._record_routing(
                 state_id=state_id,
                 node_id=node_id,
-                action=RoutingAction.route("continue", mode=mode, reason=reason),
+                action=action,
             )
-            continue_action = RoutingAction.route("continue", mode=mode, reason=reason)
-            if continue_as_route:
-                return _RouteDispatchOutcome(action=continue_action)
-            return _RouteDispatchOutcome(action=RoutingAction.continue_(reason=reason))
+            return _RouteDispatchOutcome(action=action)
 
         if destination.kind == RouteDestinationKind.FORK:
             if fork_branches is None:

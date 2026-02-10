@@ -573,6 +573,12 @@ class GateSettings(BaseModel):
 
         return self
 
+    # NOTE: routes dict and fork_to list are mutable containers on a frozen model.
+    # Pydantic frozen=True prevents attribute reassignment but not container mutation.
+    # Runtime immutability is enforced at the DAG builder level (dag.py line ~1320-1323)
+    # where NodeInfo.config is wrapped in MappingProxyType. Freezing here would break
+    # copy.deepcopy() used in the config loading pipeline (MappingProxyType is not picklable).
+
 
 class CoalesceSettings(BaseModel):
     """Configuration for coalesce (token merging) operations.
@@ -1140,6 +1146,7 @@ class ElspethSettings(BaseModel):
         description="Source plugin configuration (exactly one per run)",
     )
     sinks: dict[str, SinkSettings] = Field(
+        max_length=50,
         description="Named sink configurations (one or more required)",
     )
 
@@ -1156,24 +1163,28 @@ class ElspethSettings(BaseModel):
     # Optional - transform chain
     transforms: list[TransformSettings] = Field(
         default_factory=list,
+        max_length=500,
         description="Ordered list of transforms/gates to apply",
     )
 
     # Optional - engine-level gates (config-driven routing)
     gates: list[GateSettings] = Field(
         default_factory=list,
+        max_length=100,
         description="Engine-level gates for config-driven routing (evaluated by ExpressionParser)",
     )
 
     # Optional - coalesce configuration (for merging fork paths)
     coalesce: list[CoalesceSettings] = Field(
         default_factory=list,
+        max_length=100,
         description="Coalesce configurations for merging forked paths",
     )
 
     # Optional - aggregations (config-driven batching)
     aggregations: list[AggregationSettings] = Field(
         default_factory=list,
+        max_length=100,
         description="Aggregation configurations for batching rows",
     )
 

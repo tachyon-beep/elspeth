@@ -84,6 +84,11 @@ class RoutingAction:
                 "COPY would require dual terminal states (ROUTED + COMPLETED)."
             )
 
+        # NOTE: reason is a mutable dict. _copy_reason() deep-copies at construction
+        # time to prevent external callers from affecting the stored value. Full
+        # immutability via MappingProxyType was attempted but breaks JSON serialization
+        # (audit trail). The deep copy + frozen dataclass provide sufficient protection.
+
     @classmethod
     def continue_(cls, *, reason: RoutingReason | None = None) -> "RoutingAction":
         """Continue to next node in pipeline."""
@@ -221,7 +226,7 @@ class EdgeInfo:
     Strict contract - mode MUST be RoutingMode enum.
     """
 
-    from_node: str
-    to_node: str
+    from_node: NodeID
+    to_node: NodeID
     label: str
     mode: RoutingMode
