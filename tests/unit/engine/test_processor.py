@@ -651,6 +651,259 @@ class TestProcessRowSingleTransform:
         assert results[0].error is not None
 
 
+class TestAggregationFailureMatrix:
+    """Focused aggregation failure/regression matrix coverage."""
+
+    def _setup_batch_processor(
+        self,
+        *,
+        output_mode: str,
+        node_to_next: dict[NodeID, NodeID | None] | None = None,
+        transform_on_success: str | None = "agg_sink",
+    ) -> tuple[LandscapeDB, LandscapeRecorder, RowProcessor, Mock, NodeID]:
+        """Create a RowProcessor configured for a single batch-aware aggregation node."""
+        db, recorder = _make_recorder()
+        source_node = NodeID("source-0")
+        agg_node = NodeID("agg-1")
+
+        transform = _make_mock_transform(
+            node_id=str(agg_node),
+            name="agg-transform",
+            is_batch_aware=True,
+            on_success=transform_on_success,
+        )
+
+        traversal_next = (
+            dict(node_to_next)
+            if node_to_next is not None
+            else {
+                source_node: agg_node,
+                agg_node: None,
+            }
+        )
+
+        # Ensure source node has an explicit next mapping.
+        traversal_next.setdefault(source_node, agg_node)
+
+        processor = _make_processor(
+            recorder,
+            node_step_map={source_node: 0, agg_node: 1, NodeID("downstream-2"): 2},
+            node_to_next=traversal_next,
+            first_transform_node_id=agg_node,
+            node_to_plugin={agg_node: transform},
+            aggregation_settings={
+                agg_node: AggregationSettings(
+                    name="batch_agg",
+                    plugin="agg-transform",
+                    input="default",
+                    trigger={"count": 1},
+                    output_mode=output_mode,
+                ),
+            },
+        )
+        return db, recorder, processor, transform, agg_node
+
+    def test_flush_failure_passthrough_records_failed_outcomes(self) -> None:
+        """Passthrough flush failure records FAILED terminal outcomes for buffered tokens."""
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+        captured: dict[str, TokenInfo] = {}
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return (
+                TransformResult.error({"reason": "flush_failed"}, retryable=False),
+                [captured["token"]],
+                "batch-1",
+            )
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        assert len(results) == 1
+        assert results[0].outcome == RowOutcome.FAILED
+        assert [call.kwargs["outcome"] for call in record_outcome.call_args_list] == [RowOutcome.FAILED]
+
+    def test_flush_failure_transform_keeps_consumed_in_batch_terminal_semantics(self) -> None:
+        """Transform-mode flush failure keeps terminal outcome as CONSUMED_IN_BATCH (not FAILED)."""
+        _db, recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="transform")
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+        captured: dict[str, TokenInfo] = {}
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return (
+                TransformResult.error({"reason": "flush_failed"}, retryable=False),
+                [captured["token"]],
+                "batch-1",
+            )
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+        ):
+            results = processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+        assert len(results) == 1
+        assert results[0].outcome == RowOutcome.FAILED
+        outcomes = [call.kwargs["outcome"] for call in record_outcome.call_args_list]
+        assert outcomes == [RowOutcome.CONSUMED_IN_BATCH]
+        assert record_outcome.call_args_list[0].kwargs["batch_id"] == "batch-1"
+        assert RowOutcome.FAILED not in outcomes
+
+    def test_passthrough_success_with_rows_none_raises(self) -> None:
+        """Passthrough flush requires rows list; rows=None is an invariant violation."""
+        _db, _recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+        captured: dict[str, TokenInfo] = {}
+
+        bad_result = Mock()
+        bad_result.status = "success"
+        bad_result.is_multi_row = True
+        bad_result.rows = None
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            return bad_result, [captured["token"]], "batch-1"
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(processor, "_emit_transform_completed"),
+            pytest.raises(RuntimeError, match="rows=None"),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+    def test_passthrough_success_with_output_count_mismatch_raises(self) -> None:
+        """Passthrough flush must return one output row per buffered input token."""
+        _db, _recorder, processor, transform, _agg_node = self._setup_batch_processor(output_mode="passthrough")
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+        captured: dict[str, TokenInfo] = {}
+
+        mismatch_result = TransformResult.success_multi(
+            [make_row({"value": 100}, contract=_make_contract())],
+            success_reason={"action": "mismatch"},
+        )
+
+        def buffer_row_side_effect(node_id: NodeID, token: TokenInfo) -> None:
+            captured["token"] = token
+
+        def execute_flush_side_effect(*, node_id, transform, ctx, trigger_type):
+            other_token = make_token_info(data={"value": 20})
+            return mismatch_result, [captured["token"], other_token], "batch-1"
+
+        with (
+            patch.object(processor._aggregation_executor, "buffer_row", side_effect=buffer_row_side_effect),
+            patch.object(processor._aggregation_executor, "should_flush", return_value=True),
+            patch.object(processor._aggregation_executor, "get_trigger_type", return_value=TriggerType.COUNT),
+            patch.object(processor._aggregation_executor, "execute_flush", side_effect=execute_flush_side_effect),
+            patch.object(processor, "_emit_transform_completed"),
+            pytest.raises(ValueError, match="same number of output rows"),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+    def test_timeout_flush_passthrough_with_downstream_returns_continuation_work(self) -> None:
+        """Timeout flush routes passthrough tokens into child work when downstream exists."""
+        downstream_node = NodeID("downstream-2")
+        agg_node = NodeID("agg-1")
+        _db, _recorder, processor, transform, agg_node = self._setup_batch_processor(
+            output_mode="passthrough",
+            node_to_next={NodeID("source-0"): agg_node, agg_node: downstream_node, downstream_node: None},
+        )
+        ctx = PluginContext(run_id="test-run", config={})
+
+        result = TransformResult.success_multi(
+            [make_row({"value": 11}, contract=_make_contract())],
+            success_reason={"action": "passthrough"},
+        )
+        buffered_token = make_token_info(data={"value": 10})
+
+        with patch.object(
+            processor._aggregation_executor,
+            "execute_flush",
+            return_value=(result, [buffered_token], "batch-1"),
+        ):
+            results, child_items = processor.handle_timeout_flush(
+                node_id=agg_node,
+                transform=transform,
+                ctx=ctx,
+                trigger_type=TriggerType.TIMEOUT,
+            )
+
+        assert results == []
+        assert len(child_items) == 1
+        assert child_items[0].current_node_id == downstream_node
+
+    def test_timeout_flush_passthrough_terminal_returns_completed(self) -> None:
+        """Timeout flush returns terminal COMPLETED results when no downstream/coalesce exists."""
+        _db, _recorder, processor, transform, agg_node = self._setup_batch_processor(output_mode="passthrough")
+        ctx = PluginContext(run_id="test-run", config={})
+
+        result = TransformResult.success_multi(
+            [make_row({"value": 11}, contract=_make_contract())],
+            success_reason={"action": "passthrough"},
+        )
+        buffered_token = make_token_info(data={"value": 10})
+
+        with patch.object(
+            processor._aggregation_executor,
+            "execute_flush",
+            return_value=(result, [buffered_token], "batch-1"),
+        ):
+            results, child_items = processor.handle_timeout_flush(
+                node_id=agg_node,
+                transform=transform,
+                ctx=ctx,
+                trigger_type=TriggerType.TIMEOUT,
+            )
+
+        assert child_items == []
+        assert len(results) == 1
+        assert results[0].outcome == RowOutcome.COMPLETED
+        assert results[0].sink_name == "agg_sink"
+
+
 class TestProcessRowGateBranching:
     """Tests for non-linear gate branching through next_node_id."""
 
@@ -1933,6 +2186,38 @@ class TestMaybeCoalesceToken:
         assert len(child_items) == 1
         assert child_items[0].current_node_id == NodeID("coalesce::merge")
 
+    def test_invalid_coalesce_outcome_state_raises_invariant(self) -> None:
+        """CoalesceOutcome must be held, merged, or failed; empty state is invalid."""
+        _db, recorder = _make_recorder()
+        coalesce = Mock()
+        coalesce.accept.return_value = Mock(
+            held=False,
+            merged_token=None,
+            failure_reason=None,
+            outcomes_recorded=False,
+        )
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 2},
+        )
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="token-1",
+            row_data=make_row({}),
+            branch_name="path_a",
+        )
+
+        with pytest.raises(OrchestrationInvariantError, match="invalid state"):
+            processor._maybe_coalesce_token(
+                token,
+                current_node_id=NodeID("coalesce::merge"),
+                coalesce_node_id=NodeID("coalesce::merge"),
+                coalesce_name=CoalesceName("merge"),
+                child_items=[],
+            )
+
 
 # =============================================================================
 # _notify_coalesce_of_lost_branch
@@ -2178,6 +2463,134 @@ class TestUnknownTransformType:
                 source_row=source_row,
                 transforms=[fake_plugin],
                 ctx=ctx,
+            )
+
+
+class TestRoutingInvariantFailures:
+    """Regression tests for strict fail-closed routing invariants."""
+
+    def test_unhandled_plugin_gate_routing_kind_raises(self) -> None:
+        """Gate branch must fail closed when neither sink/fork/next/continue is valid."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+        gate = _make_mock_gate(node_id="gate-1", name="bad_gate")
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("gate-1")
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            node_step_map={source_node: 0, gate_node: 1},
+            node_to_next={source_node: gate_node, gate_node: None},
+            first_transform_node_id=gate_node,
+            node_to_plugin={gate_node: gate},
+        )
+
+        bad_outcome = GateOutcome(
+            result=GateResult(
+                row={"value": 10},
+                action=RoutingAction.route("branch_a"),
+                contract=_make_contract(),
+            ),
+            updated_token=make_token_info(data={"value": 10}),
+            sink_name=None,
+            next_node_id=None,
+            child_tokens=[],
+        )
+
+        with (
+            patch.object(processor._gate_executor, "execute_gate", return_value=bad_outcome),
+            pytest.raises(OrchestrationInvariantError, match="Unhandled gate routing kind"),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[gate],
+                ctx=ctx,
+            )
+
+    def test_unhandled_config_gate_routing_kind_raises(self) -> None:
+        """Config gate branch must fail closed when CONTINUE invariants are violated."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("cfg-gate-1")
+        config_gate = GateSettings(
+            name="cfg_router",
+            input="default",
+            condition="True",
+            routes={"true": "default", "false": "default"},
+        )
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            node_step_map={source_node: 0, gate_node: 1},
+            node_to_next={source_node: gate_node, gate_node: None},
+            first_transform_node_id=gate_node,
+            node_to_plugin={gate_node: config_gate},
+        )
+
+        bad_outcome = GateOutcome(
+            result=GateResult(
+                row={"value": 10},
+                action=RoutingAction.route("branch_a"),
+                contract=_make_contract(),
+            ),
+            updated_token=make_token_info(data={"value": 10}),
+            sink_name=None,
+            next_node_id=None,
+            child_tokens=[],
+        )
+
+        with (
+            patch.object(processor._gate_executor, "execute_config_gate", return_value=bad_outcome),
+            pytest.raises(OrchestrationInvariantError, match="Unhandled config gate routing kind"),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[],
+                ctx=ctx,
+            )
+
+    def test_missing_effective_sink_raises_invariant(self) -> None:
+        """Terminal completion must not fall back when no sink can be resolved."""
+        _db, recorder = _make_recorder()
+        source_row = _make_source_row({"value": 10})
+        ctx = PluginContext(run_id="test-run", config={})
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="   ",
+            node_step_map={NodeID("source-0"): 0},
+            node_to_next={NodeID("source-0"): None},
+            first_transform_node_id=None,
+        )
+
+        with pytest.raises(OrchestrationInvariantError, match="No effective sink for token"):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[],
+                ctx=ctx,
+            )
+
+
+class TestWorkItemCoalesceInvariant:
+    """_WorkItem must carry complete coalesce metadata together."""
+
+    def test_missing_coalesce_name_with_coalesce_node_id_raises(self) -> None:
+        """Coalesce node without coalesce name is an invariant violation."""
+        token = make_token_info(data={"value": 1})
+        with pytest.raises(OrchestrationInvariantError, match="coalesce fields must be both set or both None"):
+            _WorkItem(
+                token=token,
+                current_node_id=NodeID("coalesce::merge"),
+                coalesce_node_id=NodeID("coalesce::merge"),
+                coalesce_name=None,
             )
 
 
