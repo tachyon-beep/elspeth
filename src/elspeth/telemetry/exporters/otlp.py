@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from dataclasses import asdict
-from dataclasses import fields as dc_fields
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -45,33 +45,20 @@ def _derive_trace_id(run_id: str) -> int:
     return int.from_bytes(hash_bytes, byteorder="big")
 
 
-def _derive_span_id(event: TelemetryEvent) -> int:
-    """Derive a 64-bit span ID from event-specific identifiers.
+def _generate_span_id() -> int:
+    """Generate a random 64-bit span ID per OpenTelemetry convention.
 
-    Uses event fields to create a unique span ID. For events with
-    token_id/state_id/row_id, those are incorporated. Otherwise,
-    falls back to timestamp + event type hash.
-
-    Args:
-        event: The telemetry event
+    Uses cryptographically secure random bits, matching the standard
+    OpenTelemetry SDK behavior. The previous deterministic derivation
+    (hash of event type + timestamp + context fields) had collision risk
+    for events without token_id/row_id at the same microsecond.
 
     Returns:
-        64-bit integer suitable for OpenTelemetry span_id
+        Non-zero 64-bit integer suitable for OpenTelemetry span_id
     """
-    # Build a unique identifier from event-specific fields
-    id_parts = [type(event).__name__, str(event.timestamp.timestamp())]
-
-    # Include identifying fields if present on this event subtype
-    event_field_names = {f.name for f in dc_fields(event)}
-    for field_name in ("token_id", "state_id", "row_id", "node_id"):
-        if field_name in event_field_names:
-            value = getattr(event, field_name)
-            if value is not None:
-                id_parts.append(str(value))
-
-    combined = ":".join(id_parts)
-    hash_bytes = hashlib.sha256(combined.encode()).digest()[:8]
-    return int.from_bytes(hash_bytes, byteorder="big")
+    span_id = secrets.randbits(64)
+    # OpenTelemetry requires non-zero span_id
+    return span_id if span_id != 0 else 1
 
 
 class OTLPExporter:
@@ -256,7 +243,7 @@ class OTLPExporter:
 
         # Derive IDs
         trace_id = _derive_trace_id(event.run_id)
-        span_id = _derive_span_id(event)
+        span_id = _generate_span_id()
 
         # Convert timestamp to nanoseconds since epoch
         # OpenTelemetry expects timestamps in nanoseconds

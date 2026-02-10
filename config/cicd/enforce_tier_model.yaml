@@ -1369,9 +1369,6 @@ allow_hits:
   reason: MCP tool argument validation - Tier 3 external protocol boundary
   safety: Invalid arguments raise ValueError with descriptive message
   expires: '2026-05-02'
-- key: mcp/server.py:R4:create_server:call_tool:fp=f2fc0f3de0c0a642
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
 - key: mcp/server.py:R6:_find_audit_databases:fp=6e1b6fb8610a9c80
   owner: architecture
   reason: Silent recovery with explicit error handling path

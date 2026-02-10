@@ -2265,118 +2265,122 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
         Arguments are validated at the Tier 3 boundary before dispatch.
         ``_validate_tool_args`` checks required fields, types, and defaults.
         """
+        # Validate arguments at the Tier 3 boundary — immediately,
+        # before any of the external data travels into analyzer methods.
+        # ValueError/TypeError from validation are the caller's fault.
         try:
-            # Validate arguments at the Tier 3 boundary — immediately,
-            # before any of the external data travels into analyzer methods.
             args = _validate_tool_args(name, arguments)
+        except (ValueError, TypeError) as e:
+            return [TextContent(type="text", text=f"Invalid arguments: {e!s}")]
 
-            result: Any
-            if name == "list_runs":
-                result = analyzer.list_runs(
-                    limit=args["limit"],
-                    status=args["status"],
-                )
-            elif name == "get_run":
-                result = analyzer.get_run(args["run_id"])
-            elif name == "get_run_summary":
-                result = analyzer.get_run_summary(args["run_id"])
-            elif name == "list_nodes":
-                result = analyzer.list_nodes(args["run_id"])
-            elif name == "list_rows":
-                result = analyzer.list_rows(
-                    run_id=args["run_id"],
-                    limit=args["limit"],
-                    offset=args["offset"],
-                )
-            elif name == "list_tokens":
-                result = analyzer.list_tokens(
-                    run_id=args["run_id"],
-                    row_id=args["row_id"],
-                    limit=args["limit"],
-                )
-            elif name == "list_operations":
-                result = analyzer.list_operations(
-                    run_id=args["run_id"],
-                    operation_type=args["operation_type"],
-                    status=args["status"],
-                    limit=args["limit"],
-                )
-            elif name == "get_operation_calls":
-                result = analyzer.get_operation_calls(args["operation_id"])
-            elif name == "explain_token":
-                result = analyzer.explain_token(
-                    run_id=args["run_id"],
-                    token_id=args["token_id"],
-                    row_id=args["row_id"],
-                    sink=args["sink"],
-                )
-            elif name == "get_errors":
-                result = analyzer.get_errors(
-                    run_id=args["run_id"],
-                    error_type=args["error_type"],
-                    limit=args["limit"],
-                )
-            elif name == "get_node_states":
-                result = analyzer.get_node_states(
-                    run_id=args["run_id"],
-                    node_id=args["node_id"],
-                    status=args["status"],
-                    limit=args["limit"],
-                )
-            elif name == "get_calls":
-                result = analyzer.get_calls(args["state_id"])
-            elif name == "query":
-                result = analyzer.query(
-                    sql=args["sql"],
-                    params=args["params"],
-                )
-            # === Precomputed Analysis Tools ===
-            elif name == "get_dag_structure":
-                result = analyzer.get_dag_structure(args["run_id"])
-            elif name == "get_performance_report":
-                result = analyzer.get_performance_report(args["run_id"])
-            elif name == "get_error_analysis":
-                result = analyzer.get_error_analysis(args["run_id"])
-            elif name == "get_llm_usage_report":
-                result = analyzer.get_llm_usage_report(args["run_id"])
-            elif name == "describe_schema":
-                result = analyzer.describe_schema()
-            elif name == "get_outcome_analysis":
-                result = analyzer.get_outcome_analysis(args["run_id"])
-            # === Emergency Diagnostic Tools ===
-            elif name == "diagnose":
-                result = analyzer.diagnose()
-            elif name == "get_failure_context":
-                result = analyzer.get_failure_context(
-                    run_id=args["run_id"],
-                    limit=args["limit"],
-                )
-            elif name == "get_recent_activity":
-                result = analyzer.get_recent_activity(
-                    minutes=args["minutes"],
-                )
-            # === Schema Contract Tools ===
-            elif name == "get_run_contract":
-                result = analyzer.get_run_contract(args["run_id"])
-            elif name == "explain_field":
-                result = analyzer.explain_field(
-                    run_id=args["run_id"],
-                    field_name=args["field_name"],
-                )
-            elif name == "list_contract_violations":
-                result = analyzer.list_contract_violations(
-                    run_id=args["run_id"],
-                    limit=args["limit"],
-                )
-            else:
-                # _validate_tool_args already raises for unknown tools,
-                # but keep this branch for defense-in-depth.
-                return [TextContent(type="text", text=f"Unknown tool: {name}")]
+        # Dispatch to analyzer — no blanket catch. Database errors,
+        # serialization bugs, and analyzer bugs must propagate so they
+        # surface as MCP protocol errors rather than silent "Error: ..."
+        # text. Tier 1 audit data corruption must never be swallowed.
+        result: Any
+        if name == "list_runs":
+            result = analyzer.list_runs(
+                limit=args["limit"],
+                status=args["status"],
+            )
+        elif name == "get_run":
+            result = analyzer.get_run(args["run_id"])
+        elif name == "get_run_summary":
+            result = analyzer.get_run_summary(args["run_id"])
+        elif name == "list_nodes":
+            result = analyzer.list_nodes(args["run_id"])
+        elif name == "list_rows":
+            result = analyzer.list_rows(
+                run_id=args["run_id"],
+                limit=args["limit"],
+                offset=args["offset"],
+            )
+        elif name == "list_tokens":
+            result = analyzer.list_tokens(
+                run_id=args["run_id"],
+                row_id=args["row_id"],
+                limit=args["limit"],
+            )
+        elif name == "list_operations":
+            result = analyzer.list_operations(
+                run_id=args["run_id"],
+                operation_type=args["operation_type"],
+                status=args["status"],
+                limit=args["limit"],
+            )
+        elif name == "get_operation_calls":
+            result = analyzer.get_operation_calls(args["operation_id"])
+        elif name == "explain_token":
+            result = analyzer.explain_token(
+                run_id=args["run_id"],
+                token_id=args["token_id"],
+                row_id=args["row_id"],
+                sink=args["sink"],
+            )
+        elif name == "get_errors":
+            result = analyzer.get_errors(
+                run_id=args["run_id"],
+                error_type=args["error_type"],
+                limit=args["limit"],
+            )
+        elif name == "get_node_states":
+            result = analyzer.get_node_states(
+                run_id=args["run_id"],
+                node_id=args["node_id"],
+                status=args["status"],
+                limit=args["limit"],
+            )
+        elif name == "get_calls":
+            result = analyzer.get_calls(args["state_id"])
+        elif name == "query":
+            result = analyzer.query(
+                sql=args["sql"],
+                params=args["params"],
+            )
+        # === Precomputed Analysis Tools ===
+        elif name == "get_dag_structure":
+            result = analyzer.get_dag_structure(args["run_id"])
+        elif name == "get_performance_report":
+            result = analyzer.get_performance_report(args["run_id"])
+        elif name == "get_error_analysis":
+            result = analyzer.get_error_analysis(args["run_id"])
+        elif name == "get_llm_usage_report":
+            result = analyzer.get_llm_usage_report(args["run_id"])
+        elif name == "describe_schema":
+            result = analyzer.describe_schema()
+        elif name == "get_outcome_analysis":
+            result = analyzer.get_outcome_analysis(args["run_id"])
+        # === Emergency Diagnostic Tools ===
+        elif name == "diagnose":
+            result = analyzer.diagnose()
+        elif name == "get_failure_context":
+            result = analyzer.get_failure_context(
+                run_id=args["run_id"],
+                limit=args["limit"],
+            )
+        elif name == "get_recent_activity":
+            result = analyzer.get_recent_activity(
+                minutes=args["minutes"],
+            )
+        # === Schema Contract Tools ===
+        elif name == "get_run_contract":
+            result = analyzer.get_run_contract(args["run_id"])
+        elif name == "explain_field":
+            result = analyzer.explain_field(
+                run_id=args["run_id"],
+                field_name=args["field_name"],
+            )
+        elif name == "list_contract_violations":
+            result = analyzer.list_contract_violations(
+                run_id=args["run_id"],
+                limit=args["limit"],
+            )
+        else:
+            # _validate_tool_args already raises for unknown tools,
+            # but keep this branch for defense-in-depth.
+            return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
-            return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-        except Exception as e:
-            return [TextContent(type="text", text=f"Error: {e!s}")]
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     return server
 

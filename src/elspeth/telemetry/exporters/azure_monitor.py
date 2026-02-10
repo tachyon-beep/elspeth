@@ -17,8 +17,8 @@ import structlog
 
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters.otlp import (
-    _derive_span_id,
     _derive_trace_id,
+    _generate_span_id,
     _SyntheticReadableSpan,
 )
 
@@ -281,7 +281,7 @@ class AzureMonitorExporter:
 
         # Derive IDs using shared functions from OTLP exporter
         trace_id = _derive_trace_id(event.run_id)
-        span_id = _derive_span_id(event)
+        span_id = _generate_span_id()
 
         # Convert timestamp to nanoseconds since epoch
         if event.timestamp.tzinfo is None:
