@@ -418,9 +418,18 @@ allowed_dict_patterns:
   - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_latency:b_list (list)"
 
   # ChaosWeb - fault-injection test server for web scraping resilience testing
-  # Mirrors ChaosLLM patterns: YAML config loading and JSONL preset parsing are Tier 3 boundaries.
+  # Mirrors ChaosLLM patterns: YAML config loading, JSONL preset parsing, and
+  # metrics/admin APIs return dynamic dicts (same pattern as ChaosLLM).
   - "src/elspeth/testing/chaosweb/config.py:load_preset:return"
   - "src/elspeth/testing/chaosweb/config.py:load_config:cli_overrides"
+  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.get_stats:return"
+  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.export_metrics:return"
+  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.update_config:updates"
+  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer._get_current_config:return"
+  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_stats:return"
+  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.export_data:return"
+  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_requests:return (list)"
+  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_timeseries:return (list)"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # BATCHING INFRASTRUCTURE - Row buffering for batch operations

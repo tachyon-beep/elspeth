@@ -45,10 +45,13 @@ from elspeth.testing.chaosweb.error_injector import (
     WebErrorDecision,
     WebErrorInjector,
 )
+from elspeth.testing.chaosweb.metrics import WebMetricsRecorder
+from elspeth.testing.chaosweb.server import ChaosWebServer, create_app
 
 __all__ = [
     "SSRF_TARGETS",
     "ChaosWebConfig",
+    "ChaosWebServer",
     "ContentGenerator",
     "LatencyConfig",
     "MetricsConfig",
@@ -59,7 +62,9 @@ __all__ = [
     "WebErrorDecision",
     "WebErrorInjectionConfig",
     "WebErrorInjector",
+    "WebMetricsRecorder",
     "WebResponse",
+    "create_app",
     "list_presets",
     "load_config",
     "load_preset",

@@ -1632,3 +1632,54 @@ allow_hits:
   reason: Tier 3 boundary - isinstance validates parsed YAML is dict before passing to Pydantic
   safety: Non-dict YAML raises ValueError with clear message - no silent coercion
   expires: '2026-05-13'
+# ChaosWeb server — Tier 3 boundaries (HTTP request params, content type dispatch)
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=545da4c568c4de0d
+  owner: architecture
+  reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
+  safety: Missing path defaults to empty string - correct for catch-all route
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=dec84bd5a72b8e91
+  owner: architecture
+  reason: Tier 3 boundary - .get() on HTTP request headers (optional header override)
+  safety: Missing header defaults to None - no override applied
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=f65c8ec2e37c3ccc
+  owner: architecture
+  reason: isinstance check on content generator output (str vs bytes) for encoding
+  safety: Both branches produce valid bytes for HTTP response body
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=781a6aa8dcf37c83
+  owner: architecture
+  reason: .get() on error message mapping - fallback for error types not in mapping
+  safety: Falls back to generic status code message - never swallows errors
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=9536074d9cab3535
+  owner: architecture
+  reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
+  safety: Bytes decoded with replace - corruption helpers always receive valid str input
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=055c287207693a79
+  owner: architecture
+  reason: isinstance check on content (str vs bytes) for wrong_content_type HTTP response encoding
+  safety: Both branches produce valid bytes for Response body
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=436077d2e61ab23e
+  owner: architecture
+  reason: isinstance check on content generator output (str vs bytes) for HTTP response encoding
+  safety: Both branches produce valid bytes for Response body
+  expires: '2026-05-13'
+- key: testing/chaosweb/metrics.py:R7:WebMetricsRecorder:close:fp=053cc1eedb453e62
+  owner: architecture
+  reason: contextlib.suppress on ProgrammingError during connection cleanup
+  safety: Mirrors ChaosLLM pattern - suppression only during teardown of already-closed connections
+  expires: '2026-05-13'
+- key: testing/chaosweb/cli.py:R6:_version_callback:fp=86387baacbcfc9ec
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Falls back to 'version unknown' on ImportError - correct for optional version detection
+  expires: '2026-05-13'
+- key: testing/chaosweb/cli.py:R6:show_config:fp=ed8499ffbc8fd80e
+  owner: architecture
+  reason: Silent recovery with explicit error handling path - YAML optional fallback to JSON
+  safety: Falls back to JSON format if yaml module unavailable - data still displayed
+  expires: '2026-05-13'
