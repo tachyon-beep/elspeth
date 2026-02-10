@@ -701,3 +701,48 @@ Defensive handling IS appropriate at trust boundaries (see Three-Tier Trust Mode
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
 
 If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
+
+<!-- keel:instructions -->
+## Keel Issue Tracker
+
+Use `keel` for all task tracking in this project. Data lives in `.keel/`.
+
+### Quick Reference
+
+```bash
+# Finding work
+keel ready                              # Show issues ready to work (no blockers)
+keel list --status=open                 # All open issues
+keel list --status=in_progress          # Active work
+keel show <id>                          # Detailed issue view
+
+# Creating & updating
+keel create --title="..." --type=task --priority=2   # New issue
+keel update <id> --status=in_progress                # Claim work
+keel close <id>                                      # Mark complete
+keel close <id> --reason="explanation"               # Close with reason
+
+# Dependencies
+keel dep-add <issue> <depends-on>       # Add dependency
+keel blocked                            # Show blocked issues
+
+# Project health
+keel stats                              # Project statistics
+keel search "query"                     # Search issues
+keel doctor                             # Health check
+```
+
+### Workflow
+1. `keel ready` to find available work
+2. `keel show <id>` to review details
+3. `keel update <id> --status=in_progress` to claim it
+4. Do the work, commit code
+5. `keel close <id>` when done
+
+### Priority Scale
+- P0: Critical (drop everything)
+- P1: High (do next)
+- P2: Medium (default)
+- P3: Low
+- P4: Backlog
+<!-- /keel:instructions -->

@@ -387,3 +387,272 @@ This catalog analyzes **17 items** across the Phase 2 implementation.
 - This catalog focuses on the **Phase 2 refactoring debt** (step-number vs node-ID dual representation). It does not cover other categories of tech debt in the same files (e.g., the CLAUDE.md-documented P0 issues like non-atomic file writes).
 - Severity classifications assume the no-legacy-code policy: "SHOULD_FIX" means the code is technically correct today but violates architectural intent. "MUST_FIX" means the code produces incorrect results under some conditions.
 - DEBT-02 is classified MUST_FIX based on analysis, not testing. Verify with a coalesce-pipeline integration test before prioritizing.
+
+---
+---
+
+# Technical Debt Catalog: ChaosWeb Duplication Analysis
+
+**Date:** 2026-02-11
+**Scope:** Proposed ChaosWeb system (~4,030 LOC) and its duplication relationship with existing ChaosLLM (3,953 LOC)
+**Analyst:** Debt Cataloger Agent
+**Branch:** RC2.5-sqlite-migration
+
+---
+
+## Executive Summary
+
+The proposed ChaosWeb design will introduce approximately 1,700 LOC of near-duplicate code copied from ChaosLLM, bringing the combined Chaos testing infrastructure to ~8,000 LOC with ~43% structural overlap. This compounds an existing pattern: ELSPETH already carries documented duplication debt in LLM plugins (~6 files, CCP-04 in repair manifest) and CLI event formatters (~600 lines, CCP-05). Adding ChaosWeb without extraction creates a third major duplication cluster.
+
+**Verdict:** The duplication is not acceptable as-is for go. A targeted extraction of shared modules (~400 LOC of shared code) into `elspeth.testing.chaos_base` should happen BEFORE ChaosWeb implementation, not after. The "extract later" approach has a documented failure mode in this codebase: the LLM plugin duplication (P2-04) was tagged for "later extraction" and remains unresolved after 6 variants ship.
+
+---
+
+## Critical Priority (Block ChaosWeb Go Until Resolved)
+
+### DEBT-CW-01: Burst State Machine Duplication Creates Divergence Risk
+
+**Evidence:** `src/elspeth/testing/chaosllm/error_injector.py:147-488` -- The `ErrorInjector` class (342 LOC) contains a thread-safe burst state machine (`_is_in_burst` at line 193, `_get_burst_rate_limit_pct` at line 212, `_get_burst_capacity_pct` at line 218), priority-based and weighted selection algorithms (`_decide_priority` at line 295, `_decide_weighted` at line 397), and an `ErrorDecision` frozen dataclass with factory methods (lines 28-110).
+
+**Impact:** A bug in the burst state machine (e.g., timing edge case at interval boundaries, thread-safety issue in `_get_current_time` at line 185) would need to be found and fixed in both ChaosLLM and ChaosWeb independently. The burst state machine is the most algorithmically complex piece (~80 LOC) and has 5,412 LOC of existing tests across 13 test files. Duplicating it means those tests protect only one copy. The weighted selection algorithm (`_decide_weighted`, lines 397-477) implements a cumulative distribution function with success-weight balancing -- subtle probability bugs here would silently corrupt error injection rates in the second system.
+
+**Effort:** M (3-5 days to extract shared `chaos_base.error_injection` module before ChaosWeb build)
+
+**Category:** Architecture
+
+**Details:** The `ErrorInjector` is protocol-agnostic already. It takes an `ErrorInjectionConfig` and returns an `ErrorDecision`. The ChaosWeb design adds web-specific error types (SSRF redirect, encoding mismatch, truncated HTML) but the core selection algorithm, burst state machine, and `ErrorDecision` dataclass are identical. The natural extraction boundary:
+
+- **Shared:** `ErrorDecision` (83 LOC), `ErrorCategory` enum, `_should_trigger()`, `_is_in_burst()`, `_decide_weighted` algorithm skeleton, burst state management, RNG injection pattern, `reset()`
+- **Protocol-specific:** Error type registries (`HTTP_ERRORS`, `CONNECTION_ERRORS`, `MALFORMED_TYPES`), the specific chain of `_should_trigger()` calls in `_decide_priority()`, config field names for error percentages
+
+---
+
+### DEBT-CW-02: Identical Latency Simulator Will Exist in Two Packages
+
+**Evidence:** `src/elspeth/testing/chaosllm/latency_simulator.py` -- 78 LOC. The design states this will be "reused as-is" for ChaosWeb (0 adaptation, direct copy).
+
+**Impact:** Two identical copies of a 78-line module with identical behavior. The `LatencySimulator` class (lines 13-78) depends only on `LatencyConfig` (a Pydantic model at `config.py:145-160` with `base_ms: int` and `jitter_ms: int` fields) and `random.Random`. When the ChaosWeb copy imports from `elspeth.testing.chaosweb.config` instead of the ChaosLLM version, the two `LatencyConfig` classes will also be duplicates. Any latency simulation bug fix must be applied twice.
+
+**Effort:** S (< 1 day to relocate to `elspeth.testing.chaos_base.latency`)
+
+**Category:** Architecture
+
+**Details:** This is the clearest extraction candidate. Both the class and its config model are completely domain-agnostic -- they simulate network latency for any protocol. The existing test coverage is thorough: `tests/unit/testing/chaosllm/test_latency_simulator.py` (339 LOC) and `tests/property/testing/chaosllm/test_latency_properties.py` (155 LOC). After relocation, both ChaosLLM and ChaosWeb import from the shared location and these 494 LOC of tests cover both consumers.
+
+---
+
+### DEBT-CW-03: Config Loading Pattern Duplication (load_config + _deep_merge)
+
+**Evidence:** `src/elspeth/testing/chaosllm/config.py:485-553` -- The `_deep_merge()` function (17 LOC, lines 485-501) and `load_config()` function (50 LOC, lines 504-553) implement 3-layer configuration precedence (preset -> config file -> CLI overrides) with YAML loading and Pydantic validation.
+
+**Impact:** The deep merge algorithm is a correctness-sensitive utility. If a merge edge case is discovered (e.g., list-vs-dict collision, None handling), it must be patched in both locations. The `load_config()` pattern is structurally identical between ChaosLLM and proposed ChaosWeb -- only the top-level config type differs (`ChaosLLMConfig` vs `ChaosWebConfig`).
+
+**Effort:** S (1-2 days to extract `chaos_base.config` with shared utilities and a `load_config` factory)
+
+**Category:** Code Quality
+
+**Details:** The shared config infrastructure includes:
+
+| Component | Location | LOC | Shared? |
+|-----------|----------|-----|---------|
+| `ServerConfig` | config.py:18-37 | 20 | Identical |
+| `MetricsConfig` | config.py:40-53 | 14 | Identical |
+| `LatencyConfig` | config.py:145-160 | 16 | Identical |
+| `BurstConfig` | config.py:162-192 | 31 | Identical |
+| `_deep_merge()` | config.py:485-501 | 17 | Identical |
+| `load_config()` pattern | config.py:504-553 | 50 | Structurally identical |
+| `_get_presets_dir()` | config.py:444-446 | 3 | Same pattern |
+| `list_presets()` | config.py:449-454 | 6 | Identical |
+| `load_preset()` | config.py:457-482 | 26 | Identical |
+| **Total shared** | | **~183** | |
+
+---
+
+## High Priority (Address Within ChaosWeb Implementation Sprint)
+
+### DEBT-CW-04: Metrics Recorder SQLite Pattern Duplication
+
+**Evidence:** `src/elspeth/testing/chaosllm/metrics.py:1-849` -- The `MetricsRecorder` class implements thread-safe SQLite with per-thread connections (`_get_connection()` at lines 239-273), WAL journaling, time-series bucketing (`_get_bucket_utc()` at lines 110-139), percentile calculation (`_update_bucket_latency_stats()` at lines 450-495), and UPSERT-based aggregation. The design indicates ~270 LOC will be "adapted" for ChaosWeb.
+
+**Impact:** The SQLite connection management pattern (thread-local storage via `threading.local()`, `AttributeError` catch for first-access initialization, connection registry for cleanup) at lines 239-273 is a non-trivial concurrency pattern (35 LOC). The `_get_bucket_utc()` function (30 LOC), `_classify_outcome()` (33 LOC), and percentile calculation logic (40 LOC) are reusable utilities. Bugs in thread-local connection cleanup, WAL configuration, or shared-cache URI detection would need dual fixes.
+
+**Effort:** M (3-5 days -- extract base recorder with pluggable schema and classification)
+
+**Category:** Architecture
+
+**Details:** Natural extraction: a `ChaosMetricsBase` class handles connection lifecycle, time-series bucketing infrastructure, export, reset, and stats aggregation. Protocol-specific subclasses define the SQL schema (`_SCHEMA`), `RequestRecord` dataclass fields, and `_classify_outcome()` logic. The ChaosLLM schema has LLM-specific columns (`deployment`, `model`, `prompt_tokens_approx`, `response_tokens`, `response_mode`); ChaosWeb would have web-specific columns (`url_path`, `content_type`, `response_size_bytes`, `encoding`). The aggregation infrastructure and connection management are identical.
+
+---
+
+### DEBT-CW-05: CLI Typer Structure Duplication
+
+**Evidence:** `src/elspeth/testing/chaosllm/cli.py:1-565` -- The CLI defines `serve`, `presets`, `show_config` commands with Typer annotations, version callback (`_version_callback` at lines 46-56), startup info printing (lines 328-360), and uvicorn launch (lines 362-383). The design indicates ~350 LOC adapted for ChaosWeb.
+
+**Impact:** This compounds the existing CLI duplication problem documented as P1-06 in the repair manifest (event formatters duplicated 3x, ~600 lines) and CCP-05 (CLI duplication cross-cutting pattern). Adding a ChaosWeb CLI variant means three `_version_callback()` implementations, three `presets()` commands, three `show_config()` commands, and three MCP server launch patterns. The serve command's CLI-override-to-dict conversion logic (lines 258-312, 55 LOC) is structural boilerplate that differs only in which error-injection flags exist.
+
+**Effort:** M (2-3 days -- extract shared CLI base with protocol-specific options)
+
+**Category:** Code Quality
+
+**Details:** Shared CLI infrastructure:
+- `_version_callback()` (lines 46-56) -- identical
+- `presets()` command (lines 386-404) -- identical
+- `show_config()` command (lines 407-467) -- identical except config type
+- MCP server launch pattern (lines 469-551) -- identical except module path
+- Startup info printing pattern (lines 328-360) -- structurally identical
+
+Protocol-specific: the `serve` command's error-injection CLI flags differ (LLM: `--capacity-529-pct`, `--rate-limit-pct`; Web: `--ssrf-redirect-pct`, `--encoding-mismatch-pct`).
+
+---
+
+### DEBT-CW-06: Admin Route Handler Duplication in Server
+
+**Evidence:** `src/elspeth/testing/chaosllm/server.py:103-254` -- The server class defines `/health` (lines 209-218), `/admin/config` (lines 233-241), `/admin/stats` (lines 243-245), `/admin/reset` (lines 247-250), `/admin/export` (lines 252-254) endpoints plus runtime config update (`update_config()` at lines 159-182) and run info persistence (`_record_run_info()` at lines 192-205). The design indicates ~200 LOC adapted for ChaosWeb's admin routes.
+
+**Impact:** The admin endpoints implement a standard operational API contract: health check with burst status, runtime config hot-reload via POST, stats retrieval, metrics reset, data export. This contract is protocol-agnostic. Duplicating `update_config()` (24 LOC) means two implementations of the config-section-merge-and-rebuild pattern, which currently accesses private attributes (`self._error_injector._config`) -- a pattern that is fragile even once, let alone duplicated.
+
+**Effort:** M (2-3 days -- extract `ChaosServerBase` with admin routes)
+
+**Category:** Architecture
+
+**Details:** The `ChaosLLMServer.__init__()` (lines 87-101) shows the composition pattern: `error_injector` + `response_generator` + `latency_simulator` + `metrics_recorder`. ChaosWeb would have the same composition with a different generator (`content_generator` vs `response_generator`) and different request-specific endpoints (multi-path routing vs LLM endpoint). The admin layer and health endpoint are identical.
+
+---
+
+## Medium Priority (Address Before Third Chaos Variant)
+
+### DEBT-CW-07: Test Suite Duplication Risk (~2,500 LOC)
+
+**Evidence:** ChaosLLM tests total 5,412 LOC across 13 files:
+
+| Test File | LOC | Tests Shared Behavior? |
+|-----------|-----|----------------------|
+| `test_error_injector.py` | 803 | YES -- burst, selection, RNG |
+| `test_metrics.py` | 1,151 | PARTIAL -- connection mgmt shared, schema specific |
+| `test_response_generator.py` | 867 | NO -- LLM-specific |
+| `test_server.py` | 694 | PARTIAL -- admin routes shared, endpoints specific |
+| `test_latency_simulator.py` | 339 | YES -- entirely shared |
+| `test_fixture.py` | 230 | NO -- LLM-specific |
+| `test_error_injector_properties.py` | 404 | YES -- burst, selection properties |
+| `test_metrics_config_properties.py` | 386 | PARTIAL |
+| `test_response_generator_properties.py` | 379 | NO -- LLM-specific |
+| `test_latency_properties.py` | 155 | YES -- entirely shared |
+
+**Impact:** Without shared base modules, ChaosWeb requires redundant test coverage for shared behavior: error injection (~1,207 LOC), latency simulation (~494 LOC), metrics infrastructure (~500 LOC estimated), and config loading. Estimated duplicated test LOC: ~2,200-2,500.
+
+**Effort:** L (5-8 days of redundant test writing if not extracted first; 0 days if shared modules are extracted and existing tests relocated)
+
+**Category:** Code Quality
+
+---
+
+### DEBT-CW-08: Compounding Existing Duplication Pattern (CCP-04 + CCP-05)
+
+**Evidence:** `/home/john/elspeth-rapid/docs/code_analysis/_repair_manifest.md` documents:
+- **CCP-04** (line 628): LLM plugin duplication across 6 files -- "config classes, JSON schema builders, response parsers, Langfuse tracing, error classification"
+- **CCP-05** (line 634): CLI event formatters defined 3 times (~600 lines), run/resume finalization duplicated (~800 lines)
+- **P1-06** (line 190): CLI duplication tagged as NEEDS_REFACTOR
+- **P1-07** (line 202): Orchestrator run/resume duplication (~800 lines)
+
+**Impact:** ChaosWeb adds a third duplication cluster to a codebase already carrying two unresolved duplication debts identified on 2026-02-06 (5 days ago). Current unresolved duplication inventory:
+
+| Cluster | LOC Duplicated | Status |
+|---------|---------------|--------|
+| LLM plugins (CCP-04) | ~2,000 | Unresolved (5+ days) |
+| CLI formatters (CCP-05) | ~600 | Unresolved (5+ days) |
+| Orchestrator run/resume (P1-07) | ~800 | Unresolved (5+ days) |
+| **ChaosWeb (proposed)** | **~1,700** | **Not yet created** |
+| **Total after ChaosWeb** | **~5,100** | |
+
+Adding ChaosWeb would increase total duplication debt by 33%.
+
+**Effort:** N/A (meta-observation)
+
+**Category:** Architecture
+
+---
+
+## Recommendation: Extract Before Build
+
+### Proposed chaos_base Module Structure
+
+```
+src/elspeth/testing/chaos_base/
+    __init__.py
+    config.py          # ServerConfig, MetricsConfig, LatencyConfig, BurstConfig,
+                       #   _deep_merge(), load_config() factory, preset utilities
+                       #   (~183 LOC extracted from chaosllm/config.py)
+    error_injection.py # ErrorDecision, ErrorCategory, BaseErrorInjector
+                       #   (burst state machine, selection algorithms, RNG management)
+                       #   (~120 LOC of shared algorithm core)
+    latency.py         # LatencySimulator (moved verbatim from chaosllm)
+                       #   (78 LOC)
+    metrics.py         # BaseMetricsRecorder (connection lifecycle, bucketing,
+                       #   percentile calculation, export/reset/stats framework)
+                       #   (~150 LOC of shared infrastructure)
+    cli.py             # Shared CLI utilities (version callback, presets command,
+                       #   show_config command, startup printing pattern)
+                       #   (~80 LOC)
+```
+
+**Estimated extraction effort:** 5-8 days (including test relocation)
+
+**Estimated LOC in chaos_base:** ~400 LOC of genuinely shared code, plus ~500 LOC of relocated tests
+
+**ChaosWeb savings:**
+- Eliminates ~1,700 LOC of copied code
+- Eliminates ~2,200 LOC of duplicated tests
+- ChaosWeb reduces to ~2,330 LOC of genuinely new code (content_generator, web error types, multi-path routing, web-specific config fields, web-specific tests)
+- Existing ChaosLLM test suite continues to cover all shared behavior
+
+### When to Extract
+
+**Now. Before ChaosWeb implementation begins.**
+
+The design's argument for deferred extraction ("follows ELSPETH's no-premature-abstraction policy") misapplies the principle. No-premature-abstraction means "don't abstract before you see the second use case." ChaosWeb IS the second use case. The abstraction boundary is visible, well-defined, and backed by concrete evidence from two fully specified designs.
+
+The extraction threshold question ("at what LOC?") is the wrong frame. The threshold is not LOC -- it is "do we have two concrete consumers with a clear shared interface?" That condition is met now.
+
+The "extract later" approach has failed in this codebase already: LLM plugin duplication (CCP-04, 6 files, ~2,000 LOC) was identified for extraction and remains unresolved. Adding ChaosWeb under the same "later" promise adds a second instance of deferred-extraction debt on top of the first.
+
+---
+
+## Confidence Assessment
+
+| Aspect | Confidence | Basis |
+|--------|------------|-------|
+| ChaosLLM code structure | HIGH | Read all 7 source files (3,953 LOC total), all 13 test files (5,412 LOC total) |
+| Duplication quantification | HIGH | Line-by-line comparison of ChaosLLM source against design specification |
+| Extraction boundary identification | HIGH | Based on actual dependency analysis of ChaosLLM module imports and class interfaces |
+| Effort estimates | MEDIUM | Based on code complexity and ELSPETH development velocity from git log (5 commits in 3 days on current branch) |
+| ChaosWeb design accuracy | MEDIUM | Based on user-provided design summary; no design document exists in the repository |
+
+## Risk Assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Extraction delays ChaosWeb start by ~1 week | HIGH | LOW | Extraction reduces ChaosWeb implementation by ~1 week (net neutral to schedule) |
+| Shared base introduces tight coupling | LOW | MEDIUM | Use composition over inheritance; protocol-specific behavior stays in concrete classes |
+| Extraction proves over-engineered | LOW | LOW | Worst case: shared module used by only 2 consumers, which is still better than copy-paste |
+| Future Chaos variant (ChaosDB, ChaosQueue) leverages shared base | MEDIUM | POSITIVE | Third consumer confirms extraction value with zero incremental cost |
+| "Extract later" never happens | HIGH | HIGH | Documented precedent: LLM plugins (CCP-04), CLI (CCP-05) both tagged for extraction, both unresolved |
+
+## Information Gaps
+
+1. **No ChaosWeb design document exists in the repository.** Analysis is based entirely on the user-provided specification in the prompt. Actual implementation may diverge from the described adaptation percentages. The 1,700 LOC duplication figure comes from the design's own estimate and has not been independently verified against a prototype.
+
+2. **No ChaosWeb prototype code exists.** The extraction boundary is inferred from ChaosLLM structure and the design description. A prototype might reveal additional shared surface area or unforeseen protocol-specific requirements that change the extraction calculus.
+
+3. **Third variant probability is unknown.** If ChaosDB, ChaosQueue, or ChaosAPI is planned, the extraction ROI increases significantly. If ChaosWeb is definitively the last variant, the ROI is still positive but the urgency is lower. The design document does not mention future variants.
+
+4. **Jinja2 SSTI surface.** ChaosLLM's `response_generator.py` uses `jinja2.sandbox.SandboxedEnvironment` (line 416). The repair manifest flags this as P1-15 (Jinja2 SSTI Surface in Blob Sink and ChaosLLM). If ChaosWeb's content_generator also uses Jinja2 templates for HTML generation, this security concern is duplicated rather than addressed once in a shared location.
+
+## Caveats
+
+1. **Effort estimates assume familiarity with ChaosLLM internals.** The 5-8 day extraction estimate assumes a developer who has worked with the ChaosLLM codebase. A developer new to the system would need additional ramp time.
+
+2. **Test migration complexity not fully estimated.** Moving shared tests from `tests/*/testing/chaosllm/` to `tests/*/testing/chaos_base/` while maintaining ChaosLLM-specific tests requires careful fixture management. The conftest.py (4 LOC) is trivial, but test files that mix shared and protocol-specific assertions need splitting.
+
+3. **The "no premature abstraction" argument has legitimate force.** The counter-argument (extract now) depends on the design specification being accurate about the shared surface area. If ChaosWeb's actual implementation reveals the shared surface is smaller than the design projects (e.g., the burst state machine needs different timing semantics for web scraping), the extraction may be over-engineered. However, the risk is asymmetric: extracting a module that turns out slightly over-general costs ~1 day of unnecessary abstraction; NOT extracting and maintaining 1,700 LOC of duplicates costs ongoing maintenance indefinitely.
+
+4. **This analysis does not assess whether ChaosWeb itself is needed.** The catalog assumes ChaosWeb will be built and focuses solely on the duplication implications. The business case for web scraping resilience testing is taken as given.

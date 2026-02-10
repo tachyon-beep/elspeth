@@ -158,3 +158,5 @@ landscape.db-wal
 .bv/
 .perles/config.yaml
 .beads_tree/
+.keel/
+.codex/
