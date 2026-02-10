@@ -1381,24 +1381,6 @@ def _execute_resume_with_instances(
             telemetry_manager.close()
 
 
-def _resolve_resume_null_source_on_success(
-    source: SourceProtocol,
-    sinks: dict[str, SinkProtocol],
-) -> str:
-    """Resolve a valid on_success sink for NullSource in resume mode.
-
-    Raises:
-        typer.Exit: If source.on_success doesn't match any available sink.
-    """
-    if source.on_success in sinks:
-        return source.on_success
-    typer.echo(
-        f"Source on_success '{source.on_success}' not in available sinks: {sorted(sinks.keys())}. Cannot resume with mismatched config.",
-        err=True,
-    )
-    raise typer.Exit(1)
-
-
 def _build_resume_graphs(
     settings_config: ElspethSettings,
     plugins: dict[str, Any],
@@ -1428,8 +1410,10 @@ def _build_resume_graphs(
     )
     validation_graph.validate()
 
-    # Execution graph uses NullSource — resume data comes from stored payloads
-    null_source_on_success = _resolve_resume_null_source_on_success(plugins["source"], plugins["sinks"])
+    # Execution graph uses NullSource — resume data comes from stored payloads.
+    # NullSource inherits the original source's on_success (which may be a connection
+    # name or sink name — the DAG builder validates it during graph construction).
+    null_source_on_success = plugins["source"].on_success
     null_source = NullSource({})
     null_source.on_success = null_source_on_success
     null_source_settings = SourceSettings(plugin="null", on_success=null_source_on_success)
@@ -1674,7 +1658,7 @@ def resume(
             resume_sinks[sink_name] = sink
 
         # Override source with NullSource for resume (data comes from payloads)
-        null_source_on_success = _resolve_resume_null_source_on_success(plugins["source"], resume_sinks)
+        null_source_on_success = plugins["source"].on_success
         null_source = NullSource({})
         null_source.on_success = null_source_on_success
         resume_plugins = {

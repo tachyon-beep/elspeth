@@ -121,3 +121,87 @@ sinks:
 
         # Should find the file
         assert "Settings file not found: ~/settings.yaml" not in result.output
+
+
+class TestBuildResumeGraphs:
+    """Test _build_resume_graphs accepts connection-valued on_success.
+
+    Regression test for 6v1d: resume mode must accept connection names (e.g.
+    'source_out') not just sink names as source.on_success. The previous
+    implementation rejected connection-valued on_success with a typer.Exit(1).
+    """
+
+    def test_connection_valued_on_success_accepted(self, plugin_manager) -> None:
+        """_build_resume_graphs succeeds when source.on_success is a connection name."""
+        from elspeth.cli import _build_resume_graphs
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            transforms=[
+                TransformSettings(
+                    name="processor",
+                    plugin="passthrough",
+                    input="source_out",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config(config)
+        validation_graph, execution_graph = _build_resume_graphs(config, plugins)
+
+        # Both graphs should build successfully
+        assert validation_graph.node_count > 0
+        assert execution_graph.node_count > 0
+
+    def test_sink_valued_on_success_still_accepted(self, plugin_manager) -> None:
+        """_build_resume_graphs still works when source.on_success is a sink name."""
+        from elspeth.cli import _build_resume_graphs
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="output",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config(config)
+        validation_graph, execution_graph = _build_resume_graphs(config, plugins)
+
+        assert validation_graph.node_count > 0
+        assert execution_graph.node_count > 0
