@@ -120,6 +120,43 @@ class TestExportLandscapeJSON:
         ):
             export_landscape(db, "run-1", settings, sinks)
 
+    def test_sink_close_called_when_write_raises(self) -> None:
+        """sink.close() must be called even when sink.write() raises."""
+        db = Mock()
+        settings = self._make_settings()
+        sink = Mock()
+        sink.config = {}
+        sink.write.side_effect = RuntimeError("write failed")
+        sinks: dict[str, SinkProtocol] = {"output": sink}
+
+        with patch("elspeth.core.landscape.exporter.LandscapeExporter") as MockExporter:
+            exporter = MockExporter.return_value
+            exporter.export_run.return_value = [{"type": "run", "id": "r1"}]
+
+            with pytest.raises(RuntimeError, match="write failed"):
+                export_landscape(db, "run-1", settings, sinks)
+
+        sink.close.assert_called_once()
+
+    def test_sink_close_called_when_flush_raises(self) -> None:
+        """sink.close() must be called even when sink.flush() raises."""
+        db = Mock()
+        settings = self._make_settings()
+        sink = Mock()
+        sink.config = {}
+        sink.flush.side_effect = RuntimeError("flush failed")
+        sinks: dict[str, SinkProtocol] = {"output": sink}
+
+        with patch("elspeth.core.landscape.exporter.LandscapeExporter") as MockExporter:
+            exporter = MockExporter.return_value
+            exporter.export_run.return_value = [{"type": "run", "id": "r1"}]
+
+            with pytest.raises(RuntimeError, match="flush failed"):
+                export_landscape(db, "run-1", settings, sinks)
+
+        sink.write.assert_called_once()
+        sink.close.assert_called_once()
+
 
 # =============================================================================
 # export_landscape — CSV format

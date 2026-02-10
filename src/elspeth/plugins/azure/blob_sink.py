@@ -595,8 +595,11 @@ class AzureBlobSink(BaseSink):
                 provider="azure_blob_storage",
             )
 
-            # Azure SDK errors are external system errors - propagate with context
-            raise type(e)(f"Failed to upload blob '{rendered_path}' to container '{self._container}': {e}") from e
+            # Azure SDK errors are external system errors - propagate with context.
+            # Use RuntimeError wrapper instead of type(e)(...) because Azure SDK
+            # exceptions (HttpResponseError, ResourceExistsError, etc.) have
+            # multi-parameter constructors that won't accept a single string.
+            raise RuntimeError(f"Failed to upload blob '{rendered_path}' to container '{self._container}': {e}") from e
 
         return ArtifactDescriptor(
             artifact_type="file",

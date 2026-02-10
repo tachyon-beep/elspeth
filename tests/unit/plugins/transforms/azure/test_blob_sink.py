@@ -551,7 +551,7 @@ class TestAzureBlobSinkErrors:
     """Tests for error handling."""
 
     def test_upload_error_propagates_with_context(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
-        """Azure upload errors propagate with context message."""
+        """Azure upload errors propagate as RuntimeError with context message."""
         mock_blob_client = MagicMock()
         mock_blob_client.upload_blob.side_effect = Exception("Network error")
         mock_container = MagicMock()
@@ -561,8 +561,12 @@ class TestAzureBlobSinkErrors:
         sink = AzureBlobSink(make_config())
         rows = [{"id": 1}]
 
-        with pytest.raises(Exception, match="Failed to upload blob"):
+        with pytest.raises(RuntimeError, match="Failed to upload blob") as exc_info:
             sink.write(rows, ctx)
+
+        # Original exception preserved in cause chain
+        assert exc_info.value.__cause__ is not None
+        assert "Network error" in str(exc_info.value.__cause__)
 
     def test_connection_error_propagates(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Connection errors propagate to caller."""

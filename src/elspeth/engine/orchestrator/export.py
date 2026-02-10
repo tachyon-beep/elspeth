@@ -100,11 +100,13 @@ def export_landscape(
     else:
         # JSON export: batch all records for single write
         records = list(exporter.export_run(run_id, sign=export_config.sign))
-        if records:
-            # Capture ArtifactDescriptor for audit trail (future use)
-            _artifact_descriptor = sink.write(records, ctx)
-        sink.flush()
-        sink.close()
+        try:
+            if records:
+                # Capture ArtifactDescriptor for audit trail (future use)
+                _artifact_descriptor = sink.write(records, ctx)
+            sink.flush()
+        finally:
+            sink.close()
 
 
 def _export_csv_multifile(
