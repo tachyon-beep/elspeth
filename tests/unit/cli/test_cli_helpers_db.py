@@ -237,3 +237,32 @@ class TestResolveAuditPassphrase:
         result = resolve_audit_passphrase(settings)
         # Must use the custom var, not the default
         assert result == "custom-value"
+
+    def test_opportunistic_skips_non_sqlite_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression: don't force SQLCipher on non-sqlite URLs when settings is None."""
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        monkeypatch.setenv("ELSPETH_AUDIT_KEY", "some-key")
+
+        # PostgreSQL URL should NOT get a passphrase (SQLCipher is SQLite-only)
+        result = resolve_audit_passphrase(None, database_url="postgresql://localhost/audit")
+        assert result is None
+
+    def test_opportunistic_allows_sqlite_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SQLite URLs with settings=None should still get opportunistic passphrase."""
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        monkeypatch.setenv("ELSPETH_AUDIT_KEY", "sqlite-key")
+
+        result = resolve_audit_passphrase(None, database_url="sqlite:///path/to/audit.db")
+        assert result == "sqlite-key"
+
+    def test_opportunistic_no_url_preserves_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without database_url, settings=None still falls back to env var."""
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        monkeypatch.setenv("ELSPETH_AUDIT_KEY", "fallback-key")
+
+        # No database_url — backward compatible: return env var
+        result = resolve_audit_passphrase(None)
+        assert result == "fallback-key"

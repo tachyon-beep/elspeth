@@ -616,7 +616,7 @@ def explain(
             pass  # Fall through to opportunistic ELSPETH_AUDIT_KEY lookup
 
     try:
-        passphrase = resolve_audit_passphrase(landscape_settings)
+        passphrase = resolve_audit_passphrase(landscape_settings, database_url=db_url)
     except RuntimeError as e:
         if json_output:
             typer.echo(json_module.dumps({"error": str(e)}))
@@ -1265,7 +1265,7 @@ def purge(
     from elspeth.cli_helpers import resolve_audit_passphrase
 
     try:
-        passphrase = resolve_audit_passphrase(config.landscape if config else None)
+        passphrase = resolve_audit_passphrase(config.landscape if config else None, database_url=db_url)
     except RuntimeError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None

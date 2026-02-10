@@ -177,7 +177,7 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/rate_limit/limiter.py:R6:RateLimiter:try_acquire:fp=b1dd92e33abe1b6f
+- key: core/rate_limit/limiter.py:R6:RateLimiter:try_acquire:fp=52fa4ef5a66f8245
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -737,7 +737,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=cb728c1a23ed45e2
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=2313ec3565068c68
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern

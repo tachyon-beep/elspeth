@@ -2002,18 +2002,27 @@ class RowProcessor:
                         if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
                             child_coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
 
-                        # Children skip directly to coalesce node (or continue to next node).
-                        # NOTE: on_success_sink is not propagated to fork children. Terminal
-                        # sink resolution for fork children uses _branch_to_sink (explicit per-branch
-                        # routing from DAG COPY edges) or falls back to source_on_success. This is
-                        # intentional: fork branches are independent paths with their own routing.
-                        child_items.append(
-                            self._create_continuation_work_item(
-                                token=child_token,
-                                current_node_id=node_id,
-                                coalesce_name=child_coalesce_name,
+                        # Branches targeting direct sinks (COPY edges) bypass
+                        # continuation to avoid traversing unintended downstream
+                        # nodes. The _branch_to_sink map is mutually exclusive with
+                        # _branch_to_coalesce (enforced by constructor invariant).
+                        if child_coalesce_name is None and branch_name and BranchName(branch_name) in self._branch_to_sink:
+                            child_items.append(
+                                self._create_work_item(
+                                    token=child_token,
+                                    current_node_id=None,
+                                )
                             )
-                        )
+                        else:
+                            # Children skip to coalesce node, or continue to the
+                            # gate's structural successor for non-sink branches.
+                            child_items.append(
+                                self._create_continuation_work_item(
+                                    token=child_token,
+                                    current_node_id=node_id,
+                                    coalesce_name=child_coalesce_name,
+                                )
+                            )
 
                     # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
                     # to eliminate crash window between child creation and outcome recording.
@@ -2248,15 +2257,22 @@ class RowProcessor:
                         if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
                             cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
 
-                        # Children skip directly to coalesce step (or next processing node if no coalesce).
-                        # See plugin gate fork handler above for on_success_sink propagation note.
-                        child_items.append(
-                            self._create_continuation_work_item(
-                                token=child_token,
-                                current_node_id=node_id,
-                                coalesce_name=cfg_coalesce_name,
+                        # See plugin gate fork handler above for routing logic.
+                        if cfg_coalesce_name is None and cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_sink:
+                            child_items.append(
+                                self._create_work_item(
+                                    token=child_token,
+                                    current_node_id=None,
+                                )
                             )
-                        )
+                        else:
+                            child_items.append(
+                                self._create_continuation_work_item(
+                                    token=child_token,
+                                    current_node_id=node_id,
+                                    coalesce_name=cfg_coalesce_name,
+                                )
+                            )
 
                     # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
                     # to eliminate crash window between child creation and outcome recording.

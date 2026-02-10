@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -486,6 +487,34 @@ class TestExcepthookSuppression:
             # Cleanup just in case
             with _suppressed_lock:
                 _suppressed_thread_idents.discard(77777)
+
+    def test_hook_not_installed_when_no_suppressions_pending(self) -> None:
+        """The custom excepthook is NOT installed when no suppressions are pending.
+
+        Regression test for elspeth-rapid-16yh: the module previously replaced
+        threading.excepthook at import time, affecting all threads globally.
+        Now the hook is only installed during close() and restored after.
+        """
+        import elspeth.core.rate_limit.limiter as limiter_module
+
+        # With no pending suppressions, the hook must not be installed
+        assert not limiter_module._hook_installed
+        assert threading.excepthook is not limiter_module._custom_excepthook
+
+    def test_hook_lifecycle_install_and_restore(self) -> None:
+        """Hook is installed during close() and restored to original after."""
+        import elspeth.core.rate_limit.limiter as limiter_module
+        from elspeth.core.rate_limit import RateLimiter
+
+        saved_hook = threading.excepthook
+
+        limiter = RateLimiter(name="hook_lifecycle", requests_per_minute=60)
+        limiter.acquire()
+        limiter.close()
+
+        # After close completes, hook should be restored
+        assert not limiter_module._hook_installed
+        assert threading.excepthook is saved_hook
 
     def test_suppression_cleanup_after_clean_exit(self) -> None:
         """Thread idents are cleaned up even when thread exits without exception.

@@ -171,7 +171,11 @@ def resolve_run_id(run_id: str, recorder: "LandscapeRecorder") -> str | None:
     return run_id
 
 
-def resolve_audit_passphrase(settings: "LandscapeSettings | None") -> str | None:
+def resolve_audit_passphrase(
+    settings: "LandscapeSettings | None",
+    *,
+    database_url: str | None = None,
+) -> str | None:
     """Resolve the SQLCipher passphrase from the environment.
 
     The passphrase is always read from an environment variable (never from config
@@ -181,6 +185,10 @@ def resolve_audit_passphrase(settings: "LandscapeSettings | None") -> str | None
     Args:
         settings: LandscapeSettings if available (determines which env var to read).
             If None, attempts opportunistic lookup using the default env var.
+        database_url: Target database URL. When settings is None, the passphrase
+            is only returned for sqlite-scheme URLs (SQLCipher is a SQLite
+            extension). Non-sqlite URLs (e.g. postgresql) are never encrypted
+            via SQLCipher.
 
     Returns:
         Passphrase string if backend is sqlcipher, None otherwise.
@@ -197,10 +205,13 @@ def resolve_audit_passphrase(settings: "LandscapeSettings | None") -> str | None
             )
         return passphrase
 
-    # Opportunistic: no settings or non-sqlcipher backend.
-    # Check default env var in case we're connecting to an encrypted DB
-    # without settings (e.g., elspeth explain --database).
+    # Opportunistic: no settings available.
+    # Only attempt SQLCipher for sqlite-scheme URLs (SQLCipher is a SQLite
+    # extension — passing a passphrase to PostgreSQL or other backends would
+    # force an invalid SQLCipher engine and fail).
     if settings is None:
+        if database_url is not None and not database_url.startswith("sqlite"):
+            return None
         return os.environ.get("ELSPETH_AUDIT_KEY")
 
     return None

@@ -7,6 +7,7 @@ IMPORTANT: Sinks use allow_coercion=False to enforce that transforms
 output correct types. Wrong types = upstream bug = crash.
 """
 
+import hashlib
 import os
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -21,7 +22,7 @@ from sqlalchemy.types import TypeEngine
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.url import SanitizedDatabaseUrl
-from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.canonical import canonical_json
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -299,13 +300,14 @@ class DatabaseSink(BaseSink):
             ValidationError: If validate_input=True and a row fails validation.
                 This indicates a bug in an upstream transform.
         """
-        # Compute canonical JSON payload BEFORE any database operation
+        # Compute canonical JSON payload ONCE before any database operation.
         # Uses RFC 8785 canonical JSON for deterministic hashing:
         # - Normalizes pandas/numpy types to JSON primitives
         # - Rejects NaN/Infinity (invalid JSON per RFC 8785)
         # - Deterministic unicode escaping
-        content_hash = stable_hash(rows)
-        payload_size = len(canonical_json(rows).encode("utf-8"))
+        canonical_payload = canonical_json(rows).encode("utf-8")
+        content_hash = hashlib.sha256(canonical_payload).hexdigest()
+        payload_size = len(canonical_payload)
 
         if not rows:
             # Empty batch - return descriptor without DB operations

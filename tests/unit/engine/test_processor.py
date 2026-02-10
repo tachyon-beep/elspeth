@@ -1372,6 +1372,120 @@ class TestProcessRowGateBranching:
         assert results[0].outcome == RowOutcome.COMPLETED
         assert results[0].sink_name == "branch_sink"
 
+    def test_fork_to_sink_children_bypass_gate_continuation_successor(self) -> None:
+        """Regression: fork children in _branch_to_sink must not traverse downstream nodes.
+
+        Topology: gate-1 → transform-1 (gate's structural successor)
+        Gate forks to branches sink_a and sink_b (both in _branch_to_sink).
+
+        Without fix: children get current_node_id=transform-1 and execute the transform.
+        With fix: children get current_node_id=None, skip the loop, resolve via _branch_to_sink.
+        """
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        gate_node = NodeID("gate-1")
+        transform_node = NodeID("transform-1")
+
+        # Register nodes for FK constraints
+        recorder.register_node(
+            run_id="test-run",
+            plugin_name="fork-gate",
+            node_type=NodeType.GATE,
+            plugin_version="1.0",
+            config={},
+            node_id="gate-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id="test-run",
+            plugin_name="downstream-transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="transform-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        # Config gate: forks on "true" (always fires)
+        gate_config = GateSettings(
+            name="fork-gate",
+            input="source_out",
+            condition="True",
+            routes={"true": "fork", "false": "sink_c"},
+            fork_to=["sink_a", "sink_b"],
+        )
+
+        # Transform is the gate's continuation successor — must NOT execute for fork children
+        transform = _make_mock_transform(
+            node_id="transform-1",
+            result=TransformResult.success({"value": 99, "transformed": True}, success_reason={"action": "test"}),
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="sink_c",
+            branch_to_sink={"sink_a": "sink_a", "sink_b": "sink_b"},
+            sink_names=frozenset({"sink_a", "sink_b", "sink_c"}),
+            node_step_map={gate_node: 1, transform_node: 2},
+            node_to_next={gate_node: transform_node, transform_node: None},
+            first_transform_node_id=gate_node,
+            node_to_plugin={gate_node: gate_config, transform_node: transform},
+        )
+
+        # Mock gate executor to return FORK outcome with two child tokens.
+        # This isolates the fork routing logic from gate execution infrastructure.
+        def mock_execute_config_gate(gate_config, node_id, token, ctx, token_manager=None):
+            child_a = TokenInfo(
+                row_id=token.row_id,
+                token_id="token-fork-a",
+                row_data=token.row_data,
+                branch_name="sink_a",
+            )
+            child_b = TokenInfo(
+                row_id=token.row_id,
+                token_id="token-fork-b",
+                row_data=token.row_data,
+                branch_name="sink_b",
+            )
+            fork_action = RoutingAction.fork_to_paths(["sink_a", "sink_b"])
+            fork_result = GateResult(
+                row=token.row_data.to_dict(),
+                action=fork_action,
+                contract=token.row_data.contract,
+            )
+            fork_result.input_hash = "test-hash"
+            fork_result.output_hash = "test-hash"
+            fork_result.duration_ms = 0.1
+            return GateOutcome(
+                result=fork_result,
+                updated_token=token,
+                child_tokens=[child_a, child_b],
+            )
+
+        processor._gate_executor.execute_config_gate = mock_execute_config_gate
+
+        source_row = _make_source_row()
+        results = processor.process_row(
+            row_index=0,
+            source_row=source_row,
+            transforms=[],
+            ctx=ctx,
+        )
+
+        # Parent should be FORKED
+        forked = [r for r in results if r.outcome == RowOutcome.FORKED]
+        assert len(forked) == 1
+
+        # Fork children should complete at their branch sinks
+        completed = [r for r in results if r.outcome == RowOutcome.COMPLETED]
+        assert len(completed) == 2
+        sink_names = sorted(r.sink_name for r in completed)
+        assert sink_names == ["sink_a", "sink_b"]
+
+        # Downstream transform must NOT have been called for fork children
+        transform.process.assert_not_called()
+
     def test_overlapping_branch_to_coalesce_and_branch_to_sink_raises(self) -> None:
         """A branch name in both branch_to_coalesce and branch_to_sink is an invariant violation."""
         _db, recorder = _make_recorder()
