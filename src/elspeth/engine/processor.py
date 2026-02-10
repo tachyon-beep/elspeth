@@ -365,10 +365,16 @@ class RowProcessor:
             )
         return self._coalesce_on_success_map[coalesce_name]
 
-    def _resolve_jump_target_on_success_sink(self, start_node_id: NodeID) -> str:
-        """Resolve terminal on_success sink reachable from a route jump target."""
+    def _resolve_jump_target_on_success_sink(self, start_node_id: NodeID) -> str | None:
+        """Resolve terminal on_success sink reachable from a route jump target.
+
+        Returns None when the jump target contains a gate that will self-route
+        at execution time (gates determine sink destinations dynamically via
+        their routes config, so no static on_success resolution is needed).
+        """
         node_id: NodeID | None = start_node_id
         resolved_sink: str | None = None
+        encountered_gate = False
         iterations = 0
         max_iterations = len(self._node_to_next) + 1
 
@@ -381,7 +387,9 @@ class RowProcessor:
                 )
 
             plugin = self._resolve_plugin_for_node(node_id)
-            if isinstance(plugin, TransformProtocol) and plugin.on_success is not None:
+            if isinstance(plugin, (GateProtocol, GateSettings)):
+                encountered_gate = True
+            elif isinstance(plugin, TransformProtocol) and plugin.on_success is not None:
                 candidate_sink = plugin.on_success
                 if not self._sink_names or candidate_sink in self._sink_names:
                     resolved_sink = candidate_sink
@@ -396,13 +404,13 @@ class RowProcessor:
 
             node_id = next_node_id
 
-        if resolved_sink is None:
+        if resolved_sink is None and not encountered_gate:
             raise OrchestrationInvariantError(
                 f"Jump-target sink resolution reached terminal path with no sink from node '{start_node_id}'. "
                 "A gate route jump must resolve to a terminal sink to avoid stale routing state."
             )
 
-        if self._sink_names and resolved_sink not in self._sink_names:
+        if resolved_sink is not None and self._sink_names and resolved_sink not in self._sink_names:
             raise OrchestrationInvariantError(
                 f"Jump-target sink resolution returned '{resolved_sink}' which is not a configured sink. "
                 f"Available sinks: {sorted(self._sink_names)}. Walk started at node '{start_node_id}'."
@@ -2011,7 +2019,8 @@ class RowProcessor:
                     )
                 elif outcome.next_node_id is not None:
                     resolved_sink = self._resolve_jump_target_on_success_sink(outcome.next_node_id)
-                    last_on_success_sink = resolved_sink
+                    if resolved_sink is not None:
+                        last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
                     continue
                 else:
@@ -2252,7 +2261,8 @@ class RowProcessor:
                     )
                 elif outcome.next_node_id is not None:
                     resolved_sink = self._resolve_jump_target_on_success_sink(outcome.next_node_id)
-                    last_on_success_sink = resolved_sink
+                    if resolved_sink is not None:
+                        last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
                     continue
                 else:

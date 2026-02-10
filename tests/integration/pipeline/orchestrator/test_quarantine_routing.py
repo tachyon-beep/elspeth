@@ -1,0 +1,536 @@
+# tests/integration/pipeline/orchestrator/test_quarantine_routing.py
+"""Regression tests for orchestrator quarantine routing and audit path.
+
+Covers bead scug.1: quarantine edge-cases and happy-path audit assertions.
+
+Target code:
+- src/elspeth/engine/orchestrator/core.py:1259-1387
+
+Tests:
+1. Missing quarantine_destination -> RouteValidationError
+2. Invalid quarantine_destination (not in sinks) -> RouteValidationError
+3. Missing __quarantine__ DIVERT edge -> OrchestrationInvariantError
+4. Happy-path quarantine: FAILED node_state + DIVERT routing_event +
+   QUARANTINED outcome deferred to sink write
+5. Mixed valid + quarantined rows: valid rows complete normally,
+   quarantined rows route to quarantine sink with full audit trail
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import Any
+
+import pytest
+from sqlalchemy import select
+
+from elspeth.contracts import (
+    NodeStateStatus,
+    RoutingMode,
+    RowOutcome,
+    RunStatus,
+    SourceRow,
+)
+from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.core.landscape import LandscapeDB
+from elspeth.core.landscape.schema import (
+    edges_table,
+    node_states_table,
+    routing_events_table,
+    token_outcomes_table,
+    tokens_table,
+)
+from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+from elspeth.engine.orchestrator.types import RouteValidationError
+from tests.fixtures.base_classes import _TestSchema, _TestSourceBase, as_sink, as_source
+from tests.fixtures.pipeline import build_production_graph
+from tests.fixtures.plugins import CollectSink
+
+# ---------------------------------------------------------------------------
+# Test Sources
+# ---------------------------------------------------------------------------
+
+
+class QuarantineSource(_TestSourceBase):
+    """Source that yields a mix of valid and quarantined rows.
+
+    Quarantine rows use the configured destination.
+    """
+
+    name = "quarantine_source"
+    output_schema = _TestSchema
+
+    def __init__(
+        self,
+        valid_rows: list[dict[str, Any]],
+        quarantine_rows: list[tuple[Any, str]],
+        *,
+        quarantine_destination: str = "quarantine",
+        on_success: str = "default",
+        on_validation_failure: str = "quarantine",
+    ) -> None:
+        super().__init__()
+        self._valid_rows = valid_rows
+        self._quarantine_rows = quarantine_rows
+        self._quarantine_destination = quarantine_destination
+        self.on_success = on_success
+        self._on_validation_failure = on_validation_failure
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        # Yield valid rows first
+        for row in self._valid_rows:
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in row
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+            if self._schema_contract is None:
+                self._schema_contract = contract
+            yield SourceRow.valid(row, contract=contract)
+
+        # Yield quarantined rows
+        for row_data, error_msg in self._quarantine_rows:
+            yield SourceRow.quarantined(
+                row=row_data,
+                error=error_msg,
+                destination=self._quarantine_destination,
+            )
+
+
+class MissingDestinationSource(_TestSourceBase):
+    """Source that yields a quarantined row with missing destination."""
+
+    name = "bad_source_missing_dest"
+    output_schema = _TestSchema
+
+    def __init__(self, *, on_validation_failure: str = "quarantine") -> None:
+        super().__init__()
+        self._on_validation_failure = on_validation_failure
+        self.on_success = "default"
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        # Manually construct a SourceRow with empty destination to simulate plugin bug
+        yield SourceRow(
+            row={"bad": "data"},
+            is_quarantined=True,
+            quarantine_error="validation failed",
+            quarantine_destination="",  # Empty string — falsy
+        )
+
+
+class InvalidDestinationSource(_TestSourceBase):
+    """Source that yields a quarantined row with a sink name that doesn't exist."""
+
+    name = "bad_source_invalid_dest"
+    output_schema = _TestSchema
+
+    def __init__(self, *, on_validation_failure: str = "nonexistent_sink") -> None:
+        super().__init__()
+        self._on_validation_failure = on_validation_failure
+        self.on_success = "default"
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        yield SourceRow.quarantined(
+            row={"bad": "data"},
+            error="validation failed",
+            destination="nonexistent_sink",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestQuarantineRouteValidation:
+    """Edge cases: missing/invalid quarantine destinations raise immediately."""
+
+    def test_missing_quarantine_destination_raises_route_validation_error(self, payload_store) -> None:
+        """Missing quarantine_destination is a plugin bug — must crash, not drop silently."""
+        db = LandscapeDB.in_memory()
+        source = MissingDestinationSource(on_validation_failure="quarantine")
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        with pytest.raises(RouteValidationError, match="missing quarantine_destination"):
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        # Verify no rows leaked to any sink
+        assert len(default_sink.results) == 0
+        assert len(quarantine_sink.results) == 0
+
+    def test_invalid_quarantine_destination_raises_route_validation_error(self, payload_store) -> None:
+        """Quarantine destination pointing to non-existent sink must crash.
+
+        The pre-run validation in orchestrator/validation.py catches this before
+        the row-level quarantine code at core.py:1275 ever runs.
+        """
+        db = LandscapeDB.in_memory()
+        # Source says destination is "nonexistent_sink" but only "default" exists
+        source = InvalidDestinationSource(on_validation_failure="nonexistent_sink")
+        default_sink = CollectSink("default")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        with pytest.raises(RouteValidationError, match=r"on_validation_failure.*nonexistent_sink"):
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert len(default_sink.results) == 0
+
+    def test_row_level_invalid_quarantine_destination_raises(self, payload_store) -> None:
+        """Row-level quarantine_destination mismatch with actual sinks crashes at core.py:1275.
+
+        This tests the second validation layer: the source passes pre-run validation
+        (on_validation_failure="quarantine" matches a real sink), but yields a quarantined
+        row whose destination field points to a different, non-existent sink.
+        """
+        db = LandscapeDB.in_memory()
+
+        class MismatchDestSource(_TestSourceBase):
+            """Source that passes pre-run validation but yields quarantine rows with wrong dest."""
+
+            name = "mismatch_source"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                super().__init__()
+                self._on_validation_failure = "quarantine"  # Valid — matches a real sink
+                self.on_success = "default"
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Row claims its destination is "wrong_sink" — not in config.sinks
+                yield SourceRow.quarantined(
+                    row={"bad": True},
+                    error="validation error",
+                    destination="wrong_sink",
+                )
+
+        source = MismatchDestSource()
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        with pytest.raises(RouteValidationError, match=r"invalid quarantine_destination.*wrong_sink"):
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert len(default_sink.results) == 0
+        assert len(quarantine_sink.results) == 0
+
+    def test_missing_quarantine_edge_raises_orchestration_invariant_error(self, payload_store) -> None:
+        """If the DAG lacks the __quarantine__ DIVERT edge, OrchestrationInvariantError."""
+        db = LandscapeDB.in_memory()
+
+        # Build a source that yields quarantined rows with valid destination
+        source = QuarantineSource(
+            valid_rows=[],
+            quarantine_rows=[({}, "bad row")],
+            quarantine_destination="quarantine",
+            on_validation_failure="discard",  # "discard" prevents DAG from creating __quarantine__ edge
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        # Build graph — since on_validation_failure="discard", no __quarantine__ edge is created
+        graph = build_production_graph(config)
+
+        # Verify __quarantine__ edge is indeed missing from the graph
+        nx_graph = graph.get_nx_graph()
+        quarantine_edges = [(u, v, d) for u, v, k, d in nx_graph.edges(data=True, keys=True) if d.get("label") == "__quarantine__"]
+        assert len(quarantine_edges) == 0, "Test setup: __quarantine__ edge should not exist"
+
+        orchestrator = Orchestrator(db)
+        with pytest.raises(OrchestrationInvariantError, match=r"no __quarantine__.*DIVERT edge"):
+            orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+
+class TestQuarantineHappyPath:
+    """Happy path: quarantine rows create full audit trail."""
+
+    def test_quarantine_creates_failed_source_node_state(self, payload_store) -> None:
+        """Quarantined rows get a FAILED node_state at step_index=0 (source)."""
+        db = LandscapeDB.in_memory()
+        source = QuarantineSource(
+            valid_rows=[],
+            quarantine_rows=[({"x": "bad"}, "field 'x' type mismatch")],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_quarantined == 1
+
+        # Query node_states for the quarantined token
+        with db.engine.connect() as conn:
+            states = conn.execute(select(node_states_table).where(node_states_table.c.run_id == result.run_id)).fetchall()
+
+        # Find the FAILED source state (quarantine path)
+        failed_states = [s for s in states if s.status == NodeStateStatus.FAILED]
+        assert len(failed_states) == 1, f"Expected exactly 1 FAILED node_state, got {len(failed_states)}"
+
+        failed_state = failed_states[0]
+        assert failed_state.step_index == 0, "Quarantine node_state must be at step_index=0 (source)"
+        assert "type mismatch" in failed_state.error_json, "Error should contain quarantine error message"
+
+    def test_quarantine_creates_divert_routing_event(self, payload_store) -> None:
+        """Quarantined rows get a DIVERT routing_event linking source to quarantine sink."""
+        db = LandscapeDB.in_memory()
+        source = QuarantineSource(
+            valid_rows=[],
+            quarantine_rows=[({"x": 1}, "invalid value")],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Query routing events
+        with db.engine.connect() as conn:
+            events = conn.execute(
+                select(routing_events_table)
+                .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
+                .where(node_states_table.c.run_id == result.run_id)
+            ).fetchall()
+
+        divert_events = [e for e in events if e.mode == RoutingMode.DIVERT]
+        assert len(divert_events) == 1, f"Expected exactly 1 DIVERT routing_event, got {len(divert_events)}"
+
+        # Verify the edge is the __quarantine__ edge
+        divert_event = divert_events[0]
+        with db.engine.connect() as conn:
+            edge = conn.execute(select(edges_table).where(edges_table.c.edge_id == divert_event.edge_id)).fetchone()
+
+        assert edge is not None, "DIVERT routing_event must reference a valid edge"
+        assert edge.label == "__quarantine__", f"Expected __quarantine__ edge label, got {edge.label}"
+        assert edge.default_mode == RoutingMode.DIVERT, "Quarantine edge must have DIVERT mode"
+
+    def test_quarantine_outcome_recorded_after_sink_write(self, payload_store) -> None:
+        """QUARANTINED outcome must only be recorded after sink durability (not eagerly)."""
+        db = LandscapeDB.in_memory()
+        source = QuarantineSource(
+            valid_rows=[],
+            quarantine_rows=[({"bad": True}, "schema violation")],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_quarantined == 1
+
+        # Verify the quarantine sink received the row
+        assert len(quarantine_sink.results) == 1
+
+        # Query token outcomes
+        with db.engine.connect() as conn:
+            outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == result.run_id)).fetchall()
+
+        quarantined_outcomes = [o for o in outcomes if o.outcome == RowOutcome.QUARANTINED]
+        assert len(quarantined_outcomes) == 1, f"Expected 1 QUARANTINED outcome, got {len(quarantined_outcomes)}"
+
+        outcome = quarantined_outcomes[0]
+        assert outcome.is_terminal == 1, "QUARANTINED must be a terminal outcome"
+        assert outcome.sink_name == "quarantine", f"Expected sink_name='quarantine', got {outcome.sink_name}"
+        assert outcome.error_hash is not None, "QUARANTINED outcome must have error_hash"
+
+    def test_mixed_valid_and_quarantined_rows_full_audit(self, payload_store) -> None:
+        """Both valid and quarantined rows get complete audit trails, routed correctly."""
+        db = LandscapeDB.in_memory()
+        source = QuarantineSource(
+            valid_rows=[{"value": 1}, {"value": 2}],
+            quarantine_rows=[
+                ({"value": "not_an_int"}, "Expected int, got str"),
+                ({"missing_field": True}, "Required field 'value' missing"),
+            ],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_processed == 4
+        assert result.rows_quarantined == 2
+
+        # Valid rows reached default sink
+        assert len(default_sink.results) == 2
+        assert default_sink.results[0]["value"] == 1
+        assert default_sink.results[1]["value"] == 2
+
+        # Quarantined rows reached quarantine sink
+        assert len(quarantine_sink.results) == 2
+
+        # Verify audit trail completeness
+        with db.engine.connect() as conn:
+            # All rows have tokens
+            all_tokens = conn.execute(
+                select(tokens_table)
+                .join(
+                    node_states_table,
+                    tokens_table.c.token_id == node_states_table.c.token_id,
+                )
+                .where(node_states_table.c.run_id == result.run_id)
+            ).fetchall()
+            # Should have at least 4 distinct tokens (2 valid + 2 quarantined)
+            token_ids = {t.token_id for t in all_tokens}
+            assert len(token_ids) >= 4, f"Expected >= 4 tokens, got {len(token_ids)}"
+
+            # All rows have terminal outcomes
+            outcomes = conn.execute(
+                select(token_outcomes_table)
+                .where(token_outcomes_table.c.run_id == result.run_id)
+                .where(token_outcomes_table.c.is_terminal == 1)
+            ).fetchall()
+
+        completed_outcomes = [o for o in outcomes if o.outcome == RowOutcome.COMPLETED]
+        quarantined_outcomes = [o for o in outcomes if o.outcome == RowOutcome.QUARANTINED]
+
+        assert len(completed_outcomes) == 2, f"Expected 2 COMPLETED outcomes, got {len(completed_outcomes)}"
+        assert len(quarantined_outcomes) == 2, f"Expected 2 QUARANTINED outcomes, got {len(quarantined_outcomes)}"
+
+        # QUARANTINED outcomes have error_hash, COMPLETED do not
+        for qo in quarantined_outcomes:
+            assert qo.error_hash is not None, "QUARANTINED must have error_hash"
+            assert qo.sink_name == "quarantine"
+        for co in completed_outcomes:
+            assert co.sink_name == "default"
+
+    def test_quarantine_non_dict_row_data(self, payload_store) -> None:
+        """Quarantined rows with non-dict data (e.g., JSON primitives) route correctly."""
+        db = LandscapeDB.in_memory()
+        source = QuarantineSource(
+            valid_rows=[{"value": 1}],
+            # Non-dict quarantine data — simulates malformed JSON input
+            quarantine_rows=[
+                (42, "Expected object, got number"),
+                ("raw string", "Expected object, got string"),
+            ],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_quarantined == 2
+        assert len(quarantine_sink.results) == 2
+        assert len(default_sink.results) == 1
+
+        # Non-dict data gets wrapped as {"_raw": value} in the audit trail
+        with db.engine.connect() as conn:
+            failed_states = conn.execute(
+                select(node_states_table)
+                .where(node_states_table.c.run_id == result.run_id)
+                .where(node_states_table.c.status == NodeStateStatus.FAILED)
+            ).fetchall()
+
+        assert len(failed_states) == 2, "Each quarantined row gets its own FAILED node_state"
+
+    def test_quarantine_counter_reflected_in_run_result(self, payload_store) -> None:
+        """RunResult.rows_quarantined accurately counts quarantined rows."""
+        db = LandscapeDB.in_memory()
+        source = QuarantineSource(
+            valid_rows=[{"v": i} for i in range(5)],
+            quarantine_rows=[({"bad": i}, f"error_{i}") for i in range(3)],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_processed == 8
+        assert result.rows_quarantined == 3
+        assert result.rows_succeeded == 5
+        assert len(default_sink.results) == 5
+        assert len(quarantine_sink.results) == 3

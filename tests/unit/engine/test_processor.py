@@ -952,8 +952,8 @@ class TestProcessRowGateBranching:
         with pytest.raises(OrchestrationInvariantError, match="Coalesce 'merge' not in on_success map"):
             processor._resolve_jump_target_on_success_sink(router_node)
 
-    def test_jump_target_resolution_raises_when_terminal_sink_missing(self) -> None:
-        """Jump sink preloading must fail closed when the jump path has no sink."""
+    def test_jump_target_resolution_returns_none_when_path_terminates_at_gate(self) -> None:
+        """Jump path ending at a gate returns None — gate self-routes at runtime."""
         _db, recorder = _make_recorder()
 
         source_node = NodeID("source-0")
@@ -988,6 +988,49 @@ class TestProcessRowGateBranching:
             node_to_plugin={
                 jump_start_node: branch_transform,
                 downstream_gate_node: branch_gate,
+            },
+        )
+
+        result = processor._resolve_jump_target_on_success_sink(jump_start_node)
+        assert result is None, "Gate at end of jump path should return None (self-routing)"
+
+    def test_jump_target_resolution_raises_when_no_sink_and_no_gate(self) -> None:
+        """Jump path with only transforms and no terminal sink must fail closed."""
+        _db, recorder = _make_recorder()
+
+        source_node = NodeID("source-0")
+        jump_start_node = NodeID("branch-transform-1")
+        downstream_transform_node = NodeID("branch-transform-2")
+
+        branch_transform1 = _make_mock_transform(
+            node_id=str(jump_start_node),
+            name="branch_transform1",
+            on_success="branch_conn",
+        )
+        branch_transform2 = _make_mock_transform(
+            node_id=str(downstream_transform_node),
+            name="branch_transform2",
+            on_success="nonexistent_conn",
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="source_sink",
+            sink_names=frozenset({"source_sink", "branch_sink"}),
+            node_step_map={
+                source_node: 0,
+                jump_start_node: 1,
+                downstream_transform_node: 2,
+            },
+            node_to_next={
+                source_node: jump_start_node,
+                jump_start_node: downstream_transform_node,
+                downstream_transform_node: None,
+            },
+            first_transform_node_id=jump_start_node,
+            node_to_plugin={
+                jump_start_node: branch_transform1,
+                downstream_transform_node: branch_transform2,
             },
         )
 

@@ -1489,10 +1489,15 @@ allow_hits:
   reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=5ca1a55ebd86af96
+- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=e92659236634f221
   owner: architecture
-  reason: Protocol dispatch while traversing jumped subchain to resolve inherited terminal sink
-  safety: Traversal map invariants are enforced; raises on cycles or invalid nodes
+  reason: Protocol dispatch to detect self-routing gates during jump-target sink resolution
+  safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
+  expires: '2026-03-10'
+- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=c8930ec890458ee9
+  owner: architecture
+  reason: Protocol dispatch to detect transforms with on_success during jump-target sink resolution
+  safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
   expires: '2026-03-10'
 - key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d6d89baabae99abd
   owner: architecture
