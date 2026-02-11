@@ -156,12 +156,12 @@ allow_hits:
   reason: JSON Schema field access - external data at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=617585e2c6aa22ff
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=4d50cc10e8cea6d5
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=3b8c295c2958a52e
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=7b9aada179d30aca
   owner: architecture
   reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
@@ -176,12 +176,12 @@ allow_hits:
   reason: Protocol dispatch to detect transforms with on_success during jump-target sink resolution
   safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
   expires: '2026-03-11'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d32c9d57b2d82ab8
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=a3519ef1a40e4c56
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=957033f8d5f90f6b
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=36db507326d3c53f
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
@@ -226,12 +226,12 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=1b6ffefe6e9e35ba
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=f09f1a84533309b2
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=a7dc81daf277837c
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=0cf05b64b2027cef
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings

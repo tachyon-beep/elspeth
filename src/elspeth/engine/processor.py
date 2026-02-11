@@ -76,6 +76,34 @@ class DAGTraversalContext:
         object.__setattr__(self, "coalesce_node_map", MappingProxyType(dict(self.coalesce_node_map)))
 
 
+@dataclass(frozen=True, slots=True)
+class _FlushContext:
+    """Parametric context for aggregation flush handling.
+
+    Captures the differences between timeout/end-of-source flushes
+    (handle_timeout_flush) and count-triggered flushes
+    (_process_batch_aggregation_node) so shared helpers can handle both.
+
+    Parametric differences:
+    - error_msg: "...during timeout flush" vs "Batch transform failed"
+    - expand_parent_token: buffered_tokens[0] (timeout) vs current_token (count)
+    - triggering_token: None (timeout) vs current_token (count)
+    - coalesce info: derived from tokens (timeout) vs passed from WorkItem (count)
+    - CONSUMED_IN_BATCH recording: not needed (timeout) vs needed for triggering token (count)
+    """
+
+    node_id: NodeID
+    transform: TransformProtocol
+    settings: AggregationSettings
+    buffered_tokens: list[TokenInfo]
+    batch_id: str
+    error_msg: str
+    expand_parent_token: TokenInfo
+    triggering_token: TokenInfo | None
+    coalesce_node_id: NodeID | None
+    coalesce_name: CoalesceName | None
+
+
 def make_step_resolver(
     node_step_map: Mapping[NodeID, int],
     source_node_id: NodeID,
@@ -489,6 +517,236 @@ class RowProcessor:
         """
         return self._aggregation_executor.get_checkpoint_state()
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Aggregation flush helpers (shared by handle_timeout_flush and
+    # _process_batch_aggregation_node flush path)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _derive_coalesce_from_tokens(
+        self,
+        buffered_tokens: list[TokenInfo],
+    ) -> tuple[NodeID | None, CoalesceName | None]:
+        """Derive coalesce metadata from buffered tokens' branch_name.
+
+        For timeout/end-of-source flushes, coalesce info isn't passed in from
+        a WorkItem — it must be derived from the tokens' branch membership.
+        """
+        if buffered_tokens:
+            branch_name = buffered_tokens[0].branch_name
+            if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
+                coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
+                return self._coalesce_node_ids[coalesce_name], coalesce_name
+        return None, None
+
+    def _handle_flush_error(
+        self,
+        fctx: _FlushContext,
+    ) -> list[RowResult]:
+        """Handle failed aggregation flush for both passthrough and transform modes.
+
+        Token outcome recording depends on output_mode:
+        - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
+        - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
+          (would violate unique terminal outcome constraint)
+
+        For count-triggered transform mode, the triggering token needs
+        CONSUMED_IN_BATCH recorded because it went from buffer_row() to
+        execute_flush() without the non-flushing return path.
+        """
+        error_hash = hashlib.sha256(fctx.error_msg.encode()).hexdigest()[:16]
+        results: list[RowResult] = []
+        failure = FailureInfo(exception_type="TransformError", message=fctx.error_msg)
+
+        if fctx.settings.output_mode == OutputMode.PASSTHROUGH:
+            for token in fctx.buffered_tokens:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=RowOutcome.FAILED,
+                    error_hash=error_hash,
+                )
+                self._emit_token_completed(token, RowOutcome.FAILED)
+                results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
+        else:
+            # Transform mode: previously-buffered tokens already have CONSUMED_IN_BATCH.
+            # Triggering token (count-triggered only) needs CONSUMED_IN_BATCH recorded.
+            if fctx.triggering_token is not None:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=fctx.triggering_token.token_id,
+                    outcome=RowOutcome.CONSUMED_IN_BATCH,
+                    batch_id=fctx.batch_id,
+                )
+            # Emit TokenCompleted for all buffered tokens (deferred from buffer time
+            # to maintain TransformCompleted-before-TokenCompleted ordering).
+            # Note: TransformCompleted is NOT emitted on error path.
+            for token in fctx.buffered_tokens:
+                self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
+                results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
+
+        return results
+
+    def _route_passthrough_results(
+        self,
+        fctx: _FlushContext,
+        result: TransformResult,
+    ) -> tuple[list[RowResult], list[WorkItem]]:
+        """Route passthrough aggregation results after successful flush.
+
+        Passthrough mode: original tokens continue with enriched data.
+        Validates 1:1 row count, updates token data, and routes to
+        downstream processing or COMPLETED outcome.
+        """
+        if not result.is_multi_row:
+            raise ValueError(
+                f"Passthrough mode requires multi-row result, "
+                f"but transform '{fctx.transform.name}' returned single row. "
+                f"Use TransformResult.success_multi() for passthrough."
+            )
+        if result.rows is None:
+            raise RuntimeError("Multi-row result has rows=None")
+        if len(result.rows) != len(fctx.buffered_tokens):
+            raise ValueError(
+                f"Passthrough mode requires same number of output rows "
+                f"as input rows. Transform '{fctx.transform.name}' returned "
+                f"{len(result.rows)} rows but received {len(fctx.buffered_tokens)} input rows."
+            )
+
+        pipeline_rows = list(result.rows)
+        has_downstream = self._nav.resolve_next_node(fctx.node_id) is not None
+        first_branch = fctx.buffered_tokens[0].branch_name if fctx.buffered_tokens else None
+        needs_coalesce = fctx.coalesce_node_id is not None and fctx.coalesce_name is not None and first_branch is not None
+
+        results: list[RowResult] = []
+        child_items: list[WorkItem] = []
+
+        if has_downstream or needs_coalesce:
+            work_item_coalesce_name = fctx.coalesce_name if needs_coalesce else None
+            for token, enriched_data in zip(fctx.buffered_tokens, pipeline_rows, strict=True):
+                updated_token = token.with_updated_data(enriched_data)
+                child_items.append(
+                    self._nav.create_continuation_work_item(
+                        token=updated_token,
+                        current_node_id=fctx.node_id,
+                        coalesce_name=work_item_coalesce_name,
+                    )
+                )
+        else:
+            for token, enriched_data in zip(fctx.buffered_tokens, pipeline_rows, strict=True):
+                updated_token = token.with_updated_data(enriched_data)
+                results.append(
+                    RowResult(
+                        token=updated_token,
+                        final_data=enriched_data,
+                        outcome=RowOutcome.COMPLETED,
+                        sink_name=fctx.transform.on_success,
+                    )
+                )
+
+        return results, child_items
+
+    def _route_transform_results(
+        self,
+        fctx: _FlushContext,
+        result: TransformResult,
+    ) -> tuple[list[RowResult], list[WorkItem]]:
+        """Route transform-mode aggregation results after successful flush.
+
+        Transform mode: N input rows → M output rows with new tokens via expand_token.
+        Records CONSUMED_IN_BATCH for triggering token (if present), emits
+        deferred TokenCompleted telemetry, then routes expanded tokens downstream.
+        """
+        # Record CONSUMED_IN_BATCH for triggering token (count-triggered only)
+        if fctx.triggering_token is not None:
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=fctx.triggering_token.token_id,
+                outcome=RowOutcome.CONSUMED_IN_BATCH,
+                batch_id=fctx.batch_id,
+            )
+
+        # Emit deferred TokenCompleted for all buffered tokens
+        # (TransformCompleted was already emitted by the caller)
+        for token in fctx.buffered_tokens:
+            self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
+
+        # Extract output rows
+        if result.is_multi_row:
+            if result.rows is None:
+                raise RuntimeError("Multi-row result has rows=None")
+            output_rows = result.rows
+        else:
+            if result.row is None:
+                raise RuntimeError(
+                    f"Aggregation transform '{fctx.transform.name}' returned None for result.row "
+                    f"in 'transform' mode. Batch-aware transforms must return a row via "
+                    f"TransformResult.success(row) or rows via TransformResult.success_multi(rows). "
+                    f"This is a plugin bug."
+                )
+            output_rows = [result.row]
+
+        # Enforce expected_output_count if configured
+        if fctx.settings.expected_output_count is not None:
+            actual_count = len(output_rows)
+            if actual_count != fctx.settings.expected_output_count:
+                raise RuntimeError(
+                    f"Aggregation '{fctx.settings.name}' produced {actual_count} output row(s), "
+                    f"but expected_output_count={fctx.settings.expected_output_count}. "
+                    f"This is a plugin contract violation."
+                )
+
+        results: list[RowResult] = []
+        child_items: list[WorkItem] = []
+
+        if fctx.buffered_tokens:
+            output_contract = output_rows[0].contract
+            expanded_tokens, _expand_group_id = self._token_manager.expand_token(
+                parent_token=fctx.expand_parent_token,
+                expanded_rows=[row.to_dict() for row in output_rows],
+                output_contract=output_contract,
+                node_id=fctx.node_id,
+                run_id=self._run_id,
+                record_parent_outcome=False,
+            )
+
+            # Build triggering RowResult if applicable (count-triggered only)
+            if fctx.triggering_token is not None:
+                results.append(
+                    RowResult(
+                        token=fctx.triggering_token,
+                        final_data=fctx.triggering_token.row_data,
+                        outcome=RowOutcome.CONSUMED_IN_BATCH,
+                    )
+                )
+
+            # Route expanded tokens downstream
+            has_downstream = self._nav.resolve_next_node(fctx.node_id) is not None
+            first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
+            needs_coalesce = fctx.coalesce_node_id is not None and fctx.coalesce_name is not None and first_expanded_branch is not None
+
+            if has_downstream or needs_coalesce:
+                work_item_coalesce_name = fctx.coalesce_name if needs_coalesce else None
+                for token in expanded_tokens:
+                    child_items.append(
+                        self._nav.create_continuation_work_item(
+                            token=token,
+                            current_node_id=fctx.node_id,
+                            coalesce_name=work_item_coalesce_name,
+                        )
+                    )
+            else:
+                for token in expanded_tokens:
+                    results.append(
+                        RowResult(
+                            token=token,
+                            final_data=token.row_data,
+                            outcome=RowOutcome.COMPLETED,
+                            sink_name=fctx.transform.on_success,
+                        )
+                    )
+
+        return results, child_items
+
     def handle_timeout_flush(
         self,
         node_id: NodeID,
@@ -496,16 +754,10 @@ class RowProcessor:
         ctx: PluginContext,
         trigger_type: TriggerType,
     ) -> tuple[list[RowResult], list[WorkItem]]:
-        """Handle an aggregation flush with proper output_mode semantics.
+        """Handle an aggregation flush triggered outside normal row processing.
 
-        This method mirrors the flush handling in _process_batch_aggregation_node but
-        is designed for flushes that occur outside normal row processing:
-        - TIMEOUT: Triggered between row arrivals when timeout expires
-        - END_OF_SOURCE: Triggered at end of source to flush remaining buffers
-
-        Handles all output_modes correctly:
-        - passthrough: Routes all buffered tokens through remaining transforms
-        - transform: Creates new tokens via expand_token (N→M output)
+        Handles TIMEOUT (between row arrivals) and END_OF_SOURCE (remaining buffers)
+        flushes. Delegates to shared flush helpers after building _FlushContext.
 
         Args:
             node_id: The aggregation node ID
@@ -518,241 +770,42 @@ class RowProcessor:
             - results: RowResults for completed tokens (terminal state)
             - work_items: WorkItem list for tokens needing further processing
         """
-        # Get aggregation settings for output_mode
         settings = self._aggregation_settings[node_id]
-        output_mode = settings.output_mode
 
-        # Execute flush with the specified trigger type
-        result, buffered_tokens, _batch_id = self._aggregation_executor.execute_flush(
+        result, buffered_tokens, batch_id = self._aggregation_executor.execute_flush(
             node_id=node_id,
-            transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
+            transform=cast(BatchTransformProtocol, transform),
             ctx=ctx,
             trigger_type=trigger_type,
         )
 
-        child_items: list[WorkItem] = []
-        results: list[RowResult] = []
+        coalesce_node_id, coalesce_name = self._derive_coalesce_from_tokens(buffered_tokens)
+
+        fctx = _FlushContext(
+            node_id=node_id,
+            transform=transform,
+            settings=settings,
+            buffered_tokens=buffered_tokens,
+            batch_id=batch_id,
+            error_msg="Batch transform failed during timeout flush",
+            expand_parent_token=buffered_tokens[0],
+            triggering_token=None,
+            coalesce_node_id=coalesce_node_id,
+            coalesce_name=coalesce_name,
+        )
 
         if result.status != "success":
-            # Flush failed - handle based on output_mode
-            #
-            # CRITICAL: Token outcome recording depends on output_mode:
-            # - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
-            # - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
-            #
-            # For transform mode, the batch failure is already recorded in the
-            # batches table by execute_flush(). The CONSUMED_IN_BATCH outcome remains
-            # semantically correct (tokens were consumed into a batch that failed).
-            # Recording FAILED would violate the unique terminal outcome constraint.
-            error_msg = "Batch transform failed during timeout flush"
-            error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+            return self._handle_flush_error(fctx), []
 
-            if output_mode == OutputMode.PASSTHROUGH:
-                # Passthrough mode: tokens have BUFFERED outcome (non-terminal)
-                # Record FAILED to give them a terminal outcome
-                for token in buffered_tokens:
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=token.token_id,
-                        outcome=RowOutcome.FAILED,
-                        error_hash=error_hash,
-                    )
-                    # Emit TokenCompleted telemetry AFTER Landscape recording
-                    self._emit_token_completed(token, RowOutcome.FAILED)
-                    results.append(
-                        RowResult(
-                            token=token,
-                            final_data=token.row_data,
-                            outcome=RowOutcome.FAILED,
-                            error=FailureInfo(
-                                exception_type="TransformError",
-                                message=error_msg,
-                            ),
-                        )
-                    )
-            else:
-                # Single/transform mode: tokens already have CONSUMED_IN_BATCH (terminal)
-                # DO NOT record FAILED - would violate unique terminal outcome constraint
-                # Return FAILED results for count tracking, but no DB recording needed
-                #
-                # Bug P2-2026-02-01: Emit TokenCompleted for all buffered tokens.
-                # TokenCompleted was deferred from buffer time to maintain ordering.
-                # Even on failed flush, tokens have CONSUMED_IN_BATCH outcome (terminal).
-                # Note: TransformCompleted is NOT emitted on error path (no successful processing).
-                for token in buffered_tokens:
-                    self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
-                    results.append(
-                        RowResult(
-                            token=token,
-                            final_data=token.row_data,
-                            outcome=RowOutcome.FAILED,
-                            error=FailureInfo(
-                                exception_type="TransformError",
-                                message=error_msg,
-                            ),
-                        )
-                    )
-
-            return (results, child_items)
-
-        # SUCCESS PATH: Emit TransformCompleted telemetry for all buffered tokens
-        # Each input token was processed by this aggregation transform as part of the batch.
-        # Emitting per-token (rather than per-batch) maintains consistency with regular
-        # transform telemetry and allows accurate token counting in observability dashboards.
+        # Emit TransformCompleted telemetry for all buffered tokens
         for token in buffered_tokens:
-            self._emit_transform_completed(
-                token=token,
-                transform=transform,
-                transform_result=result,
-            )
+            self._emit_transform_completed(token=token, transform=transform, transform_result=result)
 
-        # Continue downstream only when there is a next processing node.
-        has_downstream_processing = self._nav.resolve_next_node(node_id) is not None
-
-        # Derive coalesce metadata from buffered tokens' branch_name
-        # For timeout/end-of-source flushes, we need to preserve coalesce path
-        # so tokens can still join at coalesce points after aggregation
-        coalesce_node_id: NodeID | None = None
-        coalesce_name: CoalesceName | None = None
-        if buffered_tokens:
-            branch_name = buffered_tokens[0].branch_name
-            if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
-                coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
-                coalesce_node_id = self._coalesce_node_ids[coalesce_name]
-
-        if output_mode == OutputMode.PASSTHROUGH:
-            # Passthrough: original tokens continue with enriched data
-            if not result.is_multi_row:
-                raise ValueError(
-                    f"Passthrough mode requires multi-row result, "
-                    f"but transform '{transform.name}' returned single row. "
-                    f"Use TransformResult.success_multi() for passthrough."
-                )
-
-            if result.rows is None:
-                raise RuntimeError("Multi-row result has rows=None")
-            if len(result.rows) != len(buffered_tokens):
-                raise ValueError(
-                    f"Passthrough mode requires same number of output rows "
-                    f"as input rows. Transform '{transform.name}' returned "
-                    f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
-                )
-
-            # Transforms return PipelineRow objects in result.rows — use directly
-            pipeline_rows = list(result.rows)
-
-            for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
-                # Update token with enriched data, preserving all lineage metadata
-                updated_token = token.with_updated_data(enriched_data)
-
-                # Check if token needs to go to a coalesce point
-                # This must happen EVEN if no more transforms - coalesce may be last step
-                needs_coalesce = coalesce_node_id is not None and coalesce_name is not None and updated_token.branch_name is not None
-
-                if has_downstream_processing or needs_coalesce:
-                    work_item_coalesce_name = coalesce_name if needs_coalesce else None
-                    child_items.append(
-                        self._nav.create_continuation_work_item(
-                            token=updated_token,
-                            current_node_id=node_id,
-                            coalesce_name=work_item_coalesce_name,
-                        )
-                    )
-                else:
-                    # No more transforms and no coalesce - return COMPLETED
-                    # RowResult.__post_init__ enforces sink_name is set for COMPLETED
-                    results.append(
-                        RowResult(
-                            token=updated_token,
-                            final_data=enriched_data,
-                            outcome=RowOutcome.COMPLETED,
-                            sink_name=transform.on_success,
-                        )
-                    )
-
-        elif output_mode == OutputMode.TRANSFORM:
-            # Transform mode: N input rows -> M output rows with NEW tokens
-            #
-            # Bug P2-2026-02-01: Emit TokenCompleted for all buffered tokens AFTER
-            # TransformCompleted (emitted in the TransformCompleted block above).
-            # TokenCompleted was deferred from buffer time to maintain correct ordering.
-            for token in buffered_tokens:
-                self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
-
-            # Get output rows
-            if result.is_multi_row:
-                if result.rows is None:
-                    raise RuntimeError("Multi-row result has rows=None")
-                output_rows = result.rows
-            else:
-                # Contract: batch-aware transforms in transform mode MUST return output data
-                if result.row is None:
-                    raise RuntimeError(
-                        f"Aggregation transform '{transform.name}' returned None for result.row "
-                        f"in 'transform' mode. Batch-aware transforms must return a row via "
-                        f"TransformResult.success(row) or rows via TransformResult.success_multi(rows). "
-                        f"This is a plugin bug."
-                    )
-                output_rows = [result.row]
-
-            # Enforce expected_output_count if configured (plugin contract validation)
-            if settings.expected_output_count is not None:
-                actual_count = len(output_rows)
-                if actual_count != settings.expected_output_count:
-                    raise RuntimeError(
-                        f"Aggregation '{settings.name}' produced {actual_count} output row(s), "
-                        f"but expected_output_count={settings.expected_output_count}. "
-                        f"This is a plugin contract violation."
-                    )
-
-            # Create new tokens via expand_token using first buffered token as parent
-            # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
-            if buffered_tokens:
-                # Extract contract from first output row (all rows share same contract)
-                output_contract = output_rows[0].contract
-
-                expanded_tokens, _expand_group_id = self._token_manager.expand_token(
-                    parent_token=buffered_tokens[0],
-                    expanded_rows=[row.to_dict() for row in output_rows],
-                    output_contract=output_contract,
-                    node_id=node_id,
-                    run_id=self._run_id,
-                    record_parent_outcome=False,
-                )
-
-                # Check if expanded tokens need to go to a coalesce point
-                # This must happen EVEN if no more transforms - coalesce may be last step
-                # Use first expanded token to check branch_name
-                first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
-                needs_coalesce = coalesce_node_id is not None and coalesce_name is not None and first_expanded_branch is not None
-
-                if has_downstream_processing or needs_coalesce:
-                    work_item_coalesce_name = coalesce_name if needs_coalesce else None
-                    for token in expanded_tokens:
-                        child_items.append(
-                            self._nav.create_continuation_work_item(
-                                token=token,
-                                current_node_id=node_id,
-                                coalesce_name=work_item_coalesce_name,
-                            )
-                        )
-                else:
-                    # No more transforms and no coalesce - return COMPLETED
-                    # RowResult.__post_init__ enforces sink_name is set for COMPLETED
-                    for token in expanded_tokens:
-                        results.append(
-                            RowResult(
-                                token=token,
-                                final_data=token.row_data,
-                                outcome=RowOutcome.COMPLETED,
-                                sink_name=transform.on_success,
-                            )
-                        )
-
-        else:
-            raise ValueError(f"Unknown output_mode: {output_mode}")
-
-        return (results, child_items)
+        if settings.output_mode == OutputMode.PASSTHROUGH:
+            return self._route_passthrough_results(fctx, result)
+        if settings.output_mode == OutputMode.TRANSFORM:
+            return self._route_transform_results(fctx, result)
+        raise ValueError(f"Unknown output_mode: {settings.output_mode}")
 
     def _process_batch_aggregation_node(
         self,
@@ -766,7 +819,8 @@ class RowProcessor:
         """Process a row at an aggregation node using engine buffering.
 
         Engine buffers rows and calls transform.process(rows: list[dict])
-        when the trigger fires.
+        when the trigger fires. Flush handling is delegated to shared helpers
+        (_handle_flush_error, _route_passthrough_results, _route_transform_results).
 
         TEMPORAL DECOUPLING (Bug P2-2026-02-01):
 
@@ -780,15 +834,6 @@ class RowProcessor:
           Deferred to maintain ordering invariant (TransformCompleted before
           TokenCompleted for each token).
 
-        DO NOT assume "Landscape recording and telemetry emission happen together"
-        for transform-mode aggregation. These two events have different timestamps.
-
-        This decoupling is necessary because:
-        1. Tokens become terminal (CONSUMED_IN_BATCH) when buffered
-        2. But TransformCompleted can only fire when the batch actually processes
-        3. Telemetry ordering requires TransformCompleted before TokenCompleted
-        4. Therefore TokenCompleted must be deferred to flush time
-
         Args:
             transform: The batch-aware transform
             current_token: Current row token
@@ -799,16 +844,14 @@ class RowProcessor:
 
         Returns:
             (RowResult or list[RowResult], child_items) tuple
-            - Single RowResult for transform mode (or list if N→M output)
-            - List of RowResults for passthrough mode (one per buffered token)
+            - Single RowResult for non-flush buffering
+            - List of RowResults for flush (passthrough or transform mode)
         """
         raw_node_id = transform.node_id
         if raw_node_id is None:
             raise OrchestrationInvariantError("Node ID is None during edge resolution")
         node_id = NodeID(raw_node_id)
 
-        # Get output_mode from aggregation settings
-        # Caller guarantees node_id is in self._aggregation_settings (checked in _handle_aggregation_node)
         settings = self._aggregation_settings[node_id]
         output_mode = settings.output_mode
 
@@ -817,292 +860,46 @@ class RowProcessor:
 
         # Check if we should flush
         if self._aggregation_executor.should_flush(node_id):
-            # Determine trigger type
             trigger_type = self._aggregation_executor.get_trigger_type(node_id)
             if trigger_type is None:
-                trigger_type = TriggerType.COUNT  # Default if no evaluator
+                trigger_type = TriggerType.COUNT
 
-            # Execute flush with full audit recording
             result, buffered_tokens, batch_id = self._aggregation_executor.execute_flush(
                 node_id=node_id,
-                transform=cast(BatchTransformProtocol, transform),  # Runtime guarantees batch-aware
+                transform=cast(BatchTransformProtocol, transform),
                 ctx=ctx,
                 trigger_type=trigger_type,
             )
 
+            fctx = _FlushContext(
+                node_id=node_id,
+                transform=transform,
+                settings=settings,
+                buffered_tokens=buffered_tokens,
+                batch_id=batch_id,
+                error_msg="Batch transform failed",
+                expand_parent_token=current_token,
+                triggering_token=current_token,
+                coalesce_node_id=coalesce_node_id,
+                coalesce_name=coalesce_name,
+            )
+
             if result.status != "success":
-                # Flush failed - handle based on output_mode
-                #
-                # CRITICAL: Token outcome recording depends on output_mode:
-                # - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
-                # - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
-                #
-                # For transform mode, the batch failure is already recorded in the
-                # batches table by execute_flush(). The CONSUMED_IN_BATCH outcome remains
-                # semantically correct (tokens were consumed into a batch that failed).
-                # Recording FAILED would violate the unique terminal outcome constraint.
-                error_msg = "Batch transform failed"
-                error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+                return self._handle_flush_error(fctx), child_items
 
-                results: list[RowResult] = []
-                if output_mode == OutputMode.PASSTHROUGH:
-                    # Passthrough mode: tokens have BUFFERED outcome (non-terminal)
-                    # Record FAILED for ALL buffered tokens to give them terminal outcome
-                    for token in buffered_tokens:
-                        self._recorder.record_token_outcome(
-                            run_id=self._run_id,
-                            token_id=token.token_id,
-                            outcome=RowOutcome.FAILED,
-                            error_hash=error_hash,
-                        )
-                        # Emit TokenCompleted telemetry AFTER Landscape recording
-                        self._emit_token_completed(token, RowOutcome.FAILED)
-                        results.append(
-                            RowResult(
-                                token=token,
-                                final_data=token.row_data,
-                                outcome=RowOutcome.FAILED,
-                                error=FailureInfo(
-                                    exception_type="TransformError",
-                                    message=error_msg,
-                                ),
-                            )
-                        )
-                else:
-                    # Single/transform mode: PREVIOUSLY buffered tokens have CONSUMED_IN_BATCH
-                    # (recorded when they were buffered via the non-flushing return path in
-                    # _process_transform_with_aggregation). However, the TRIGGERING token
-                    # (current_token) went straight from buffer_row() to execute_flush(),
-                    # skipping the non-flushing path. It needs CONSUMED_IN_BATCH.
-                    #
-                    # Record CONSUMED_IN_BATCH for triggering token only.
-                    # DO NOT record FAILED - would violate unique terminal outcome constraint.
-                    # Return FAILED results for count tracking, but no additional DB recording
-                    # needed for previously buffered tokens.
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=current_token.token_id,
-                        outcome=RowOutcome.CONSUMED_IN_BATCH,
-                        batch_id=batch_id,
-                    )
-
-                    # Bug P2-2026-02-01: Emit TokenCompleted for ALL buffered tokens.
-                    # TokenCompleted was deferred from buffer time to maintain ordering.
-                    # Even on failed flush, tokens have CONSUMED_IN_BATCH outcome (terminal).
-                    # Note: TransformCompleted is NOT emitted on error path (no successful processing).
-                    # Note: buffered_tokens includes the triggering token (buffered before flush check).
-                    for token in buffered_tokens:
-                        self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
-
-                    for token in buffered_tokens:
-                        results.append(
-                            RowResult(
-                                token=token,
-                                final_data=token.row_data,
-                                outcome=RowOutcome.FAILED,
-                                error=FailureInfo(
-                                    exception_type="TransformError",
-                                    message=error_msg,
-                                ),
-                            )
-                        )
-                return (results, child_items)
-
-            # SUCCESS PATH: Emit TransformCompleted telemetry for all buffered tokens
-            # Each input token was processed by this aggregation transform as part of the batch.
-            # Emitting per-token (rather than per-batch) maintains consistency with regular
-            # transform telemetry and allows accurate token counting in observability dashboards.
-            #
-            # NOTE: For transform mode, the triggering token (current_token) also needs
-            # TransformCompleted, but it's emitted in the transform-mode block below AFTER
-            # its Landscape recording and BEFORE its TokenCompleted (Bug P2-2026-02-01).
+            # Emit TransformCompleted telemetry for all buffered tokens
             for token in buffered_tokens:
-                self._emit_transform_completed(
-                    token=token,
-                    transform=transform,
-                    transform_result=result,
-                )
+                self._emit_transform_completed(token=token, transform=transform, transform_result=result)
 
-            # Handle output modes
             if output_mode == OutputMode.PASSTHROUGH:
-                # Passthrough: original tokens continue with enriched data
-                # Validate result is multi-row
-                if not result.is_multi_row:
-                    raise ValueError(
-                        f"Passthrough mode requires multi-row result, "
-                        f"but transform '{transform.name}' returned single row. "
-                        f"Use TransformResult.success_multi() for passthrough."
-                    )
-
-                # Validate row count matches
-                if result.rows is None:
-                    raise RuntimeError("Multi-row result has rows=None")
-                if len(result.rows) != len(buffered_tokens):
-                    raise ValueError(
-                        f"Passthrough mode requires same number of output rows "
-                        f"as input rows. Transform '{transform.name}' returned "
-                        f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
-                    )
-
-                # Transforms return PipelineRow objects in result.rows — use directly
-                pipeline_rows = list(result.rows)
-
-                # Build COMPLETED results for all buffered tokens with enriched data
-                # Continue downstream only when there is a next processing node.
-                has_downstream_processing = self._nav.resolve_next_node(node_id) is not None
-
-                # Check if tokens need to go to a coalesce point
-                # This must happen EVEN if no more transforms - coalesce may be last step
-                # Use first buffered token to check branch_name (all should have same branch)
-                first_token_branch = buffered_tokens[0].branch_name if buffered_tokens else None
-                needs_coalesce = coalesce_node_id is not None and coalesce_name is not None and first_token_branch is not None
-
-                if has_downstream_processing or needs_coalesce:
-                    work_item_coalesce_name = coalesce_name if needs_coalesce else None
-                    for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
-                        # Update token, preserving all lineage metadata
-                        updated_token = token.with_updated_data(enriched_data)
-                        child_items.append(
-                            self._nav.create_continuation_work_item(
-                                token=updated_token,
-                                current_node_id=node_id,
-                                coalesce_name=work_item_coalesce_name,
-                            )
-                        )
-                    # Return empty list - all results will come from child items
-                    return ([], child_items)
-                else:
-                    # No more transforms and no coalesce - return COMPLETED for all tokens
-                    # RowResult.__post_init__ enforces sink_name is set for COMPLETED
-                    passthrough_results: list[RowResult] = []
-                    for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
-                        # Update token, preserving all lineage metadata
-                        updated_token = token.with_updated_data(enriched_data)
-                        # Convert PipelineRow to dict for final_data (RowResult expects dict)
-                        passthrough_results.append(
-                            RowResult(
-                                token=updated_token,
-                                final_data=enriched_data.to_dict(),
-                                outcome=RowOutcome.COMPLETED,
-                                sink_name=transform.on_success,
-                            )
-                        )
-                    return (passthrough_results, child_items)
-
-            elif output_mode == OutputMode.TRANSFORM:
-                # Transform mode: N input rows -> M output rows with NEW tokens
-                # Previously-buffered tokens already returned CONSUMED_IN_BATCH
-                # when they were buffered (non-flushing path at bottom of method).
-                # Only the triggering token (current_token) hasn't been returned yet.
-                # New tokens are created for output rows via expand_token()
-
-                # Get output rows - can be single or multi
-                if result.is_multi_row:
-                    if result.rows is None:
-                        raise RuntimeError("Multi-row result has rows=None")
-                    output_rows = result.rows
-                else:
-                    # Contract: batch-aware transforms in transform mode MUST return output data
-                    if result.row is None:
-                        raise RuntimeError(
-                            f"Aggregation transform '{transform.name}' returned None for result.row "
-                            f"in 'transform' mode. Batch-aware transforms must return a row via "
-                            f"TransformResult.success(row) or rows via TransformResult.success_multi(rows). "
-                            f"This is a plugin bug."
-                        )
-                    output_rows = [result.row]
-
-                # Enforce expected_output_count if configured (plugin contract validation)
-                if settings.expected_output_count is not None:
-                    actual_count = len(output_rows)
-                    if actual_count != settings.expected_output_count:
-                        raise RuntimeError(
-                            f"Aggregation '{settings.name}' produced {actual_count} output row(s), "
-                            f"but expected_output_count={settings.expected_output_count}. "
-                            f"This is a plugin contract violation."
-                        )
-
-                # Create new tokens via expand_token using triggering token as parent
-                # This establishes audit trail linkage
-                # NOTE: Don't record EXPANDED - triggering token gets CONSUMED_IN_BATCH below
-
-                # Extract contract from first output row (all rows share same contract)
-                output_contract = output_rows[0].contract
-
-                expanded_tokens, _expand_group_id = self._token_manager.expand_token(
-                    parent_token=current_token,
-                    expanded_rows=[row.to_dict() for row in output_rows],
-                    output_contract=output_contract,
-                    node_id=node_id,
-                    run_id=self._run_id,
-                    record_parent_outcome=False,
-                )
-
-                # The triggering token becomes CONSUMED_IN_BATCH
-                # Note: batch_id comes from execute_flush() which captured it before reset
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=current_token.token_id,
-                    outcome=RowOutcome.CONSUMED_IN_BATCH,
-                    batch_id=batch_id,
-                )
-
-                # Bug P2-2026-02-01: Emit TokenCompleted for ALL buffered tokens
-                # TransformCompleted was already emitted for all tokens (including current_token)
-                # in the TransformCompleted emission loop (buffered_tokens includes the triggering
-                # token because buffer_row() adds it before should_flush() is checked).
-                #
-                # TokenCompleted was deferred from buffer time for non-triggering tokens to
-                # maintain correct ordering (TransformCompleted before TokenCompleted).
-                # Now emit TokenCompleted for all of them.
-                for token in buffered_tokens:
-                    self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
-
-                triggering_result = RowResult(
-                    token=current_token,
-                    final_data=current_token.row_data,
-                    outcome=RowOutcome.CONSUMED_IN_BATCH,
-                )
-
-                # Continue downstream only when there is a next processing node.
-                has_downstream_processing = self._nav.resolve_next_node(node_id) is not None
-
-                # Check if expanded tokens need to go to a coalesce point
-                # This must happen EVEN if no more transforms - coalesce may be last step
-                # Use first expanded token to check branch_name
-                first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
-                needs_coalesce = coalesce_node_id is not None and coalesce_name is not None and first_expanded_branch is not None
-
-                if has_downstream_processing or needs_coalesce:
-                    work_item_coalesce_name = coalesce_name if needs_coalesce else None
-                    for token in expanded_tokens:
-                        child_items.append(
-                            self._nav.create_continuation_work_item(
-                                token=token,
-                                current_node_id=node_id,
-                                coalesce_name=work_item_coalesce_name,
-                            )
-                        )
-                    # Return triggering result - expanded tokens will produce results via work queue
-                    return (triggering_result, child_items)
-                else:
-                    # No more transforms and no coalesce - return COMPLETED for expanded tokens
-                    # RowResult.__post_init__ enforces sink_name is set for COMPLETED
-                    output_results: list[RowResult] = [triggering_result]
-                    for token in expanded_tokens:
-                        output_results.append(
-                            RowResult(
-                                token=token,
-                                final_data=token.row_data,
-                                outcome=RowOutcome.COMPLETED,
-                                sink_name=transform.on_success,
-                            )
-                        )
-                    # Return triggering + completed results
-                    return (output_results, child_items)
-
-            else:
-                raise ValueError(f"Unknown output_mode: {output_mode}")
+                flush_results, flush_child_items = self._route_passthrough_results(fctx, result)
+                child_items.extend(flush_child_items)
+                return flush_results, child_items
+            if output_mode == OutputMode.TRANSFORM:
+                flush_results, flush_child_items = self._route_transform_results(fctx, result)
+                child_items.extend(flush_child_items)
+                return flush_results, child_items
+            raise ValueError(f"Unknown output_mode: {output_mode}")
 
         # Not flushing yet - row is buffered
         # In passthrough mode: BUFFERED (non-terminal, will reappear)
