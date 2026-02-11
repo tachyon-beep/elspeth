@@ -1,5 +1,14 @@
 # Bug Report: AzureBlobSink Overwrites Prior Batches on Repeated write() Calls
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - AzureBlobSink uploads only the current batch and overwrites the blob on each `write()` call, causing earlier batches in the same run to be lost while tokens are still marked as COMPLETED.

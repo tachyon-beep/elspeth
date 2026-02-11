@@ -1,5 +1,18 @@
 # Bug Report: Template Field Extraction Misidentifies `row.get()` and Drops Actual Field
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `extract_jinja2_fields("{{ row.get('status') }}")` still returns `frozenset({'get'})`.
+  - The extractor still records `row.get` as an attribute and does not parse `Call` args to capture `'status'`.
+- Current evidence:
+  - `src/elspeth/core/templates.py:99`
+  - `src/elspeth/core/templates.py:103`
+  - `src/elspeth/core/templates.py:143`
+
 ## Summary
 
 - `extract_jinja2_fields*` treats `row.get(...)` as a field named `get` and ignores the actual key argument, so templates using `row.get('field')` produce incorrect required field lists.

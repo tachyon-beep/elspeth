@@ -1,5 +1,18 @@
 # Bug Report: Azure Monitor flush drops “no events” acknowledgment log
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Azure exporter still returns immediately when `_buffer` is empty during flush.
+  - That empty-buffer branch still has no acknowledgment log message.
+- Current evidence:
+  - `src/elspeth/telemetry/exporters/azure_monitor.py:243`
+  - `src/elspeth/telemetry/exporters/azure_monitor.py:244`
+  - `CLAUDE.md:524`
+
 ## Summary
 
 - `AzureMonitorExporter.flush()` / `_flush_batch()` returns silently when the buffer is empty, violating the “No Silent Failures” telemetry requirement to log that telemetry was requested but unavailable.

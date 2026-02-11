@@ -1,5 +1,14 @@
 # Bug Report: Azure LLM Template Rendering Ignores PipelineRow Contract (Dual-Name Resolution Broken)
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `AzureLLMTransform._process_row()` calls `PromptTemplate.render_with_metadata()` without passing the row contract, so templates cannot resolve original header names and contract-based dual-name access fails.

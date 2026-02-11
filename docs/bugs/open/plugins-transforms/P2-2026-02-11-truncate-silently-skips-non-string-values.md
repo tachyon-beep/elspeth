@@ -1,5 +1,14 @@
 # Bug Report: Truncate Silently Skips Non-String Values
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - Truncate uses `isinstance(..., str)` to skip non-string values, which contradicts its own contract ("wrong types crash immediately") and the Tier 2 trust model; upstream type violations are silently passed through.

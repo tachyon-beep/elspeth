@@ -1,5 +1,14 @@
 # Bug Report: Lookup Data Mutability Produces Stale `lookup_hash` (Audit Mismatch)
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `PromptTemplate` stores `lookup_data` by reference and computes `lookup_hash` only once; if the lookup dict is mutated after initialization, the rendered prompt uses new values while the audit hash remains tied to the old data.

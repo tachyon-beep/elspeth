@@ -1,5 +1,14 @@
 # Bug Report: FieldMapper Renames Drop Original Field Names in Output Contracts
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - FieldMapper uses `narrow_contract_to_output` without preserving original source header names for renamed fields, so the output contract loses original-name lineage and “headers: original” sinks emit renamed headers instead of source headers.

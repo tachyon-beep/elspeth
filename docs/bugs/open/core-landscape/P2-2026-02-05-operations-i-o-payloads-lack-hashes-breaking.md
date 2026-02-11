@@ -1,5 +1,21 @@
 # Bug Report: Operations I/O Payloads Lack Hashes, Breaking Audit Integrity After Purge
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `operations` still has refs only (`input_data_ref`, `output_data_ref`) and no hash columns.
+  - Operation recorders still store payload refs but do not persist operation I/O hashes.
+  - Export still includes only refs for operations.
+- Current evidence:
+  - `src/elspeth/core/landscape/schema.py:239`
+  - `src/elspeth/core/landscape/schema.py:240`
+  - `src/elspeth/core/landscape/_call_recording.py:211`
+  - `src/elspeth/core/landscape/_call_recording.py:280`
+  - `src/elspeth/core/landscape/exporter.py:256`
+
 ## Summary
 
 - The `operations` table stores `input_data_ref`/`output_data_ref` without corresponding hashes, so once payloads are purged there is no way to verify the integrity of source/sink operation inputs or outputs, violating the audit rule that hashes must survive payload deletion.

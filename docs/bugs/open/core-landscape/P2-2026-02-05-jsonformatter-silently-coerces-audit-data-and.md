@@ -1,5 +1,17 @@
 # Bug Report: JSONFormatter Silently Coerces Audit Data and Allows NaN/Infinity
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `JSONFormatter` still uses `json.dumps(record, default=str)` directly.
+  - Repro still serializes `float('nan')` as `NaN` and datetime via `str(...)`.
+- Current evidence:
+  - `src/elspeth/core/landscape/formatters.py:105`
+  - `src/elspeth/core/landscape/formatters.py:107`
+
 ## Summary
 
 - JSONFormatter uses `json.dumps(..., default=str)` without `serialize_datetime`, allowing NaN/Infinity and silently coercing unexpected types instead of failing fast.

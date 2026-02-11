@@ -1,5 +1,19 @@
 # Bug Report: Telemetry Exporter Discovery Ignores Pluggy Hooks
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Telemetry factory still resolves exporters from static `_EXPORTER_REGISTRY` only.
+  - Telemetry hook specs and built-in hook implementation exist, but factory still does not call the pluggy discovery path.
+- Current evidence:
+  - `src/elspeth/telemetry/factory.py:37`
+  - `src/elspeth/telemetry/factory.py:69`
+  - `src/elspeth/telemetry/hookspecs.py:38`
+  - `src/elspeth/telemetry/exporters/__init__.py:32`
+
 ## Summary
 
 - `create_telemetry_manager()` only consults a hardcoded registry and never calls the telemetry pluggy hooks, so any exporter registered via `elspeth_get_exporters` is invisible and fails with `TelemetryExporterError`.

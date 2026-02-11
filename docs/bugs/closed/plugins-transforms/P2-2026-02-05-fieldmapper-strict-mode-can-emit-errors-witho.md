@@ -1,5 +1,14 @@
 # Bug Report: FieldMapper Strict Mode Can Emit Errors Without on_error Validation
 
+**Status: FIXED**
+
+## Status Update (2026-02-11)
+
+- Classification: **Fixed**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the originally reported behavior is no longer present.
+
+
 ## Summary
 
 - `field_mapper` can return `TransformResult.error()` in strict mode without enforcing `on_error` configuration, which triggers a runtime crash in the executor instead of a configuration-time validation error.

@@ -1,5 +1,17 @@
 # Bug Report: Canonicalization Crashes on Zero‑Dimensional NumPy Arrays
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `canonical_json(np.array(5))` still raises `TypeError: 'int' object is not iterable`.
+  - The ndarray path still iterates over `obj.tolist()` unconditionally, which breaks for 0-D arrays.
+- Current evidence:
+  - `src/elspeth/core/canonical.py:76`
+  - `src/elspeth/core/canonical.py:90`
+
 ## Summary
 
 - Canonical JSON normalization assumes `np.ndarray.tolist()` is iterable and crashes on 0‑D arrays (scalar arrays), raising `TypeError` instead of normalizing to a JSON‑safe primitive.

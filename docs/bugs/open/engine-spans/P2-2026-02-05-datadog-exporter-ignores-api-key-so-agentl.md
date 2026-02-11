@@ -1,5 +1,19 @@
 # Bug Report: Datadog exporter ignores `api_key`, so agentless Datadog telemetry never works
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Datadog exporter configuration still does not read/apply `api_key`; it configures only agent host/port.
+  - Telemetry guide still documents `api_key` and direct API mode, so behavior and docs remain misaligned.
+- Current evidence:
+  - `src/elspeth/telemetry/exporters/datadog.py:114`
+  - `src/elspeth/telemetry/exporters/datadog.py:145`
+  - `docs/guides/telemetry.md:188`
+  - `docs/guides/telemetry.md:217`
+
 ## Summary
 
 - The Datadog exporter documents and accepts an `api_key` option but never reads or applies it, so “agentless” Datadog export (direct API) is non-functional and silently falls back to agent host/port.

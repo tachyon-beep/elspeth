@@ -1,5 +1,14 @@
 # Bug Report: BatchStats emits `mean` for empty batches even when `compute_mean=False`
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `BatchStats.process()` always includes `mean` in the empty-batch path, ignoring the `compute_mean` setting. This produces inconsistent output/contract behavior relative to non-empty batches and documented intent.

@@ -1,5 +1,14 @@
 # Bug Report: Duplicate `output_mapping` suffixes silently overwrite output fields
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - Multi-query config allows duplicate `output_mapping` suffixes, causing output key collisions and silent data loss at runtime.

@@ -1,5 +1,14 @@
 # Bug Report: OpenRouter Batch Drops `/api/v1` From Base URL
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - OpenRouter batch uses `httpx.Client(base_url=...)` but sends requests with a leading slash path, which causes `httpx` to discard the `/api/v1` path segment and hit the wrong endpoint.

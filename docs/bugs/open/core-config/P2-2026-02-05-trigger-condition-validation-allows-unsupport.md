@@ -1,5 +1,18 @@
 # Bug Report: Trigger Condition Validation Allows Unsupported Keys
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `TriggerConfig(condition="row['type'] == 'flush_signal'")` is still accepted at config time.
+  - Runtime still evaluates with batch-only context and then fails with `ExpressionEvaluationError` for missing `type`.
+- Current evidence:
+  - `src/elspeth/core/config.py:248`
+  - `src/elspeth/engine/triggers.py:120`
+  - `src/elspeth/engine/triggers.py:124`
+
 ## Summary
 
 - `TriggerConfig` validation does not enforce the documented batch-only context, allowing conditions that reference non-existent keys and fail at runtime.

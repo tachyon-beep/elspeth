@@ -1,5 +1,14 @@
 # Bug Report: Telemetry Payloads Are Mutable References (Can Drift From Audit Hashes)
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `PluginContext.record_call()` passes mutable `request_data`/`response_data` dicts directly into telemetry events, so later mutations can change telemetry payloads after hashes are computed, causing telemetry/audit correlation drift.

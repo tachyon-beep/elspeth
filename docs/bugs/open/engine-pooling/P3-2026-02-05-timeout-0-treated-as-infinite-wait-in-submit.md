@@ -1,5 +1,17 @@
 # Bug Report: Timeout=0 Treated As Infinite Wait In Submit/Release
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Timeout handling still uses truthiness checks, so `timeout=0.0` is treated as `None` (infinite wait).
+  - This still affects both `submit()` and `wait_for_next_release()`.
+- Current evidence:
+  - `src/elspeth/plugins/batching/row_reorder_buffer.py:157`
+  - `src/elspeth/plugins/batching/row_reorder_buffer.py:240`
+
 ## Summary
 
 - `submit(timeout=0.0)` and `wait_for_next_release(timeout=0.0)` are treated as infinite waits because `timeout` is checked with a truthiness test instead of `is not None`.

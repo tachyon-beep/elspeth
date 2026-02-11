@@ -1,5 +1,19 @@
 # Bug Report: FieldResolutionApplied Bypasses Granularity Filtering
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `should_emit()` still has no explicit `FieldResolutionApplied` case.
+  - Unknown events still fail open (`True`), and orchestrator continues emitting `FieldResolutionApplied`, so lifecycle mode can still leak this event.
+- Current evidence:
+  - `src/elspeth/telemetry/filtering.py:57`
+  - `src/elspeth/telemetry/filtering.py:69`
+  - `src/elspeth/contracts/events.py:254`
+  - `src/elspeth/engine/orchestrator/core.py:1254`
+
 ## Summary
 
 - `FieldResolutionApplied` telemetry events are emitted even when granularity is set to `lifecycle`, violating the documented granularity contract and increasing telemetry volume in minimal-overhead mode.

@@ -1,5 +1,14 @@
 # Bug Report: Over-broad “rate” substring misclassifies non‑rate errors as retryable
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `_is_retryable_error()` treats any error message containing the substring `"rate"` as a rate‑limit, which misclassifies non‑rate errors (e.g., invalid `temperature`) as retryable and raises `RateLimitError`.

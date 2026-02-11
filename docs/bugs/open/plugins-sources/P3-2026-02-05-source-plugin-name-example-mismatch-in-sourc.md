@@ -1,5 +1,14 @@
 # Bug Report: Source Plugin Name Example Mismatch in `sources/__init__.py`
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - The usage example in `src/elspeth/plugins/sources/__init__.py` shows `get_source_by_name("csv_source")`, but the actual CSV source plugin name is `"csv"`, so the example triggers a lookup failure.

@@ -1,5 +1,14 @@
 # Bug Report: PluginManager Silently Accepts Unknown Hook Implementations
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `PluginManager.register()` does not validate hook implementations against known hookspecs, so a misspelled hook (e.g., `elspeth_get_tranforms`) registers without error and the plugin is silently ignored by `_refresh_caches()`.

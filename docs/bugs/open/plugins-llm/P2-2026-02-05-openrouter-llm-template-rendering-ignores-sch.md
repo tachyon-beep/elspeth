@@ -1,5 +1,14 @@
 # Bug Report: OpenRouter LLM Template Rendering Ignores Schema Contract (Original Header Names Fail)
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - OpenRouter LLM transform calls `PromptTemplate.render_with_metadata()` without passing the schema contract, so templates that use original header names (supported by PipelineRow/contract) fail with `TemplateError` and are routed to `on_error`.

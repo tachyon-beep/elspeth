@@ -1,5 +1,14 @@
 # Bug Report: KeywordFilter Ignores PipelineRow Dual-Name Resolution, Allowing Original-Name Fields to Bypass Filtering
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - KeywordFilter converts `PipelineRow` to a plain dict and checks field membership on normalized keys only, so configurations that reference original header names (e.g., `"Amount USD"`) silently skip scanning and allow blocked content through.

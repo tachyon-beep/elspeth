@@ -1,5 +1,14 @@
 # Bug Report: skip_rows Uses Line-Based Skipping and Breaks Multiline CSV Records
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `skip_rows` advances the file by raw lines before creating `csv.reader`, which desynchronizes parsing when skipped rows contain quoted newlines and can corrupt downstream parsing.

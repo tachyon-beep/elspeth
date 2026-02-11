@@ -1,5 +1,14 @@
 # Bug Report: CapacityError From Rate Limits Crashes AzurePromptShield Instead of Returning a Row Error
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - HTTP 429/503/529 responses raise `CapacityError` that is never handled in this transform, so BatchTransformMixin treats it as a plugin bug and the pipeline crashes instead of retrying or returning `TransformResult.error`.

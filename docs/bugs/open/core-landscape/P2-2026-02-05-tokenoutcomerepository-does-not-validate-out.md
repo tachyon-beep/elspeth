@@ -1,5 +1,17 @@
 # Bug Report: TokenOutcomeRepository Does Not Validate `outcome` vs `is_terminal` Consistency
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Repository still validates only that `is_terminal` is in `(0,1)`, but does not cross-check against `RowOutcome(...).is_terminal`.
+  - Repro still loads inconsistent row (`outcome='buffered'`, `is_terminal=1`) without raising.
+- Current evidence:
+  - `src/elspeth/core/landscape/repositories.py:502`
+  - `src/elspeth/core/landscape/repositories.py:513`
+
 ## Summary
 
 - `TokenOutcomeRepository.load()` accepts inconsistent `outcome` and `is_terminal` combinations (e.g., `outcome='buffered'` with `is_terminal=1`) without crashing.

@@ -1,5 +1,14 @@
 # Bug Report: JSON/JSONL accepts NaN/Infinity, violating canonical JSON policy
 
+**Status: FIXED**
+
+## Status Update (2026-02-11)
+
+- Classification: **Fixed**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the originally reported behavior is no longer present.
+
+
 ## Summary
 
 - JSON and JSONL parsing use `json.loads` without `parse_constant`, allowing non-finite values (NaN/Infinity) that violate canonical JSON requirements.

@@ -1,5 +1,19 @@
 # Bug Report: Operation input/output payloads are never purged
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `find_expired_payload_refs()` and `_find_affected_run_ids()` still query rows/calls/routing refs only, not `operations.input_data_ref` / `operations.output_data_ref`.
+  - Repro still shows operation I/O refs excluded from both expired-ref selection and affected-run detection.
+- Current evidence:
+  - `src/elspeth/core/retention/purge.py:120`
+  - `src/elspeth/core/retention/purge.py:221`
+  - `src/elspeth/core/retention/purge.py:321`
+  - `src/elspeth/core/retention/purge.py:362`
+
 ## Summary
 
 - `operations.input_data_ref` and `operations.output_data_ref` are stored in the PayloadStore but are omitted from purge selection and run-impact calculations, so these payloads never get deleted by retention and are invisible to reproducibility grade updates.

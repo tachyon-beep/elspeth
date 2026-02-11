@@ -1,5 +1,19 @@
 # Bug Report: Late-arrival coalesce failures miss immediate token outcome recording
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Late-arrival handling still records a failed node state but does not record a terminal token outcome in `CoalesceExecutor.accept()`.
+  - Other coalesce failure paths do record token outcomes, so late-arrival behavior remains inconsistent.
+- Current evidence:
+  - `src/elspeth/engine/coalesce_executor.py:235`
+  - `src/elspeth/engine/coalesce_executor.py:253`
+  - `src/elspeth/engine/coalesce_executor.py:377`
+  - `src/elspeth/engine/coalesce_executor.py:454`
+
 ## Summary
 
 - Late-arriving tokens after a coalesce merge record a failed node state but do not record a terminal token outcome inside `CoalesceExecutor`, creating an audit gap and a crash window before the caller records the outcome.

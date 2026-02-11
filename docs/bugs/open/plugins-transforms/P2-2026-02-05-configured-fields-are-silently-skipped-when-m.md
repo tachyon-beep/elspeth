@@ -1,5 +1,14 @@
 # Bug Report: Configured Fields Are Silently Skipped When Missing or Non-String (Content Bypass)
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 - When a configured field is missing or not a string, the transform silently skips it and still returns success, allowing unmoderated content to pass without any audit signal.
 

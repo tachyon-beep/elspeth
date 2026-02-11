@@ -1,5 +1,19 @@
 # Bug Report: RowDataResult Accepts Non-Dict Payloads in AVAILABLE State
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `RowDataResult` still enforces only None/non-None invariants and does not enforce dict type for AVAILABLE.
+  - `get_row_data()` still forwards decoded JSON directly into AVAILABLE without shape validation.
+  - Repro still accepts `RowDataResult(state=AVAILABLE, data=[...])`.
+- Current evidence:
+  - `src/elspeth/core/landscape/row_data.py:56`
+  - `src/elspeth/core/landscape/_query_methods.py:145`
+  - `src/elspeth/core/landscape/_query_methods.py:146`
+
 ## Summary
 
 - RowDataResult does not validate that AVAILABLE data is a `dict`, so non-dict JSON payloads (e.g., arrays, scalars) are treated as valid audit data instead of crashing on Tier 1 corruption.

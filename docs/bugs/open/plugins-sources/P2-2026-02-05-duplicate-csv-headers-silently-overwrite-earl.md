@@ -1,5 +1,14 @@
 # Bug Report: Duplicate CSV Headers Silently Overwrite Earlier Columns
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - CSV files with duplicate header names (when `normalize_fields` is false) silently overwrite earlier column values during row dict construction, causing undetected data loss.

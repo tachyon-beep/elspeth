@@ -1,5 +1,14 @@
 # Bug Report: Azure Multi-Query Drops PipelineRow Dual-Name Resolution
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `AzureMultiQueryLLMTransform` converts `PipelineRow` to a raw dict before template context building, which strips original field-name access and causes `KeyError` when configs use original CSV headers.

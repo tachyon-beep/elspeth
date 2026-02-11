@@ -1,5 +1,14 @@
 # Bug Report: get_nested_field Hides Type Mismatches as “Missing” in Pipeline Data
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `get_nested_field` returns the default sentinel when an intermediate value is not a `dict`, which silently masks type violations in Tier 2 pipeline data and violates the no-defensive-programming rule.

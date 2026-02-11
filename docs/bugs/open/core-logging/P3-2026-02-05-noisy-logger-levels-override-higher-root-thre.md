@@ -1,5 +1,17 @@
 # Bug Report: Noisy Logger Levels Override Higher Root Thresholds
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `configure_logging(level='ERROR')` still sets root to ERROR but noisy loggers to WARNING.
+  - Effective level mismatch remains (`root=ERROR`, `azure=WARNING`), so warnings from noisy loggers can bypass intended threshold.
+- Current evidence:
+  - `src/elspeth/core/logging.py:135`
+  - `src/elspeth/core/logging.py:141`
+
 ## Summary
 
 - `configure_logging()` forces noisy third-party loggers to `WARNING` even when the configured root level is higher (e.g., `ERROR`), causing warnings to be emitted unexpectedly.

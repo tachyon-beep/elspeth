@@ -1,5 +1,17 @@
 # Bug Report: NodeRepository Accepts Malformed `schema_fields_json` Without Crashing
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `NodeRepository.load()` still runs `json.loads(...)` and forwards the result without validating list-of-dict shape.
+  - Repro still accepts object JSON (`{\"a\":1}`) and `null` without raising.
+- Current evidence:
+  - `src/elspeth/core/landscape/repositories.py:95`
+  - `src/elspeth/core/landscape/repositories.py:97`
+
 ## Summary
 
 - `NodeRepository.load()` parses `schema_fields_json` but never validates it is a `list[dict]`, allowing malformed JSON types (e.g., object or `null`) to be accepted without crashing.

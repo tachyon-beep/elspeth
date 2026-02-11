@@ -1,5 +1,14 @@
 # Bug Report: PluginConfig.from_dict Lacks Non-Dict Type Guard
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `PluginConfig.from_dict` assumes the input is a dict; non-dict inputs raise `TypeError` and bypass `PluginConfigError`, producing unclear crashes instead of a consistent validation error.

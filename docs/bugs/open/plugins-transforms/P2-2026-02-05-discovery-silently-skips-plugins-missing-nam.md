@@ -1,5 +1,14 @@
 # Bug Report: Discovery Silently Skips Plugins Missing `name` Attribute
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - Plugin discovery uses a defensive `getattr` + warning to skip system-owned plugin classes without a `name`, masking protocol violations instead of failing fast.

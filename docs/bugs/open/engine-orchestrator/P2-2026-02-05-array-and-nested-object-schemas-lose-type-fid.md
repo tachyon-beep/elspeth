@@ -1,5 +1,19 @@
 # Bug Report: Array and Nested Object Schemas Lose Type Fidelity on Resume
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Schema reconstruction still returns bare `list` for arrays and bare `dict` for objects.
+  - Recursive handling of `items`/`properties` is still not implemented, so nested type fidelity is still lost on resume.
+- Current evidence:
+  - `src/elspeth/engine/orchestrator/export.py:326`
+  - `src/elspeth/engine/orchestrator/export.py:329`
+  - `src/elspeth/engine/orchestrator/export.py:332`
+  - `src/elspeth/engine/orchestrator/export.py:334`
+
 ## Summary
 
 - `_json_schema_to_python_type` ignores `items` for arrays and `properties` for objects, returning bare `list`/`dict`. This drops item and nested field types, violating the stated intent to reconstruct full schemas.

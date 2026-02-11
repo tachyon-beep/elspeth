@@ -1,5 +1,14 @@
 # Bug Report: Duplicate Raw Headers Are Not Detected When `normalize_fields=False`, Causing Silent Column Loss
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - Duplicate CSV headers pass through unchanged when `normalize_fields=False`, and the resulting resolution mapping and row dict silently drop earlier columns, violating auditability and causing data loss.

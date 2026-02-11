@@ -1,5 +1,17 @@
 # Bug Report: expand_token records EXPANDED outcome before validating output contract lock
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `TokenManager.expand_token()` still calls recorder expansion before enforcing `output_contract.locked`.
+  - Invalid unlocked output contracts can still trigger recorder-side writes before the method raises.
+- Current evidence:
+  - `src/elspeth/engine/tokens.py:356`
+  - `src/elspeth/engine/tokens.py:366`
+
 ## Summary
 
 - `TokenManager.expand_token()` calls `LandscapeRecorder.expand_token()` (which creates child tokens and records parent EXPANDED) before checking `output_contract.locked`, so an invalid (unlocked) contract can still produce audit-side effects before the method raises.

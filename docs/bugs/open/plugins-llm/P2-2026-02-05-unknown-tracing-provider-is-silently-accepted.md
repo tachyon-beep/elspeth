@@ -1,5 +1,14 @@
 # Bug Report: Unknown Tracing Provider Is Silently Accepted and Disables Tracing
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - Unknown `tracing.provider` values are accepted without validation, causing tracing to be silently disabled with no warning.

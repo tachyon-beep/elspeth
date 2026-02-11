@@ -1,5 +1,17 @@
 # Bug Report: SinkExecutor Leaves ctx.contract Stale for Sink Writes
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `SinkExecutor.write()` still calls `sink.write(rows, ctx)` without synchronizing `ctx.contract` to the contracts carried by the sink-bound tokens.
+  - `TransformExecutor` still sets `ctx.contract` from transform input tokens, so sink-time contract use can remain stale after schema-changing transforms.
+- Current evidence:
+  - `src/elspeth/engine/executors/sink.py:174`
+  - `src/elspeth/engine/executors/transform.py:195`
+
 ## Summary
 
 - SinkExecutor does not update `ctx.contract` to reflect the contract of the tokens being written, so sinks that rely on `ctx.contract` (e.g., CSV/JSON headers in ORIGINAL mode) can use stale contracts when upstream transforms change schema.

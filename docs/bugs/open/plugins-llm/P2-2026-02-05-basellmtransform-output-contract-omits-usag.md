@@ -1,5 +1,14 @@
 # Bug Report: BaseLLMTransform Output Contract Omits `_usage` Metadata, Violating Guaranteed Fields
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `BaseLLMTransform` adds `<response_field>_usage` to output but uses `propagate_contract()`, which skips dict types, so the usage field is missing from the output `SchemaContract` despite being documented as a guaranteed field.

@@ -1,5 +1,14 @@
 # Bug Report: Malformed CSV Header Raises csv.Error Without Quarantine or Audit Record
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - A malformed header row can raise `csv.Error` during header parsing and crash the run without any validation error record or quarantine handling.

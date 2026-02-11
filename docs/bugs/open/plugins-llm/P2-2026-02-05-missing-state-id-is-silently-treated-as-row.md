@@ -1,5 +1,14 @@
 # Bug Report: Missing `state_id` Is Silently Treated as Row Error Instead of Crash
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - When `ctx.state_id` is `None`, the plugin returns a row-level error instead of crashing, which hides a framework bug and allows the batch to complete without required audit linkage.

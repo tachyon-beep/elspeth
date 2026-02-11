@@ -1,5 +1,17 @@
 # Bug Report: CSVFormatter Skips Audit Integrity Checks for Scalar Values
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - CSV scalar values still bypass `serialize_datetime`.
+  - Repro still emits scalar `float('inf')` and raw `datetime` unchanged in `CSVFormatter.format(...)`.
+- Current evidence:
+  - `src/elspeth/core/landscape/formatters.py:216`
+  - `src/elspeth/core/landscape/formatters.py:223`
+
 ## Summary
 
 - CSVFormatter only applies `serialize_datetime` to list values; scalar values (including datetime and NaN/Infinity floats) are passed through unvalidated, violating audit integrity requirements during CSV export.

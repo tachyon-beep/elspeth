@@ -1,5 +1,14 @@
 # Bug Report: CSVSink Silently Writes Blank Values When Required Fields Are Missing
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - CSVSink does not enforce required fields when `validate_input=False` (default), so rows missing required schema fields are written with empty strings instead of crashing, causing silent data corruption and audit-trail mismatch.

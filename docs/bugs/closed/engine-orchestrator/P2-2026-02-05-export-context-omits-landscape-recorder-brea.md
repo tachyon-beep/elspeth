@@ -1,5 +1,18 @@
 # Bug Report: Export Context Omits Landscape Recorder, Breaking `restore_source_headers`
 
+**Status: FIXED**
+
+## Status Update (2026-02-11)
+
+- Classification: **Fixed**
+- Verification summary:
+  - `export_landscape()` now instantiates `LandscapeRecorder(db)` and passes it into `PluginContext`.
+  - Export sink context now includes `landscape`, matching sink expectations for `restore_source_headers=True`.
+- Current evidence:
+  - `src/elspeth/engine/orchestrator/export.py:87`
+  - `src/elspeth/engine/orchestrator/export.py:89`
+  - `src/elspeth/engine/orchestrator/export.py:90`
+
 ## Summary
 
 - `export_landscape` builds a `PluginContext` with `landscape=None`. CSV/JSON sinks configured with `restore_source_headers=True` require `ctx.landscape` and will raise a `ValueError`, causing export to fail even though a `LandscapeDB` is available.

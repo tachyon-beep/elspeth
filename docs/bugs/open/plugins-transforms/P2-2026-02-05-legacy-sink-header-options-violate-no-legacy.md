@@ -1,5 +1,14 @@
 # Bug Report: Legacy Sink Header Options Violate No-Legacy Policy
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - Sink config still exposes and prioritizes legacy `display_headers` and `restore_source_headers`, explicitly labeled as backwards compatibility, which violates the No Legacy Code Policy.

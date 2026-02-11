@@ -1,5 +1,14 @@
 # Bug Report: JSONExplode Drops `output_field` From Contract for Object Elements, Breaking FIXED-Mode Downstream Access
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - JSONExplode emits object elements (dict/list) as `output_field` but builds its output contract via `narrow_contract_to_output`, which skips non-primitive types; in FIXED mode this omits `output_field` from the contract, so downstream `PipelineRow` access raises `KeyError` even though the field exists in data.

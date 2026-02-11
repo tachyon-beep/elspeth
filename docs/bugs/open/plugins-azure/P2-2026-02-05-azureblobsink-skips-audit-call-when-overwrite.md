@@ -1,5 +1,14 @@
 # Bug Report: AzureBlobSink Skips Audit Call When overwrite=False and Blob Exists
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - When `overwrite=False` and the blob already exists, `AzureBlobSink` raises `ValueError` without recording an external call, leaving the audit trail incomplete.

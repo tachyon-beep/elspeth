@@ -1,5 +1,14 @@
 # Bug Report: Azure LLM Transform Masks Missing `ctx.token` With "unknown" Token ID
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `AzureLLMTransform._process_row()` uses `"unknown"` when `ctx.token` is `None`, masking orchestrator bugs and breaking trace correlation.

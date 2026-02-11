@@ -1,5 +1,14 @@
 # Bug Report: Schema Config Errors Escape Validator as Exceptions Instead of Structured Errors
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - Invalid `schema` configs in plugin options raise `PluginConfigError` and propagate out of `PluginConfigValidator`, violating the validator’s “structured errors” contract and bypassing formatted error reporting.

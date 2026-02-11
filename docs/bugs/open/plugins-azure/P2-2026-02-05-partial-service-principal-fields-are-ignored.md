@@ -1,5 +1,14 @@
 # Bug Report: Partial Service Principal Fields Are Ignored When Another Auth Method Is Set
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - Partial Service Principal credentials are silently ignored if another auth method (e.g., `connection_string`) is fully configured, violating the "mutually exclusive" contract and masking misconfiguration.

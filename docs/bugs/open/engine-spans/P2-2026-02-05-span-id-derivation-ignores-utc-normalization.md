@@ -1,5 +1,18 @@
 # Bug Report: Span ID derivation ignores UTC normalization for naive timestamps
 
+**Status: OVERTAKEN BY EVENTS**
+
+## Status Update (2026-02-11)
+
+- Classification: **Overtaken by events (refactor)**
+- Verification summary:
+  - The prior `_derive_span_id()` path no longer exists; span IDs are now generated randomly.
+  - Since span ID generation no longer derives from timestamps, the original naive-timestamp normalization mismatch no longer applies in current code.
+- Current evidence:
+  - `src/elspeth/telemetry/exporters/otlp.py:48`
+  - `src/elspeth/telemetry/exporters/otlp.py:59`
+  - `src/elspeth/telemetry/exporters/otlp.py:242`
+
 ## Summary
 
 - `_derive_span_id()` uses `event.timestamp.timestamp()` directly, which interprets naive datetimes in local time, while `_event_to_span()` normalizes naive timestamps to UTC. This yields inconsistent span IDs vs. span timestamps when a naive `TelemetryEvent.timestamp` is provided.

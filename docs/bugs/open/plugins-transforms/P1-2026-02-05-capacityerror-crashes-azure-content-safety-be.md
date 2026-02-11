@@ -1,5 +1,14 @@
 # Bug Report: CapacityError Crashes Azure Content Safety Because Pooled Executor Is Never Used
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 - Capacity errors (HTTP 429/503/529) raise `CapacityError`, but `_executor` is never invoked; BatchTransformMixin treats the exception as a plugin bug, causing the node to fail and ignoring pool retry configuration.
 

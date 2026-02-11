@@ -1,5 +1,20 @@
 # Bug Report: OTLP exporter accepts invalid config types and raises non-TelemetryExporterError
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `OTLPExporter.configure()` still assigns `endpoint`, `headers`, and `batch_size` without explicit type validation.
+  - Invalid types can still flow into operations like `batch_size < 1` and `headers.items()`, yielding non-contract exceptions.
+- Current evidence:
+  - `src/elspeth/telemetry/exporters/otlp.py:125`
+  - `src/elspeth/telemetry/exporters/otlp.py:126`
+  - `src/elspeth/telemetry/exporters/otlp.py:127`
+  - `src/elspeth/telemetry/exporters/otlp.py:130`
+  - `src/elspeth/telemetry/exporters/otlp.py:142`
+
 ## Summary
 
 - `OTLPExporter.configure()` does not validate `endpoint`, `headers`, or `batch_size` types, so invalid config values raise `TypeError`/`AttributeError` instead of the required `TelemetryExporterError`.

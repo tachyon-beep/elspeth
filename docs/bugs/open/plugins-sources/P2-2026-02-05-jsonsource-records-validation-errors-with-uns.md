@@ -1,5 +1,14 @@
 # Bug Report: JSONSource records validation errors with unsupported `schema_mode="structure"`
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - JSONSource uses `schema_mode="structure"` for data_key structural errors, but audit contracts/documentation only allow `fixed`, `flexible`, `observed`, or `parse`, creating a schema-mode contract violation.

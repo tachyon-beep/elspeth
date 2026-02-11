@@ -1,5 +1,19 @@
 # Bug Report: Aggregate Drop Logging Uses Shared Counter Without Synchronization
 
+**Status: FIXED**
+
+## Status Update (2026-02-11)
+
+- Classification: **Fixed**
+- Verification summary:
+  - Export-thread total-failure drop accounting now performs the `_last_logged_drop_count` threshold check while holding `_dropped_lock`.
+  - Pipeline-thread drop handling also updates dropped counters under the same lock path.
+- Current evidence:
+  - `src/elspeth/telemetry/manager.py:207`
+  - `src/elspeth/telemetry/manager.py:216`
+  - `src/elspeth/telemetry/manager.py:285`
+  - `src/elspeth/telemetry/manager.py:287`
+
 ## Summary
 
 - `_last_logged_drop_count` is updated by both the export thread and the pipeline thread without consistent locking, creating a race that can lead to missed or duplicated aggregate drop logs.

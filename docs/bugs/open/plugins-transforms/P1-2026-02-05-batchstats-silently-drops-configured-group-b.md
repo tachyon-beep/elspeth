@@ -1,5 +1,14 @@
 # Bug Report: BatchStats silently drops configured `group_by` field instead of failing fast
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - When `group_by` is configured but missing from the batch rows, `BatchStats` silently omits the field instead of failing fast. This hides upstream schema/config errors and violates the “no defensive programming” policy.

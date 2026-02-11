@@ -1,5 +1,14 @@
 # Bug Report: JSON array mode silently ignores `mode=append` and truncates existing files
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - JSONSink accepts `mode="append"` with `format="json"` but `_write_json_array()` always truncates, so existing JSON array files are silently overwritten.

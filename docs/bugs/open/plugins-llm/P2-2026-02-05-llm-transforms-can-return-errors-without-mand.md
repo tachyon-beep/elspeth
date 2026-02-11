@@ -1,5 +1,14 @@
 # Bug Report: LLM Transforms Can Return Errors Without Mandatory `on_error`, Causing Runtime Crash
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `BaseLLMTransform` returns `TransformResult.error()` for template and non-retryable LLM failures, but `LLMConfig` does not require `on_error`, so the executor raises a runtime error instead of routing/quarantining rows.

@@ -1,5 +1,14 @@
 # Bug Report: Malformed Content Safety Responses Can Crash Pipeline Due to Missing Type Validation
 
+**Status: FIXED**
+
+## Status Update (2026-02-11)
+
+- Classification: **Fixed**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the originally reported behavior is no longer present.
+
+
 ## Summary
 - External response parsing assumes `category` is a string and `severity` is an int; malformed responses can raise `AttributeError` or `TypeError` that are not caught, crashing the pipeline instead of yielding a structured error.
 

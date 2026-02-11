@@ -1,5 +1,20 @@
 # Bug Report: ExternalCallCompleted telemetry lacks token_id for correlation
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `ExternalCallCompleted` still has no `token_id` field.
+  - Current emit sites still populate state/operation IDs only, so direct token correlation remains unavailable in the event payload.
+- Current evidence:
+  - `CLAUDE.md:526`
+  - `src/elspeth/contracts/events.py:327`
+  - `src/elspeth/plugins/clients/llm.py:350`
+  - `src/elspeth/plugins/clients/http.py:381`
+  - `src/elspeth/contracts/plugin_context.py:333`
+
 ## Summary
 
 - `ExternalCallCompleted` does not include `token_id`, violating the telemetry correlation workflow requirement and making external-call telemetry hard to tie to a specific row/token.

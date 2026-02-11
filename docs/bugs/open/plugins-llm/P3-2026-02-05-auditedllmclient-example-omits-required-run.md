@@ -1,5 +1,14 @@
 # Bug Report: AuditedLLMClient example omits required `run_id` and `telemetry_emit`
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - The package-level docstring example in `src/elspeth/plugins/clients/__init__.py` shows instantiating `AuditedLLMClient` without `run_id` and `telemetry_emit`, but those are required parameters. Following the example raises a `TypeError`.

@@ -1,5 +1,19 @@
 # Bug Report: DROP Backpressure Drops Newest Event Instead of Oldest
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - DROP mode still uses `put_nowait()` and drops the incoming event on `queue.Full`.
+  - The implementation still does not evict an already-queued oldest event.
+- Current evidence:
+  - `src/elspeth/telemetry/manager.py:283`
+  - `src/elspeth/telemetry/manager.py:285`
+  - `src/elspeth/telemetry/manager.py:287`
+  - `docs/guides/telemetry.md:75`
+
 ## Summary
 
 - In `drop` backpressure mode, the telemetry queue drops the newest event when full, but the docs specify that the oldest event should be dropped.

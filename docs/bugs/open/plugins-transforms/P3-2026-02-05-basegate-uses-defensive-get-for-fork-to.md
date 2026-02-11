@@ -1,5 +1,14 @@
 # Bug Report: BaseGate Uses Defensive `.get` for `fork_to`, Masking Config Bugs
 
+**Status: OVERTAKEN BY EVENTS**
+
+## Status Update (2026-02-11)
+
+- Classification: **Overtaken by events**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; architectural/codepath changes mean this ticket no longer applies directly.
+
+
 ## Summary
 
 - `BaseGate.__init__` uses `config.get("fork_to")` for system-owned config, violating the “no defensive programming” rule and potentially masking missing `fork_to` when it is required for fork routes.

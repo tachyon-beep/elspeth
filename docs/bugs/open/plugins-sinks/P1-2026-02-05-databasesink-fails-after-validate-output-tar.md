@@ -1,5 +1,14 @@
 # Bug Report: DatabaseSink Fails After `validate_output_target()` Due to Missing Metadata Initialization
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+
 ## Summary
 
 - `validate_output_target()` creates a SQLAlchemy engine but never initializes `self._metadata`, causing `_ensure_table()` to raise `RuntimeError` on the first write after validation (resume path).
