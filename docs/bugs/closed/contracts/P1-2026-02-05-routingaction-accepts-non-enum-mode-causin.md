@@ -99,3 +99,19 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` (Data Manifesto: type violations must crash).
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after implementing and verifying strict `RoutingMode` type validation.
+- Fix summary:
+  - Added runtime enum guard in `RoutingAction.__post_init__` so non-enum `mode` fails immediately with `TypeError`.
+  - Added contract regression tests for both `RoutingAction.route(..., mode="move")` and direct constructor usage with string `mode`.
+- Verification:
+  - Runtime repro now fails fast at construction time:
+    - `RoutingAction.route("review", mode="move")` raises `TypeError: mode must be RoutingMode...`
+  - Test suites passing:
+    - `uv run pytest -q tests/unit/contracts/test_routing.py`
+    - `uv run pytest -q tests/unit/engine/test_executors.py -k "config_gate"`
+- Evidence:
+  - `src/elspeth/contracts/routing.py`
+  - `tests/unit/contracts/test_routing.py`

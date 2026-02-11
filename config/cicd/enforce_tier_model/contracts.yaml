@@ -148,6 +148,11 @@ allow_hits:
 - key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=d20c868c67b376ce
   owner: architecture
   reason: Silent recovery with explicit error handling path
+- key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=4d9b80b717bc7551
+  owner: bugfix
+  reason: Dataclass invariant enforcement - RoutingAction requires RoutingMode enum, not raw strings
+  safety: TypeError raised immediately on construction - explicit crash, not masking
+  expires: null
 - key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=2300432a3c93d6b5
   owner: bugfix
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl

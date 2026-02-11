@@ -64,6 +64,9 @@ class RoutingAction:
 
     def __post_init__(self) -> None:
         """Validate invariants between kind, mode, and destinations."""
+        if not isinstance(self.mode, RoutingMode):
+            raise TypeError(f"mode must be RoutingMode, got {type(self.mode).__name__}: {self.mode!r}")
+
         if self.kind == RoutingKind.CONTINUE and self.destinations:
             raise ValueError("CONTINUE must have empty destinations")
 

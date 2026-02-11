@@ -63,6 +63,13 @@ class TestRoutingAction:
         ):
             RoutingAction.route("above", mode=RoutingMode.COPY)
 
+    def test_route_with_string_mode_raises_type_error(self) -> None:
+        """route requires RoutingMode enum, not a raw string."""
+        from elspeth.contracts import RoutingAction
+
+        with pytest.raises(TypeError, match="mode must be RoutingMode"):
+            RoutingAction.route("above", mode="move")  # type: ignore[arg-type]
+
     def test_route_with_reason(self) -> None:
         """route can include audit reason."""
         from elspeth.contracts import RoutingAction
@@ -235,6 +242,17 @@ class TestRoutingAction:
                 kind=RoutingKind.ROUTE,
                 destinations=("sink_a", "sink_b"),
                 mode=RoutingMode.MOVE,
+            )
+
+    def test_constructor_with_string_mode_raises_type_error(self) -> None:
+        """Direct constructor requires enum mode."""
+        from elspeth.contracts import RoutingAction, RoutingKind
+
+        with pytest.raises(TypeError, match="mode must be RoutingMode"):
+            RoutingAction(
+                kind=RoutingKind.ROUTE,
+                destinations=("sink_a",),
+                mode="move",  # type: ignore[arg-type]
             )
 
 
