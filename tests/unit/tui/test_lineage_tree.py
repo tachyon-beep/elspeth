@@ -21,11 +21,11 @@ class TestLineageTreeWidget:
             "run_id": "run-001",
             "source": SourceInfo(name="csv_source", node_id="node-001"),
             "transforms": [
-                NodeInfo(name="passthrough", node_id="node-002"),
-                NodeInfo(name="filter", node_id="node-003"),
+                NodeInfo(name="passthrough", node_id="node-002", node_type="transform"),
+                NodeInfo(name="filter", node_id="node-003", node_type="transform"),
             ],
             "sinks": [
-                NodeInfo(name="output", node_id="node-004"),
+                NodeInfo(name="output", node_id="node-004", node_type="sink"),
             ],
             "tokens": [
                 TokenDisplayInfo(
@@ -46,8 +46,8 @@ class TestLineageTreeWidget:
         lineage_data: LineageData = {
             "run_id": "run-001",
             "source": SourceInfo(name="csv_source", node_id="node-001"),
-            "transforms": [NodeInfo(name="filter", node_id="node-002")],
-            "sinks": [NodeInfo(name="output", node_id="node-003")],
+            "transforms": [NodeInfo(name="filter", node_id="node-002", node_type="transform")],
+            "sinks": [NodeInfo(name="output", node_id="node-003", node_type="sink")],
             "tokens": [
                 TokenDisplayInfo(
                     token_id="token-001",
@@ -74,7 +74,7 @@ class TestLineageTreeWidget:
             "run_id": "run-001",
             "source": SourceInfo(name="csv_source", node_id="node-001"),
             "transforms": [],
-            "sinks": [NodeInfo(name="output", node_id="node-002")],
+            "sinks": [NodeInfo(name="output", node_id="node-002", node_type="sink")],
             "tokens": [],
         }
 
@@ -88,10 +88,10 @@ class TestLineageTreeWidget:
         lineage_data: LineageData = {
             "run_id": "run-001",
             "source": SourceInfo(name="csv_source", node_id="node-001"),
-            "transforms": [NodeInfo(name="gate", node_id="node-002")],
+            "transforms": [NodeInfo(name="threshold_gate", node_id="node-002", node_type="gate")],
             "sinks": [
-                NodeInfo(name="high", node_id="node-003"),
-                NodeInfo(name="low", node_id="node-004"),
+                NodeInfo(name="high", node_id="node-003", node_type="sink"),
+                NodeInfo(name="low", node_id="node-004", node_type="sink"),
             ],
             "tokens": [
                 TokenDisplayInfo(
@@ -123,7 +123,7 @@ class TestLineageTreeWidget:
             "run_id": "run-001",
             "source": SourceInfo(name="csv_source", node_id="node-001"),
             "transforms": [],
-            "sinks": [NodeInfo(name="output", node_id="node-002")],
+            "sinks": [NodeInfo(name="output", node_id="node-002", node_type="sink")],
             "tokens": [],
         }
 
@@ -144,8 +144,8 @@ class TestLineageTreeWidget:
         lineage_data: LineageData = {
             "run_id": "run-001",
             "source": SourceInfo(name="csv_source", node_id="node-001"),
-            "transforms": [NodeInfo(name="filter", node_id="node-002")],
-            "sinks": [NodeInfo(name="output", node_id="node-003")],
+            "transforms": [NodeInfo(name="filter", node_id="node-002", node_type="transform")],
+            "sinks": [NodeInfo(name="output", node_id="node-003", node_type="sink")],
             "tokens": [],
         }
 
@@ -158,3 +158,37 @@ class TestLineageTreeWidget:
         # Non-existent node
         missing = tree.get_node_by_id("nonexistent")
         assert missing is None
+
+    def test_gate_aggregation_coalesce_labels(self) -> None:
+        """Gate, aggregation, and coalesce nodes display with correct type labels."""
+        from elspeth.tui.widgets.lineage_tree import LineageTree
+
+        lineage_data: LineageData = {
+            "run_id": "run-001",
+            "source": SourceInfo(name="csv_source", node_id="node-001"),
+            "transforms": [
+                NodeInfo(name="field_mapper", node_id="node-002", node_type="transform"),
+                NodeInfo(name="threshold_check", node_id="node-003", node_type="gate"),
+                NodeInfo(name="batch_agg", node_id="node-004", node_type="aggregation"),
+                NodeInfo(name="merge_results", node_id="node-005", node_type="coalesce"),
+            ],
+            "sinks": [NodeInfo(name="output", node_id="node-006", node_type="sink")],
+            "tokens": [],
+        }
+
+        tree = LineageTree(lineage_data)
+        nodes = tree.get_tree_nodes()
+        labels = [n["label"] for n in nodes]
+
+        # Each node type should use its specific label prefix
+        assert "Transform: field_mapper" in labels
+        assert "Gate: threshold_check" in labels
+        assert "Aggregation: batch_agg" in labels
+        assert "Coalesce: merge_results" in labels
+        assert "Sink: output" in labels
+
+        # Verify node_type is propagated to tree nodes
+        node_types = {n["label"]: n["node_type"] for n in nodes}
+        assert node_types["Gate: threshold_check"] == "gate"
+        assert node_types["Aggregation: batch_agg"] == "aggregation"
+        assert node_types["Coalesce: merge_results"] == "coalesce"

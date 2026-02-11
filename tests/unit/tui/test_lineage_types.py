@@ -13,8 +13,8 @@ class TestLineageDataContract:
         data: LineageData = {
             "run_id": "run-123",
             "source": {"name": "csv", "node_id": "node-1"},
-            "transforms": [{"name": "mapper", "node_id": "node-2"}],
-            "sinks": [{"name": "output", "node_id": "node-3"}],
+            "transforms": [{"name": "mapper", "node_id": "node-2", "node_type": "transform"}],
+            "sinks": [{"name": "output", "node_id": "node-3", "node_type": "sink"}],
             "tokens": [],
         }
         assert data["run_id"] == "run-123"
@@ -32,14 +32,15 @@ class TestLineageDataContract:
         assert source["node_id"] is None
 
     def test_node_info_contract(self) -> None:
-        """NodeInfo requires name and node_id."""
-        node: NodeInfo = {"name": "filter_transform", "node_id": "tfm-001"}
+        """NodeInfo requires name, node_id, and node_type."""
+        node: NodeInfo = {"name": "filter_transform", "node_id": "tfm-001", "node_type": "transform"}
         assert node["name"] == "filter_transform"
         assert node["node_id"] == "tfm-001"
+        assert node["node_type"] == "transform"
 
     def test_node_info_with_none_node_id(self) -> None:
         """NodeInfo allows None for node_id."""
-        node: NodeInfo = {"name": "filter_transform", "node_id": None}
+        node: NodeInfo = {"name": "filter_transform", "node_id": None, "node_type": "transform"}
         assert node["name"] == "filter_transform"
         assert node["node_id"] is None
 
@@ -69,12 +70,12 @@ class TestLineageDataContract:
             "run_id": "run-abc-123",
             "source": {"name": "api_source", "node_id": "src-001"},
             "transforms": [
-                {"name": "normalize", "node_id": "tfm-001"},
-                {"name": "validate", "node_id": "tfm-002"},
+                {"name": "normalize", "node_id": "tfm-001", "node_type": "transform"},
+                {"name": "validate", "node_id": "tfm-002", "node_type": "transform"},
             ],
             "sinks": [
-                {"name": "database", "node_id": "sink-001"},
-                {"name": "archive", "node_id": "sink-002"},
+                {"name": "database", "node_id": "sink-001", "node_type": "sink"},
+                {"name": "archive", "node_id": "sink-002", "node_type": "sink"},
             ],
             "tokens": [
                 {
@@ -101,7 +102,7 @@ class TestLineageDataContract:
             "run_id": "run-minimal",
             "source": {"name": "simple", "node_id": "src-001"},
             "transforms": [],
-            "sinks": [{"name": "output", "node_id": "sink-001"}],
+            "sinks": [{"name": "output", "node_id": "sink-001", "node_type": "sink"}],
             "tokens": [],
         }
         assert data["transforms"] == []
@@ -118,8 +119,8 @@ class TestLineageDataWithLineageTree:
         data: LineageData = {
             "run_id": "run-123",
             "source": {"name": "csv", "node_id": "node-1"},
-            "transforms": [{"name": "mapper", "node_id": "node-2"}],
-            "sinks": [{"name": "output", "node_id": "node-3"}],
+            "transforms": [{"name": "mapper", "node_id": "node-2", "node_type": "transform"}],
+            "sinks": [{"name": "output", "node_id": "node-3", "node_type": "sink"}],
             "tokens": [],
         }
         tree = LineageTree(data)

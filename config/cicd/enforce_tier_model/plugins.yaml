@@ -382,42 +382,49 @@ allow_hits:
 - key: plugins/validation.py:R1:PluginConfigValidator:_extract_errors:fp=76f7694624d8cfcc
   owner: architecture
   reason: Optional field access at trust boundary
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:post:fp=3c0be6939b9ad68c
+# Refactored: post()/get() shared logic now in _execute_request/_parse_response_body/_record_and_emit
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=e7d4911570543fc8
   owner: architecture
-  reason: HTTP response headers - external system boundary, content-type may be missing
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:fp=57f98d9a680c4fe0
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:fp=8d0a8a1eebc183ff
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=de1053d26df88b2e
-  owner: architecture
-  reason: HTTP response headers - external system boundary, content-type may be missing
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get:fp=8e3c6282a014e674
-  owner: architecture
-  reason: HTTP response headers - external system boundary, content-type may be missing
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=828d933917d5becb
+  reason: HTTP response content-type header - external system boundary, header may be missing
+  safety: Falls back to binary encoding if content-type absent
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=6628fa9d0a7a0404
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get:fp=fd83274374bde4f7
+  safety: Logged and continues - telemetry is non-critical to HTTP processing
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=637450bc8d8c43f6
   owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=4ca4e2477ece4e30
+  reason: httpx Client.get() method call - dispatched based on HTTP method
+  safety: This is the actual external HTTP call, not a defensive dict access
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=9c621dc9c28a0f12
   owner: architecture
   reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=218c21461d517b71
+  safety: This is the actual external HTTP call with IP pinning
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=6823e2da3e8ef8c9
   owner: architecture
-  reason: httpx Client.get() method call - this is the external HTTP call with IP pinning
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=51570a45a72c0c87
+  reason: HTTP response content-type header - external system boundary, header may be missing
+  safety: Falls back to binary encoding if content-type absent
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=7f3e2fa7f8422b79
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=5592b5008ca0c900
+  safety: Logged and continues - telemetry is non-critical to HTTP processing
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=006ffa0fa617b773
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=23c341af1cdd3b1e
+  safety: Logged and continues - telemetry is non-critical to HTTP processing
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=414de8801de66baf
   owner: architecture
   reason: HTTP redirect Location header - external system boundary, header may be absent
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=48a4d8f531e7c27d
+  safety: Missing Location header breaks redirect loop naturally (no redirect target)
+  expires: '2026-05-02'
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=82217ab58737f078
   owner: architecture
-  reason: HTTP redirect Location header - external system boundary, header may be absent
+  reason: httpx Client.get() method call - ephemeral client per redirect hop for TLS isolation
+  safety: This is the actual external HTTP call, not a defensive dict access
+  expires: '2026-05-02'

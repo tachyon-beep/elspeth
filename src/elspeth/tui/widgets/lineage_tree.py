@@ -73,13 +73,24 @@ class LineageTree:
         transforms = self._data["transforms"]
         current_parent = source_node
 
+        # Label map for processing node types (gate, aggregation, coalesce
+        # are displayed with their specific type, not generic "Transform")
+        _TYPE_LABELS = {
+            "transform": "Transform",
+            "gate": "Gate",
+            "aggregation": "Aggregation",
+            "coalesce": "Coalesce",
+        }
+
         for transform in transforms:
             transform_name = transform["name"]
             transform_node_id = transform["node_id"]
+            raw_type = transform["node_type"]
+            type_label = _TYPE_LABELS[raw_type]
             transform_node = TreeNode(
-                label=f"Transform: {transform_name}",
+                label=f"{type_label}: {transform_name}",
                 node_id=transform_node_id,
-                node_type="transform",
+                node_type=raw_type,
             )
             current_parent.children.append(transform_node)
             current_parent = transform_node

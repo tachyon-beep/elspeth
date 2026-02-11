@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from elspeth.contracts.enums import CallStatus, RoutingMode
+from elspeth.contracts.enums import CallStatus, NodeType, RoutingMode
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.mcp.types import (
@@ -200,6 +200,13 @@ def get_dag_structure(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str)
         for e in edges
     ]
 
+    # Build terminal sink map: processing node → sink name for on_success/MOVE edges
+    sink_id_to_name = {n.node_id: n.plugin_name for n in nodes if n.node_type == NodeType.SINK}
+    terminal_sink_map: dict[str, str] = {}
+    for e in edges:
+        if e.label == "on_success" and e.default_mode == RoutingMode.MOVE and e.to_node_id in sink_id_to_name:
+            terminal_sink_map[e.from_node_id] = sink_id_to_name[e.to_node_id]
+
     # Generate mermaid diagram
     lines = ["graph TD"]
     for n in nodes:
@@ -220,6 +227,7 @@ def get_dag_structure(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str)
         "edges": edge_list,  # type: ignore[typeddict-item]  # functional TypedDict with "from" keyword
         "node_count": len(nodes),
         "edge_count": len(edges),
+        "terminal_sink_map": terminal_sink_map,
         "mermaid": "\n".join(lines),
     }
 

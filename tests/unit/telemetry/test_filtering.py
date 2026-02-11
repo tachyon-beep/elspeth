@@ -130,7 +130,7 @@ def _external_call() -> ExternalCallCompleted:
 
 @dataclass(frozen=True, slots=True)
 class _UnknownEvent(TelemetryEvent):
-    """Custom event subclass to test forward-compatibility pass-through."""
+    """Custom event subclass to test fail-closed filtering."""
 
     custom_field: str = "unknown"
 
@@ -226,19 +226,19 @@ class TestExternalCallEventsFullOnly:
 
 
 # =============================================================================
-# Unknown Events: Pass Through for Forward Compatibility
+# Unknown Events: Blocked (Fail-Closed for Audit Integrity)
 # =============================================================================
 
 
-class TestUnknownEventsPassThrough:
-    def test_unknown_event_passes_at_lifecycle(self) -> None:
-        assert should_emit(_unknown_event(), LIFECYCLE) is True
+class TestUnknownEventsBlocked:
+    def test_unknown_event_blocked_at_lifecycle(self) -> None:
+        assert should_emit(_unknown_event(), LIFECYCLE) is False
 
-    def test_unknown_event_passes_at_rows(self) -> None:
-        assert should_emit(_unknown_event(), ROWS) is True
+    def test_unknown_event_blocked_at_rows(self) -> None:
+        assert should_emit(_unknown_event(), ROWS) is False
 
-    def test_unknown_event_passes_at_full(self) -> None:
-        assert should_emit(_unknown_event(), FULL) is True
+    def test_unknown_event_blocked_at_full(self) -> None:
+        assert should_emit(_unknown_event(), FULL) is False
 
 
 # =============================================================================

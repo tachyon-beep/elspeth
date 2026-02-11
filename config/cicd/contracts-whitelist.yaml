@@ -294,6 +294,10 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
   # HTTP CLIENTS - External API trust boundary
   # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:request_data"
+  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:response_data"
+  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:error_data"
+  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._execute_request:json"
   - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient.post:json"
   - "src/elspeth/plugins/clients/replayer.py:ReplayMissError.__init__:request_data"
   - "src/elspeth/plugins/clients/replayer.py:CallReplayer.replay:request_data"

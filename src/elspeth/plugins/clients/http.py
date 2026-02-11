@@ -298,6 +298,224 @@ class AuditedHTTPClient(AuditedClientBase):
         """Close the underlying httpx client and release connections."""
         self._client.close()
 
+    def _resolve_url(self, url: str) -> str:
+        """Join base_url with path, handling slash combinations."""
+        if self._base_url:
+            base = self._base_url.rstrip("/")
+            path = url.lstrip("/")
+            return f"{base}/{path}"
+        return url
+
+    def _parse_response_body(self, response: httpx.Response, full_url: str) -> Any:
+        """Parse response body at Tier 3 boundary with strict JSON validation.
+
+        Handles JSON (with NaN/Infinity rejection), text, and binary content.
+        """
+        content_type = response.headers.get("content-type", "")
+
+        if "application/json" in content_type:
+            parsed, error = _parse_json_strict(response.text)
+            if error is not None:
+                logger.warning(
+                    "JSON parse failed despite Content-Type: application/json",
+                    extra={
+                        "url": full_url,
+                        "status_code": response.status_code,
+                        "body_preview": response.text[:200],
+                        "error": error,
+                    },
+                )
+                return {
+                    "_json_parse_failed": True,
+                    "_error": error,
+                    "_raw_text": response.text[:10_000],
+                }
+            return parsed
+
+        # Text content types: text/*, application/xml, application/x-www-form-urlencoded
+        is_text_content = content_type.startswith("text/") or "xml" in content_type or "form-urlencoded" in content_type
+        if is_text_content:
+            return response.text
+
+        # Binary content as base64 for JSON serialization
+        return {"_binary": base64.b64encode(response.content).decode("ascii")}
+
+    def _record_and_emit(
+        self,
+        *,
+        call_index: int,
+        full_url: str,
+        request_data: dict[str, Any],
+        response: httpx.Response | None,
+        response_data: dict[str, Any] | None,
+        error_data: dict[str, Any] | None,
+        latency_ms: float,
+        call_status: CallStatus,
+    ) -> None:
+        """Record call to audit trail and emit telemetry event."""
+        self._recorder.record_call(
+            state_id=self._state_id,
+            call_index=call_index,
+            call_type=CallType.HTTP,
+            status=call_status,
+            request_data=request_data,
+            response_data=response_data,
+            error=error_data,
+            latency_ms=latency_ms,
+        )
+
+        # Telemetry emitted AFTER successful Landscape recording
+        # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
+        try:
+            self._telemetry_emit(
+                ExternalCallCompleted(
+                    timestamp=datetime.now(UTC),
+                    run_id=self._run_id,
+                    call_type=CallType.HTTP,
+                    provider=self._extract_provider(full_url),
+                    status=call_status,
+                    latency_ms=latency_ms,
+                    state_id=self._state_id,
+                    operation_id=None,
+                    request_hash=stable_hash(request_data),
+                    response_hash=stable_hash(response_data) if response_data else None,
+                    request_payload=request_data,
+                    response_payload=response_data,
+                    token_usage=None,
+                )
+            )
+        except Exception as tel_err:
+            logger.warning(
+                "telemetry_emit_failed",
+                error=str(tel_err),
+                error_type=type(tel_err).__name__,
+                run_id=self._run_id,
+                state_id=self._state_id,
+                call_type="http",
+            )
+
+    def _execute_request(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str] | None,
+        timeout: float | None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, str | int | float] | None = None,
+    ) -> httpx.Response:
+        """Execute an HTTP request with audit recording and telemetry.
+
+        Shared implementation for post() and get(). Handles URL resolution,
+        header merging, response parsing, audit recording, and telemetry.
+
+        Args:
+            method: HTTP method ("POST" or "GET")
+            url: URL path (appended to base_url if configured)
+            headers: Additional headers for this request
+            timeout: Request timeout override (uses client default if None)
+            json: JSON body (POST only)
+            params: Query parameters (GET only)
+
+        Returns:
+            httpx.Response object
+
+        Raises:
+            httpx.HTTPError: For network/HTTP errors
+        """
+        self._acquire_rate_limit()
+        call_index = self._next_call_index()
+
+        full_url = self._resolve_url(url)
+        merged_headers = {**self._default_headers, **(headers or {})}
+        effective_timeout = timeout if timeout is not None else self._timeout
+
+        # Build request data for audit trail (method-specific fields always present
+        # for stable schema per method)
+        request_data: dict[str, Any] = {
+            "method": method,
+            "url": full_url,
+            "headers": self._filter_request_headers(merged_headers),
+        }
+        if method == "POST":
+            request_data["json"] = json
+        elif method == "GET":
+            request_data["params"] = params
+
+        start = time.perf_counter()
+
+        try:
+            # Dispatch to the correct httpx method
+            if method == "POST":
+                response = self._client.post(
+                    full_url,
+                    json=json,
+                    headers=merged_headers,
+                    timeout=effective_timeout,
+                )
+            else:
+                response = self._client.get(
+                    full_url,
+                    params=params,
+                    headers=merged_headers,
+                    timeout=effective_timeout,
+                )
+
+            latency_ms = (time.perf_counter() - start) * 1000
+
+            response_body = self._parse_response_body(response, full_url)
+
+            # 2xx = SUCCESS, 4xx/5xx = ERROR
+            is_success = 200 <= response.status_code < 300
+            call_status = CallStatus.SUCCESS if is_success else CallStatus.ERROR
+
+            response_data: dict[str, Any] = {
+                "status_code": response.status_code,
+                "headers": self._filter_response_headers(dict(response.headers)),
+                "body_size": len(response.content),
+                "body": response_body,
+            }
+
+            error_data: dict[str, Any] | None = None
+            if not is_success:
+                error_data = {
+                    "type": "HTTPError",
+                    "message": f"HTTP {response.status_code}",
+                    "status_code": response.status_code,
+                }
+
+            self._record_and_emit(
+                call_index=call_index,
+                full_url=full_url,
+                request_data=request_data,
+                response=response,
+                response_data=response_data,
+                error_data=error_data,
+                latency_ms=latency_ms,
+                call_status=call_status,
+            )
+
+            return response
+
+        except Exception as e:
+            latency_ms = (time.perf_counter() - start) * 1000
+
+            self._record_and_emit(
+                call_index=call_index,
+                full_url=full_url,
+                request_data=request_data,
+                response=None,
+                response_data=None,
+                error_data={
+                    "type": type(e).__name__,
+                    "message": str(e),
+                },
+                latency_ms=latency_ms,
+                call_status=CallStatus.ERROR,
+            )
+
+            raise
+
     def post(
         self,
         url: str,
@@ -320,198 +538,13 @@ class AuditedHTTPClient(AuditedClientBase):
         Raises:
             httpx.HTTPError: For network/HTTP errors
         """
-        # Acquire rate limit permission before making external call
-        self._acquire_rate_limit()
-
-        call_index = self._next_call_index()
-
-        # Properly join base_url and url, handling slash combinations
-        if self._base_url:
-            # Normalize: strip trailing slash from base, leading slash from path
-            # Then join with exactly one slash
-            base = self._base_url.rstrip("/")
-            path = url.lstrip("/")
-            full_url = f"{base}/{path}"
-        else:
-            full_url = url
-        merged_headers = {**self._default_headers, **(headers or {})}
-        effective_timeout = timeout if timeout is not None else self._timeout
-
-        # Filter sensitive headers from recorded request
-        request_data = {
-            "method": "POST",
-            "url": full_url,
-            "json": json,
-            "headers": self._filter_request_headers(merged_headers),
-        }
-
-        start = time.perf_counter()
-
-        try:
-            response = self._client.post(
-                full_url,
-                json=json,
-                headers=merged_headers,
-                timeout=effective_timeout,
-            )
-
-            latency_ms = (time.perf_counter() - start) * 1000
-
-            # Build response data with full body for audit trail
-            # Try JSON first, then text, then binary (no truncation - payload store handles size)
-            response_body: Any = None
-            content_type = response.headers.get("content-type", "")
-
-            if "application/json" in content_type:
-                # Parse JSON strictly at Tier 3 boundary - reject NaN/Infinity
-                # that canonicalization cannot handle
-                parsed, error = _parse_json_strict(response.text)
-                if error is not None:
-                    # JSON parse failed or contains non-canonicalizable values
-                    # This is a Tier 3 boundary issue - external data doesn't match contract
-                    # Record the failure explicitly for audit trail completeness
-                    logger.warning(
-                        "JSON parse failed despite Content-Type: application/json",
-                        extra={
-                            "url": full_url,
-                            "status_code": response.status_code,
-                            "body_preview": response.text[:200],
-                            "error": error,
-                        },
-                    )
-                    response_body = {
-                        "_json_parse_failed": True,
-                        "_error": error,
-                        "_raw_text": response.text[:10_000],
-                    }
-                else:
-                    response_body = parsed
-            else:
-                # For non-JSON, detect text vs binary content
-                # Text content types: text/*, application/xml, application/x-www-form-urlencoded
-                is_text_content = content_type.startswith("text/") or "xml" in content_type or "form-urlencoded" in content_type
-
-                if is_text_content:
-                    # Store full text (payload store auto-persist handles large responses)
-                    response_body = response.text
-                else:
-                    # Store binary content as base64 for JSON serialization
-                    # This handles images, PDFs, and other binary formats
-                    response_body = {"_binary": base64.b64encode(response.content).decode("ascii")}
-
-            # Determine status based on HTTP response code
-            # 2xx = SUCCESS, 4xx/5xx = ERROR (audit must reflect what application sees)
-            is_success = 200 <= response.status_code < 300
-            call_status = CallStatus.SUCCESS if is_success else CallStatus.ERROR
-
-            response_data: dict[str, Any] = {
-                "status_code": response.status_code,
-                "headers": self._filter_response_headers(dict(response.headers)),
-                "body_size": len(response.content),
-                "body": response_body,
-            }
-
-            # For error responses, also include error details
-            error_data: dict[str, Any] | None = None
-            if not is_success:
-                error_data = {
-                    "type": "HTTPError",
-                    "message": f"HTTP {response.status_code}",
-                    "status_code": response.status_code,
-                }
-
-            self._recorder.record_call(
-                state_id=self._state_id,
-                call_index=call_index,
-                call_type=CallType.HTTP,
-                status=call_status,
-                request_data=request_data,
-                response_data=response_data,
-                error=error_data,
-                latency_ms=latency_ms,
-            )
-
-            # Telemetry emitted AFTER successful Landscape recording
-            # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
-            try:
-                self._telemetry_emit(
-                    ExternalCallCompleted(
-                        timestamp=datetime.now(UTC),
-                        run_id=self._run_id,
-                        call_type=CallType.HTTP,
-                        provider=self._extract_provider(full_url),
-                        status=call_status,
-                        latency_ms=latency_ms,
-                        state_id=self._state_id,  # Transform context
-                        operation_id=None,  # Not in source/sink context
-                        request_hash=stable_hash(request_data),
-                        response_hash=stable_hash(response_data),
-                        request_payload=request_data,  # Full request for observability
-                        response_payload=response_data,  # Full response for observability
-                        token_usage=None,  # HTTP calls don't have token usage
-                    )
-                )
-            except Exception as tel_err:
-                # Telemetry failure must not corrupt the successful call
-                logger.warning(
-                    "telemetry_emit_failed",
-                    error=str(tel_err),
-                    error_type=type(tel_err).__name__,
-                    run_id=self._run_id,
-                    state_id=self._state_id,
-                    call_type="http",
-                )
-
-            return response
-
-        except Exception as e:
-            latency_ms = (time.perf_counter() - start) * 1000
-
-            self._recorder.record_call(
-                state_id=self._state_id,
-                call_index=call_index,
-                call_type=CallType.HTTP,
-                status=CallStatus.ERROR,
-                request_data=request_data,
-                error={
-                    "type": type(e).__name__,
-                    "message": str(e),
-                },
-                latency_ms=latency_ms,
-            )
-
-            # Telemetry emitted AFTER successful Landscape recording (even for call errors)
-            # Wrapped in try/except to prevent telemetry failures from corrupting error handling
-            try:
-                self._telemetry_emit(
-                    ExternalCallCompleted(
-                        timestamp=datetime.now(UTC),
-                        run_id=self._run_id,
-                        call_type=CallType.HTTP,
-                        provider=self._extract_provider(full_url),
-                        status=CallStatus.ERROR,
-                        latency_ms=latency_ms,
-                        state_id=self._state_id,  # Transform context
-                        operation_id=None,  # Not in source/sink context
-                        request_hash=stable_hash(request_data),
-                        response_hash=None,  # No response on exception
-                        request_payload=request_data,  # Full request for observability
-                        response_payload=None,  # No response on exception
-                        token_usage=None,
-                    )
-                )
-            except Exception as tel_err:
-                # Telemetry failure must not corrupt the error handling flow
-                logger.warning(
-                    "telemetry_emit_failed",
-                    error=str(tel_err),
-                    error_type=type(tel_err).__name__,
-                    run_id=self._run_id,
-                    state_id=self._state_id,
-                    call_type="http",
-                )
-
-            raise
+        return self._execute_request(
+            method="POST",
+            url=url,
+            headers=headers,
+            timeout=timeout,
+            json=json,
+        )
 
     def get(
         self,
@@ -535,198 +568,13 @@ class AuditedHTTPClient(AuditedClientBase):
         Raises:
             httpx.HTTPError: For network/HTTP errors
         """
-        # Acquire rate limit permission before making external call
-        self._acquire_rate_limit()
-
-        call_index = self._next_call_index()
-
-        # Properly join base_url and url, handling slash combinations
-        if self._base_url:
-            # Normalize: strip trailing slash from base, leading slash from path
-            # Then join with exactly one slash
-            base = self._base_url.rstrip("/")
-            path = url.lstrip("/")
-            full_url = f"{base}/{path}"
-        else:
-            full_url = url
-        merged_headers = {**self._default_headers, **(headers or {})}
-        effective_timeout = timeout if timeout is not None else self._timeout
-
-        # Filter sensitive headers from recorded request
-        request_data = {
-            "method": "GET",
-            "url": full_url,
-            "params": params,
-            "headers": self._filter_request_headers(merged_headers),
-        }
-
-        start = time.perf_counter()
-
-        try:
-            response = self._client.get(
-                full_url,
-                params=params,
-                headers=merged_headers,
-                timeout=effective_timeout,
-            )
-
-            latency_ms = (time.perf_counter() - start) * 1000
-
-            # Build response data with full body for audit trail
-            # Try JSON first, then text, then binary (no truncation - payload store handles size)
-            response_body: Any = None
-            content_type = response.headers.get("content-type", "")
-
-            if "application/json" in content_type:
-                # Parse JSON strictly at Tier 3 boundary - reject NaN/Infinity
-                # that canonicalization cannot handle
-                parsed, error = _parse_json_strict(response.text)
-                if error is not None:
-                    # JSON parse failed or contains non-canonicalizable values
-                    # This is a Tier 3 boundary issue - external data doesn't match contract
-                    # Record the failure explicitly for audit trail completeness
-                    logger.warning(
-                        "JSON parse failed despite Content-Type: application/json",
-                        extra={
-                            "url": full_url,
-                            "status_code": response.status_code,
-                            "body_preview": response.text[:200],
-                            "error": error,
-                        },
-                    )
-                    response_body = {
-                        "_json_parse_failed": True,
-                        "_error": error,
-                        "_raw_text": response.text[:10_000],
-                    }
-                else:
-                    response_body = parsed
-            else:
-                # For non-JSON, detect text vs binary content
-                # Text content types: text/*, application/xml, application/x-www-form-urlencoded
-                is_text_content = content_type.startswith("text/") or "xml" in content_type or "form-urlencoded" in content_type
-
-                if is_text_content:
-                    # Store full text (payload store auto-persist handles large responses)
-                    response_body = response.text
-                else:
-                    # Store binary content as base64 for JSON serialization
-                    # This handles images, PDFs, and other binary formats
-                    response_body = {"_binary": base64.b64encode(response.content).decode("ascii")}
-
-            # Determine status based on HTTP response code
-            # 2xx = SUCCESS, 4xx/5xx = ERROR (audit must reflect what application sees)
-            is_success = 200 <= response.status_code < 300
-            call_status = CallStatus.SUCCESS if is_success else CallStatus.ERROR
-
-            response_data: dict[str, Any] = {
-                "status_code": response.status_code,
-                "headers": self._filter_response_headers(dict(response.headers)),
-                "body_size": len(response.content),
-                "body": response_body,
-            }
-
-            # For error responses, also include error details
-            error_data: dict[str, Any] | None = None
-            if not is_success:
-                error_data = {
-                    "type": "HTTPError",
-                    "message": f"HTTP {response.status_code}",
-                    "status_code": response.status_code,
-                }
-
-            self._recorder.record_call(
-                state_id=self._state_id,
-                call_index=call_index,
-                call_type=CallType.HTTP,
-                status=call_status,
-                request_data=request_data,
-                response_data=response_data,
-                error=error_data,
-                latency_ms=latency_ms,
-            )
-
-            # Telemetry emitted AFTER successful Landscape recording
-            # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
-            try:
-                self._telemetry_emit(
-                    ExternalCallCompleted(
-                        timestamp=datetime.now(UTC),
-                        run_id=self._run_id,
-                        call_type=CallType.HTTP,
-                        provider=self._extract_provider(full_url),
-                        status=call_status,
-                        latency_ms=latency_ms,
-                        state_id=self._state_id,  # Transform context
-                        operation_id=None,  # Not in source/sink context
-                        request_hash=stable_hash(request_data),
-                        response_hash=stable_hash(response_data),
-                        request_payload=request_data,  # Full request for observability
-                        response_payload=response_data,  # Full response for observability
-                        token_usage=None,  # HTTP calls don't have token usage
-                    )
-                )
-            except Exception as tel_err:
-                # Telemetry failure must not corrupt the successful call
-                logger.warning(
-                    "telemetry_emit_failed",
-                    error=str(tel_err),
-                    error_type=type(tel_err).__name__,
-                    run_id=self._run_id,
-                    state_id=self._state_id,
-                    call_type="http",
-                )
-
-            return response
-
-        except Exception as e:
-            latency_ms = (time.perf_counter() - start) * 1000
-
-            self._recorder.record_call(
-                state_id=self._state_id,
-                call_index=call_index,
-                call_type=CallType.HTTP,
-                status=CallStatus.ERROR,
-                request_data=request_data,
-                error={
-                    "type": type(e).__name__,
-                    "message": str(e),
-                },
-                latency_ms=latency_ms,
-            )
-
-            # Telemetry emitted AFTER successful Landscape recording (even for call errors)
-            # Wrapped in try/except to prevent telemetry failures from corrupting error handling
-            try:
-                self._telemetry_emit(
-                    ExternalCallCompleted(
-                        timestamp=datetime.now(UTC),
-                        run_id=self._run_id,
-                        call_type=CallType.HTTP,
-                        provider=self._extract_provider(full_url),
-                        status=CallStatus.ERROR,
-                        latency_ms=latency_ms,
-                        state_id=self._state_id,  # Transform context
-                        operation_id=None,  # Not in source/sink context
-                        request_hash=stable_hash(request_data),
-                        response_hash=None,  # No response on exception
-                        request_payload=request_data,  # Full request for observability
-                        response_payload=None,  # No response on exception
-                        token_usage=None,
-                    )
-                )
-            except Exception as tel_err:
-                # Telemetry failure must not corrupt the error handling flow
-                logger.warning(
-                    "telemetry_emit_failed",
-                    error=str(tel_err),
-                    error_type=type(tel_err).__name__,
-                    run_id=self._run_id,
-                    state_id=self._state_id,
-                    call_type="http",
-                )
-
-            raise
+        return self._execute_request(
+            method="GET",
+            url=url,
+            headers=headers,
+            timeout=timeout,
+            params=params,
+        )
 
     def get_ssrf_safe(
         self,

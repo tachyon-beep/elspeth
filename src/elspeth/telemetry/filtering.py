@@ -32,7 +32,7 @@ def should_emit(event: TelemetryEvent, granularity: TelemetryGranularity) -> boo
     - Row events (RowCreated, TransformCompleted, GateEvaluated, TokenCompleted):
       Emit at ROWS or FULL granularity
     - External call events (ExternalCallCompleted): Emit only at FULL granularity
-    - Unknown event types: Pass through (fail-open for forward compatibility)
+    - Unknown event types: Blocked (fail-closed for audit integrity)
 
     Args:
         event: The telemetry event to check
@@ -66,6 +66,9 @@ def should_emit(event: TelemetryEvent, granularity: TelemetryGranularity) -> boo
         case ExternalCallCompleted():
             return granularity == TelemetryGranularity.FULL
 
-        # Unknown event types: pass through (forward compatibility)
+        # Unknown event types: blocked (fail-closed for audit integrity).
+        # New event types must be explicitly added to the appropriate tier above.
+        # Telemetry is operational visibility, not the audit trail — dropping
+        # unknown events is safe; Landscape still records everything.
         case _:
-            return True
+            return False
