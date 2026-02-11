@@ -42,6 +42,11 @@ def _reject_nonfinite_constant(value: str) -> None:
     raise ValueError(f"Non-standard JSON constant '{value}' not allowed. Use null for missing values, not NaN/Infinity.")
 
 
+def _contains_surrogateescape_chars(value: str) -> bool:
+    """Return True when value contains surrogateescape-decoded bytes."""
+    return any(0xDC80 <= ord(char) <= 0xDCFF for char in value)
+
+
 class JSONSourceConfig(SourceDataConfig):
     """Configuration for JSON source plugin.
 
@@ -158,45 +163,61 @@ class JSONSource(BaseSource):
         fails to parse is quarantined, not crash the pipeline. This allows
         subsequent valid lines to still be processed.
         """
-        # Read JSONL as bytes so decode failures can be quarantined per-line.
-        with open(self._path, "rb") as f:
-            for line_num, raw_line in enumerate(f, start=1):
-                try:
-                    line = raw_line.decode(self._encoding).strip()
-                except UnicodeDecodeError as e:
-                    raw_row = {"__raw_bytes_hex__": raw_line.hex(), "__line_number__": line_num}
-                    error_msg = f"JSON parse error at line {line_num}: invalid {self._encoding} encoding ({e})"
-                    quarantined = self._record_parse_error(
-                        ctx=ctx,
-                        row=raw_row,
-                        error_msg=error_msg,
-                    )
-                    if quarantined is not None:
-                        yield quarantined
-                    continue
+        line_num = 0
+        try:
+            # Iterate in text mode so newline handling respects multibyte encodings
+            # (e.g., utf-16 / utf-32) instead of splitting on raw 0x0A bytes.
+            with open(self._path, encoding=self._encoding, errors="surrogateescape", newline="") as f:
+                for line_num, raw_line in enumerate(f, start=1):
+                    if _contains_surrogateescape_chars(raw_line):
+                        raw_bytes = raw_line.encode(self._encoding, errors="surrogateescape")
+                        raw_row = {"__raw_bytes_hex__": raw_bytes.hex(), "__line_number__": line_num}
+                        error_msg = f"JSON parse error at line {line_num}: invalid {self._encoding} encoding"
+                        quarantined = self._record_parse_error(
+                            ctx=ctx,
+                            row=raw_row,
+                            error_msg=error_msg,
+                        )
+                        if quarantined is not None:
+                            yield quarantined
+                        continue
 
-                if not line:  # Skip empty lines
-                    continue
+                    line = raw_line.strip()
+                    if not line:  # Skip empty lines
+                        continue
 
-                # Catch JSON parse errors at the trust boundary
-                # parse_constant rejects NaN/Infinity at parse time (canonical JSON policy)
-                try:
-                    row = json.loads(line, parse_constant=_reject_nonfinite_constant)
-                except (json.JSONDecodeError, ValueError) as e:
-                    # External data parse failure - quarantine, don't crash
-                    # Store raw line + metadata for audit traceability
-                    raw_row = {"__raw_line__": line, "__line_number__": line_num}
-                    error_msg = f"JSON parse error at line {line_num}: {e}"
-                    quarantined = self._record_parse_error(
-                        ctx=ctx,
-                        row=raw_row,
-                        error_msg=error_msg,
-                    )
-                    if quarantined is not None:
-                        yield quarantined
-                    continue
+                    # Catch JSON parse errors at the trust boundary
+                    # parse_constant rejects NaN/Infinity at parse time (canonical JSON policy)
+                    try:
+                        row = json.loads(line, parse_constant=_reject_nonfinite_constant)
+                    except (json.JSONDecodeError, ValueError) as e:
+                        # External data parse failure - quarantine, don't crash
+                        # Store raw line + metadata for audit traceability
+                        raw_row = {"__raw_line__": line, "__line_number__": line_num}
+                        error_msg = f"JSON parse error at line {line_num}: {e}"
+                        quarantined = self._record_parse_error(
+                            ctx=ctx,
+                            row=raw_row,
+                            error_msg=error_msg,
+                        )
+                        if quarantined is not None:
+                            yield quarantined
+                        continue
 
-                yield from self._validate_and_yield(row, ctx)
+                    yield from self._validate_and_yield(row, ctx)
+        except UnicodeDecodeError as e:
+            # Some codecs (notably utf-16/utf-32) can still raise on truncated byte
+            # sequences while reading. Treat as an external parse failure.
+            error_line = line_num + 1
+            raw_row = {"file_path": str(self._path), "__line_number__": error_line}
+            error_msg = f"JSON parse error at line {error_line}: invalid {self._encoding} encoding ({e})"
+            quarantined = self._record_parse_error(
+                ctx=ctx,
+                row=raw_row,
+                error_msg=error_msg,
+            )
+            if quarantined is not None:
+                yield quarantined
 
     def _load_json_array(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Load from JSON array format."""

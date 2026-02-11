@@ -240,6 +240,8 @@ def _ensure_output_directories(config: ElspethSettings) -> list[str]:
 
 def _validate_existing_sqlite_db_url(db_url: str, *, source: str) -> None:
     """Fail fast when a file-backed SQLite URL points to a missing file."""
+    from urllib.parse import unquote, urlsplit
+
     from sqlalchemy.engine.url import make_url
 
     parsed_url = make_url(db_url)
@@ -247,10 +249,36 @@ def _validate_existing_sqlite_db_url(db_url: str, *, source: str) -> None:
         return
 
     db_path = parsed_url.database
-    if db_path is None or db_path == ":memory:":
+    if db_path is None:
         return
 
-    resolved = Path(db_path).expanduser().resolve()
+    query = parsed_url.query
+    raw_uri = query.get("uri")
+    uri_enabled = False
+    if raw_uri is not None:
+        uri_value = raw_uri if isinstance(raw_uri, str) else raw_uri[0]
+        uri_enabled = uri_value.lower() in ("1", "true", "yes", "on")
+
+    raw_mode = query.get("mode")
+    if raw_mode is not None:
+        mode_value = raw_mode if isinstance(raw_mode, str) else raw_mode[0]
+        if mode_value == "memory":
+            return
+
+    if db_path == ":memory:" or db_path.startswith("file::memory:"):
+        return
+
+    if uri_enabled and db_path.startswith("file:"):
+        split = urlsplit(db_path)
+        path_part = unquote(split.path)
+        if split.netloc and split.netloc != "localhost":
+            path_part = f"//{split.netloc}{path_part}"
+        if not path_part:
+            return
+        resolved = Path(path_part).expanduser().resolve()
+    else:
+        resolved = Path(db_path).expanduser().resolve()
+
     if not resolved.exists():
         typer.echo(f"Error: Database file not found ({source}): {resolved}", err=True)
         raise typer.Exit(1) from None

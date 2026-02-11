@@ -534,6 +534,29 @@ class TestJSONSourceParseErrors:
         assert results[0].row == {"id": 1}
         assert results[1].row == {"id": 3}
 
+    def test_jsonl_utf16_records_load_without_decode_quarantine(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """UTF-16 JSONL should parse as valid rows (no raw-byte line splitting)."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "utf16-data.jsonl"
+        jsonl_file.write_text('{"id": 1, "name": "alice"}\n{"id": 2, "name": "bob"}\n', encoding="utf-16")
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "encoding": "utf-16",
+                "on_validation_failure": "quarantine",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        results = list(source.load(ctx))
+        assert len(results) == 2
+        assert all(not row.is_quarantined for row in results)
+        assert results[0].row == {"id": 1, "name": "alice"}
+        assert results[1].row == {"id": 2, "name": "bob"}
+
     def test_jsonl_quarantined_row_contains_raw_line_data(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Quarantined parse error should contain the raw line for audit."""
         from elspeth.plugins.sources.json_source import JSONSource

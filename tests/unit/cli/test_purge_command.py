@@ -2,9 +2,11 @@
 
 from pathlib import Path
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
-from elspeth.cli import app
+from elspeth.cli import _validate_existing_sqlite_db_url, app
 
 runner = CliRunner()
 
@@ -65,3 +67,27 @@ class TestPurgeCommandDatabaseResolution:
         assert "Using database from settings.yaml: sqlite:///./state/audit.db" in result.output
         assert "No payloads older than" in result.output
         assert existing_db.exists()
+
+
+class TestPurgeSqliteUriValidation:
+    """Tests for URI-style SQLite URL validation in purge preflight."""
+
+    def test_accepts_existing_file_uri_database(self, tmp_path: Path) -> None:
+        """sqlite:///file:/abs/path.db?uri=true should pass when file exists."""
+        db_path = tmp_path / "audit.db"
+        db_path.touch()
+        url = f"sqlite:///file:{db_path}?uri=true"
+
+        _validate_existing_sqlite_db_url(url, source="settings.yaml")
+
+    def test_rejects_missing_file_uri_database(self, tmp_path: Path) -> None:
+        """sqlite:///file:/abs/path.db?uri=true should fail when file is missing."""
+        db_path = tmp_path / "missing.db"
+        url = f"sqlite:///file:{db_path}?uri=true"
+
+        with pytest.raises(typer.Exit):
+            _validate_existing_sqlite_db_url(url, source="settings.yaml")
+
+    def test_accepts_file_memory_uri_database(self) -> None:
+        """file::memory URI should not be treated as a filesystem path."""
+        _validate_existing_sqlite_db_url("sqlite:///file::memory:?cache=shared&uri=true", source="settings.yaml")
