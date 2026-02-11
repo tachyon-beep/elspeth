@@ -986,12 +986,11 @@ class RowProcessor:
                     # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
                     # for audit trail completeness (same as TransformExecutor error handling)
                     on_error = transform.on_error
-                    if on_error is None:
-                        raise RuntimeError(
-                            f"Transform '{transform.name}' raised retryable LLMClientError but has no "
-                            f"on_error configured. Either configure on_error or enable retry. "
-                            f"Error: {e}"
-                        ) from e
+                    # on_error is always set (required by TransformSettings) — Tier 1 invariant
+                    assert on_error is not None, (
+                        f"Transform '{transform.name}' has on_error=None — this should be "
+                        f"impossible since TransformSettings requires on_error"
+                    )
 
                     error_details: TransformErrorReason = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
                     ctx.record_transform_error(
@@ -1034,12 +1033,10 @@ class RowProcessor:
                 # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
                 # for audit trail completeness (same as TransformExecutor error handling)
                 on_error = transform.on_error
-                if on_error is None:
-                    raise RuntimeError(
-                        f"Transform '{transform.name}' raised retryable {type(e).__name__} but has no "
-                        f"on_error configured. Either configure on_error or enable retry. "
-                        f"Error: {e}"
-                    ) from e
+                # on_error is always set (required by TransformSettings) — Tier 1 invariant
+                assert on_error is not None, (
+                    f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
+                )
 
                 transient_error: TransformErrorReason = {"reason": "transient_error_no_retry", "error": str(e)}
                 ctx.record_transform_error(

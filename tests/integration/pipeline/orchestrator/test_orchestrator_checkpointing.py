@@ -232,6 +232,7 @@ class TestOrchestratorCheckpointing:
             name = "passthrough"
             input_schema = _TestSchema
             output_schema = _TestSchema
+            on_error = "discard"
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})

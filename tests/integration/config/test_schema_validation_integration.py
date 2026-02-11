@@ -61,6 +61,7 @@ def test_schema_validation_end_to_end(tmp_path: Path, plugin_manager: PluginMana
                 plugin="passthrough",
                 input="source_out",
                 on_success="output",
+                on_error="discard",
                 options={"schema": {"mode": "observed"}},
             ),
         ],

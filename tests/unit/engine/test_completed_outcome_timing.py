@@ -134,6 +134,8 @@ class TestCompletedOutcomeTimingContract:
             name = "passthrough"
             input_schema = RowSchema
             output_schema = RowSchema
+            on_error = "discard"
+            on_success = "default"
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
@@ -226,6 +228,8 @@ class TestCompletedOutcomeTimingContract:
             name = "passthrough"
             input_schema = RowSchema
             output_schema = RowSchema
+            on_error = "discard"
+            on_success = "default"
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
@@ -303,6 +307,8 @@ class TestCompletedOutcomeTimingContract:
             name = "passthrough"
             input_schema = RowSchema
             output_schema = RowSchema
+            on_error = "discard"
+            on_success = "default"
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})

@@ -237,7 +237,7 @@ def wire_transforms(
         input_connection = source_connection if index == 0 else f"conn_{index - 1}_{index}"
         on_success = final_sink if index == total - 1 else f"conn_{index}_{index + 1}"
         node_name = names[index] if names is not None else f"{transform.name}_{index}"
-        on_error = getattr(transform, "on_error", None)
+        on_error = getattr(transform, "on_error", None) or "discard"
 
         settings = TransformSettings(
             name=node_name,

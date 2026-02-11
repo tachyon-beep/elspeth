@@ -170,6 +170,27 @@ def test_post_fingerprints_auth_headers(http_client, mock_recorder):
 
 
 @respx.mock
+def test_post_fingerprints_compact_secret_headers(http_client, mock_recorder):
+    """Compact secret header names (apikey/authkey) should be fingerprinted."""
+    with patch.dict("os.environ", {"ELSPETH_FINGERPRINT_KEY": "test-key-12345", "ELSPETH_ALLOW_RAW_SECRETS": ""}):
+        respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
+
+        http_client.post(
+            "https://api.example.com/secure",
+            json={},
+            headers={"apikey": "api-secret", "authkey": "auth-secret"},
+        )
+
+        call_args = mock_recorder.record_call.call_args[1]
+        recorded_headers = call_args["request_data"]["headers"]
+
+        assert recorded_headers["apikey"].startswith("<fingerprint:")
+        assert recorded_headers["authkey"].startswith("<fingerprint:")
+        assert "api-secret" not in recorded_headers["apikey"]
+        assert "auth-secret" not in recorded_headers["authkey"]
+
+
+@respx.mock
 def test_post_telemetry_failure_doesnt_corrupt_audit(http_client, mock_recorder, mock_telemetry_emit):
     """Telemetry emission failure must not prevent Landscape recording."""
     # Make telemetry callback raise
@@ -376,6 +397,8 @@ def test_sensitive_header_detection(http_client):
     sensitive_exact = [
         "authorization",
         "Authorization",
+        "apikey",
+        "authkey",
         "X-API-Key",
         "api-key",
         "X-Auth-Token",
@@ -400,9 +423,11 @@ def test_sensitive_header_detection(http_client):
         "Secret-Key",  # segments "secret" and "key"
         "Bearer-Token",  # segment "token"
         "X-Session-Token",  # segment "token"
+        "X-Authorization",  # segment "authorization"
         "X-Secret-Value",  # segment "secret"
         "X-Password-Hash",  # segment "password"
         "X-Credential-Id",  # segment "credential"
+        "XAuthorization",  # compact x+authorization form
     ]
 
     for header in sensitive_word:

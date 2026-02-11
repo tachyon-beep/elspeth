@@ -1593,27 +1593,32 @@ class TestExecuteTransformNoRetry:
         assert result.status == "error"
         assert error_sink == "discard"
 
-    def test_retryable_llm_error_without_on_error_raises(self) -> None:
-        """Retryable LLMClientError without on_error raises RuntimeError."""
+    def test_retryable_llm_error_on_error_is_always_set(self) -> None:
+        """on_error is now required at config time — None no longer reaches runtime.
+
+        Previously on_error=None would raise RuntimeError. Now TransformSettings
+        requires on_error, so every transform has a valid error route. This test
+        documents the invariant by verifying 'discard' (minimum valid value) works.
+        """
         _, _, processor = self._setup()
-        transform = _make_mock_transform(node_id="t1", on_error=None)
+        transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={})
 
         llm_error = LLMClientError("rate limited", retryable=True)
-        with (
-            patch.object(
-                processor._transform_executor,
-                "execute_transform",
-                side_effect=llm_error,
-            ),
-            pytest.raises(RuntimeError, match="no on_error configured"),
+        with patch.object(
+            processor._transform_executor,
+            "execute_transform",
+            side_effect=llm_error,
         ):
-            processor._execute_transform_with_retry(
+            result, _out_token, error_sink = processor._execute_transform_with_retry(
                 transform=transform,
                 token=token,
                 ctx=ctx,
             )
+
+        assert result.status == "error"
+        assert error_sink == "discard"
 
     def test_non_retryable_llm_error_reraises(self) -> None:
         """Non-retryable LLMClientError is re-raised directly."""
@@ -1679,26 +1684,31 @@ class TestExecuteTransformNoRetry:
         assert result.status == "error"
         assert error_sink == "discard"
 
-    def test_transient_error_without_on_error_raises(self) -> None:
-        """Transient error without on_error raises RuntimeError."""
+    def test_transient_error_on_error_is_always_set(self) -> None:
+        """on_error is now required at config time — None no longer reaches runtime.
+
+        Previously on_error=None would raise RuntimeError on transient errors.
+        Now TransformSettings requires on_error, so every transform has a valid
+        error route. This test documents the invariant.
+        """
         _, _, processor = self._setup()
-        transform = _make_mock_transform(node_id="t1", on_error=None)
+        transform = _make_mock_transform(node_id="t1", on_error="discard")
         token = make_token_info(data={"value": 42})
         ctx = PluginContext(run_id="test-run", config={})
 
-        with (
-            patch.object(
-                processor._transform_executor,
-                "execute_transform",
-                side_effect=ConnectionError("connection reset"),
-            ),
-            pytest.raises(RuntimeError, match="no on_error configured"),
+        with patch.object(
+            processor._transform_executor,
+            "execute_transform",
+            side_effect=ConnectionError("connection reset"),
         ):
-            processor._execute_transform_with_retry(
+            result, _out_token, error_sink = processor._execute_transform_with_retry(
                 transform=transform,
                 token=token,
                 ctx=ctx,
             )
+
+        assert result.status == "error"
+        assert error_sink == "discard"
 
     def test_retryable_llm_error_with_named_error_sink_returns_error_sink(self) -> None:
         """Retryable LLMClientError with on_error pointing to real sink returns that sink."""

@@ -191,6 +191,15 @@ class TestCommentBypassPrevented:
         with pytest.raises(ValueError, match=r"(?i)read-only|not allowed|SELECT|forbidden"):
             _validate_readonly_sql("SELECT 1; /* harmless */ DROP TABLE runs")
 
+    def test_line_comment_marker_inside_string_does_not_hide_payload(self) -> None:
+        """'--' inside a quoted string must not suppress trailing statements."""
+        with pytest.raises(ValueError, match=r"(?i)semicolon|multiple|statement|forbidden"):
+            _validate_readonly_sql("SELECT '--'; UPDATE runs SET status = 'failed'")
+
+    def test_comment_marker_inside_string_remains_valid_for_single_select(self) -> None:
+        """Comment-like text inside string literals is valid in read-only SELECT."""
+        _validate_readonly_sql("SELECT '--not-a-comment' AS marker")
+
 
 class TestKeywordInIdentifierAllowed:
     """Keywords appearing as column/table names (word boundaries) should not

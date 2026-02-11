@@ -36,18 +36,25 @@ def _source_settings(cls: Any, /, **kwargs: Any) -> Any:
 
 
 def _transform_settings(cls: Any, /, **kwargs: Any) -> Any:
-    """Build TransformSettings from legacy call sites."""
+    """Build TransformSettings with explicit on_success and on_error.
+
+    Callers MUST provide on_success explicitly — no defaults are inferred.
+    on_error defaults to "discard" (a concrete valid value, not a sentinel).
+    """
     options = dict(kwargs.pop("options", {}) or {})
     on_success = kwargs.pop("on_success", None)
-    if on_success is None and "on_success" in options:
+    if "on_success" in options:
         on_success = options.pop("on_success")
-    on_error = kwargs.pop("on_error", None)
-    if on_error is None and "on_error" in options:
+    on_error = kwargs.pop("on_error", "discard")
+    if "on_error" in options:
         on_error = options.pop("on_error")
     name = kwargs.pop("name", None)
     plugin = kwargs.get("plugin", "transform")
     if name is None:
         name = f"{plugin}_{abs(hash((plugin, repr(sorted(options.items()))))) % 10_000}"
+    if on_success is None:
+        msg = f"_transform_settings: on_success is required for transform '{name}' — no defaults inferred"
+        raise ValueError(msg)
     input_connection = kwargs.pop("input", None)
     if input_connection is None:
         input_connection = f"{_AUTO_TRANSFORM_INPUT_PREFIX}{name}"
@@ -104,30 +111,15 @@ def _apply_explicit_success_routing(settings: Any) -> Any:
 
     updated_transforms = []
     previous_connection = source_on_success
-    for index, transform in enumerate(transforms):
+    for _index, transform in enumerate(transforms):
         input_connection = transform.input
         if input_connection.startswith(_AUTO_TRANSFORM_INPUT_PREFIX):
             input_connection = previous_connection
 
-        if transform.on_success is not None:
-            on_success = transform.on_success
-        elif index < len(transforms) - 1:
-            on_success = transforms[index + 1].name
-        elif gates:
-            on_success = "gate_in_0"
-        elif aggregations:
-            on_success = "agg_in_0"
-        else:
-            on_success = sink_name
-
-        updated_transform = transform.model_copy(
-            update={
-                "input": input_connection,
-                "on_success": on_success,
-            }
-        )
+        # on_success is always explicit — no inference needed.
+        updated_transform = transform.model_copy(update={"input": input_connection})
         updated_transforms.append(updated_transform)
-        previous_connection = on_success
+        previous_connection = transform.on_success
 
     updated_aggregations: list[Any] = []
     for index, aggregation in enumerate(aggregations):
@@ -995,8 +987,20 @@ class TestExecutionGraphFromConfig:
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             transforms=[
-                _transform_settings(TransformSettings, plugin="passthrough", options={"schema": {"mode": "observed"}}),
-                _transform_settings(TransformSettings, plugin="field_mapper", options={"schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    on_success="to_field_mapper",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
             ],
         )
 
@@ -1026,39 +1030,19 @@ class TestExecutionGraphFromConfig:
         field_mapper_idx = next(i for i, n in enumerate(order) if "field_mapper" in n)
         assert passthrough_idx < field_mapper_idx
 
-    def test_terminal_transform_missing_on_success_raises(self, plugin_manager) -> None:
-        """Terminal transform must declare on_success (no test-time injection)."""
-        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+    def test_pydantic_rejects_missing_on_success_on_transform(self, plugin_manager) -> None:
+        """on_success is required on TransformSettings — omitting it is a Pydantic error."""
+        from pydantic import ValidationError
 
-        config = ElspethSettings(
-            source=_source_settings(
-                SourceSettings,
-                plugin="csv",
-                options={
-                    "path": "test.csv",
-                    "on_validation_failure": "discard",
-                    "on_success": "source_out",
-                    "schema": {"mode": "observed"},
-                },
-            ),
-            sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
-            },
-            transforms=[
-                _transform_settings(TransformSettings, plugin="passthrough", input="source_out", options={"schema": {"mode": "observed"}}),
-            ],
-        )
+        from elspeth.core.config import TransformSettings
 
-        plugins = instantiate_plugins_from_config_raw(config)
-        with pytest.raises(GraphValidationError, match=r"Dangling output connections"):
-            ExecutionGraph.from_plugin_instances(
-                source=plugins["source"],
-                source_settings=plugins["source_settings"],
-                transforms=plugins["transforms"],
-                sinks=plugins["sinks"],
-                aggregations=plugins["aggregations"],
-                gates=list(config.gates),
+        with pytest.raises(ValidationError, match="on_success"):
+            TransformSettings(
+                name="passthrough_0",
+                plugin="passthrough",
+                input="source_out",
+                on_error="discard",
+                options={"schema": {"mode": "observed"}},
             )
 
     def test_non_terminal_transform_with_on_success_builds_when_properly_wired(self, plugin_manager) -> None:
@@ -1274,6 +1258,7 @@ class TestExecutionGraphFromConfig:
                 _transform_settings(
                     TransformSettings,
                     plugin="passthrough",
+                    on_success="to_agg",
                     options={"schema": {"mode": "observed"}},
                 ),
             ],
@@ -1462,8 +1447,20 @@ class TestExecutionGraphFromConfig:
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             transforms=[
-                _transform_settings(TransformSettings, plugin="passthrough", options={"schema": {"mode": "observed"}}),
-                _transform_settings(TransformSettings, plugin="field_mapper", options={"schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    on_success="to_field_mapper",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
             ],
         )
 
@@ -1505,8 +1502,20 @@ class TestExecutionGraphFromConfig:
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             transforms=[
-                _transform_settings(TransformSettings, plugin="passthrough", options={"schema": {"mode": "observed"}}),
-                _transform_settings(TransformSettings, plugin="field_mapper", options={"schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    on_success="to_field_mapper",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
             ],
         )
 
@@ -1549,13 +1558,25 @@ class TestExecutionGraphFromConfig:
             ),
             transforms=[
                 _transform_settings(
-                    TransformSettings, name="passthrough_0", plugin="passthrough", options={"schema": {"mode": "observed"}}
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    on_success="pt0_out",
+                    options={"schema": {"mode": "observed"}},
                 ),
                 _transform_settings(
-                    TransformSettings, name="passthrough_1", plugin="passthrough", options={"schema": {"mode": "observed"}}
+                    TransformSettings,
+                    name="passthrough_1",
+                    plugin="passthrough",
+                    on_success="pt1_out",
+                    options={"schema": {"mode": "observed"}},
                 ),
                 _transform_settings(
-                    TransformSettings, name="field_mapper_0", plugin="field_mapper", options={"schema": {"mode": "observed"}}
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    on_success="to_gates",
+                    options={"schema": {"mode": "observed"}},
                 ),
             ],
             gates=[
@@ -2908,7 +2929,9 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             transforms=[
-                _transform_settings(TransformSettings, plugin="passthrough", options={"schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings, plugin="passthrough", on_success="to_gate", options={"schema": {"mode": "observed"}}
+                ),
             ],
             gates=[
                 _gate_settings(
@@ -3944,6 +3967,7 @@ transforms:
     plugin: passthrough
     input: source_out
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: fixed
@@ -4019,6 +4043,7 @@ transforms:
     plugin: passthrough
     input: step_a
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed
@@ -4298,6 +4323,7 @@ class TestDeterministicNodeIDs:
                 _transform_settings(
                     TransformSettings,
                     plugin="passthrough",
+                    on_success="out",
                     options={"schema": {"mode": "observed"}},
                 )
             ],
@@ -4413,6 +4439,7 @@ class TestDeterministicNodeIDs:
                 plugin="passthrough",
                 input="source_out",
                 on_success="out",
+                on_error="discard",
                 options={"schema": {"mode": "observed"}},
             )
 
@@ -4599,7 +4626,11 @@ class TestDivertEdges:
             ),
             transforms=[
                 _transform_settings(
-                    TransformSettings, plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}
+                    TransformSettings,
+                    plugin="passthrough",
+                    on_success="default",
+                    on_error="errors",
+                    options={"schema": {"mode": "observed"}},
                 ),
             ],
             sinks={
@@ -4637,7 +4668,11 @@ class TestDivertEdges:
             ),
             transforms=[
                 _transform_settings(
-                    TransformSettings, plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}
+                    TransformSettings,
+                    plugin="passthrough",
+                    on_success="default",
+                    on_error="errors",
+                    options={"schema": {"mode": "observed"}},
                 ),
             ],
             sinks={
@@ -4706,10 +4741,20 @@ class TestDivertEdges:
             ),
             transforms=[
                 _transform_settings(
-                    TransformSettings, name="pt_a", plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}
+                    TransformSettings,
+                    name="pt_a",
+                    plugin="passthrough",
+                    on_success="pt_a_out",
+                    on_error="errors",
+                    options={"schema": {"mode": "observed"}},
                 ),
                 _transform_settings(
-                    TransformSettings, name="pt_b", plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}
+                    TransformSettings,
+                    name="pt_b",
+                    plugin="passthrough",
+                    on_success="default",
+                    on_error="errors",
+                    options={"schema": {"mode": "observed"}},
                 ),
             ],
             sinks={

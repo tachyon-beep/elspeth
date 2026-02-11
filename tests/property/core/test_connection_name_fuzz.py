@@ -111,6 +111,8 @@ class TestConnectionNameRejection:
                 name="safe_transform",
                 plugin="passthrough",
                 input=name,
+                on_success="output",
+                on_error="discard",
                 options={"schema": {"mode": "observed"}},
             )
 
@@ -124,6 +126,7 @@ class TestConnectionNameRejection:
                 plugin="passthrough",
                 input="safe_input",
                 on_success=name,
+                on_error="discard",
                 options={"schema": {"mode": "observed"}},
             )
 
@@ -151,6 +154,8 @@ class TestConnectionNameRejection:
                 name="safe_transform",
                 plugin="passthrough",
                 input=name,
+                on_success="output",
+                on_error="discard",
                 options={"schema": {"mode": "observed"}},
             )
 
@@ -217,6 +222,7 @@ class TestConnectionNameRejection:
                         plugin="passthrough",
                         input="safe_out",
                         on_success=name if name else "fallback",
+                        on_error="discard",
                         options={"schema": {"mode": "observed"}},
                     ),
                 ],
@@ -269,6 +275,8 @@ class TestConnectionNameAcceptance:
             name="safe_transform",
             plugin="passthrough",
             input=name,
+            on_success="output",
+            on_error="discard",
             options={"schema": {"mode": "observed"}},
         )
         assert t.input == name
@@ -325,6 +333,7 @@ class TestConnectionNameRoundtrip:
                     plugin="passthrough",
                     input=name,
                     on_success="output",
+                    on_error="discard",
                     options={"schema": {"mode": "observed"}},
                 ),
             ],
@@ -378,6 +387,7 @@ class TestConnectionNameRoundtrip:
                     plugin="passthrough",
                     input=name,
                     on_success="output",
+                    on_error="discard",
                     options={"schema": {"mode": "observed"}},
                 ),
             ],

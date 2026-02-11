@@ -18,6 +18,8 @@ transforms:
 - name: passthrough_0
   plugin: passthrough
   input: source_out
+  on_success: passthrough_0
+  on_error: discard
   options:
     schema:
       mode: observed

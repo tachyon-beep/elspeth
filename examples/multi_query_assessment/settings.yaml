@@ -21,6 +21,7 @@ transforms:
   plugin: azure_multi_query_llm
   input: source_out
   on_success: results
+  on_error: quarantine
   options:
     deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
     endpoint: ${AZURE_OPENAI_ENDPOINT}
@@ -129,6 +130,12 @@ sinks:
     plugin: csv
     options:
       path: examples/multi_query_assessment/output/results.csv
+      schema:
+        mode: observed
+  quarantine:
+    plugin: json
+    options:
+      path: examples/multi_query_assessment/output/quarantine.json
       schema:
         mode: observed
 landscape:

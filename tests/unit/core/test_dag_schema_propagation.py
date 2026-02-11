@@ -94,6 +94,7 @@ class TestOutputSchemaConfigPropagation:
                 plugin=transform.name,
                 input="source_out",
                 on_success="output",
+                on_error="discard",
                 options={},
             ),
         )
@@ -130,6 +131,7 @@ class TestOutputSchemaConfigPropagation:
                 plugin=transform.name,
                 input="source_out",
                 on_success="output",
+                on_error="discard",
                 options={},
             ),
         )
@@ -539,6 +541,7 @@ class TestPassThroughNodesInheritComputedSchema:
                 plugin=transform.name,
                 input="source_out",
                 on_success="gate_in",
+                on_error="discard",
                 options={},
             ),
         )
@@ -586,6 +589,7 @@ class TestPassThroughNodesInheritComputedSchema:
                 plugin=transform.name,
                 input="source_out",
                 on_success="gate_in",
+                on_error="discard",
                 options={},
             ),
         )
@@ -629,6 +633,7 @@ class TestPassThroughNodesInheritComputedSchema:
                 plugin=transform.name,
                 input="source_out",
                 on_success="fork_in",
+                on_error="discard",
                 options={},
             ),
         )
@@ -687,6 +692,7 @@ class TestPassThroughNodesInheritComputedSchema:
                 plugin=transform.name,
                 input="source_out",
                 on_success="fork_in",
+                on_error="discard",
                 options={},
             ),
         )

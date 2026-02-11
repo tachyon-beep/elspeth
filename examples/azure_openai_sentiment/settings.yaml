@@ -14,6 +14,7 @@ transforms:
   plugin: azure_llm
   input: source_out
   on_success: output
+  on_error: quarantine
   options:
     deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
     endpoint: ${AZURE_OPENAI_ENDPOINT}
@@ -40,6 +41,12 @@ sinks:
     options:
       path: examples/azure_openai_sentiment/output/results.json
       format: jsonl
+      schema:
+        mode: observed
+  quarantine:
+    plugin: json
+    options:
+      path: examples/azure_openai_sentiment/output/quarantine.json
       schema:
         mode: observed
 landscape:

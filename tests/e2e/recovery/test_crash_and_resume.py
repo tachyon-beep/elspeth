@@ -170,6 +170,7 @@ class _DoublerTransform(BaseTransform):
     input_schema = _RowSchema
     output_schema = _RowSchema
     determinism = Determinism.DETERMINISTIC
+    on_error = "discard"
 
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})

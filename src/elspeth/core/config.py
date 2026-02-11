@@ -767,12 +767,10 @@ class TransformSettings(BaseModel):
     name: str = Field(description="Unique identifier for this transform (drives node IDs and audit records)")
     plugin: str = Field(description="Plugin name")
     input: str = Field(description="Named input connection (must match an upstream on_success value)")
-    on_success: str | None = Field(
-        default=None,
+    on_success: str = Field(
         description="Connection name or sink name for successfully processed rows",
     )
-    on_error: str | None = Field(
-        default=None,
+    on_error: str = Field(
         description="Sink name for rows that cannot be processed, or 'discard'",
     )
     options: dict[str, Any] = Field(
@@ -806,23 +804,19 @@ class TransformSettings(BaseModel):
 
     @field_validator("on_success")
     @classmethod
-    def validate_on_success(cls, v: str | None) -> str | None:
-        """Ensure on_success is not empty string."""
-        if v is not None and not v.strip():
-            raise ValueError("on_success must be a connection name, sink name, or omitted entirely")
-        if v is None:
-            return None
+    def validate_on_success(cls, v: str) -> str:
+        """Ensure on_success is a valid connection or sink name."""
+        if not v.strip():
+            raise ValueError("on_success must be a connection name or sink name")
         value = v.strip()
         return _validate_connection_or_sink_name(value, field_label="Transform on_success connection name")
 
     @field_validator("on_error")
     @classmethod
-    def validate_on_error(cls, v: str | None) -> str | None:
-        """Ensure on_error is not empty string."""
-        if v is not None and not v.strip():
-            raise ValueError("on_error must be a sink name, 'discard', or omitted entirely")
-        if v is None:
-            return None
+    def validate_on_error(cls, v: str) -> str:
+        """Ensure on_error is a valid sink name or 'discard'."""
+        if not v.strip():
+            raise ValueError("on_error must be a sink name or 'discard'")
         value = v.strip()
         if value == "discard":
             return value

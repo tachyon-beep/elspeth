@@ -17,7 +17,7 @@ class TestConnectionNameValidation:
         from elspeth.core.config import TransformSettings
 
         with pytest.raises(ValidationError, match="starts with '__'"):
-            TransformSettings(name="t0", plugin="passthrough", input="__internal__", options={})
+            TransformSettings(name="t0", plugin="passthrough", input="__internal__", on_success="output", on_error="discard", options={})
 
     def test_transform_on_success_rejects_dunder_prefix(self) -> None:
         from elspeth.core.config import TransformSettings
@@ -28,6 +28,7 @@ class TestConnectionNameValidation:
                 plugin="passthrough",
                 input="source_out",
                 on_success="__quarantine__",
+                on_error="discard",
                 options={},
             )
 
@@ -39,6 +40,7 @@ class TestConnectionNameValidation:
                 name="t0",
                 plugin="passthrough",
                 input="source_out",
+                on_success="output",
                 on_error="__error_0__",
                 options={},
             )
@@ -46,11 +48,12 @@ class TestConnectionNameValidation:
     def test_transform_on_error_rejects_empty_string(self) -> None:
         from elspeth.core.config import TransformSettings
 
-        with pytest.raises(ValidationError, match="on_error must be a sink name, 'discard', or omitted entirely"):
+        with pytest.raises(ValidationError, match="on_error must be a sink name or 'discard'"):
             TransformSettings(
                 name="t0",
                 plugin="passthrough",
                 input="source_out",
+                on_success="output",
                 on_error="",
                 options={},
             )
@@ -62,6 +65,7 @@ class TestConnectionNameValidation:
             name="t0",
             plugin="passthrough",
             input="source_out",
+            on_success="output",
             on_error="discard",
             options={},
         )
@@ -129,6 +133,8 @@ class TestConnectionNameValidation:
                 name="t" * 39,
                 plugin="passthrough",
                 input="source_out",
+                on_success="output",
+                on_error="discard",
                 options={},
             )
 

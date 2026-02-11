@@ -42,6 +42,7 @@ transforms:
   - name: passthrough_0
     input: source_out
     on_success: output
+    on_error: discard
     plugin: passthrough
     options:
       schema:
@@ -105,6 +106,7 @@ transforms:
   - name: passthrough_0
     input: source_out
     on_success: output
+    on_error: discard
     plugin: passthrough
     options:
       schema:

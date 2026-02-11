@@ -89,10 +89,15 @@ class TestValidateRouteDestinations:
 class TestValidateTransformErrorSinks:
     """Tests for validate_transform_error_sinks()."""
 
-    def test_no_on_error_passes(self) -> None:
-        """Transform with on_error=None is fine (no error routing)."""
-        transform = _make_transform(node_id="t-1", name="mapper", on_error=None)
-        validate_transform_error_sinks([transform], {"output"})
+    def test_discard_on_error_passes_with_no_sinks(self) -> None:
+        """Transform with on_error='discard' passes even with no sinks defined.
+
+        on_error is now required at config time (TransformSettings), so None
+        never reaches the validator. This test verifies 'discard' (the minimum
+        valid value) works regardless of available sinks.
+        """
+        transform = _make_transform(node_id="t-1", name="mapper", on_error="discard")
+        validate_transform_error_sinks([transform], set())
 
     def test_discard_passes(self) -> None:
         """on_error='discard' is a special value, not a sink."""

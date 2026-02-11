@@ -58,7 +58,9 @@ def test_unknown_transform_plugin_error():
             "on_success": "t0_in",
             "options": {"path": "test.csv", "schema": {"mode": "observed"}, "on_validation_failure": "discard"},
         },
-        "transforms": [{"plugin": "nonexistent_transform", "name": "t0", "input": "t0_in", "on_success": "out", "options": {}}],
+        "transforms": [
+            {"plugin": "nonexistent_transform", "name": "t0", "input": "t0_in", "on_success": "out", "on_error": "discard", "options": {}}
+        ],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["data: str"]}}}},
     }
 
@@ -446,6 +448,7 @@ transforms:
     name: t0
     input: t0_in
     on_success: output
+    on_error: discard
     options:
       schema: {mode: observed}  # Dynamic transform
 

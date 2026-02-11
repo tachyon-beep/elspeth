@@ -148,9 +148,8 @@ class TransformProtocol(Protocol):
         - close(): Called at pipeline completion for cleanup
 
     Error Routing (WP-11.99b):
-        Transforms that can return TransformResult.error() must set on_error
-        to specify where errored rows go. If on_error is None and the transform
-        returns an error, the executor raises RuntimeError.
+        All transforms must have on_error set (required by TransformSettings).
+        on_error specifies where errored rows go: a sink name or "discard".
 
     Example:
         class EnrichTransform:
@@ -195,12 +194,14 @@ class TransformProtocol(Protocol):
 
     # Error routing configuration (WP-11.99b)
     # Injected by cli_helpers.py bridge from TransformSettings.on_error.
-    # None means: transform doesn't return errors, OR errors are bugs.
+    # Always non-None at runtime (TransformSettings requires on_error).
+    # Protocol retains str | None because injection happens post-construction.
     on_error: str | None
 
     # Success routing configuration (Phase 3: lifted from options to settings)
     # Injected by cli_helpers.py bridge from TransformSettings.on_success.
-    # None means: non-terminal (more transforms follow in the pipeline).
+    # Always non-None at runtime (TransformSettings requires on_success).
+    # Protocol retains str | None because injection happens post-construction.
     on_success: str | None
 
     def __init__(self, config: dict[str, Any]) -> None:

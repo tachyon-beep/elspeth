@@ -66,6 +66,7 @@ transforms:
   plugin: field_mapper
   input: screened
   on_success: fields
+  on_error: discard
   options:
     mapping:
       id: application_id
@@ -84,6 +85,7 @@ transforms:
   plugin: truncate
   input: fields
   on_success: trimmed
+  on_error: discard
   options:
     fields:
       notes: 40

@@ -75,6 +75,7 @@ class TestDeaggregationPipeline:
                     "plugin": "json_explode",
                     "input": "explode_input",
                     "on_success": "output",
+                    "on_error": "discard",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",
@@ -206,6 +207,7 @@ class TestDeaggregationAuditTrail:
                     "plugin": "json_explode",
                     "input": "explode_input",
                     "on_success": "output",
+                    "on_error": "discard",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",
@@ -374,6 +376,7 @@ class TestSourceSchemaValidation:
                     "plugin": "json_explode",
                     "input": "explode_input",
                     "on_success": "output",
+                    "on_error": "discard",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",

@@ -11,6 +11,7 @@ import base64
 import json
 import math
 import os
+import re
 import time
 from datetime import UTC, datetime
 from json import JSONDecodeError
@@ -172,12 +173,15 @@ class AuditedHTTPClient(AuditedClientBase):
     )
 
     # Words that indicate sensitive content when they appear as complete
-    # dash-delimited segments in header names.
+    # delimiter-separated segments in header names.
     # e.g. "X-Auth-Token" splits to {"x","auth","token"} → matches "auth","token"
     # but "X-Author" splits to {"x","author"} → no match (avoids false positives)
     _SENSITIVE_HEADER_WORDS = frozenset(
         {
             "auth",
+            "authkey",
+            "apikey",
+            "authorization",
             "key",
             "secret",
             "token",
@@ -189,8 +193,10 @@ class AuditedHTTPClient(AuditedClientBase):
     def _is_sensitive_header(self, header_name: str) -> bool:
         """Check if a header name indicates sensitive content.
 
-        Uses dash-delimited word matching to avoid false positives from
-        substring matching (e.g. "key" in "monkey", "auth" in "author").
+        Uses delimiter-separated word matching to avoid false positives from
+        broad substring matching (e.g. "key" in "monkey", "auth" in "author"),
+        while still catching common compact forms like ``apikey`` and
+        ``authkey``.
 
         Args:
             header_name: Header name to check
@@ -201,8 +207,10 @@ class AuditedHTTPClient(AuditedClientBase):
         lower_name = header_name.lower()
         if lower_name in self._SENSITIVE_HEADERS_EXACT:
             return True
-        segments = lower_name.split("-")
-        return any(seg in self._SENSITIVE_HEADER_WORDS for seg in segments)
+        segments = [seg for seg in re.split(r"[^a-z0-9]+", lower_name) if seg]
+        if any(seg in self._SENSITIVE_HEADER_WORDS for seg in segments):
+            return True
+        return lower_name.startswith("x") and lower_name[1:] in self._SENSITIVE_HEADER_WORDS
 
     def _filter_request_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """Fingerprint sensitive request headers for audit recording.

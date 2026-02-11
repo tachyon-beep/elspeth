@@ -294,9 +294,11 @@ class TestResumeComprehensive:
 
         # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
         strict_schema = {"mode": "fixed", "fields": ["id: int", "value: str"]}
+        passthrough = PassThrough({"schema": strict_schema})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
-            transforms=[PassThrough({"schema": strict_schema})],
+            transforms=[passthrough],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
@@ -400,9 +402,11 @@ class TestResumeComprehensive:
 
         # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
         strict_schema = {"mode": "fixed", "fields": ["id: int", "value: str"]}
+        passthrough = PassThrough({"schema": strict_schema})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
-            transforms=[PassThrough({"schema": strict_schema})],
+            transforms=[passthrough],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
@@ -602,9 +606,11 @@ class TestResumeComprehensive:
         # Use CSVSink with strict schema matching the data: {"id": int, "timestamp": datetime}
         # CSVSink stringifies datetime values automatically
         strict_schema = {"mode": "fixed", "fields": ["id: int", "timestamp: str"]}
+        passthrough = PassThrough({"schema": strict_schema})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
-            transforms=[PassThrough({"schema": strict_schema})],
+            transforms=[passthrough],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
@@ -804,9 +810,11 @@ class TestResumeComprehensive:
         # Use CSVSink with strict schema matching the data: {"id": int, "amount": Decimal}
         # CSVSink stringifies Decimal values automatically
         strict_schema = {"mode": "fixed", "fields": ["id: int", "amount: str"]}
+        passthrough = PassThrough({"schema": strict_schema})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
-            transforms=[PassThrough({"schema": strict_schema})],
+            transforms=[passthrough],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
@@ -999,9 +1007,11 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        passthrough = PassThrough({"schema": {"mode": "observed"}})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
-            transforms=[PassThrough({"schema": {"mode": "observed"}})],
+            transforms=[passthrough],
             sinks={
                 "default": JSONSink(
                     {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
@@ -1197,9 +1207,11 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        passthrough = PassThrough({"schema": {"mode": "observed"}})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
-            transforms=[PassThrough({"schema": {"mode": "observed"}})],
+            transforms=[passthrough],
             sinks={
                 "default": JSONSink(
                     {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
@@ -1375,9 +1387,11 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        passthrough = PassThrough({"schema": {"mode": "observed"}})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),
-            transforms=[PassThrough({"schema": {"mode": "observed"}})],
+            transforms=[passthrough],
             sinks={"default": JSONSink({"path": "/tmp/dummy.json", "schema": {"mode": "observed"}, "mode": "write", "format": "jsonl"})},
         )
 

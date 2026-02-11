@@ -26,6 +26,8 @@ def test_transform_input_rejects_reserved_continue() -> None:
             name="t1",
             plugin="passthrough",
             input="continue",
+            on_success="output",
+            on_error="discard",
         )
 
 
@@ -35,6 +37,8 @@ def test_transform_input_rejects_reserved_fork() -> None:
             name="t1",
             plugin="passthrough",
             input="fork",
+            on_success="output",
+            on_error="discard",
         )
 
 
@@ -45,6 +49,7 @@ def test_transform_on_success_rejects_reserved_continue() -> None:
             plugin="passthrough",
             input="in_conn",
             on_success="continue",
+            on_error="discard",
         )
 
 

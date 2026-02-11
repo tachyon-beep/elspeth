@@ -66,13 +66,14 @@ def _observed_sink(**kwargs: Any) -> SinkSettings:
     return SinkSettings(**defaults)
 
 
-def _observed_transform(name: str, *, input: str, on_success: str | None = None, **kwargs: Any) -> TransformSettings:
+def _observed_transform(name: str, *, input: str, on_success: str = "output", **kwargs: Any) -> TransformSettings:
     """Minimal transform settings with observed schema."""
     return TransformSettings(
         name=name,
         plugin="passthrough",
         input=input,
         on_success=on_success,
+        on_error="discard",
         options={"schema": {"mode": "observed"}, **kwargs.get("options", {})},
     )
 

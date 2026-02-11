@@ -180,6 +180,8 @@ class TestWiredTransformIntegrity:
                     name="t0",
                     plugin="expected_plugin",
                     input="source_out",
+                    on_success="output",
+                    on_error="discard",
                     options={},
                 ),
             )

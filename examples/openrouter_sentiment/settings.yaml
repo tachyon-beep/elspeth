@@ -14,6 +14,7 @@ transforms:
   plugin: openrouter_llm
   input: source_out
   on_success: output
+  on_error: quarantine
   options:
     api_key: ${OPENROUTER_API_KEY}
     model: openai/gpt-4o-mini
@@ -42,5 +43,11 @@ sinks:
       schema:
         mode: observed
       format: jsonl
+  quarantine:
+    plugin: json
+    options:
+      path: examples/openrouter_sentiment/output/quarantine.json
+      schema:
+        mode: observed
 landscape:
   url: sqlite:///examples/openrouter_sentiment/runs/audit.db

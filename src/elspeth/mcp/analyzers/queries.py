@@ -517,14 +517,143 @@ def _strip_sql_comments(sql: str) -> str:
     """Strip SQL comments (block and line) from a query string.
 
     Removes ``/* ... */`` block comments and ``-- ...`` line comments.
-    Does NOT handle comments inside string literals, but the MCP analysis
-    server should never receive queries that rely on that distinction.
+    Handles string literals so comment markers inside quotes are preserved.
     """
-    # Remove block comments (non-greedy to handle multiple)
-    result = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
-    # Remove line comments
-    result = re.sub(r"--[^\n]*", " ", result)
-    return result
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    in_single_quote = False
+    in_double_quote = False
+    in_line_comment = False
+    in_block_comment = False
+
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+                out.append(ch)
+            i += 1
+            continue
+
+        if in_block_comment:
+            if ch == "*" and nxt == "/":
+                in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+
+        if in_single_quote:
+            out.append(ch)
+            if ch == "'":
+                # SQL escape for single quote inside single-quoted literal.
+                if nxt == "'":
+                    out.append(nxt)
+                    i += 2
+                    continue
+                in_single_quote = False
+            i += 1
+            continue
+
+        if in_double_quote:
+            out.append(ch)
+            if ch == '"':
+                # SQL escape for double quote inside quoted identifier.
+                if nxt == '"':
+                    out.append(nxt)
+                    i += 2
+                    continue
+                in_double_quote = False
+            i += 1
+            continue
+
+        if ch == "-" and nxt == "-":
+            in_line_comment = True
+            out.append(" ")
+            i += 2
+            continue
+
+        if ch == "/" and nxt == "*":
+            in_block_comment = True
+            out.append(" ")
+            i += 2
+            continue
+
+        if ch == "'":
+            in_single_quote = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double_quote = True
+            out.append(ch)
+            i += 1
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
+def _strip_sql_string_literals(sql: str) -> str:
+    """Strip string and quoted-identifier contents from SQL.
+
+    Keeps quote delimiters while dropping inner content so keyword checks
+    do not flag words that only appear inside quoted values/identifiers.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    in_single_quote = False
+    in_double_quote = False
+
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        if in_single_quote:
+            if ch == "'":
+                out.append(ch)
+                if nxt == "'":
+                    out.append(nxt)
+                    i += 2
+                    continue
+                in_single_quote = False
+            i += 1
+            continue
+
+        if in_double_quote:
+            if ch == '"':
+                out.append(ch)
+                if nxt == '"':
+                    out.append(nxt)
+                    i += 2
+                    continue
+                in_double_quote = False
+            i += 1
+            continue
+
+        if ch == "'":
+            in_single_quote = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double_quote = True
+            out.append(ch)
+            i += 1
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
 
 
 # Keyword blocklist: statements that are NOT read-only.
@@ -601,8 +730,7 @@ def _validate_readonly_sql(sql: str) -> None:
     # Step 4: Reject forbidden keywords (word-boundary match).
     # Strip string literal contents first so that keywords inside quotes
     # (e.g., WHERE status = 'INSERT') don't trigger false positives.
-    upper_stripped = re.sub(r"'[^']*'", "''", upper)
-    upper_stripped = re.sub(r'"[^"]*"', '""', upper_stripped)
+    upper_stripped = _strip_sql_string_literals(upper)
     for keyword in _FORBIDDEN_KEYWORDS:
         if re.search(rf"\b{keyword}\b", upper_stripped):
             raise ValueError(f"Query contains forbidden keyword: {keyword}")

@@ -248,6 +248,8 @@ class TestTransformSettings:
             name="test_transform",
             plugin="field_mapper",
             input="source_out",
+            on_success="output",
+            on_error="discard",
             options={"field": "confidence", "min": 0.8},
         )
         assert rp.plugin == "field_mapper"
@@ -257,7 +259,7 @@ class TestTransformSettings:
         """TransformSettings defaults: options is empty dict."""
         from elspeth.core.config import TransformSettings
 
-        rp = TransformSettings(name="test_transform", plugin="passthrough", input="source_out")
+        rp = TransformSettings(name="test_transform", plugin="passthrough", input="source_out", on_success="output", on_error="discard")
         assert rp.plugin == "passthrough"
         assert rp.options == {}
 
@@ -919,6 +921,8 @@ class TestResolveConfig:
                     "name": "t1",
                     "plugin": "field_mapper",
                     "input": "source_out",
+                    "on_success": "output",
+                    "on_error": "discard",
                     "options": {"mapping": {"a": "b"}},
                 },
             ],
@@ -2127,6 +2131,8 @@ transforms:
   - name: t1
     plugin: llm_transform
     input: source_out
+    on_success: output
+    on_error: discard
     options:
       api_key: openai-key-123
       model: gpt-4
@@ -2159,6 +2165,8 @@ transforms:
   - name: t1
     plugin: llm_transform
     input: source_out
+    on_success: output
+    on_error: discard
     options:
       api_key: openai-key-123
       model: gpt-4
@@ -3146,6 +3154,8 @@ transforms:
   - name: t1
     plugin: openrouter_llm
     input: source_out
+    on_success: output
+    on_error: discard
     options:
       model: test
       template_file: prompts/test.j2

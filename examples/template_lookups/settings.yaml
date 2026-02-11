@@ -22,11 +22,18 @@ sinks:
       schema:
         mode: observed
       format: jsonl
+  quarantine:
+    plugin: json
+    options:
+      path: examples/template_lookups/output/quarantine.json
+      schema:
+        mode: observed
 transforms:
 - name: openrouter_llm_0
   plugin: openrouter_llm
   input: source_out
   on_success: output
+  on_error: quarantine
   options:
     model: anthropic/claude-3-haiku
     api_key: ${OPENROUTER_API_KEY}

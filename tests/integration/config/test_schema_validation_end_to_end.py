@@ -41,6 +41,7 @@ transforms:
     plugin: passthrough
     input: source_out
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: fixed
@@ -92,6 +93,7 @@ transforms:
     plugin: passthrough
     input: source_out
     on_success: t0_out
+    on_error: discard
     options:
       schema:
         mode: fixed
@@ -101,6 +103,7 @@ transforms:
     plugin: passthrough
     input: t0_out
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: fixed
@@ -209,6 +212,7 @@ transforms:
     plugin: passthrough
     input: source_out
     on_success: output
+    on_error: discard
     options:
       schema: {mode: observed}
 
@@ -389,6 +393,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
                 "plugin": "passthrough",
                 "input": "source_out",
                 "on_success": "out",
+                "on_error": "discard",
                 "options": {
                     "schema": {"mode": "fixed", "fields": ["id: int", "email: str"]},  # Requires 'email'!
                 },

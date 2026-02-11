@@ -14,6 +14,7 @@ transforms:
   plugin: json_explode
   input: source_out
   on_success: output
+  on_error: discard
   options:
     array_field: items
     output_field: item

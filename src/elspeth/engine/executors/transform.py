@@ -378,13 +378,10 @@ class TransformExecutor:
 
             # Handle error routing - on_error is part of TransformProtocol
             on_error = transform.on_error
-
-            if on_error is None:
-                raise RuntimeError(
-                    f"Transform '{transform.name}' returned error but has no on_error "
-                    f"configured. Either configure on_error or fix the transform to not "
-                    f"return errors for this input. Error: {result.reason}"
-                )
+            # on_error is always set (required by TransformSettings) — Tier 1 invariant
+            assert on_error is not None, (
+                f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
+            )
 
             # Set error_sink so caller knows where the error was routed
             error_sink = on_error

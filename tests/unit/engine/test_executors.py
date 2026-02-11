@@ -15,7 +15,7 @@ Error Routing Decision Tree (exd audit)
 Every error follows one of these paths through the executor layer:
 
 Transform Error (TransformResult.error):
-  on_error=None        → RuntimeError CRASH (plugin bug: no error route configured)
+  on_error is REQUIRED  (enforced by TransformSettings at config time — None no longer possible)
   on_error="discard"   → node_state=FAILED + transform_error recorded (NO routing_event)
                          → token outcome: QUARANTINED (recorded at sink write time)
   on_error=<sink_name> → node_state=FAILED + transform_error + DIVERT routing_event
@@ -451,19 +451,26 @@ class TestTransformExecutor:
 
         assert error_sink == "discard"
 
-    def test_error_result_without_on_error_raises_runtime_error(self) -> None:
-        """Error result with on_error=None raises RuntimeError."""
+    def test_on_error_is_always_set_invariant(self) -> None:
+        """on_error is now required at config time — transforms always have it set.
+
+        Previously on_error=None would raise RuntimeError at execution time.
+        Now TransformSettings requires on_error, so the None case cannot occur
+        in production. This test documents the invariant.
+        """
+        # Every transform constructed via TransformSettings will have on_error set.
+        # Verify a transform with on_error="discard" works (the minimum valid value).
         recorder = _make_recorder()
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
-        transform = _make_transform(on_error=None)
+        transform = _make_transform(on_error="discard")
         transform.process.return_value = TransformResult.error(
             reason={"reason": "test_error"},
         )
         token = _make_token()
         ctx = _make_ctx()
 
-        with pytest.raises(RuntimeError, match="no on_error"):
-            executor.execute_transform(transform, token, ctx)
+        _, _, error_sink = executor.execute_transform(transform, token, ctx)
+        assert error_sink == "discard"
 
     def test_error_path_records_failed_state(self) -> None:
         """Error result records FAILED node_state."""

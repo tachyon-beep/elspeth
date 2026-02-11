@@ -12,6 +12,7 @@ transforms:
   plugin: openrouter_multi_query_llm
   input: source_out
   on_success: output
+  on_error: quarantine
   options:
     model: anthropic/claude-3-5-sonnet
     api_key: ${OPENROUTER_API_KEY}
@@ -105,6 +106,12 @@ sinks:
     plugin: csv
     options:
       path: examples/schema_contracts_llm_assessment/output/results.csv
+      schema:
+        mode: observed
+  quarantine:
+    plugin: json
+    options:
+      path: examples/schema_contracts_llm_assessment/output/quarantine.json
       schema:
         mode: observed
 landscape:

@@ -27,6 +27,7 @@ transforms:
     plugin: passthrough
     input: pass1
     on_success: output
+    on_error: discard
     options:
       schema:
         mode: observed

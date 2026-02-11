@@ -32,6 +32,7 @@ transforms:
   plugin: passthrough
   input: validated
   on_success: enriched
+  on_error: discard
   options:
     schema:
       mode: observed

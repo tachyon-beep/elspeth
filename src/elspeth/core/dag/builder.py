@@ -404,9 +404,7 @@ def build_execution_graph(
     for wired in transforms:
         tid = transform_ids_by_name[wired.settings.name]
         on_success = wired.settings.on_success
-        if on_success is None:
-            register_producer(wired.settings.name, tid, "continue", f"transform '{wired.settings.name}'")
-        elif SinkName(on_success) not in sink_ids:
+        if SinkName(on_success) not in sink_ids:
             register_producer(on_success, tid, "continue", f"transform '{wired.settings.name}'")
 
     for agg_name, (_transform, agg_settings) in aggregations.items():
@@ -544,8 +542,6 @@ def build_execution_graph(
     # ===== TERMINAL ROUTING (on_success -> sinks) =====
     for wired in transforms:
         on_success = wired.settings.on_success
-        if on_success is None:
-            continue
         tid = transform_ids_by_name[wired.settings.name]
         if SinkName(on_success) in sink_ids:
             graph.add_edge(tid, sink_ids[SinkName(on_success)], label="on_success", mode=RoutingMode.MOVE)
@@ -557,17 +553,17 @@ def build_execution_graph(
             )
 
     for agg_name, (_transform, agg_settings) in aggregations.items():
-        on_success = agg_settings.on_success
-        if on_success is None:
+        agg_on_success = agg_settings.on_success
+        if agg_on_success is None:
             continue
         aid = aggregation_ids[AggregationName(agg_name)]
-        if SinkName(on_success) in sink_ids:
-            graph.add_edge(aid, sink_ids[SinkName(on_success)], label="on_success", mode=RoutingMode.MOVE)
-        elif on_success not in consumers:
-            suggestions = _suggest_similar(on_success, sorted(consumers.keys()))
+        if SinkName(agg_on_success) in sink_ids:
+            graph.add_edge(aid, sink_ids[SinkName(agg_on_success)], label="on_success", mode=RoutingMode.MOVE)
+        elif agg_on_success not in consumers:
+            suggestions = _suggest_similar(agg_on_success, sorted(consumers.keys()))
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(
-                f"Aggregation '{agg_settings.name}' on_success '{on_success}' is neither a sink nor a known connection.{hint}"
+                f"Aggregation '{agg_settings.name}' on_success '{agg_on_success}' is neither a sink nor a known connection.{hint}"
             )
 
     if coalesce_settings:
@@ -642,7 +638,7 @@ def build_execution_graph(
     # Transform error edges
     for wired in transforms:
         on_error = wired.settings.on_error
-        if on_error is not None and on_error != "discard":
+        if on_error != "discard":
             if SinkName(on_error) not in sink_ids:
                 suggestions = _suggest_similar(on_error, sorted(str(s) for s in sink_ids))
                 hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""

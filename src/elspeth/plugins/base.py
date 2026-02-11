@@ -88,12 +88,16 @@ class BaseTransform(ABC):
 
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig override this from config.
-    # None means: transform doesn't return errors, OR errors are bugs.
+    # Always non-None at runtime (TransformSettings requires on_error).
+    # Base class default is None because injection happens post-construction
+    # via cli_helpers bridge (set from TransformSettings.on_error).
     on_error: str | None = None
 
     # Success routing configuration
     # Terminal transforms set this to the output sink name.
-    # None means: non-terminal (more transforms follow in the pipeline).
+    # Always non-None at runtime (TransformSettings requires on_success).
+    # Base class default is None because injection happens post-construction
+    # via cli_helpers bridge (set from TransformSettings.on_success).
     on_success: str | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:

@@ -53,6 +53,7 @@ transforms:
   plugin: truncate
   input: clean
   on_success: trimmed
+  on_error: discard
   options:
     fields:
       notes: 50
