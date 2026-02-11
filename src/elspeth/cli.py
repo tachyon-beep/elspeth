@@ -476,7 +476,7 @@ def run(
 
     # Execute pipeline with pre-instantiated plugins
     try:
-        _execute_pipeline_with_instances(
+        execution_result = _execute_pipeline_with_instances(
             config,
             graph,
             plugins,
@@ -503,6 +503,12 @@ def run(
         else:
             typer.echo(f"Error during pipeline execution: {e}", err=True)
         raise typer.Exit(1) from None
+
+    # Emit final execution summary in JSON mode for machine consumption
+    if output_format == "json":
+        import json
+
+        typer.echo(json.dumps({"event": "execution_result", **execution_result}))
 
 
 @app.command()

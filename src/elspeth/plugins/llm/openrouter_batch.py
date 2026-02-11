@@ -16,9 +16,10 @@ Benefits:
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from threading import Lock
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import Field
@@ -28,6 +29,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -39,6 +41,9 @@ from elspeth.plugins.llm.tracing import (
 )
 from elspeth.plugins.pooling import is_capacity_error
 from elspeth.plugins.schema_factory import create_schema_from_config
+
+if TYPE_CHECKING:
+    from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
 class OpenRouterBatchConfig(LLMConfig):
@@ -180,16 +185,35 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             required_fields=schema_config.required_fields,
         )
 
+        # Recorder and telemetry references (set in on_start)
+        self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
+        self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
+
+        # HTTP client cache — one per state_id for call_index uniqueness.
+        # Each state_id gets its own AuditedHTTPClient with monotonically
+        # increasing call indices, ensuring UNIQUE(state_id, call_index).
+        self._http_clients: dict[str, AuditedHTTPClient] = {}
+        self._http_clients_lock = Lock()
+
         # Tier 2: Plugin-internal tracing (Langfuse only)
         self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
         self._tracing_active: bool = False
         self._langfuse_client: Any = None  # Langfuse client if configured
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Initialize tracing if configured.
+        """Capture recorder, telemetry, rate limit context, and initialize tracing.
 
-        Called by the engine at pipeline start. Initializes Tier 2 tracing.
+        Called by the engine at pipeline start. Captures the landscape
+        recorder, run_id, telemetry callback, and rate limiter for use in
+        worker threads. Also initializes Tier 2 tracing if configured.
         """
+        self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
+        self._limiter = ctx.rate_limit_registry.get_limiter("openrouter") if ctx.rate_limit_registry is not None else None
+
         if self._tracing_config is not None:
             self._setup_tracing()
 
@@ -423,20 +447,12 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 f"empty buffers. This indicates a bug in the engine or test setup."
             )
 
-        # Process rows in parallel using a SHARED httpx.Client
-        # httpx.Client is thread-safe and reusing it avoids connection overhead
+        # Process rows in parallel using AuditedHTTPClient (one per state_id).
+        # Each worker thread gets a cached client via _get_http_client().
         results: dict[int, dict[str, Any] | Exception] = {}
 
-        with (
-            httpx.Client(
-                base_url=self._base_url,
-                timeout=self._timeout,
-                headers=self._request_headers,
-            ) as client,
-            ThreadPoolExecutor(max_workers=self._pool_size) as executor,
-        ):
-            # Submit all rows with shared client
-            futures = {executor.submit(self._process_single_row, idx, row.to_dict(), ctx, client): idx for idx, row in enumerate(rows)}
+        with ThreadPoolExecutor(max_workers=self._pool_size) as executor:
+            futures = {executor.submit(self._process_single_row, idx, row.to_dict(), ctx): idx for idx, row in enumerate(rows)}
 
             # Collect results - catch only transport exceptions, let plugin bugs crash.
             # _process_single_row already handles HTTPStatusError and RequestError
@@ -522,23 +538,49 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
         )
 
+    def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
+        """Get or create AuditedHTTPClient for a state_id.
+
+        Clients are cached to preserve call_index across retries within the
+        same batch. This ensures uniqueness of (state_id, call_index).
+
+        Thread-safe: multiple workers can call this concurrently.
+        """
+        with self._http_clients_lock:
+            if state_id not in self._http_clients:
+                if self._recorder is None:
+                    raise RuntimeError("OpenRouter batch transform requires recorder. Ensure on_start was called.")
+                self._http_clients[state_id] = AuditedHTTPClient(
+                    recorder=self._recorder,
+                    state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
+                    timeout=self._timeout,
+                    base_url=self._base_url,
+                    headers=self._request_headers,
+                    limiter=self._limiter,
+                )
+            return self._http_clients[state_id]
+
     def _process_single_row(
         self,
         idx: int,
         row: dict[str, Any],
         ctx: PluginContext,
-        client: httpx.Client,
     ) -> dict[str, Any]:
         """Process a single row through OpenRouter API.
 
         Called by worker threads. Returns either the processed row dict
         or a dict with an "error" key.
 
+        Uses AuditedHTTPClient which automatically records HTTP calls to the
+        Landscape audit trail and emits telemetry events. Manual ctx.record_call()
+        is only used for pre-HTTP errors (template rendering).
+
         Args:
             idx: Row index in batch
             row: Row to process
             ctx: Plugin context
-            client: Shared httpx.Client (thread-safe) for making requests
 
         Returns:
             Processed row dict or {"error": {...}} on failure
@@ -547,8 +589,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         try:
             rendered = self._template.render_with_metadata(row)
         except TemplateError as e:
-            # Record template error to audit trail - every decision must be traceable
-            # per CLAUDE.md auditability standard
+            # Record template error to audit trail — this happens before any HTTP
+            # call, so AuditedHTTPClient can't record it. Use ctx.record_call().
             ctx.record_call(
                 call_type=CallType.LLM,
                 status=CallStatus.ERROR,
@@ -581,43 +623,31 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         if self._max_tokens:
             request_body["max_tokens"] = self._max_tokens
 
-        # 3. Make API call (EXTERNAL BOUNDARY - wrap and audit)
-        # We need state_id to record the call - batch transforms should always have it
-        # (synthetic IDs would fail foreign key constraints in calls table)
+        # 3. Make API call via AuditedHTTPClient (automatically records to audit trail)
         state_id = ctx.state_id
         if state_id is None:
             return {"error": {"reason": "missing_state_id"}}
 
-        start = time.perf_counter()
+        http_client = self._get_http_client(state_id)
+
         try:
-            # Use the shared httpx.Client passed from _process_batch
-            # (httpx.Client is thread-safe, avoids per-row connection overhead)
-            response = client.post(
+            # AuditedHTTPClient.post() records the call to Landscape and emits
+            # telemetry automatically. It does NOT call raise_for_status() — we
+            # do that ourselves below to handle error responses per-row.
+            response = http_client.post(
                 "/chat/completions",
                 json=request_body,
                 headers={"Content-Type": "application/json"},
             )
             response.raise_for_status()
-            latency_ms = (time.perf_counter() - start) * 1000
 
         except httpx.HTTPStatusError as e:
-            latency_ms = (time.perf_counter() - start) * 1000
-            ctx.record_call(
-                call_type=CallType.LLM,
-                status=CallStatus.ERROR,
-                request_data={"row_index": idx, **request_body},
-                response_data=None,
-                error={"status_code": e.response.status_code, "error": str(e)},
-                latency_ms=latency_ms,
-                provider="openrouter",
-            )
-            # Record error to Langfuse
+            # HTTP error already recorded by AuditedHTTPClient — just trace and return
             self._record_langfuse_trace(
                 idx=idx,
                 prompt=rendered.prompt,
                 response_content="",
                 model=self._model,
-                latency_ms=latency_ms,
                 error=f"HTTP {e.response.status_code}: {e}",
             )
             return {
@@ -629,23 +659,12 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 }
             }
         except httpx.RequestError as e:
-            latency_ms = (time.perf_counter() - start) * 1000
-            ctx.record_call(
-                call_type=CallType.LLM,
-                status=CallStatus.ERROR,
-                request_data={"row_index": idx, **request_body},
-                response_data=None,
-                error={"error": str(e), "error_type": type(e).__name__},
-                latency_ms=latency_ms,
-                provider="openrouter",
-            )
-            # Record error to Langfuse
+            # Network error already recorded by AuditedHTTPClient — just trace and return
             self._record_langfuse_trace(
                 idx=idx,
                 prompt=rendered.prompt,
                 response_content="",
                 model=self._model,
-                latency_ms=latency_ms,
                 error=f"Request error: {e}",
             )
             return {
@@ -660,15 +679,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         try:
             data = response.json()
         except (ValueError, TypeError) as e:
-            ctx.record_call(
-                call_type=CallType.LLM,
-                status=CallStatus.ERROR,
-                request_data={"row_index": idx, **request_body},
-                response_data=None,
-                error={"reason": "invalid_json", "error": str(e)},
-                latency_ms=latency_ms,
-                provider="openrouter",
-            )
             return {
                 "error": {
                     "reason": "invalid_json_response",
@@ -679,15 +689,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # 5. Validate response structure (EXTERNAL DATA - validate at boundary)
         if not isinstance(data, dict):
-            ctx.record_call(
-                call_type=CallType.LLM,
-                status=CallStatus.ERROR,
-                request_data={"row_index": idx, **request_body},
-                response_data=None,
-                error={"reason": "invalid_json_type", "actual": type(data).__name__},
-                latency_ms=latency_ms,
-                provider="openrouter",
-            )
             return {
                 "error": {
                     "reason": "invalid_json_type",
@@ -700,28 +701,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         try:
             choices = data["choices"]
             if not choices:
-                ctx.record_call(
-                    call_type=CallType.LLM,
-                    status=CallStatus.ERROR,
-                    request_data={"row_index": idx, **request_body},
-                    response_data=data,
-                    error={"reason": "empty_choices"},
-                    latency_ms=latency_ms,
-                    provider="openrouter",
-                )
                 return {"error": {"reason": "empty_choices", "response": data}}
 
             content = choices[0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:
-            ctx.record_call(
-                call_type=CallType.LLM,
-                status=CallStatus.ERROR,
-                request_data={"row_index": idx, **request_body},
-                response_data=data,
-                error={"reason": "malformed_response", "error": str(e)},
-                latency_ms=latency_ms,
-                provider="openrouter",
-            )
             return {
                 "error": {
                     "reason": "malformed_response",
@@ -730,39 +713,27 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 }
             }
 
-        # Record successful call
         # Note: "usage" and "model" are optional in OpenAI/OpenRouter API responses
         # (e.g., streaming responses may omit usage). The .get() here handles a valid
-        # API variation, not a bug - this is Tier 3 external data normalization.
+        # API variation, not a bug — this is Tier 3 external data normalization.
         usage = data.get("usage") or {}
         response_model = data.get("model", self._model)
-        ctx.record_call(
-            call_type=CallType.LLM,
-            status=CallStatus.SUCCESS,
-            request_data={"row_index": idx, **request_body},
-            response_data={"content": content, "usage": usage, "model": response_model},
-            latency_ms=latency_ms,
-            provider="openrouter",
-        )
 
-        # Record to Langfuse (per-call tracing - unlike Azure Batch, we control each call)
+        # Record to Langfuse (per-call tracing — unlike Azure Batch, we control each call)
         self._record_langfuse_trace(
             idx=idx,
             prompt=rendered.prompt,
             response_content=content,
             model=response_model,
             usage=usage,
-            latency_ms=latency_ms,
         )
 
         # 7. Build output row (OUR CODE - let exceptions crash)
-        # row is already a dict (converted by caller on line 442)
         output: dict[str, Any] = dict(row)
         output[self._response_field] = content
         output[f"{self._response_field}_usage"] = usage
         output[f"{self._response_field}_template_hash"] = rendered.template_hash
         output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
-        # Template source metadata - always present for audit (None = inline template)
         output[f"{self._response_field}_template_source"] = rendered.template_source
         output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
         output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
@@ -777,6 +748,13 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         if self._tracing_active:
             self._flush_tracing()
 
+        # Close and clear cached HTTP clients
+        with self._http_clients_lock:
+            for client in self._http_clients.values():
+                client.close()
+            self._http_clients.clear()
+
+        self._recorder = None
         self._langfuse_client = None
 
     def _flush_tracing(self) -> None:

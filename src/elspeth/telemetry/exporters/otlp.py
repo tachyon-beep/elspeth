@@ -71,9 +71,8 @@ class OTLPExporter:
         endpoint: OTLP endpoint URL (required). For gRPC, typically port 4317.
         headers: Optional dict of headers (e.g., Authorization)
         batch_size: Number of events to buffer before export (default: 100)
-        flush_interval_ms: Time-based flush interval in ms (default: 5000)
-            Note: Time-based flushing is not currently implemented.
-            Flushing occurs on batch_size threshold or explicit flush() call.
+
+    Flushing occurs on batch_size threshold or explicit flush() call.
 
     Example configuration:
         telemetry:
@@ -95,7 +94,6 @@ class OTLPExporter:
         self._endpoint: str | None = None
         self._headers: dict[str, str] = {}
         self._batch_size: int = 100
-        self._flush_interval_ms: int = 5000  # Documented but not implemented
         self._span_exporter: OTLPSpanExporter | None = None
         self._buffer: list[TelemetryEvent] = []
         self._configured: bool = False
@@ -113,7 +111,6 @@ class OTLPExporter:
                 - endpoint (required): OTLP gRPC endpoint URL
                 - headers (optional): Dict of header key-value pairs
                 - batch_size (optional): Buffer size before auto-flush (default: 100)
-                - flush_interval_ms (optional): Time-based flush (not yet implemented)
 
         Raises:
             TelemetryExporterError: If endpoint is missing or OpenTelemetry
@@ -128,7 +125,6 @@ class OTLPExporter:
         self._endpoint = config["endpoint"]
         self._headers = config.get("headers", {})
         self._batch_size = config.get("batch_size", 100)
-        self._flush_interval_ms = config.get("flush_interval_ms", 5000)
 
         # Validate batch_size is positive
         if self._batch_size < 1:
