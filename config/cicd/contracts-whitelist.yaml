@@ -123,7 +123,6 @@ allowed_dict_patterns:
   - "src/elspeth/cli.py:_execute_pipeline_with_instances:plugins"
   - "src/elspeth/cli.py:_execute_resume_with_instances:plugins"
   - "src/elspeth/cli.py:_load_raw_yaml:return"
-  - "src/elspeth/cli.py:_extract_secrets_config:raw_config"
 
   # Security - secrets loading from config (Tier 3 external config)
   - "src/elspeth/core/security/config_secrets.py:load_secrets_from_config:return (list)"
