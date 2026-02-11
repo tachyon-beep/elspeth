@@ -46,6 +46,11 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libsqlcipher-dev
+
       - name: Install dependencies
         run: |
           uv venv
@@ -112,6 +117,11 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: ${{ env.UV_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
         run: |
@@ -215,6 +225,11 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: ${{ env.UV_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
         run: |
