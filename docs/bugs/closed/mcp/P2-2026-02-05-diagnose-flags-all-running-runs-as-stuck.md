@@ -1,5 +1,17 @@
 # Bug Report: `diagnose()` Flags All Running Runs as “Stuck”
 
+**Status: RESOLVED ✅**
+
+## Status Update (2026-02-11)
+
+- Classification: **Resolved**
+- Verification summary:
+  - `diagnose()` now applies a one-hour UTC cutoff for `stuck_runs`.
+  - Recent runs in `running` status are no longer falsely flagged as stuck.
+- Current evidence:
+  - `src/elspeth/mcp/analyzers/diagnostics.py`
+  - `tests/unit/mcp/test_diagnostics.py`
+
 ## Summary
 
 - The `diagnose()` tool claims to detect runs “running for > 1 hour” but its query lacks a time threshold, so any run with status `running` is marked as stuck.
@@ -47,8 +59,8 @@
 
 ## Evidence
 
-- `src/elspeth/mcp/server.py:1193` comments “running for > 1 hour” but no time filter is applied.
-- `src/elspeth/mcp/server.py:1195`–`src/elspeth/mcp/server.py:1199` show the query only checks status and `completed_at`.
+- `src/elspeth/mcp/analyzers/diagnostics.py` now enforces `started_at < now(UTC) - 1 hour` for `stuck_runs`.
+- New MCP unit tests cover recent/old/mixed running-run scenarios.
 
 ## Impact
 
@@ -62,9 +74,15 @@
 
 ## Proposed Fix
 
-- Code changes (modules/files): Add a timestamp cutoff condition in `src/elspeth/mcp/server.py` when selecting stuck runs.
+- Code changes (modules/files):
+  - `src/elspeth/mcp/analyzers/diagnostics.py`: add UTC one-hour cutoff for `stuck_runs`.
+  - `src/elspeth/mcp/analyzers/diagnostics.py`: reuse the same cutoff for stuck operations.
 - Config or schema changes: None.
-- Tests to add/update: Add a test where a recent running run is not flagged, and an old running run is flagged.
+- Tests added/updated:
+  - `tests/unit/mcp/test_diagnostics.py`:
+    - recent running run is not flagged as stuck
+    - old running run is flagged as stuck
+    - mixed recent+old running runs only include old run
 - Risks or migration steps: None.
 
 ## Architectural Deviations
@@ -81,8 +99,11 @@
 
 ## Tests
 
-- Suggested tests to run: `python -m pytest tests/mcp/test_server_diagnose.py -k stuck_runs`
-- New tests required: yes, add `diagnose()` stuck-run threshold tests.
+- Validation run:
+  - `uv run pytest -q tests/unit/mcp/test_diagnostics.py`
+  - `uv run pytest -q tests/unit/mcp`
+  - `uv run ruff check src/elspeth/mcp/analyzers/diagnostics.py tests/unit/mcp/test_diagnostics.py`
+- New tests required: no (covered by new unit tests).
 
 ## Notes / Links
 
