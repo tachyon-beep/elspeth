@@ -210,6 +210,11 @@ class ResponseGenerator:
         # Setup Jinja2 environment with custom helpers
         self._jinja_env = self._create_jinja_env()
 
+    @property
+    def config(self) -> ResponseConfig:
+        """Current response generation configuration (frozen/immutable)."""
+        return self._config
+
     def _create_jinja_env(self) -> jinja2.Environment:
         """Create Jinja2 environment with custom helpers."""
         env = jinja2.sandbox.SandboxedEnvironment(

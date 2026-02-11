@@ -38,6 +38,11 @@ class LatencySimulator:
         self._config = config
         self._rng = rng if rng is not None else random_module.Random()
 
+    @property
+    def config(self) -> LatencyConfig:
+        """Current latency simulation configuration (frozen/immutable)."""
+        return self._config
+
     def simulate(self) -> float:
         """Calculate a simulated latency delay.
 

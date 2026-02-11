@@ -170,19 +170,19 @@ class ChaosLLMServer:
             updates: Dict with sections to update (error_injection, response, latency)
         """
         if "error_injection" in updates:
-            current_error = self._error_injector._config.model_dump()
+            current_error = self._error_injector.config.model_dump()
             merged = deep_merge(current_error, updates["error_injection"])
             error_config = ErrorInjectionConfig(**merged)
             self._error_injector = ErrorInjector(error_config)
 
         if "response" in updates:
-            current_response = self._response_generator._config.model_dump()
+            current_response = self._response_generator.config.model_dump()
             merged = deep_merge(current_response, updates["response"])
             response_config = ResponseConfig(**merged)
             self._response_generator = ResponseGenerator(response_config)
 
         if "latency" in updates:
-            current_latency = self._latency_simulator._config.model_dump()
+            current_latency = self._latency_simulator.config.model_dump()
             merged = deep_merge(current_latency, updates["latency"])
             latency_config = LatencyConfig(**merged)
             self._latency_simulator = LatencySimulator(latency_config)
@@ -190,9 +190,9 @@ class ChaosLLMServer:
     def _get_current_config(self) -> dict[str, Any]:
         """Get current configuration as dict."""
         return {
-            "error_injection": self._error_injector._config.model_dump(),
-            "response": self._response_generator._config.model_dump(),
-            "latency": self._latency_simulator._config.model_dump(),
+            "error_injection": self._error_injector.config.model_dump(),
+            "response": self._response_generator.config.model_dump(),
+            "latency": self._latency_simulator.config.model_dump(),
         }
 
     def _record_run_info(self) -> None:
@@ -285,7 +285,7 @@ class ChaosLLMServer:
         messages = body.get("messages", [])
 
         # Extract override headers (only if config allows)
-        if self._response_generator._config.allow_header_overrides:
+        if self._response_generator.config.allow_header_overrides:
             mode_override = request.headers.get("X-Fake-Response-Mode")
             template_override = request.headers.get("X-Fake-Template")
         else:
@@ -693,7 +693,7 @@ class ChaosLLMServer:
             message_count=len(body.get("messages", [])),
             prompt_tokens_approx=response.prompt_tokens,
             response_tokens=response.completion_tokens,
-            response_mode=mode_override or self._response_generator._config.mode,
+            response_mode=mode_override or self._response_generator.config.mode,
             injection_type=injection_type,
         )
 

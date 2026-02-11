@@ -139,26 +139,26 @@ class ChaosWebServer:
         Uses deep_merge so partial nested updates preserve existing fields.
         """
         if "error_injection" in updates:
-            current = self._error_injector._config.model_dump()
+            current = self._error_injector.config.model_dump()
             merged = deep_merge(current, updates["error_injection"])
             self._error_injector = WebErrorInjector(WebErrorInjectionConfig(**merged))
 
         if "content" in updates:
-            current = self._content_generator._config.model_dump()
+            current = self._content_generator.config.model_dump()
             merged = deep_merge(current, updates["content"])
             self._content_generator = ContentGenerator(WebContentConfig(**merged))
 
         if "latency" in updates:
-            current = self._latency_simulator._config.model_dump()
+            current = self._latency_simulator.config.model_dump()
             merged = deep_merge(current, updates["latency"])
             self._latency_simulator = LatencySimulator(LatencyConfig(**merged))
 
     def _get_current_config(self) -> dict[str, Any]:
         """Get current configuration as dict."""
         return {
-            "error_injection": self._error_injector._config.model_dump(),
-            "content": self._content_generator._config.model_dump(),
-            "latency": self._latency_simulator._config.model_dump(),
+            "error_injection": self._error_injector.config.model_dump(),
+            "content": self._content_generator.config.model_dump(),
+            "latency": self._latency_simulator.config.model_dump(),
         }
 
     def _record_run_info(self) -> None:
@@ -229,7 +229,7 @@ class ChaosWebServer:
 
         # Extract header overrides if allowed
         mode_override: str | None = None
-        if self._content_generator._config.allow_header_overrides:
+        if self._content_generator.config.allow_header_overrides:
             mode_override = request.headers.get("X-Fake-Content-Mode")
 
         # Error injector decides

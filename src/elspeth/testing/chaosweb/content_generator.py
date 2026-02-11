@@ -165,6 +165,11 @@ class ContentGenerator:
         self._preset_bank: PresetBank | None = None
         self._jinja_env = self._create_jinja_env()
 
+    @property
+    def config(self) -> WebContentConfig:
+        """Current content generation configuration (frozen/immutable)."""
+        return self._config
+
     def _create_jinja_env(self) -> jinja2.sandbox.SandboxedEnvironment:
         """Create Jinja2 SandboxedEnvironment with template helpers.
 

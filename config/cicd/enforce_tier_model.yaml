@@ -502,12 +502,12 @@ allow_hits:
   reason: List/tuple type detection for canonical JSON serialization after mypy typecheck
   safety: isinstance() required for polymorphic serialization - fundamental to RFC8785 normalization
   expires: null
-- key: testing/chaosllm/cli.py:R6:_version_callback:fp=e2b51655e4d22702
+- key: testing/chaosllm/cli.py:R6:_version_callback:fp=2356e21cffe3cb94
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: testing/chaosllm/cli.py:R6:show_config:fp=ed8499ffbc8fd80e
+- key: testing/chaosllm/cli.py:R6:show_config:fp=f771ba918fdda859
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -1432,7 +1432,7 @@ allow_hits:
   reason: Tier 3 boundary - .get() on parsed JSONL object for optional content_type field
   safety: Missing content_type defaults to text/html - correct for HTML preset pages
   expires: '2026-05-13'
-- key: testing/chaosweb/content_generator.py:R1:ContentGenerator:_generate_preset_html:fp=f14d5eed4882098d
+- key: testing/chaosweb/content_generator.py:R1:ContentGenerator:_generate_preset_html:fp=f82931abed46988a
   owner: architecture
   reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
   safety: Falls back to config default_content_type - preset pages may omit content_type
@@ -1477,12 +1477,12 @@ allow_hits:
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
   safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
   expires: '2026-05-13'
-- key: testing/chaosweb/cli.py:R6:_version_callback:fp=86387baacbcfc9ec
+- key: testing/chaosweb/cli.py:R6:_version_callback:fp=4b75b810cbdea9ee
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Falls back to 'version unknown' on ImportError - correct for optional version detection
   expires: '2026-05-13'
-- key: testing/chaosweb/cli.py:R6:show_config:fp=ed8499ffbc8fd80e
+- key: testing/chaosweb/cli.py:R6:show_config:fp=f771ba918fdda859
   owner: architecture
   reason: Silent recovery with explicit error handling path - YAML optional fallback to JSON
   safety: Falls back to JSON format if yaml module unavailable - data still displayed
@@ -1567,62 +1567,62 @@ allow_hits:
   reason: Tier 3 boundary - isinstance validates parsed JSONL line is dict
   safety: Validates external file content structure
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=6ff12e014ac3cbd7
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=c7e347f009bb773f
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=8bcf17d15986431d
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=2058bd4500661122
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=d2a90a0c04d1f1b0
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=9e7f0047c9b7adeb
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=68fb557610a08852
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=a54e498f1de4de74
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=cfdb493affb7fb83
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=2cee4f55e36e4e40
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=fa01d45bd87c173d
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=f721fe146811db54
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in OpenAI-compatible request body
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=af838a83c3fbd3d2
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=d67c5fa6fe354693
   owner: architecture
   reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
   safety: dict.get for optional content field in message objects
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=95e0276c1540d59b
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=3c1c38c4d318aa61
   owner: architecture
   reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
   safety: dict.get for optional content field in message objects
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=028bad60809f8671
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=f68fbcc7cfbbac72
   owner: architecture
   reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
   safety: dict.get for optional content field in message objects
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=658faf2e31f47380
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=ec9ff6439db1bbb2
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=0c97355ecc79a154
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=69b1a2b8e2da9376
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=0931b20c21d4268d
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=2853e5b480f37dea
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients

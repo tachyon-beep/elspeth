@@ -66,10 +66,11 @@ def _classify_web_outcome(
     is_forbidden = status_code == 403
     is_not_found = status_code == 404
     is_server_error = status_code is not None and 500 <= status_code < 600
-    is_connection_error = status_code is None and error_type in (
+    is_connection_error = error_type in (
         "timeout",
         "connection_reset",
         "connection_stall",
+        "incomplete_response",
     )
     is_malformed = outcome == "error_malformed"
     is_redirect = outcome == "error_redirect"

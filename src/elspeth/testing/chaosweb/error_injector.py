@@ -248,6 +248,11 @@ class WebErrorInjector:
             rng=self._rng,
         )
 
+    @property
+    def config(self) -> WebErrorInjectionConfig:
+        """Current web error injection configuration (frozen/immutable)."""
+        return self._config
+
     def _pick_retry_after(self) -> int:
         """Pick a random Retry-After value from the configured range."""
         min_sec, max_sec = self._config.retry_after_sec

@@ -395,6 +395,26 @@ class ChaosLLMConfig(BaseModel):
         default=None,
         description="Preset name used to build this config (if any)",
     )
+    allow_external_bind: bool = Field(
+        default=False,
+        description="Allow binding to 0.0.0.0 or :: (all interfaces). Blocked by default for safety.",
+    )
+
+    @model_validator(mode="after")
+    def validate_host_binding(self) -> "ChaosLLMConfig":
+        """Block binding to all interfaces unless explicitly allowed.
+
+        ChaosLLM is a testing tool that should only bind to localhost.
+        Binding to 0.0.0.0 or :: exposes the chaos server to the network,
+        which could be used to inject errors into non-test traffic.
+        """
+        dangerous_hosts = {"0.0.0.0", "::", "0:0:0:0:0:0:0:0"}
+        if self.server.host in dangerous_hosts and not self.allow_external_bind:
+            raise ValueError(
+                f"Binding to '{self.server.host}' exposes ChaosLLM to the network. "
+                f"Use allow_external_bind: true to override, or bind to 127.0.0.1."
+            )
+        return self
 
 
 # === Preset Loading ===

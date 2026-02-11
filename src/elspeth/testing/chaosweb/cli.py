@@ -18,7 +18,9 @@ import json
 from pathlib import Path
 from typing import Annotated, Any
 
+import pydantic
 import typer
+import yaml
 
 from elspeth.testing.chaosweb.config import (
     DEFAULT_MEMORY_DB,
@@ -233,7 +235,7 @@ def serve(
     except FileNotFoundError as e:
         typer.secho(f"Error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
-    except Exception as e:
+    except (pydantic.ValidationError, yaml.YAMLError, ValueError) as e:
         typer.secho(f"Configuration error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
