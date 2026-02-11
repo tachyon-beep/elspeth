@@ -115,37 +115,37 @@ allow_hits:
   reason: Silent recovery with explicit error handling path - YAML optional fallback to JSON
   safety: Falls back to JSON format if yaml module unavailable - data still displayed
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=58cc3ba582d39fc1
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=93ed1264ecce1136
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=ecb4544f65194888
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=dc896e6aa7c6bca4
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=62622c244fae8178
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=4e9ee12d49d66d1c
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=d058d6e47f789305
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=786fbff1794cda31
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=91a3fcade1ef1d2c
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=7a4fd6dbf29fd75e
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=798a6079a1211756
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=577eb83133678825
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=03fae35d0a4b1983
+- key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=161b08f529c97d97
   owner: architecture
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
   safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
