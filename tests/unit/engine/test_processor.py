@@ -449,6 +449,7 @@ class TestProcessRowNoTransforms:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COMPLETED
+        assert results[0].sink_name == "default"
         assert results[0].token.row_data["value"] == 42
 
     def test_creates_row_and_token_records(self) -> None:
@@ -553,6 +554,7 @@ class TestProcessRowSingleTransform:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COMPLETED
+        assert results[0].sink_name == "default"
 
     def test_transform_error_with_discard_returns_quarantined(self) -> None:
         """Transform error with on_error='discard' → QUARANTINED."""
@@ -1394,6 +1396,7 @@ class TestProcessExistingRow:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COMPLETED
+        assert results[0].sink_name == "default"
         # The row_id should match the existing row
         assert results[0].token.row_id == existing_row_id
 
@@ -1424,6 +1427,7 @@ class TestProcessToken:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COMPLETED
+        assert results[0].sink_name == "default"
 
     def test_terminal_coalesce_continuation_uses_coalesce_on_success_sink(self) -> None:
         """Merged token resumed at terminal coalesce must route to coalesce sink, not source sink."""
@@ -1965,6 +1969,7 @@ class TestMaybeCoalesceToken:
         assert handled is True
         assert result is not None
         assert result.outcome == RowOutcome.COALESCED
+        assert result.sink_name == "output"
 
     def test_coalesce_merged_at_terminal_missing_sink_mapping_raises(self) -> None:
         """Terminal coalesce merge without sink mapping is an internal bug."""
@@ -2201,6 +2206,7 @@ class TestNotifyCoalesceOfLostBranch:
 
         assert len(results) == 1
         assert results[0].outcome == RowOutcome.COALESCED
+        assert results[0].sink_name == "output"
 
     def test_lost_branch_terminal_merge_missing_sink_mapping_raises(self) -> None:
         """Terminal coalesce merge from branch loss must have sink mapping."""
