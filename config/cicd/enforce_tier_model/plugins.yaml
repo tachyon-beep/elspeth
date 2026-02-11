@@ -114,16 +114,6 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=bc395c6a768847b9
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=ae444b17b823e17a
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=0bd8dc8dca329b8b
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions

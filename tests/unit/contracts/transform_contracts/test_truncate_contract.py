@@ -131,8 +131,8 @@ class TestTruncateStrictContract(TransformErrorContractTestBase):
         assert result.reason["actual"] == "NoneType"
 
 
-class TestTruncateLenientNonStringContract(TransformContractPropertyTestBase):
-    """Contract tests: lenient mode passes non-strings through unchanged."""
+class TestTruncateNonStringContract(TransformErrorContractTestBase):
+    """Contract tests: configured non-string fields must return an explicit error."""
 
     @pytest.fixture
     def transform(self) -> TransformProtocol:
@@ -147,18 +147,27 @@ class TestTruncateLenientNonStringContract(TransformContractPropertyTestBase):
 
     @pytest.fixture
     def valid_input(self) -> dict[str, Any]:
-        """Return input with non-string field — should pass through in lenient mode."""
+        """Return input that should process successfully."""
+        return {"value": "hello", "id": 1}
+
+    @pytest.fixture
+    def error_input(self) -> dict[str, Any]:
+        """Return input with non-string field that must return an error."""
         return {"value": 42, "id": 1}
 
-    def test_lenient_non_string_passes_through(
+    def test_non_string_returns_type_mismatch_error(
         self,
         transform: TransformProtocol,
-        valid_input: dict[str, Any],
+        error_input: dict[str, Any],
         ctx: Any,
     ) -> None:
-        """Contract: Lenient mode MUST pass non-string fields through unchanged."""
+        """Contract: Non-string configured field MUST return type_mismatch error."""
         ctx = make_context(run_id="test")
-        pipeline_row = make_pipeline_row(valid_input)
+        pipeline_row = make_pipeline_row(error_input)
         result = transform.process(pipeline_row, ctx)
-        assert result.status == "success"
-        assert result.row["value"] == 42
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "type_mismatch"
+        assert result.reason["field"] == "value"
+        assert result.reason["expected"] == "str"
+        assert result.reason["actual"] == "int"

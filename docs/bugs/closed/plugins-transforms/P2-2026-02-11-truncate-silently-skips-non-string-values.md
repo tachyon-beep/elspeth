@@ -1,12 +1,18 @@
 # Bug Report: Truncate Silently Skips Non-String Values
 
-**Status: OPEN**
+**Status: FIXED**
 
-## Status Update (2026-02-11)
+## Resolution (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Fixed**
+- Summary of fix:
+  - `Truncate.process()` now returns `TransformResult.error` with `reason=type_mismatch` for configured fields that are not strings, regardless of `strict`.
+  - Truncation tracking now records `fields_modified` inline during mutation, removing defensive `isinstance`-based post filtering.
+  - Contract tests now assert that non-string configured fields return an explicit error instead of silently passing through.
+- Verification:
+  - `uv run pytest -q tests/unit/contracts/transform_contracts/test_truncate_contract.py` (76 passed)
+  - `UV_CACHE_DIR=.uv-cache uv run ruff check src/elspeth/plugins/transforms/truncate.py tests/unit/contracts/transform_contracts/test_truncate_contract.py` (passed)
+  - `UV_CACHE_DIR=.uv-cache uv run --with mypy mypy src/elspeth/plugins/transforms/truncate.py tests/unit/contracts/transform_contracts/test_truncate_contract.py` (passed)
 
 
 ## Summary

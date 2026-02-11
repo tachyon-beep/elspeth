@@ -36,7 +36,7 @@ class TruncateConfig(TransformDataConfig):
     )
     strict: bool = Field(
         default=False,
-        description="If True, error when a specified field is missing or not a string (default: False)",
+        description="If True, error when a specified field is missing (default: False)",
     )
 
 
@@ -52,7 +52,7 @@ class Truncate(BaseTransform):
         schema: Required. Schema for input/output (use {mode: observed} for any fields)
         fields: Dict of field_name -> max_length (e.g., {"title": 100, "description": 500})
         suffix: String to append when truncating (e.g., "..."). Included in max length.
-        strict: If True, error on missing or non-string fields (default: False, skip them)
+        strict: If True, error on missing configured fields (default: False, skip missing fields)
         on_error: Sink to route errors to (default: None, will quarantine)
 
     Example config:
@@ -107,6 +107,7 @@ class Truncate(BaseTransform):
         """
         row_dict = row.to_dict()
         output = copy.deepcopy(row_dict)
+        fields_modified: list[str] = []
 
         for field_name, max_len in self._fields.items():
             if field_name not in output:
@@ -121,18 +122,16 @@ class Truncate(BaseTransform):
 
             value = output[field_name]
 
-            # Only truncate strings — non-strings skip in lenient mode, error in strict
-            if not isinstance(value, str):
-                if self._strict:
-                    return TransformResult.error(
-                        {
-                            "reason": "type_mismatch",
-                            "field": field_name,
-                            "expected": "str",
-                            "actual": type(value).__name__,
-                        }
-                    )
-                continue
+            # Type mismatches are upstream contract bugs; always surface explicitly.
+            if type(value) is not str:
+                return TransformResult.error(
+                    {
+                        "reason": "type_mismatch",
+                        "field": field_name,
+                        "expected": "str",
+                        "actual": type(value).__name__,
+                    }
+                )
 
             # Truncate if needed
             if len(value) > max_len:
@@ -142,13 +141,7 @@ class Truncate(BaseTransform):
                     output[field_name] = value[:truncate_at] + self._suffix
                 else:
                     output[field_name] = value[:max_len]
-
-        # Track which fields were actually truncated
-        fields_modified = [
-            field_name
-            for field_name, max_len in self._fields.items()
-            if field_name in row_dict and isinstance(row_dict[field_name], str) and len(row_dict[field_name]) > max_len
-        ]
+                fields_modified.append(field_name)
 
         return TransformResult.success(
             PipelineRow(output, row.contract),
