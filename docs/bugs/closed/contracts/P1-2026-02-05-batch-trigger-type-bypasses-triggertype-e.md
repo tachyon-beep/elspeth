@@ -87,3 +87,25 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md:25`
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after enforcing strict `TriggerType` enum handling in the Batch audit contract and repository load path.
+- Fix summary:
+  - Updated `Batch.trigger_type` from `str | None` to `TriggerType | None`.
+  - Added Tier-1 enum validation in `Batch.__post_init__`.
+  - Updated `BatchRepository.load()` to convert DB strings via `TriggerType(...)` (or `None`).
+  - Added/updated tests for valid enum behavior and invalid trigger type rejection.
+- Verification:
+  - Direct repro now fails fast:
+    - constructing `Batch(..., trigger_type="not_a_trigger")` raises `TypeError`.
+  - Targeted tests passing:
+    - `uv run pytest -q tests/unit/contracts/test_audit.py`
+    - `uv run pytest -q tests/unit/core/landscape/test_repositories.py`
+    - `uv run pytest -q tests/unit/core/landscape/test_exporter.py`
+- Evidence:
+  - `src/elspeth/contracts/audit.py`
+  - `src/elspeth/core/landscape/repositories.py`
+  - `tests/unit/contracts/test_audit.py`
+  - `tests/unit/core/landscape/test_repositories.py`
+  - `tests/unit/core/landscape/test_exporter.py`

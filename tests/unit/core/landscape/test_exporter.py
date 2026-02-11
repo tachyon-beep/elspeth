@@ -45,6 +45,7 @@ from elspeth.contracts.enums import (
     NodeType,
     RoutingMode,
     RunStatus,
+    TriggerType,
 )
 from elspeth.core.landscape.exporter import LandscapeExporter
 
@@ -257,7 +258,7 @@ _BATCH = Batch(
     status=BatchStatus.COMPLETED,
     created_at=_DT,
     completed_at=_DT2,
-    trigger_type="count",
+    trigger_type=TriggerType.COUNT,
     trigger_reason="count >= 10",
 )
 
