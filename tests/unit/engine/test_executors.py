@@ -1,5 +1,5 @@
 # tests/unit/engine/test_executors.py
-"""Comprehensive unit tests for the 4 executor classes in engine/executors.py.
+"""Comprehensive unit tests for the 4 executor classes in engine/executors/.
 
 Tests cover:
 - TransformExecutor: success/error/exception paths, audit recording
@@ -8,6 +8,45 @@ Tests cover:
 - SinkExecutor: write lifecycle, artifact recording, callback handling
 
 All tests mock the LandscapeRecorder and SpanFactory to isolate executor logic.
+
+Error Routing Decision Tree (exd audit)
+========================================
+
+Every error follows one of these paths through the executor layer:
+
+Transform Error (TransformResult.error):
+  on_error=None        → RuntimeError CRASH (plugin bug: no error route configured)
+  on_error="discard"   → node_state=FAILED + transform_error recorded (NO routing_event)
+                         → token outcome: QUARANTINED (recorded at sink write time)
+  on_error=<sink_name> → node_state=FAILED + transform_error + DIVERT routing_event
+                         → token outcome: ROUTED to error sink
+
+Transform Exception (plugin crash):
+  → node_state=FAILED (always recorded before re-raise)
+  → exception propagates → pipeline CRASH
+
+Gate Error:
+  Expression exception   → node_state=FAILED + re-raise → pipeline CRASH
+  Unknown route label    → node_state=FAILED + ValueError → pipeline CRASH
+  Non-string/bool result → str() conversion, then route lookup (may fail as above)
+  Missing edge           → node_state=FAILED + MissingEdgeError → pipeline CRASH
+
+Aggregation Error:
+  Flush exception        → node_state=FAILED, batch=FAILED → pipeline CRASH
+  Flush error result     → node_state=FAILED, batch=FAILED, tokens=CONSUMED_IN_BATCH
+  BatchPending           → node_state=PENDING (control flow, not error)
+
+Sink Error:
+  Write exception        → all node_states=FAILED → pipeline CRASH (no outcomes recorded)
+  Flush exception        → all node_states=FAILED → pipeline CRASH (no outcomes recorded)
+
+Source Quarantine:
+  Validation failure     → quarantine token → DIVERT routing_event → sink write
+                         → token outcome: QUARANTINED
+
+Invariant: Every error records node_state=FAILED before any exception propagates.
+Invariant: DIVERT routing_event only for non-discard error routing (audit accuracy).
+Invariant: Token outcomes only recorded after sink durability (crash recovery safe).
 """
 
 from __future__ import annotations
@@ -527,6 +566,67 @@ class TestTransformExecutor:
         kwargs = recorder.complete_node_state.call_args[1]
         assert kwargs["duration_ms"] >= 0
 
+    # --- Error routing edge cases (exd audit) ---
+
+    def test_discard_error_does_not_record_divert_routing(self) -> None:
+        """on_error='discard' must NOT create a DIVERT routing_event.
+
+        Discard means quarantine silently — no routing decision was made,
+        so recording a DIVERT event would misrepresent the audit trail.
+        """
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform(on_error="discard")
+        transform.process.return_value = TransformResult.error(
+            reason={"reason": "test_error"},
+        )
+        token = _make_token()
+        ctx = _make_ctx()
+
+        executor.execute_transform(transform, token, ctx)
+
+        recorder.record_routing_event.assert_not_called()
+
+    def test_error_reason_propagated_to_node_state_error_field(self) -> None:
+        """TransformResult.error() reason dict stored as node_state error."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform(on_error="discard")
+        error_reason = {"reason": "content_filtered", "provider": "azure", "code": "CF-01"}
+        transform.process.return_value = TransformResult.error(reason=error_reason)
+        token = _make_token()
+        ctx = _make_ctx()
+
+        executor.execute_transform(transform, token, ctx)
+
+        kwargs = recorder.complete_node_state.call_args[1]
+        assert kwargs["error"] == error_reason
+
+    def test_non_discard_error_records_both_transform_error_and_divert(self) -> None:
+        """Non-discard error records transform_error AND DIVERT routing event.
+
+        Both are required for audit completeness: the transform_error
+        captures the error details, and the DIVERT records the routing
+        decision for lineage tracing.
+        """
+        recorder = _make_recorder()
+        edge_ids = {NodeID("node_1"): "divert_edge_1"}
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver(), error_edge_ids=edge_ids)
+        transform = _make_transform(on_error="error_sink")
+        transform.process.return_value = TransformResult.error(
+            reason={"reason": "api_error"},
+        )
+        token = _make_token()
+        ctx = _make_ctx()
+        ctx.record_transform_error = MagicMock()
+
+        executor.execute_transform(transform, token, ctx)
+
+        # Both must be recorded
+        ctx.record_transform_error.assert_called_once()
+        recorder.record_routing_event.assert_called_once()
+        assert recorder.record_routing_event.call_args[1]["mode"] == RoutingMode.DIVERT
+
 
 # =============================================================================
 # TestGateExecutor
@@ -834,6 +934,59 @@ class TestGateExecutor:
             )
 
         assert recorder.complete_node_state.call_count >= 1
+        last_call = recorder.complete_node_state.call_args_list[-1]
+        assert last_call[1]["status"] == NodeStateStatus.FAILED
+
+    # --- Error routing edge cases (exd audit) ---
+
+    def test_config_gate_none_result_records_failed_with_route_label(self) -> None:
+        """Expression returning None is stringified to 'None' and fails route lookup.
+
+        The gate converts non-string/non-bool results via str(), so None
+        becomes 'None'. Since 'None' isn't in routes, this records FAILED
+        state and raises ValueError with the stringified label.
+        """
+        recorder = _make_recorder()
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="None",
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        with pytest.raises(ValueError, match="None"):
+            executor.execute_config_gate(config, "cg_1", token, ctx)
+
+        last_call = recorder.complete_node_state.call_args_list[-1]
+        assert last_call[1]["status"] == NodeStateStatus.FAILED
+        assert "None" in last_call[1]["error"]["exception"]
+
+    def test_config_gate_int_result_stringified_for_route_lookup(self) -> None:
+        """Expression returning int is stringified for route label matching.
+
+        Arithmetic expressions return int. The gate converts it via str()
+        (e.g., 42 → '42'). If '42' isn't in routes, it records FAILED.
+        """
+        recorder = _make_recorder()
+        executor = GateExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        # '40 + 2' returns 42 → str(42) = '42' → not in routes
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="40 + 2",
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        with pytest.raises(ValueError, match="'42'"):
+            executor.execute_config_gate(config, "cg_1", token, ctx)
+
         last_call = recorder.complete_node_state.call_args_list[-1]
         assert last_call[1]["status"] == NodeStateStatus.FAILED
 
