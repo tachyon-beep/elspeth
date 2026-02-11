@@ -438,13 +438,16 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             # Submit all rows with shared client
             futures = {executor.submit(self._process_single_row, idx, row.to_dict(), ctx, client): idx for idx, row in enumerate(rows)}
 
-            # Collect results - catch only transport exceptions, let plugin bugs crash
+            # Collect results - catch only transport exceptions, let plugin bugs crash.
+            # _process_single_row already handles HTTPStatusError and RequestError
+            # (the two HTTPError subclasses). Only StreamError can legitimately
+            # escape — it occurs during response streaming, after the request succeeds.
+            # InvalidURL is a config bug (bad base_url) and must crash per CLAUDE.md.
             for future in as_completed(futures):
                 idx = futures[future]
                 try:
                     results[idx] = future.result()
-                except (httpx.HTTPError, httpx.InvalidURL, httpx.StreamError) as e:
-                    # Transport-level errors are row-level failures, not plugin bugs
+                except httpx.StreamError as e:
                     results[idx] = e
 
         # Assemble output rows in original order
@@ -459,11 +462,25 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             result = results[idx]
 
             if isinstance(result, Exception):
-                # Unexpected exception (httpx transport errors caught in as_completed loop)
+                # StreamError escaped from _process_single_row — record to audit
+                # trail so the failure is attributable (h27 fix).
+                ctx.record_call(
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data={"row_index": idx},
+                    response_data=None,
+                    error={
+                        "reason": "transport_exception",
+                        "error": str(result),
+                        "error_type": type(result).__name__,
+                    },
+                    latency_ms=None,
+                    provider="openrouter",
+                )
                 output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
-                    "reason": "unexpected_exception",
+                    "reason": "transport_exception",
                     "error": str(result),
                     "error_type": type(result).__name__,
                 }
