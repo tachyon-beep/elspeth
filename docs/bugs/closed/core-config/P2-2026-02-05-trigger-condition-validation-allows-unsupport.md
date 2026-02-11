@@ -1,17 +1,16 @@
 # Bug Report: Trigger Condition Validation Allows Unsupported Keys
 
-**Status: OPEN**
+**Status: RESOLVED ✅**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
+- Classification: **Resolved**
 - Verification summary:
-  - `TriggerConfig(condition="row['type'] == 'flush_signal'")` is still accepted at config time.
-  - Runtime still evaluates with batch-only context and then fails with `ExpressionEvaluationError` for missing `type`.
+  - `TriggerConfig(condition="row['type'] == 'flush_signal'")` is now rejected at config time with a clear unsupported-key validation error.
+  - Batch-only conditions using `row['batch_count']` and `row['batch_age_seconds']` continue to validate and run.
 - Current evidence:
-  - `src/elspeth/core/config.py:248`
-  - `src/elspeth/engine/triggers.py:120`
-  - `src/elspeth/engine/triggers.py:124`
+  - `src/elspeth/core/config.py`
+  - `tests/unit/core/test_config_aggregation.py`
 
 ## Summary
 
@@ -60,9 +59,9 @@
 
 ## Evidence
 
-- Trigger conditions are documented as batch-only with `batch_count` and `batch_age_seconds`. See `src/elspeth/core/config.py:146`, `src/elspeth/core/config.py:148`.
-- Validation only checks syntax/security/boolean-ness; it does not restrict field access. See `src/elspeth/core/config.py:178`, `src/elspeth/core/config.py:204`.
-- Runtime evaluation context includes only `batch_count` and `batch_age_seconds`. See `src/elspeth/engine/triggers.py:119`, `src/elspeth/engine/triggers.py:121`.
+- Trigger conditions are documented as batch-only with `batch_count` and `batch_age_seconds`.
+- Validation now enforces a strict row-key whitelist for trigger conditions.
+- Runtime evaluation context remains batch-only, and config-time rejection prevents missing-key runtime failures for unsupported trigger keys.
 
 ## Impact
 
@@ -77,8 +76,16 @@
 ## Proposed Fix
 
 - Code changes (modules/files): Extend `TriggerConfig.validate_condition_expression()` to parse and reject any row key usage outside `batch_count` and `batch_age_seconds`; update the docstring/examples to show `row['batch_count']`/`row['batch_age_seconds']` usage explicitly.
+  - Implemented in `src/elspeth/core/config.py`:
+    - Trigger condition validator now rejects unsupported keys outside `batch_count`/`batch_age_seconds`.
+    - Non-literal row key access in trigger conditions is rejected.
+    - Batch-trigger example updated to explicit `row[...]` syntax.
 - Config or schema changes: None.
-- Tests to add/update: Add config validation tests that accept `row['batch_count']` and reject `row['type']`.
+- Tests added/updated:
+  - `tests/unit/core/test_config_aggregation.py`:
+    - Updated combined-trigger valid example to batch-only keys.
+    - Added regression tests rejecting `row['type']` and `row.get('status')`.
+    - Added regression test rejecting non-literal row key access.
 - Risks or migration steps: None.
 
 ## Architectural Deviations
@@ -94,8 +101,10 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/core/test_config_aggregation.py -k trigger`
-- New tests required: yes, add invalid-key and valid-key cases.
+- Validation run:
+  - `uv run pytest -q tests/unit/core/test_config_aggregation.py tests/unit/engine/test_triggers.py`
+  - `uv run ruff check src/elspeth/core/config.py tests/unit/core/test_config_aggregation.py`
+- New tests required: no (covered by added regression tests).
 
 ## Notes / Links
 

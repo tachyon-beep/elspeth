@@ -6,6 +6,7 @@ Uses Pydantic for validation and Dynaconf for multi-source loading.
 Settings are frozen (immutable) after construction.
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Any, Literal
@@ -223,7 +224,7 @@ class TriggerConfig(BaseModel):
         trigger:
           count: 1000           # Fire after 1000 rows
           timeout_seconds: 3600         # Or after 1 hour
-          condition: "batch_count >= 100 and batch_age_seconds < 30"  # Or batch metrics
+          condition: "row['batch_count'] >= 100 and row['batch_age_seconds'] < 30"  # Or batch metrics
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
@@ -266,6 +267,56 @@ class TriggerConfig(BaseModel):
             raise ValueError(f"Invalid condition syntax: {e}") from e
         except ExpressionSecurityError as e:
             raise ValueError(f"Forbidden construct in condition: {e}") from e
+
+        # Trigger conditions are batch-level only: row may only expose these keys.
+        allowed_row_keys = frozenset({"batch_count", "batch_age_seconds"})
+
+        def _extract_string_key(node: ast.AST) -> str | None:
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return node.value
+            return None
+
+        parsed = ast.parse(v, mode="eval")
+        invalid_keys: set[str] = set()
+
+        for node in ast.walk(parsed):
+            key: str | None = None
+
+            # row['key']
+            if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "row":
+                key = _extract_string_key(node.slice)
+                if key is None:
+                    raise ValueError(
+                        "Trigger condition row keys must be string literals. Allowed keys: row['batch_count'], row['batch_age_seconds']."
+                    )
+
+            # row.get('key') / row.get('key', default)
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "row"
+                and node.func.attr == "get"
+                and node.args
+            ):
+                key = _extract_string_key(node.args[0])
+                if key is None:
+                    raise ValueError(
+                        "Trigger condition row.get() keys must be string literals. "
+                        "Allowed keys: row['batch_count'], row['batch_age_seconds']."
+                    )
+
+            if key is None:
+                continue
+            if key not in allowed_row_keys:
+                invalid_keys.add(key)
+
+        if invalid_keys:
+            invalid_display = ", ".join(sorted(repr(key) for key in invalid_keys))
+            raise ValueError(
+                "Trigger condition references unsupported row keys: "
+                f"{invalid_display}. Allowed keys: row['batch_count'], row['batch_age_seconds']."
+            )
 
         # P2-2026-01-31: Reject non-boolean expressions
         # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
