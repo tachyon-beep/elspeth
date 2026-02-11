@@ -208,16 +208,9 @@ def _set_transform_routing(
     on_success: str | None,
     on_error: str | None,
 ) -> None:
-    """Set routing fields on test transforms with protocol-compatible fallback."""
-    try:
-        transform.on_success = on_success
-    except AttributeError:
-        transform._on_success = on_success
-
-    try:
-        transform.on_error = on_error
-    except AttributeError:
-        transform._on_error = on_error
+    """Set routing fields on test transforms."""
+    transform.on_success = on_success
+    transform.on_error = on_error
 
 
 def wire_transforms(

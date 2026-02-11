@@ -106,7 +106,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
         agg_transform = _AggTransform()
         if agg_settings.on_success is None:
             agg_settings = agg_settings.model_copy(update={"on_success": default_sink})
-        agg_transform._on_success = agg_settings.on_success
+        agg_transform.on_success = agg_settings.on_success
         aggregations[agg_name] = (agg_transform, agg_settings)  # type: ignore[assignment]
 
     return ExecutionGraph.from_plugin_instances(

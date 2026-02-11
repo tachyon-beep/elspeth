@@ -521,7 +521,7 @@ class TestRetryBehavior:
             input_schema = _RowSchema
             output_schema = _RowSchema
             determinism = Determinism.DETERMINISTIC
-            _on_error = "discard"
+            on_error = "discard"
 
             def __init__(self, fail_ids: set[str]) -> None:
                 super().__init__({"schema": {"mode": "observed"}})

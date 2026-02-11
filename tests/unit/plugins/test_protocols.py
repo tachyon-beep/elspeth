@@ -165,16 +165,8 @@ class TestTransformProtocol:
             is_batch_aware = False  # Batch support (structural aggregation)
             creates_tokens = False  # Deaggregation (multi-row output)
             transforms_adds_fields = False  # Schema evolution tracking
-            _on_error: str | None = None  # Error routing (WP-11.99b)
-            _on_success: str | None = None  # Success routing
-
-            @property
-            def on_error(self) -> str | None:
-                return self._on_error
-
-            @property
-            def on_success(self) -> str | None:
-                return self._on_success
+            on_error: str | None = None  # Error routing (WP-11.99b)
+            on_success: str | None = None  # Success routing
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config

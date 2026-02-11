@@ -117,7 +117,7 @@ class TestExplicitSinkRouting:
 
         source = ListSource([{"value": 1}, {"value": 2}], on_success="output")
         transform = IdentityTransform()
-        transform._on_success = "output"
+        transform.on_success = "output"
         sink = CollectSink(name="output")
 
         config = PipelineConfig(
@@ -274,7 +274,7 @@ class TestExplicitSinkRouting:
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}], on_success="output")
         transform = BatchPassthroughTransform()
-        transform._on_success = "output"
+        transform.on_success = "output"
         sink = CollectSink(name="output")
 
         # Build graph with transform as regular transform (on_success wires to sink)
@@ -347,9 +347,9 @@ class TestExplicitSinkRouting:
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}], on_success="source_out")
         t1 = IdentityTransform()
-        t1._on_success = "conn_1_2"
+        t1.on_success = "conn_1_2"
         t2 = AddFieldTransform("processed", True)
-        t2._on_success = "output"
+        t2.on_success = "output"
         sink = CollectSink(name="output")
 
         # Build graph through production path with explicit connection names
@@ -438,7 +438,7 @@ class TestExplicitSinkRoutingEdgeCases:
         Verify: Rows route to the final sink declared in wire_transforms, not other sinks.
 
         With WiredTransform architecture, routing is determined by wire_transforms()
-        and TransformSettings, not by individual transform._on_success attributes.
+        and TransformSettings, not by individual transform.on_success attributes.
         """
         from tests.fixtures.factories import wire_transforms
 
@@ -505,7 +505,7 @@ class TestExplicitSinkRoutingEdgeCases:
 
         source = ListSource([{"value": 10}, {"value": 20}], on_success="gate_in")
         transform = AddFieldTransform("routed", True)
-        transform._on_success = "output"
+        transform.on_success = "output"
         sink_output = CollectSink(name="output")
         sink_flagged = CollectSink(name="flagged")
 

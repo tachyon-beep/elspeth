@@ -66,7 +66,7 @@ class _SelectiveErrorTransform(BaseTransform):
     input_schema = _PartialSchema
     output_schema = _PartialSchema
     determinism = Determinism.DETERMINISTIC
-    _on_error = "discard"
+    on_error = "discard"
 
     def __init__(self, fail_ids: set[int]) -> None:
         super().__init__({"schema": {"mode": "observed"}})

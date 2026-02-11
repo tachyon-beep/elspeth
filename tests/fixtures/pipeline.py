@@ -238,8 +238,5 @@ def build_production_graph(
 
 
 def _set_transform_routing(transform: Any, *, on_success: str | None) -> None:
-    """Set on_success for test transforms with protocol-compatible fallback."""
-    try:
-        transform.on_success = on_success
-    except AttributeError:
-        transform._on_success = on_success
+    """Set on_success for test transforms."""
+    transform.on_success = on_success

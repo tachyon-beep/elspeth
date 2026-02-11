@@ -233,7 +233,7 @@ class TransformExecutor:
 
         Error Routing:
         - TransformResult.error() is a LEGITIMATE processing failure
-        - Routes to configured sink via transform._on_error
+        - Routes to configured sink via transform.on_error
         - RuntimeError if transform errors without on_error config
         - Exceptions are BUGS and propagate (not routed)
 
@@ -250,8 +250,8 @@ class TransformExecutor:
             Tuple of (TransformResult with audit fields, updated TokenInfo, error_sink)
             where error_sink is:
             - None if transform succeeded
-            - "discard" if transform errored and _on_error == "discard"
-            - The sink name if transform errored and _on_error is a sink name
+            - "discard" if transform errored and on_error == "discard"
+            - The sink name if transform errored and on_error is a sink name
 
         Raises:
             Exception: Re-raised from transform.process() after recording failure

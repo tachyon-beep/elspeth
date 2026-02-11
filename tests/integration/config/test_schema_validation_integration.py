@@ -175,7 +175,7 @@ def test_static_schema_validation(plugin_manager: PluginManager) -> None:
         name = "static_transform"
         input_schema = StaticSchema  # Class-level static schema
         output_schema = StaticSchema  # Class-level static schema
-        _on_success = "output"  # Terminal transform routes to output sink
+        on_success = "output"  # Terminal transform routes to output sink
 
         def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
             return TransformResult.success(make_pipeline_row(row), success_reason={"action": "passthrough"})

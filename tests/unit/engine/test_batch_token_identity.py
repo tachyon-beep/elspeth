@@ -104,7 +104,7 @@ class SumTransform(BaseTransform):
     def __init__(self, node_id: str) -> None:
         super().__init__({"schema": {"mode": "observed"}})
         self.node_id = node_id
-        self._on_success = "output"
+        self.on_success = "output"
 
     def process(self, rows: list[dict[str, Any]] | PipelineRow, ctx: PluginContext) -> TransformResult:
         if isinstance(rows, list):

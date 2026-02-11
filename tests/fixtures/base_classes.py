@@ -167,18 +167,8 @@ class _TestTransformBase:
     is_batch_aware: bool = False
     creates_tokens: bool = False
     transforms_adds_fields: bool = False
-    _on_error: str | None = None
-    _on_success: str | None = None
-
-    @property
-    def on_error(self) -> str | None:
-        """Error routing destination for this transform."""
-        return self._on_error
-
-    @property
-    def on_success(self) -> str | None:
-        """Success routing destination for this transform."""
-        return self._on_success
+    on_error: str | None = None
+    on_success: str | None = None
 
     def __init__(self) -> None:
         self.config: dict[str, Any] = {"schema": {"mode": "observed"}}

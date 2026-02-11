@@ -121,7 +121,7 @@ class TestOnSuccessConfigAlignment:
 
     The wiring chain:
     1. TransformDataConfig.on_success (Pydantic validation)
-    2. BaseTransform._on_success (set from config or test helper)
+    2. BaseTransform.on_success (set from config or test helper)
     3. TransformProtocol.on_success property (read by DAG and processor)
     4. _validate_on_success_routing() in dag.py (DAG construction)
     5. RowProcessor tracks last_on_success_sink (runtime routing)
@@ -139,7 +139,7 @@ class TestOnSuccessConfigAlignment:
         db = LandscapeDB.in_memory()
         source = ListSource([{"value": 42}], on_success="target_sink")
         transform = _OnSuccessTracingTransform()
-        transform._on_success = "target_sink"
+        transform.on_success = "target_sink"
         sink = CollectSink(name="target_sink")
 
         config = PipelineConfig(
@@ -176,12 +176,12 @@ class TestOnSuccessConfigAlignment:
         assert result.status == RunStatus.COMPLETED
         assert len(sink.results) == 1
 
-    def test_on_success_property_matches_internal_field(self) -> None:
-        """TransformProtocol.on_success property reads from _on_success field."""
+    def test_on_success_attribute_readable_and_writable(self) -> None:
+        """TransformProtocol.on_success is a plain attribute."""
         transform = _OnSuccessTracingTransform()
         assert transform.on_success is None
 
-        transform._on_success = "my_sink"
+        transform.on_success = "my_sink"
         assert transform.on_success == "my_sink"
 
     def test_config_on_success_parsed_into_transform(self) -> None:
@@ -310,7 +310,7 @@ class TestOnSuccessConfigAlignment:
         db = LandscapeDB.in_memory()
         source = ListSource([{"value": 1}], on_success="source_out")
         transform = _OnSuccessTracingTransform()
-        transform._on_success = "sink_b"
+        transform.on_success = "sink_b"
         sink_a = CollectSink(name="sink_a")
         sink_b = CollectSink(name="sink_b")
 

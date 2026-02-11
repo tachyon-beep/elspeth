@@ -110,7 +110,7 @@ class TestOrchestrator:
         db = LandscapeDB.in_memory()
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = DoubleTransform()
-        transform._on_success = "default"
+        transform.on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -309,7 +309,7 @@ class TestOrchestratorMultipleTransforms:
         source = ListSource([{"value": 5}])
         transform1 = AddOneTransform()
         transform2 = MultiplyTwoTransform()
-        transform2._on_success = "default"
+        transform2.on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -361,7 +361,7 @@ class TestOrchestratorEmptyPipeline:
         db = LandscapeDB.in_memory()
         source = ListSource([])  # Empty source
         transform = IdentityTransform()
-        transform._on_success = "default"
+        transform.on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(

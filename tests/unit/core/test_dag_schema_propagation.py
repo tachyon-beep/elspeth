@@ -27,16 +27,8 @@ class MockTransformWithSchemaConfig:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    _on_error: str | None = None
-    _on_success: str | None = "output"
-
-    @property
-    def on_error(self) -> str | None:
-        return self._on_error
-
-    @property
-    def on_success(self) -> str | None:
-        return self._on_success
+    on_error: str | None = None
+    on_success: str | None = "output"
 
     def __init__(self) -> None:
         # Computed schema config with guaranteed and audit fields
@@ -55,16 +47,8 @@ class MockTransformWithoutSchemaConfig:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed", "guaranteed_fields": ["config_field"]}}
-    _on_error: str | None = None
-    _on_success: str | None = "output"
-
-    @property
-    def on_error(self) -> str | None:
-        return self._on_error
-
-    @property
-    def on_success(self) -> str | None:
-        return self._on_success
+    on_error: str | None = None
+    on_success: str | None = "output"
 
 
 class MockSource:
@@ -354,16 +338,8 @@ class MockAggregationTransform:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    _on_error: str | None = None
-    _on_success: str | None = "output"
-
-    @property
-    def on_error(self) -> str | None:
-        return self._on_error
-
-    @property
-    def on_success(self) -> str | None:
-        return self._on_success
+    on_error: str | None = None
+    on_success: str | None = "output"
 
     def __init__(self) -> None:
         self._output_schema_config = SchemaConfig(

@@ -311,7 +311,7 @@ class TestJSONExplodeConfiguration:
     """Tests for configuration validation."""
 
     def test_no_on_error_attribute(self) -> None:
-        """JSONExplode has no on_error - _on_error should be None."""
+        """JSONExplode has no on_error - on_error should be None."""
         from elspeth.plugins.transforms.json_explode import JSONExplode
 
         transform = JSONExplode(
@@ -322,7 +322,7 @@ class TestJSONExplodeConfiguration:
         )
 
         # on_error is None because JSONExplode uses DataPluginConfig,
-        # not TransformDataConfig, and doesn't set _on_error
+        # not TransformDataConfig, and doesn't set on_error
         assert transform.on_error is None
 
     def test_array_field_is_required(self) -> None:

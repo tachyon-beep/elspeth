@@ -111,9 +111,9 @@ class PassTransform(BaseTransform):
         if input_connection is not None:
             self.input = input_connection
         if on_success is not None:
-            self._on_success = on_success
+            self.on_success = on_success
         if on_error is not None:
-            self._on_error = on_error
+            self.on_error = on_error
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -125,7 +125,7 @@ class FailTransform(BaseTransform):
     name = "fail_transform"
     input_schema: type[PluginSchema] = _TestSchema
     output_schema: type[PluginSchema] = _TestSchema
-    _on_error = "discard"
+    on_error = "discard"
 
     def __init__(
         self,
@@ -141,7 +141,7 @@ class FailTransform(BaseTransform):
         if input_connection is not None:
             self.input = input_connection
         if on_error is not None:
-            self._on_error = on_error
+            self.on_error = on_error
         self._error_reason = error_reason
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -154,7 +154,7 @@ class ConditionalErrorTransform(BaseTransform):
     name = "conditional_error"
     input_schema: type[PluginSchema] = _TestSchema
     output_schema: type[PluginSchema] = _TestSchema
-    _on_error = "discard"
+    on_error = "discard"
 
     def __init__(
         self,
@@ -170,9 +170,9 @@ class ConditionalErrorTransform(BaseTransform):
         if input_connection is not None:
             self.input = input_connection
         if on_success is not None:
-            self._on_success = on_success
+            self.on_success = on_success
         if on_error is not None:
-            self._on_error = on_error
+            self.on_error = on_error
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if row["fail"]:
@@ -201,9 +201,9 @@ class CountingTransform(BaseTransform):
         if input_connection is not None:
             self.input = input_connection
         if on_success is not None:
-            self._on_success = on_success
+            self.on_success = on_success
         if on_error is not None:
-            self._on_error = on_error
+            self.on_error = on_error
         self.call_count = 0
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -233,9 +233,9 @@ class SlowTransform(BaseTransform):
         if input_connection is not None:
             self.input = input_connection
         if on_success is not None:
-            self._on_success = on_success
+            self.on_success = on_success
         if on_error is not None:
-            self._on_error = on_error
+            self.on_error = on_error
         self._delay = delay_seconds
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -251,7 +251,7 @@ class ErrorOnNthTransform(BaseTransform):
     name = "error_on_nth"
     input_schema: type[PluginSchema] = _TestSchema
     output_schema: type[PluginSchema] = _TestSchema
-    _on_error = "discard"
+    on_error = "discard"
 
     def __init__(
         self,
@@ -268,9 +268,9 @@ class ErrorOnNthTransform(BaseTransform):
         if input_connection is not None:
             self.input = input_connection
         if on_success is not None:
-            self._on_success = on_success
+            self.on_success = on_success
         if on_error is not None:
-            self._on_error = on_error
+            self.on_error = on_error
         self._error_on = error_on
         self._call_count = 0
 

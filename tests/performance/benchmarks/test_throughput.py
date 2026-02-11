@@ -40,7 +40,7 @@ def _run_pipeline(
 
     # Set on_success on terminal transform if any
     if transforms:
-        transforms[-1]._on_success = sink_name
+        transforms[-1].on_success = sink_name
 
     config = PipelineConfig(
         source=as_source(source),

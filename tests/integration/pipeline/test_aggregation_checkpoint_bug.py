@@ -57,7 +57,7 @@ class BatchCollectorTransform(BaseTransform):
     input_schema = _TestSchema
     output_schema = _TestSchema
     is_batch_aware = True
-    _on_success: str | None = "output"
+    on_success: str | None = "output"
 
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})

@@ -90,16 +90,8 @@ class SimpleTransform:
     is_batch_aware = False
     creates_tokens = False
     transforms_adds_fields = False
-    _on_error: str | None = None
-    _on_success: str | None = "output"
-
-    @property
-    def on_error(self) -> str | None:
-        return self._on_error
-
-    @property
-    def on_success(self) -> str | None:
-        return self._on_success
+    on_error: str | None = None
+    on_success: str | None = "output"
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})

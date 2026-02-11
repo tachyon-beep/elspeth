@@ -148,8 +148,8 @@ class TransformProtocol(Protocol):
         - close(): Called at pipeline completion for cleanup
 
     Error Routing (WP-11.99b):
-        Transforms that can return TransformResult.error() must set _on_error
-        to specify where errored rows go. If _on_error is None and the transform
+        Transforms that can return TransformResult.error() must set on_error
+        to specify where errored rows go. If on_error is None and the transform
         returns an error, the executor raises RuntimeError.
 
     Example:
@@ -259,7 +259,7 @@ class BatchTransformProtocol(Protocol):
         - close(): Called at pipeline completion for cleanup
 
     Error Routing (WP-11.99b):
-        Batch transforms that can return TransformResult.error() must set _on_error
+        Batch transforms that can return TransformResult.error() must set on_error
         to specify where errored batches go.
 
     Example:
