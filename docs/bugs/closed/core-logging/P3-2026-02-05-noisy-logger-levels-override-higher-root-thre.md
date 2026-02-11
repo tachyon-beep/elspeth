@@ -1,16 +1,16 @@
 # Bug Report: Noisy Logger Levels Override Higher Root Thresholds
 
-**Status: OPEN**
+**Status: RESOLVED ✅**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
+- Classification: **Resolved**
 - Verification summary:
-  - `configure_logging(level='ERROR')` still sets root to ERROR but noisy loggers to WARNING.
-  - Effective level mismatch remains (`root=ERROR`, `azure=WARNING`), so warnings from noisy loggers can bypass intended threshold.
+  - `configure_logging(level='ERROR')` now sets noisy logger levels to at least the configured root threshold.
+  - Effective level mismatch no longer occurs (`root=ERROR`, `azure=ERROR`), so warnings from noisy loggers are suppressed.
 - Current evidence:
-  - `src/elspeth/core/logging.py:135`
-  - `src/elspeth/core/logging.py:141`
+  - `src/elspeth/core/logging.py`
+  - `tests/unit/core/test_logging.py`
 
 ## Summary
 
@@ -58,7 +58,8 @@
 
 ## Evidence
 
-- `src/elspeth/core/logging.py:137-141` sets noisy loggers to `WARNING` unconditionally, regardless of `log_level`.
+- `src/elspeth/core/logging.py` now computes `noisy_level = max(log_level, logging.WARNING)` and applies it to all noisy loggers.
+- `tests/unit/core/test_logging.py` includes regression coverage that verifies noisy warnings are suppressed at root `ERROR`.
 
 ## Impact
 
@@ -73,10 +74,10 @@
 ## Proposed Fix
 
 - Code changes (modules/files):
-  - In `src/elspeth/core/logging.py`, set noisy loggers to `max(log_level, logging.WARNING)` to avoid lowering verbosity below the configured threshold.
+  - `src/elspeth/core/logging.py`: set noisy loggers to `max(log_level, logging.WARNING)` to avoid lowering verbosity below the configured threshold.
 - Config or schema changes: None.
 - Tests to add/update:
-  - Add a test ensuring noisy logger effective level is at least the configured root level when `level="ERROR"`.
+  - Added a regression test ensuring noisy logger warnings are suppressed when `level="ERROR"`.
 - Risks or migration steps:
   - Low risk; only affects log filtering.
 
@@ -94,8 +95,10 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/core/test_logging.py`
-- New tests required: yes, add a test for `level="ERROR"` noisy logger behavior
+- Validation run:
+  - `uv run pytest -q tests/unit/core/test_logging.py`
+  - `uv run ruff check src/elspeth/core/logging.py tests/unit/core/test_logging.py`
+- New tests required: no (covered by regression test).
 
 ## Notes / Links
 
