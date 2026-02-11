@@ -151,6 +151,7 @@ class RuntimeTelemetryProtocol(Protocol):
     - granularity: TelemetrySettings.granularity (parsed to TelemetryGranularity enum)
     - backpressure_mode: TelemetrySettings.backpressure_mode (parsed to BackpressureMode enum)
     - fail_on_total_exporter_failure: TelemetrySettings.fail_on_total_exporter_failure
+    - max_consecutive_failures: TelemetrySettings.max_consecutive_failures (direct)
     - exporter_configs: TelemetrySettings.exporters (converted to tuple of ExporterConfig)
 
     Note: The from_settings() factory validates that backpressure_mode is
@@ -176,6 +177,11 @@ class RuntimeTelemetryProtocol(Protocol):
     @property
     def fail_on_total_exporter_failure(self) -> bool:
         """Whether to fail the run if all exporters fail."""
+        ...
+
+    @property
+    def max_consecutive_failures(self) -> int:
+        """Number of consecutive total failures before disabling or raising."""
         ...
 
     @property

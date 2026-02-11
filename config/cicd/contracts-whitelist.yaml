@@ -318,7 +318,6 @@ allowed_dict_patterns:
   # method receives raw config before type validation.
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/telemetry/protocols.py:ExporterProtocol.configure:config"
-  - "src/elspeth/telemetry/manager.py:TelemetryManager.health_metrics:return"
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter.configure:config"
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter._serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter.configure:config"

@@ -1,7 +1,7 @@
-"""Tests for sink display header functionality.
+"""Tests for sink header output functionality.
 
-Tests the display_headers and restore_source_headers configuration options
-for CSV and JSON sinks that allow restoring original header names in output.
+Tests the unified headers configuration option for CSV and JSON sinks
+that controls output header naming (normalized, original, or custom mapping).
 """
 
 import csv
@@ -12,70 +12,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.config_base import PluginConfigError, SinkPathConfig
 
 
-class TestSinkPathConfigValidation:
-    """Tests for SinkPathConfig display header validation."""
-
-    def test_display_headers_and_restore_mutually_exclusive(self) -> None:
-        """Cannot use both display_headers and restore_source_headers."""
-        with pytest.raises(PluginConfigError, match="Cannot use both"):
-            SinkPathConfig.from_dict(
-                {
-                    "path": "output.csv",
-                    "schema": {"mode": "observed"},
-                    "display_headers": {"user_id": "User ID"},
-                    "restore_source_headers": True,
-                }
-            )
-
-    def test_display_headers_only_is_valid(self) -> None:
-        """display_headers alone is valid."""
-        cfg = SinkPathConfig.from_dict(
-            {
-                "path": "output.csv",
-                "schema": {"mode": "observed"},
-                "display_headers": {"user_id": "User ID", "amount": "Transaction Amount"},
-            }
-        )
-        assert cfg.display_headers == {"user_id": "User ID", "amount": "Transaction Amount"}
-        assert cfg.restore_source_headers is False
-
-    def test_restore_source_headers_only_is_valid(self) -> None:
-        """restore_source_headers alone is valid."""
-        cfg = SinkPathConfig.from_dict(
-            {
-                "path": "output.csv",
-                "schema": {"mode": "observed"},
-                "restore_source_headers": True,
-            }
-        )
-        assert cfg.display_headers is None
-        assert cfg.restore_source_headers is True
-
-    def test_neither_display_option_is_valid(self) -> None:
-        """Both display options omitted is valid (default behavior)."""
-        cfg = SinkPathConfig.from_dict(
-            {
-                "path": "output.csv",
-                "schema": {"mode": "observed"},
-            }
-        )
-        assert cfg.display_headers is None
-        assert cfg.restore_source_headers is False
-
-
-class TestCSVSinkDisplayHeaders:
-    """Tests for CSVSink display header functionality."""
+class TestCSVSinkHeaders:
+    """Tests for CSVSink header output functionality."""
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
 
-    def test_explicit_display_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """display_headers maps normalized names to display names in CSV header."""
+    def test_explicit_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """headers dict maps normalized names to display names in CSV header."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
@@ -83,7 +31,7 @@ class TestCSVSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
-                "display_headers": {"user_id": "User ID", "amount": "Transaction Amount"},
+                "headers": {"user_id": "User ID", "amount": "Transaction Amount"},
             }
         )
 
@@ -110,7 +58,7 @@ class TestCSVSinkDisplayHeaders:
             assert rows[0] == ["u1", "100.0"]
             assert rows[1] == ["u2", "200.0"]
 
-    def test_partial_display_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+    def test_partial_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Unmapped fields keep their normalized names."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
@@ -119,7 +67,7 @@ class TestCSVSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float", "status: str"]},
-                "display_headers": {"user_id": "User ID"},  # Only user_id is mapped
+                "headers": {"user_id": "User ID"},  # Only user_id is mapped
             }
         )
 
@@ -133,8 +81,8 @@ class TestCSVSinkDisplayHeaders:
             # user_id mapped, others keep normalized names
             assert header == ["User ID", "amount", "status"]
 
-    def test_restore_source_headers(self, tmp_path: Path) -> None:
-        """restore_source_headers fetches mapping from Landscape."""
+    def test_original_headers_from_landscape(self, tmp_path: Path) -> None:
+        """headers: original fetches mapping from Landscape."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
@@ -142,7 +90,7 @@ class TestCSVSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "case_study_1: str"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -173,8 +121,8 @@ class TestCSVSinkDisplayHeaders:
             header = next(reader)
             assert header == ["User ID", "case StUdY --- 1!!"]
 
-    def test_restore_source_headers_requires_landscape(self, tmp_path: Path) -> None:
-        """restore_source_headers fails if Landscape is not available.
+    def test_original_headers_requires_landscape(self, tmp_path: Path) -> None:
+        """headers: original fails if Landscape is not available.
 
         Note: Error occurs on first write(), not on_start(), because field resolution
         is only available after source iteration begins (lazy resolution).
@@ -186,21 +134,21 @@ class TestCSVSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["id: str"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
         ctx = PluginContext(run_id="test-run", config={}, landscape=None)
 
-        # on_start is now a no-op for restore_source_headers (lazy resolution)
+        # on_start is now a no-op for original headers (lazy resolution)
         sink.on_start(ctx)
 
         # Error occurs on first write when resolution is attempted
         with pytest.raises(ValueError, match="requires Landscape"):
             sink.write([{"id": "test"}], ctx)
 
-    def test_restore_source_headers_requires_field_resolution(self, tmp_path: Path) -> None:
-        """restore_source_headers fails if source didn't record resolution.
+    def test_original_headers_requires_field_resolution(self, tmp_path: Path) -> None:
+        """headers: original fails if source didn't record resolution.
 
         Note: Error occurs on first write(), not on_start(), because field resolution
         is only available after source iteration begins (lazy resolution).
@@ -212,7 +160,7 @@ class TestCSVSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["id: str"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -221,7 +169,7 @@ class TestCSVSinkDisplayHeaders:
 
         ctx = PluginContext(run_id="test-run", config={}, landscape=mock_landscape)
 
-        # on_start is now a no-op for restore_source_headers (lazy resolution)
+        # on_start is now a no-op for original headers (lazy resolution)
         sink.on_start(ctx)
 
         # Error occurs on first write when resolution is attempted
@@ -237,7 +185,7 @@ class TestCSVSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "computed_score: float"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -260,8 +208,8 @@ class TestCSVSinkDisplayHeaders:
             # user_id restored, computed_score keeps normalized name
             assert header == ["User ID", "computed_score"]
 
-    def test_no_display_headers_uses_normalized(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Without display options, headers are normalized field names."""
+    def test_no_headers_option_uses_normalized(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Without headers option, headers are normalized field names."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
@@ -282,16 +230,16 @@ class TestCSVSinkDisplayHeaders:
             assert header == ["user_id", "amount"]
 
 
-class TestJSONSinkDisplayHeaders:
-    """Tests for JSONSink display header functionality."""
+class TestJSONSinkHeaders:
+    """Tests for JSONSink header output functionality."""
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
 
-    def test_explicit_display_headers_jsonl(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """display_headers maps normalized names to display names in JSONL keys."""
+    def test_explicit_custom_headers_jsonl(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """headers dict maps normalized names to display names in JSONL keys."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.jsonl"
@@ -299,7 +247,7 @@ class TestJSONSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "observed"},
-                "display_headers": {"user_id": "User ID", "amount": "Transaction Amount"},
+                "headers": {"user_id": "User ID", "amount": "Transaction Amount"},
             }
         )
 
@@ -324,8 +272,8 @@ class TestJSONSinkDisplayHeaders:
             row2 = json.loads(lines[1])
             assert row2 == {"User ID": "u2", "Transaction Amount": 200.0}
 
-    def test_explicit_display_headers_json_array(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """display_headers works with JSON array format."""
+    def test_explicit_custom_headers_json_array(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """headers dict works with JSON array format."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.json"
@@ -334,7 +282,7 @@ class TestJSONSinkDisplayHeaders:
                 "path": str(output_file),
                 "format": "json",
                 "schema": {"mode": "observed"},
-                "display_headers": {"user_id": "User ID"},
+                "headers": {"user_id": "User ID"},
             }
         )
 
@@ -347,8 +295,8 @@ class TestJSONSinkDisplayHeaders:
             assert len(data) == 1
             assert data[0] == {"User ID": "u1", "status": "active"}
 
-    def test_restore_source_headers_jsonl(self, tmp_path: Path) -> None:
-        """restore_source_headers fetches mapping from Landscape for JSONL."""
+    def test_original_headers_jsonl(self, tmp_path: Path) -> None:
+        """headers: original fetches mapping from Landscape for JSONL."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.jsonl"
@@ -356,7 +304,7 @@ class TestJSONSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "observed"},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -377,8 +325,8 @@ class TestJSONSinkDisplayHeaders:
             row = json.loads(f.readline())
             assert row == {"User ID": "u1", "Amount (USD)": 99.99}
 
-    def test_no_display_headers_uses_normalized(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Without display options, JSONL uses normalized field names."""
+    def test_no_headers_option_uses_normalized(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Without headers option, JSONL uses normalized field names."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.jsonl"
@@ -446,38 +394,38 @@ class TestFieldResolutionReverseMapping:
         assert reverse == {"id": "id", "name": "name"}
 
 
-class TestCSVDisplayHeadersAppendMode:
-    """Tests for CSV append mode with display headers."""
+class TestCSVCustomHeadersAppendMode:
+    """Tests for CSV append mode with custom headers."""
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
 
-    def test_append_with_explicit_display_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Append mode correctly validates and appends when display headers match."""
+    def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append mode correctly validates and appends when custom headers match."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
 
-        # First write with display headers
+        # First write with custom headers
         sink1 = CSVSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
-                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+                "headers": {"user_id": "User ID", "amount": "Amount"},
             }
         )
         sink1.write([{"user_id": "u1", "amount": 100.0}], ctx)
         sink1.flush()
         sink1.close()
 
-        # Append with same display headers
+        # Append with same custom headers
         sink2 = CSVSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
-                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+                "headers": {"user_id": "User ID", "amount": "Amount"},
                 "mode": "append",
             }
         )
@@ -496,16 +444,16 @@ class TestCSVDisplayHeadersAppendMode:
             assert rows[1] == ["u2", "200.0"]
 
 
-class TestCSVDisplayHeadersSpecialCharacters:
-    """Tests for CSV display headers containing special characters."""
+class TestCSVCustomHeadersSpecialCharacters:
+    """Tests for CSV custom headers containing special characters."""
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
 
-    def test_display_header_with_comma(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Display headers containing commas are properly quoted in CSV."""
+    def test_header_with_comma(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Custom headers containing commas are properly quoted in CSV."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
@@ -513,7 +461,7 @@ class TestCSVDisplayHeadersSpecialCharacters:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["amount: float", "currency: str"]},
-                "display_headers": {"amount": "Amount, USD", "currency": "Currency"},
+                "headers": {"amount": "Amount, USD", "currency": "Currency"},
             }
         )
 
@@ -536,8 +484,8 @@ class TestCSVDisplayHeadersSpecialCharacters:
             assert len(rows) == 1
             assert rows[0] == ["100.0", "USD"]
 
-    def test_display_header_with_quotes(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Display headers containing quotes are properly escaped in CSV."""
+    def test_header_with_quotes(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Custom headers containing quotes are properly escaped in CSV."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
@@ -545,7 +493,7 @@ class TestCSVDisplayHeadersSpecialCharacters:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["value: str"]},
-                "display_headers": {"value": 'Value "quoted"'},
+                "headers": {"value": 'Value "quoted"'},
             }
         )
 
@@ -559,8 +507,8 @@ class TestCSVDisplayHeadersSpecialCharacters:
             header = next(reader)
             assert header == ['Value "quoted"']
 
-    def test_display_header_with_newline(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Display headers containing newlines are properly quoted in CSV."""
+    def test_header_with_newline(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Custom headers containing newlines are properly quoted in CSV."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
@@ -568,7 +516,7 @@ class TestCSVDisplayHeadersSpecialCharacters:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["description: str"]},
-                "display_headers": {"description": "Description\n(multi-line)"},
+                "headers": {"description": "Description\n(multi-line)"},
             }
         )
 
@@ -583,38 +531,38 @@ class TestCSVDisplayHeadersSpecialCharacters:
             assert header == ["Description\n(multi-line)"]
 
 
-class TestJSONLDisplayHeadersAppendMode:
-    """Tests for JSONL append/resume mode with display headers."""
+class TestJSONLCustomHeadersAppendMode:
+    """Tests for JSONL append/resume mode with custom headers."""
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
 
-    def test_append_with_explicit_display_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Append mode correctly validates and appends when display headers match."""
+    def test_append_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append mode correctly validates and appends when custom headers match."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.jsonl"
 
-        # First write with display headers
+        # First write with custom headers
         sink1 = JSONSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
-                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+                "headers": {"user_id": "User ID", "amount": "Amount"},
             }
         )
         sink1.write([{"user_id": "u1", "amount": 100.0}], ctx)
         sink1.flush()
         sink1.close()
 
-        # Append with same display headers
+        # Append with same custom headers
         sink2 = JSONSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
-                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+                "headers": {"user_id": "User ID", "amount": "Amount"},
                 "mode": "append",
             }
         )
@@ -631,22 +579,22 @@ class TestJSONLDisplayHeadersAppendMode:
             assert row1 == {"User ID": "u1", "Amount": 100.0}
             assert row2 == {"User ID": "u2", "Amount": 200.0}
 
-    def test_resume_validation_with_display_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Resume validation succeeds when existing file uses display names."""
+    def test_resume_validation_with_custom_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Resume validation succeeds when existing file uses custom header names."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.jsonl"
 
-        # Pre-create file with display headers
+        # Pre-create file with custom headers
         with open(output_file, "w") as f:
             f.write(json.dumps({"User ID": "u1", "Amount": 100.0}) + "\n")
 
-        # Open in append mode with matching display headers - should validate successfully
+        # Open in append mode with matching custom headers - should validate successfully
         sink = JSONSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
-                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+                "headers": {"user_id": "User ID", "amount": "Amount"},
                 "mode": "append",
             }
         )
@@ -656,11 +604,11 @@ class TestJSONLDisplayHeadersAppendMode:
         assert result.valid, f"Validation failed: {result.error_message}"
 
 
-class TestResumeValidationWithRestoreSourceHeaders:
-    """Tests for resume validation when restore_source_headers is enabled.
+class TestResumeValidationWithOriginalHeaders:
+    """Tests for resume validation when headers: original is enabled.
 
     This tests the scenario where:
-    1. A run completes with restore_source_headers=True (output has display names)
+    1. A run completes with headers: original (output has source header names)
     2. User runs `elspeth resume` on the same run
     3. validate_output_target() must correctly compare existing display names
        against expected display names (not normalized schema names)
@@ -669,26 +617,26 @@ class TestResumeValidationWithRestoreSourceHeaders:
     calling validate_output_target() during resume.
     """
 
-    def test_csv_resume_validation_with_restore_source_headers(self, tmp_path: Path) -> None:
-        """CSV resume validation succeeds when restore_source_headers mapping is provided."""
+    def test_csv_resume_validation_with_original_headers(self, tmp_path: Path) -> None:
+        """CSV resume validation succeeds when original headers mapping is provided."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
 
-        # Pre-create CSV file with display headers (as if previous run used restore_source_headers)
+        # Pre-create CSV file with original headers (as if previous run used headers: original)
         with open(output_file, "w", newline="") as f:
             import csv
 
             writer = csv.writer(f)
-            writer.writerow(["User ID", "Amount (USD)"])  # Display names
+            writer.writerow(["User ID", "Amount (USD)"])  # Original names
             writer.writerow(["u1", "100.0"])
 
-        # Create sink with restore_source_headers (resume scenario)
+        # Create sink with headers: original (resume scenario)
         sink = CSVSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -705,9 +653,8 @@ class TestResumeValidationWithRestoreSourceHeaders:
         assert result.valid, f"Validation failed: {result.error_message}"
 
     def test_csv_resume_validation_without_resolution_fails(self, tmp_path: Path) -> None:
-        """CSV resume validation fails when restore_source_headers but no resolution provided.
+        """CSV resume validation fails when headers: original but no resolution provided.
 
-        This documents the current broken behavior that will be fixed.
         Without the field resolution, validation compares normalized schema names
         (user_id, amount_usd) against display names (User ID, Amount (USD)) and fails.
         """
@@ -723,38 +670,37 @@ class TestResumeValidationWithRestoreSourceHeaders:
             writer.writerow(["User ID", "Amount (USD)"])
             writer.writerow(["u1", "100.0"])
 
-        # Create sink with restore_source_headers but don't provide resolution
+        # Create sink with headers: original but don't provide resolution
         sink = CSVSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
         # Without resolution, validation SHOULD fail (compares wrong field names)
-        # After fix: this test verifies the error is clear
         result = sink.validate_output_target()
         # The validation compares ["user_id", "amount_usd"] against ["User ID", "Amount (USD)"]
-        assert not result.valid, "Should fail when restore_source_headers but no resolution"
+        assert not result.valid, "Should fail when headers: original but no resolution"
         assert result.missing_fields is not None
 
-    def test_jsonl_resume_validation_with_restore_source_headers(self, tmp_path: Path) -> None:
-        """JSONL resume validation succeeds when restore_source_headers mapping is provided."""
+    def test_jsonl_resume_validation_with_original_headers(self, tmp_path: Path) -> None:
+        """JSONL resume validation succeeds when original headers mapping is provided."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.jsonl"
 
-        # Pre-create JSONL file with display headers
+        # Pre-create JSONL file with original headers
         with open(output_file, "w") as f:
             f.write(json.dumps({"User ID": "u1", "Amount (USD)": 100.0}) + "\n")
 
-        # Create sink with restore_source_headers
+        # Create sink with headers: original
         sink = JSONSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -770,36 +716,34 @@ class TestResumeValidationWithRestoreSourceHeaders:
         assert result.valid, f"Validation failed: {result.error_message}"
 
     def test_jsonl_resume_validation_without_resolution_fails(self, tmp_path: Path) -> None:
-        """JSONL resume validation fails when restore_source_headers but no resolution."""
+        """JSONL resume validation fails when headers: original but no resolution."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.jsonl"
 
-        # Pre-create JSONL file with display headers
+        # Pre-create JSONL file with original headers
         with open(output_file, "w") as f:
             f.write(json.dumps({"User ID": "u1", "Amount (USD)": 100.0}) + "\n")
 
-        # Create sink with restore_source_headers but no resolution
+        # Create sink with headers: original but no resolution
         sink = JSONSink(
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
         # Without resolution, validation should fail
         result = sink.validate_output_target()
-        assert not result.valid, "Should fail when restore_source_headers but no resolution"
+        assert not result.valid, "Should fail when headers: original but no resolution"
 
-    def test_csv_resume_validation_free_mode_with_restore_source_headers(self, tmp_path: Path) -> None:
-        """Free mode resume validation works with restore_source_headers."""
+    def test_csv_resume_validation_strict_mode_with_original_headers(self, tmp_path: Path) -> None:
+        """Strict mode resume validation works with headers: original."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
 
-        # CSV requires strict mode (rejects free mode with allows_extra_fields)
-        # This test uses strict mode but verifies field subset matching works
         with open(output_file, "w", newline="") as f:
             import csv
 
@@ -811,7 +755,7 @@ class TestResumeValidationWithRestoreSourceHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "status: str"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -821,13 +765,13 @@ class TestResumeValidationWithRestoreSourceHeaders:
         result = sink.validate_output_target()
         assert result.valid, f"Validation failed: {result.error_message}"
 
-    def test_jsonl_resume_validation_free_mode_with_restore_source_headers(self, tmp_path: Path) -> None:
-        """Free mode resume validation works with restore_source_headers for JSONL."""
+    def test_jsonl_resume_validation_flexible_mode_with_original_headers(self, tmp_path: Path) -> None:
+        """Flexible mode resume validation works with headers: original for JSONL."""
         from elspeth.plugins.sinks.json_sink import JSONSink
 
         output_file = tmp_path / "output.jsonl"
 
-        # File has extra field not in schema (free mode allows this)
+        # File has extra field not in schema (flexible mode allows this)
         with open(output_file, "w") as f:
             f.write(json.dumps({"User ID": "u1", "Amount": 100.0, "Extra Field": "extra"}) + "\n")
 
@@ -835,7 +779,7 @@ class TestResumeValidationWithRestoreSourceHeaders:
             {
                 "path": str(output_file),
                 "schema": {"mode": "flexible", "fields": ["user_id: str", "amount: float"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 

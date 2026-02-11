@@ -237,14 +237,14 @@ class TestResumeSchemaValidationOrder:
         assert list(validation.schema_fields) == ["id", "name"]
 
 
-class TestResumeWithRestoreSourceHeaders:
-    """Tests for resume validation when restore_source_headers is enabled."""
+class TestResumeWithOriginalHeaders:
+    """Tests for resume validation when headers: original is enabled."""
 
-    def test_csv_resume_with_restore_source_headers_succeeds(self, tmp_path: Path):
-        """Resume succeeds when CLI provides field resolution for restore_source_headers."""
+    def test_csv_resume_with_original_headers_succeeds(self, tmp_path: Path):
+        """Resume succeeds when CLI provides field resolution for headers: original."""
         csv_path = tmp_path / "output.csv"
 
-        # Create CSV with display headers (as if previous run used restore_source_headers)
+        # Create CSV with original headers (as if previous run used headers: original)
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["User ID", "Amount (USD)"])
             writer.writeheader()
@@ -254,7 +254,7 @@ class TestResumeWithRestoreSourceHeaders:
             {
                 "path": str(csv_path),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -270,7 +270,7 @@ class TestResumeWithRestoreSourceHeaders:
         validation = sink.validate_output_target()
         assert validation.valid is True, f"Validation failed: {validation.error_message}"
 
-    def test_csv_resume_with_restore_source_headers_fails_without_resolution(self, tmp_path: Path):
+    def test_csv_resume_with_original_headers_fails_without_resolution(self, tmp_path: Path):
         """Resume fails when CLI doesn't provide field resolution (bug scenario)."""
         csv_path = tmp_path / "output.csv"
 
@@ -282,7 +282,7 @@ class TestResumeWithRestoreSourceHeaders:
             {
                 "path": str(csv_path),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -293,7 +293,7 @@ class TestResumeWithRestoreSourceHeaders:
         assert validation.missing_fields is not None
         assert len(validation.missing_fields) > 0
 
-    def test_jsonl_resume_with_restore_source_headers_succeeds(self, tmp_path: Path):
+    def test_jsonl_resume_with_original_headers_succeeds(self, tmp_path: Path):
         """JSONL resume succeeds when CLI provides field resolution."""
         jsonl_path = tmp_path / "output.jsonl"
 
@@ -305,7 +305,7 @@ class TestResumeWithRestoreSourceHeaders:
                 "path": str(jsonl_path),
                 "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 "format": "jsonl",
-                "restore_source_headers": True,
+                "headers": "original",
             }
         )
 
@@ -320,8 +320,8 @@ class TestResumeWithRestoreSourceHeaders:
         validation = sink.validate_output_target()
         assert validation.valid is True, f"Validation failed: {validation.error_message}"
 
-    def test_no_op_when_not_using_restore_source_headers(self, tmp_path: Path):
-        """set_resume_field_resolution() is a no-op when restore_source_headers=False."""
+    def test_no_op_when_not_using_original_headers(self, tmp_path: Path):
+        """set_resume_field_resolution() is a no-op when headers mode is not original."""
         csv_path = tmp_path / "output.csv"
 
         with open(csv_path, "w", newline="") as f:

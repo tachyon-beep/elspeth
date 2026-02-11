@@ -26,7 +26,7 @@ Thread Safety:
 
 import queue
 import threading
-from typing import Any
+from typing import TypedDict
 
 import structlog
 
@@ -39,6 +39,21 @@ from elspeth.telemetry.filtering import should_emit
 from elspeth.telemetry.protocols import ExporterProtocol
 
 logger = structlog.get_logger(__name__)
+
+
+class HealthMetrics(TypedDict):
+    """Typed return value for TelemetryManager.health_metrics.
+
+    All fields are operational counters constructed by the manager itself.
+    This is Tier 1 (our data) — not external input.
+    """
+
+    events_emitted: int
+    events_dropped: int
+    exporter_failures: dict[str, int]
+    consecutive_total_failures: int
+    queue_depth: int
+    queue_maxsize: int
 
 
 class TelemetryManager:
@@ -91,7 +106,7 @@ class TelemetryManager:
         self._config = config
         self._exporters = exporters
         self._consecutive_total_failures = 0
-        self._max_consecutive_failures = 10
+        self._max_consecutive_failures = config.max_consecutive_failures
 
         # Health metrics
         self._events_emitted = 0
@@ -295,7 +310,7 @@ class TelemetryManager:
             self._last_logged_drop_count = self._events_dropped
 
     @property
-    def health_metrics(self) -> dict[str, Any]:
+    def health_metrics(self) -> HealthMetrics:
         """Return telemetry health metrics for monitoring.
 
         Returns a snapshot of telemetry health:
@@ -312,7 +327,7 @@ class TelemetryManager:
             slightly stale but this is acceptable for operational monitoring.
 
         Returns:
-            Dictionary of health metrics
+            Typed health metrics snapshot.
         """
         with self._dropped_lock:
             events_dropped = self._events_dropped

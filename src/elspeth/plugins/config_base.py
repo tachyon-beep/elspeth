@@ -214,36 +214,11 @@ class SinkPathConfig(PathConfig):
             - "normalized": Use Python identifier names (default)
             - "original": Restore original source header names
             - dict: Custom mapping from normalized to output names
-
-    Legacy Options (for backwards compatibility):
-        display_headers: Explicit mapping from normalized field names to
-            display names. Superseded by headers: {mapping}.
-        restore_source_headers: Flag to restore original source headers.
-            Superseded by headers: original.
-
-    Priority Order (highest to lowest):
-        1. headers (if specified)
-        2. restore_source_headers (legacy, maps to ORIGINAL)
-        3. display_headers (legacy, maps to CUSTOM)
-        4. Default: NORMALIZED
-
-    When 'headers' is set, it takes precedence and legacy options are ignored.
-    Legacy options remain mutually exclusive when 'headers' is not set.
     """
 
     headers: str | dict[str, str] | None = Field(
         default=None,
         description=("Header output mode: 'normalized', 'original', or {field: header} mapping"),
-    )
-
-    display_headers: dict[str, str] | None = Field(
-        default=None,
-        description=("LEGACY: Explicit mapping from normalized field names to display names. Prefer 'headers: {mapping}' instead."),
-    )
-
-    restore_source_headers: bool = Field(
-        default=False,
-        description=("LEGACY: Automatically restore original source headers. Prefer 'headers: original' instead."),
     )
 
     @field_validator("headers")
@@ -266,46 +241,14 @@ class SinkPathConfig(PathConfig):
 
         raise ValueError(f"headers must be 'normalized', 'original', or a dict mapping, got {type(v).__name__}")
 
-    @model_validator(mode="after")
-    def _validate_display_options(self) -> Self:
-        """Validate display header option interactions.
-
-        When 'headers' is set, it takes full precedence and legacy options
-        are ignored (no validation needed). When 'headers' is not set,
-        legacy options remain mutually exclusive.
-        """
-        # New 'headers' takes precedence - skip legacy validation
-        if self.headers is not None:
-            return self
-
-        # Legacy validation: mutual exclusion when headers not set
-        if self.display_headers is not None and self.restore_source_headers:
-            raise ValueError(
-                "Cannot use both display_headers and restore_source_headers. "
-                "Use display_headers for explicit control, or restore_source_headers "
-                "to automatically restore source field names."
-            )
-        return self
-
     @property
     def headers_mode(self) -> HeaderMode:
         """Get resolved header mode.
 
-        Priority:
-        1. 'headers' setting (if specified)
-        2. 'restore_source_headers' (legacy, maps to ORIGINAL)
-        3. 'display_headers' (legacy, maps to CUSTOM)
-        4. Default: NORMALIZED
+        Returns NORMALIZED when headers is not set.
         """
         if self.headers is not None:
             return parse_header_mode(self.headers)
-
-        if self.restore_source_headers:
-            return HeaderMode.ORIGINAL
-
-        if self.display_headers is not None:
-            return HeaderMode.CUSTOM
-
         return HeaderMode.NORMALIZED
 
     @property
@@ -317,11 +260,6 @@ class SinkPathConfig(PathConfig):
         """
         if isinstance(self.headers, dict):
             return self.headers
-
-        # Only use display_headers if headers is not set
-        if self.headers is None and self.display_headers is not None:
-            return self.display_headers
-
         return None
 
 

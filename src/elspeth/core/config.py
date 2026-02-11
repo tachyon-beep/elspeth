@@ -1129,6 +1129,11 @@ class TelemetrySettings(BaseModel):
         default=True,
         description="Fail the run if all exporters fail (when enabled)",
     )
+    max_consecutive_failures: int = Field(
+        default=10,
+        gt=0,
+        description="Number of consecutive total exporter failures before disabling telemetry or raising an error",
+    )
     exporters: list[ExporterSettings] = Field(
         default_factory=list,
         description="List of telemetry exporters to send events to",

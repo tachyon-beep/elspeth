@@ -29,6 +29,7 @@ def _make_config(
         granularity=TelemetryGranularity.FULL,
         backpressure_mode=BackpressureMode.DROP,
         fail_on_total_exporter_failure=False,
+        max_consecutive_failures=10,
         exporter_configs=exporter_configs,
     )
 

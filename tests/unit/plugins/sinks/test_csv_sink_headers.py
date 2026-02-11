@@ -1,9 +1,9 @@
 """Tests for CSVSink header mode integration with contracts.
 
-Tests the integration of the new header_modes system with CSVSink:
+Tests the integration of the header_modes system with CSVSink:
 - set_output_contract() and get_output_contract() methods
 - Resolution of headers via contracts when mode is ORIGINAL
-- Integration with existing display_headers and restore_source_headers
+- Interaction between headers config and schema contracts
 """
 
 from pathlib import Path
@@ -209,11 +209,12 @@ class TestCSVSinkHeaderModes:
         assert "AMOUNT" in header_line
         assert "CUST_ID" in header_line
 
-    def test_original_headers_without_contract_falls_back(self, output_path: Path, ctx: PluginContext) -> None:
-        """headers: original without contract falls back to normalized names.
+    def test_original_headers_without_contract_or_landscape_errors(self, output_path: Path, ctx: PluginContext) -> None:
+        """headers: original without contract or Landscape raises ValueError.
 
-        When no contract is available (and no legacy restore_source_headers with
-        Landscape), the sink should gracefully use normalized names.
+        When the user explicitly requests original headers but no source of
+        original names is available (no contract, no Landscape), write()
+        raises an error rather than silently degrading to normalized names.
         """
         sink = CSVSink(
             {
@@ -222,21 +223,14 @@ class TestCSVSinkHeaderModes:
                 "headers": "original",
             }
         )
-        # Deliberately NOT setting a contract
+        # Deliberately NOT setting a contract or landscape
 
-        sink.write([{"amount_usd": 100, "customer_id": "C001"}], ctx)
-        sink.close()
-
-        content = output_path.read_text()
-        lines = content.strip().split("\n")
-        header_line = lines[0]
-        # Without contract, should fall back to normalized names
-        assert "amount_usd" in header_line
-        assert "customer_id" in header_line
+        with pytest.raises(ValueError, match="requires Landscape"):
+            sink.write([{"amount_usd": 100, "customer_id": "C001"}], ctx)
 
 
 class TestCSVSinkHeaderModeInteraction:
-    """Test interaction between new header modes and legacy options."""
+    """Test interaction between header modes and schema contracts."""
 
     @pytest.fixture
     def output_path(self, tmp_path: Path) -> Path:
@@ -359,41 +353,3 @@ class TestCSVSinkHeaderModeInteraction:
         assert "MY_AMOUNT" in lines[0]
         assert "MY_CUSTOMER" in lines[0]
         assert "'Amount USD'" not in lines[0]
-
-
-class TestCSVSinkLegacyDisplayHeadersCompatibility:
-    """Test legacy display_headers option still works.
-
-    The new header modes should not break existing configs using display_headers.
-    """
-
-    @pytest.fixture
-    def output_path(self, tmp_path: Path) -> Path:
-        """Output file path."""
-        return tmp_path / "output.csv"
-
-    @pytest.fixture
-    def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
-
-    def test_legacy_display_headers_still_works(self, output_path: Path, ctx: PluginContext) -> None:
-        """Legacy display_headers config option continues to work."""
-        sink = CSVSink(
-            {
-                "path": str(output_path),
-                "schema": STRICT_SCHEMA,
-                "display_headers": {
-                    "amount_usd": "Amount (USD)",
-                    "customer_id": "Customer",
-                },
-            }
-        )
-
-        sink.write([{"amount_usd": 100, "customer_id": "C001"}], ctx)
-        sink.close()
-
-        content = output_path.read_text()
-        lines = content.strip().split("\n")
-        assert "Amount (USD)" in lines[0]
-        assert "Customer" in lines[0]

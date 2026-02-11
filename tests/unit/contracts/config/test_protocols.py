@@ -71,6 +71,7 @@ PROTOCOL_EXPECTED_PROPERTIES: dict[type, set[str]] = {
         "granularity",
         "backpressure_mode",
         "fail_on_total_exporter_failure",
+        "max_consecutive_failures",
         "exporter_configs",
     },
 }
@@ -183,6 +184,7 @@ class _FakeTelemetryComplete:
     granularity: TelemetryGranularity = TelemetryGranularity.LIFECYCLE
     backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
     fail_on_total_exporter_failure: bool = True
+    max_consecutive_failures: int = 10
     exporter_configs: tuple[ExporterConfig, ...] = ()
 
 
@@ -191,6 +193,7 @@ class _FakeTelemetryMissingGranularity:
     enabled: bool = False
     backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
     fail_on_total_exporter_failure: bool = True
+    max_consecutive_failures: int = 10
     exporter_configs: tuple[ExporterConfig, ...] = ()
 
 
@@ -377,9 +380,9 @@ class TestProtocolCompleteness:
         props = _get_protocol_property_names(RuntimeCheckpointProtocol)
         assert len(props) == 3
 
-    def test_telemetry_protocol_has_5_properties(self) -> None:
+    def test_telemetry_protocol_has_6_properties(self) -> None:
         props = _get_protocol_property_names(RuntimeTelemetryProtocol)
-        assert len(props) == 5
+        assert len(props) == 6
 
     @pytest.mark.parametrize(
         "protocol",

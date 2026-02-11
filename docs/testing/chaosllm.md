@@ -62,6 +62,12 @@ def test_under_stress(chaosllm_server):
 | `/admin/config` | POST | Update configuration at runtime |
 | `/admin/stats` | GET | Request statistics summary |
 | `/admin/reset` | POST | Clear metrics, start fresh run |
+| `/admin/export` | GET | Export raw metrics data for external analysis |
+
+> **Security Notice:** All admin endpoints are unauthenticated. ChaosLLM is a test
+> tool intended for local or trusted-network use only. Do not expose admin endpoints
+> to untrusted networks. There are no CORS restrictions or rate limits on admin
+> endpoints. When running on shared infrastructure, bind to `127.0.0.1` (the default).
 
 ### Request Format
 
