@@ -285,8 +285,8 @@ class TestCheckAggregationTimeouts:
 
         assert result.rows_succeeded == 0
 
-    def test_non_timeout_trigger_skipped(self) -> None:
-        """Count triggers are handled elsewhere — skip in timeout check."""
+    def test_count_trigger_skipped(self) -> None:
+        """Count triggers are handled in buffer_row — skip in pre-row check."""
         config = _make_config(aggregation_settings={"agg-1": _make_agg_settings()})
         processor = Mock()
         processor.check_aggregation_timeout.return_value = (True, TriggerType.COUNT)
@@ -300,6 +300,46 @@ class TestCheckAggregationTimeouts:
         )
 
         assert result.rows_succeeded == 0
+
+    def test_condition_trigger_flushes_pre_row(self) -> None:
+        """Condition triggers that are time-based must flush before next row.
+
+        P1-2026-02-05: Condition triggers like 'batch_age_seconds >= 5' can
+        become true between rows. They must be treated like timeout triggers
+        for pre-row flush, and the actual trigger_type must be passed through
+        (not hardcoded as TIMEOUT).
+        """
+        token = make_token_info()
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
+
+        agg_transform = _make_batch_transform(node_id="agg-1")
+        config = _make_config(
+            transforms=[agg_transform],
+            aggregation_settings={"agg-1": _make_agg_settings()},
+        )
+        processor = Mock()
+        processor.check_aggregation_timeout.return_value = (True, TriggerType.CONDITION)
+        processor.get_aggregation_buffer_count.return_value = 3
+        processor.handle_timeout_flush.return_value = ([completed], [])
+
+        pending = _make_pending()
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+
+        result = check_aggregation_timeouts(
+            config=config,
+            processor=processor,
+            ctx=Mock(),
+            pending_tokens=pending,
+            agg_transform_lookup=lookup,
+        )
+
+        # Condition trigger should flush (not be skipped)
+        assert result.rows_succeeded == 1
+        assert len(pending["output"]) == 1
+
+        # Verify actual trigger_type is passed (not hardcoded TIMEOUT)
+        call_kwargs = processor.handle_timeout_flush.call_args.kwargs
+        assert call_kwargs["trigger_type"] == TriggerType.CONDITION
 
     def test_empty_buffer_skipped(self) -> None:
         """Timeout fires but buffer is empty — nothing to flush."""

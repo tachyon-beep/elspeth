@@ -53,10 +53,18 @@ class VerificationResult:
     def has_differences(self) -> bool:
         """Check if there are meaningful differences.
 
-        Returns True only when there are actual differences between
-        responses (not when the recording is simply missing or payload is purged).
+        Returns True when there are actual differences between responses.
+        Missing recordings are not differences. Missing payloads are not
+        differences UNLESS hash-based comparison detected a mismatch
+        (indicated by non-empty differences dict).
         """
-        return not self.is_match and not self.recorded_call_missing and not self.payload_missing
+        if self.recorded_call_missing:
+            return False
+        if self.payload_missing:
+            # Hash-based comparison may have populated differences even
+            # though the full payload is missing. Surface those.
+            return not self.is_match and bool(self.differences)
+        return not self.is_match
 
 
 @dataclass
@@ -214,14 +222,43 @@ class CallVerifier:
         # This catches both purged payloads AND runs recorded without a payload store.
         response_expected = call.response_hash is not None or call.status == CallStatus.SUCCESS
         if recorded_response is None and response_expected:
-            result = VerificationResult(
-                request_hash=request_hash,
-                live_response=live_response,
-                recorded_response=None,
-                is_match=False,
-                payload_missing=True,
-            )
             self._report.missing_payloads += 1
+
+            # P1-2026-02-05: When response_hash exists, perform hash-based
+            # verification even though the full payload is missing. Per CLAUDE.md:
+            # "Hashes survive payload deletion — integrity is always verifiable."
+            if call.response_hash is not None:
+                live_hash = stable_hash(live_response)
+                is_match = live_hash == call.response_hash
+                if is_match:
+                    self._report.matches += 1
+                else:
+                    self._report.mismatches += 1
+                result = VerificationResult(
+                    request_hash=request_hash,
+                    live_response=live_response,
+                    recorded_response=None,
+                    is_match=is_match,
+                    payload_missing=True,
+                    differences={
+                        "hash_mismatch": {
+                            "recorded_hash": call.response_hash,
+                            "live_hash": live_hash,
+                        }
+                    }
+                    if not is_match
+                    else {},
+                )
+            else:
+                # No hash available — cannot verify, just mark as missing
+                result = VerificationResult(
+                    request_hash=request_hash,
+                    live_response=live_response,
+                    recorded_response=None,
+                    is_match=False,
+                    payload_missing=True,
+                )
+
             self._report.results.append(result)
             return result
 

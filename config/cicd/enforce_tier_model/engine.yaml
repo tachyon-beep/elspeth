@@ -11,7 +11,7 @@ allow_hits:
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion
   expires: null
-- key: engine/triggers.py:R5:TriggerEvaluator:should_trigger:fp=bac17c66d1886d99
+- key: engine/triggers.py:R5:TriggerEvaluator:should_trigger:fp=33b9bd90b4c4226c
   owner: bugfix
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion

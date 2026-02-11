@@ -395,6 +395,96 @@ class TestTriggerFirstToFireWins:
         )
 
 
+class TestTriggerConditionLatching:
+    """Tests for P1-2026-02-05: Condition trigger must latch once fired.
+
+    Window-based conditions (e.g., batch_age_seconds < 0.5) can become
+    false after the window closes. Once _condition_fire_time is set,
+    should_trigger() must honor it regardless of current evaluation.
+    """
+
+    def test_window_condition_latched_after_window_closes(self) -> None:
+        """Condition that was true at accept time still triggers after window closes.
+
+        Scenario:
+        - Condition: batch_age_seconds < 0.5 (true in first 500ms)
+        - Accept row at t=0 (condition true, fire time latched)
+        - should_trigger() called at t=1.0 (condition now false)
+
+        Expected: should_trigger() returns True (latched fire time honored)
+        Bug behavior: should_trigger() returned False (re-evaluated, found false)
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(condition="row['batch_age_seconds'] < 0.5")
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept at t=0 — condition is true (0.0 < 0.5), fire time latched
+        evaluator.record_accept()
+        assert evaluator._condition_fire_time is not None
+
+        # Advance past the window
+        clock.advance(1.0)  # Now at t=1.0, condition is false (1.0 < 0.5 = False)
+
+        # should_trigger() must honor the latched fire time
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "condition"
+
+    def test_latched_condition_reports_original_fire_time(self) -> None:
+        """Latched condition uses the original fire time, not current time.
+
+        This matters for "first to fire wins" when combined with other triggers.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(
+            timeout_seconds=2.0,
+            condition="row['batch_age_seconds'] < 0.5",
+        )
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept at t=0 — condition fires immediately
+        evaluator.record_accept()
+
+        # Advance past both condition window AND timeout
+        clock.advance(3.0)  # Now at t=3.0
+
+        # Both have fired, but condition fired at t=0 (before timeout at t=2.0)
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "condition", "Condition latched at t=0.0, timeout at t=2.0. Condition should win."
+
+    def test_unlatched_condition_still_evaluated(self) -> None:
+        """Condition that hasn't fired yet is still re-evaluated at should_trigger() time.
+
+        This is the non-bug case: time-dependent conditions that become true
+        between accepts (e.g., batch_age_seconds >= 5) should be detected.
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(condition="row['batch_age_seconds'] >= 5.0")
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept at t=0 — condition is false (0.0 >= 5.0 = False)
+        evaluator.record_accept()
+        assert evaluator._condition_fire_time is None
+
+        # Advance past threshold
+        clock.advance(6.0)
+
+        # should_trigger() re-evaluates and finds condition is now true
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "condition"
+
+
 class TestTriggerConditionBooleanValidation:
     """Tests for P2-2026-01-31: Trigger condition must return boolean.
 

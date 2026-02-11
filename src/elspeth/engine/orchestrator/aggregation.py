@@ -204,8 +204,11 @@ def check_aggregation_timeouts(
         if not should_flush:
             continue
 
-        # Skip if not a timeout trigger - count triggers are handled in buffer_row
-        if trigger_type != TriggerType.TIMEOUT:
+        # Skip count triggers — they are handled in buffer_row.
+        # Timeout AND condition triggers can be time-based (e.g.,
+        # batch_age_seconds >= 5) and must flush before the next row is buffered.
+        # P1-2026-02-05: condition triggers were previously skipped here.
+        if trigger_type not in (TriggerType.TIMEOUT, TriggerType.CONDITION):
             continue
 
         # Check if there are buffered rows
@@ -222,11 +225,12 @@ def check_aggregation_timeouts(
 
         # Use handle_timeout_flush for proper output_mode handling.
         # Continuation is node-based inside the processor.
+        # Pass actual trigger_type (TIMEOUT or CONDITION) for correct audit records.
         completed_results, work_items = processor.handle_timeout_flush(
             node_id=agg_node_id,
             transform=agg_transform,
             ctx=ctx,
-            trigger_type=TriggerType.TIMEOUT,
+            trigger_type=trigger_type,
         )
 
         # Handle completed results (no more transforms - go to sink)
