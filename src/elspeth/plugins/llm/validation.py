@@ -19,6 +19,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
+def _reject_nonfinite_constant(value: str) -> None:
+    """Reject non-standard JSON constants (NaN, Infinity, -Infinity)."""
+    raise ValueError(f"Non-standard JSON constant '{value}' not allowed")
+
+
 @dataclass(frozen=True)
 class ValidationSuccess:
     """Successful validation result containing parsed data."""
@@ -55,8 +60,8 @@ def validate_json_object_response(content: str) -> ValidationResult:
     """
     # Step 1: Parse JSON
     try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError as e:
+        parsed = json.loads(content, parse_constant=_reject_nonfinite_constant)
+    except (json.JSONDecodeError, ValueError) as e:
         return ValidationError(
             reason="invalid_json",
             detail=str(e),

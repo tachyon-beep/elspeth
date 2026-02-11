@@ -10,9 +10,11 @@ CRITICAL: The `allow_coercion` parameter enforces the three-tier trust model:
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+import math
+from collections.abc import Callable
+from typing import Annotated, Any, Literal, cast
 
-from pydantic import ConfigDict, Field, create_model
+from pydantic import ConfigDict, Field, create_model, model_validator
 
 from elspeth.contracts import PluginSchema
 from elspeth.contracts.schema import FieldDefinition, SchemaConfig
@@ -36,6 +38,41 @@ TYPE_MAP: dict[str, type] = {
     "bool": bool,
     "any": Any,
 }
+
+
+def _find_non_finite_value_path(value: Any, path: str = "$") -> str | None:
+    """Find the first path containing a non-finite float value."""
+    value_type = type(value)
+
+    if value_type is float and not math.isfinite(value):
+        return path
+
+    if value_type is dict:
+        for key, nested in value.items():
+            nested_path = _find_non_finite_value_path(nested, f"{path}.{key!s}")
+            if nested_path is not None:
+                return nested_path
+        return None
+
+    if value_type in {list, tuple}:
+        for idx, nested in enumerate(value):
+            nested_path = _find_non_finite_value_path(nested, f"{path}[{idx}]")
+            if nested_path is not None:
+                return nested_path
+
+    # Catch numpy floating scalars without importing numpy.
+    if value_type.__module__ == "numpy" and "float" in value_type.__name__ and not math.isfinite(float(value)):
+        return path
+
+    return None
+
+
+def _reject_non_finite_observed_values(data: Any) -> Any:
+    """Reject NaN/Infinity in observed schemas at source boundary."""
+    offending_path = _find_non_finite_value_path(data)
+    if offending_path is not None:
+        raise ValueError(f"Non-finite float at {offending_path}. Use null/None for missing values, not NaN/Infinity.")
+    return data
 
 
 def create_schema_from_config(
@@ -80,6 +117,13 @@ def _create_dynamic_schema(name: str) -> type[PluginSchema]:
 
     Note: Dynamic schemas don't do type checking, so coercion is irrelevant.
     """
+    validators: dict[str, Callable[..., Any]] = {
+        "_reject_non_finite_observed_values": cast(
+            Callable[..., Any],
+            model_validator(mode="before")(_reject_non_finite_observed_values),
+        )
+    }
+
     return create_model(
         name,
         __base__=PluginSchema,
@@ -88,6 +132,7 @@ def _create_dynamic_schema(name: str) -> type[PluginSchema]:
             extra="allow",
             # No strict setting needed - no fields to validate types against
         ),
+        __validators__=validators,
     )
 
 

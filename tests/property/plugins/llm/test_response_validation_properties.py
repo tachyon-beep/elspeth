@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -45,7 +46,6 @@ valid_json_objects = st.dictionaries(
 
 # Non-JSON strings - use explicit patterns instead of filter() for efficiency
 # (Reviewer fix: avoid .filter(not _is_valid_json) which rejects >99% of inputs)
-# NOTE: "NaN" is valid JSON (parses to float) so it goes in wrong_type_json, not here
 non_json_strings = st.one_of(
     st.just(""),
     st.just("{"),
@@ -159,6 +159,21 @@ class TestLLMResponseEdgeCases:
         assert isinstance(result, ValidationError)
         assert result.reason == "invalid_json_type"
         assert result.actual == "list"
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            '{"score": NaN}',
+            '{"score": Infinity}',
+            '{"score": -Infinity}',
+        ],
+    )
+    def test_non_finite_constants_rejected(self, content: str) -> None:
+        """Non-standard JSON constants are rejected at parse boundary."""
+        result = validate_json_object_response(content)
+
+        assert isinstance(result, ValidationError)
+        assert result.reason == "invalid_json"
 
 
 class TestLLMResponseDeterminism:
