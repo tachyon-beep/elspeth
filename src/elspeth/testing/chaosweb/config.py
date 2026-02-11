@@ -364,8 +364,8 @@ class WebErrorInjectionConfig(BaseModel):
     )
     max_redirect_loop_hops: int = Field(
         default=10,
-        gt=0,
-        description="Maximum hops in a redirect loop before terminating",
+        ge=3,
+        description="Maximum hops in a redirect loop before terminating (minimum 3)",
     )
     ssrf_redirect_pct: float = Field(
         default=0.0,

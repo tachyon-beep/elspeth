@@ -199,20 +199,41 @@ class LandscapeDB:
         # Forward URL query params as connect kwargs (parity with non-encrypted
         # path, where create_engine extracts them automatically).  Coerce known
         # sqlite3.connect() params from their string URL representation.
+        #
+        # SQLite URI-style params (mode, cache, immutable, vfs) are NOT valid
+        # connect() kwargs — they must be embedded in a file: URI when uri=True.
+        _CONNECT_KWARGS = {"check_same_thread", "uri", "timeout", "detect_types", "cached_statements", "isolation_level", "factory"}
         connect_kwargs: dict[str, Any] = {}
+        uri_params: dict[str, str] = {}
+
         for key, raw_value in parsed.query.items():
             value = raw_value if isinstance(raw_value, str) else raw_value[0]
-            if key in ("check_same_thread", "uri"):
-                connect_kwargs[key] = value.lower() in ("true", "1", "yes")
-            elif key == "timeout":
-                connect_kwargs[key] = float(value)
-            elif key in ("detect_types", "cached_statements"):
-                connect_kwargs[key] = int(value)
+            if key in _CONNECT_KWARGS:
+                if key in ("check_same_thread", "uri"):
+                    connect_kwargs[key] = value.lower() in ("true", "1", "yes")
+                elif key == "timeout":
+                    connect_kwargs[key] = float(value)
+                elif key in ("detect_types", "cached_statements"):
+                    connect_kwargs[key] = int(value)
+                else:
+                    connect_kwargs[key] = value
             else:
-                connect_kwargs[key] = value
+                # URI-style param (mode, cache, immutable, vfs, etc.)
+                uri_params[key] = value
+
+        # When URI params are present, build a file: URI and enable uri=True
+        # so that SQLite interprets them via the URI interface.
+        if uri_params:
+            from urllib.parse import quote, urlencode
+
+            file_uri = f"file:{quote(resolved_path)}?{urlencode(uri_params)}"
+            connect_kwargs["uri"] = True
+        else:
+            file_uri = None
 
         def _creator() -> object:
-            conn = sqlcipher3.connect(resolved_path, **connect_kwargs)
+            db = file_uri if file_uri is not None else resolved_path
+            conn = sqlcipher3.connect(db, **connect_kwargs)
             # PRAGMA key MUST be the first statement — SQLCipher contract.
             # Escape double quotes in the passphrase (SQLite literal syntax:
             # a literal " inside a double-quoted string is written as "").

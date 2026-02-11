@@ -96,6 +96,8 @@ class ChaosWebServer:
             Route("/admin/stats", self._admin_stats_endpoint, methods=["GET"]),
             Route("/admin/reset", self._admin_reset_endpoint, methods=["POST"]),
             Route("/admin/export", self._admin_export_endpoint, methods=["GET"]),
+            # Redirect loop handler — must be before catch-all
+            Route("/redirect", self._redirect_hop_endpoint, methods=["GET"]),
             # Catch-all content route — must be last
             Route("/{path:path}", self._page_endpoint, methods=["GET"]),
         ]
@@ -210,6 +212,62 @@ class ChaosWebServer:
         """Handle GET /admin/export."""
         return JSONResponse(self.export_metrics())
 
+    async def _redirect_hop_endpoint(self, request: Request) -> Response:
+        """Handle GET /redirect — enforce redirect loop hop limits.
+
+        Implements the stateless query-parameter approach (PC-2 decision):
+        each hop increments the counter until max is reached, then terminates
+        with a 200 response.  Without this handler, redirect URLs would fall
+        through to the catch-all route and the hop/max params would be ignored.
+        """
+        hop = int(request.query_params.get("hop", "1"))
+        max_hops = int(request.query_params.get("max", "10"))
+        target = request.query_params.get("target", "/")
+
+        request_id = str(uuid.uuid4())
+        timestamp_utc = datetime.now(UTC).isoformat()
+        start_time = time.monotonic()
+
+        # Simulate latency on each hop (same as initial redirect)
+        delay = self._latency_simulator.simulate()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+
+        if hop < max_hops:
+            # Continue the redirect chain
+            next_url = f"/redirect?hop={hop + 1}&max={max_hops}&target={target}"
+            self._record_request(
+                request_id=request_id,
+                timestamp_utc=timestamp_utc,
+                path="/redirect",
+                outcome="error_redirect",
+                status_code=301,
+                error_type="redirect_loop",
+                injection_type="redirect_loop",
+                latency_ms=elapsed_ms,
+                redirect_hops=hop,
+            )
+            return Response(
+                status_code=301,
+                headers={"Location": next_url},
+            )
+
+        # Loop terminated — return 200 at final hop
+        self._record_request(
+            request_id=request_id,
+            timestamp_utc=timestamp_utc,
+            path="/redirect",
+            outcome="redirect_loop_terminated",
+            status_code=200,
+            error_type="redirect_loop",
+            injection_type="redirect_loop",
+            latency_ms=elapsed_ms,
+            redirect_hops=hop,
+        )
+        return HTMLResponse(f"<html><body><p>Redirect loop terminated after {hop} hops.</p></body></html>")
+
     async def _page_endpoint(self, request: Request) -> Response:
         """Handle GET /{path} — main content serving with error injection.
 
@@ -232,6 +290,9 @@ class ChaosWebServer:
         if self._content_generator.config.allow_header_overrides:
             mode_override = request.headers.get("X-Fake-Content-Mode")
 
+        # Capture request headers for content generation (template/echo modes)
+        request_headers = dict(request.headers)
+
         # Error injector decides
         decision = self._error_injector.decide()
 
@@ -253,6 +314,7 @@ class ChaosWebServer:
                         timestamp_utc=timestamp_utc,
                         path=path,
                         mode_override=mode_override,
+                        headers=request_headers,
                         start_time=start_time,
                     )
                 return await self._handle_connection_error(
@@ -269,6 +331,7 @@ class ChaosWebServer:
                     timestamp_utc=timestamp_utc,
                     path=path,
                     mode_override=mode_override,
+                    headers=request_headers,
                     start_time=start_time,
                 )
             # HTTP-level error
@@ -286,6 +349,7 @@ class ChaosWebServer:
             timestamp_utc=timestamp_utc,
             path=path,
             mode_override=mode_override,
+            headers=request_headers,
             start_time=start_time,
         )
 
@@ -502,6 +566,7 @@ class ChaosWebServer:
         timestamp_utc: str,
         path: str,
         mode_override: str | None,
+        headers: dict[str, str] | None,
         start_time: float,
     ) -> Response:
         """Handle malformed content responses (200 with corrupted content)."""
@@ -515,6 +580,7 @@ class ChaosWebServer:
         # Generate base HTML then corrupt it
         web_response = self._content_generator.generate(
             path=path,
+            headers=headers,
             mode_override=mode_override,
         )
 
@@ -641,6 +707,7 @@ class ChaosWebServer:
         timestamp_utc: str,
         path: str,
         mode_override: str | None,
+        headers: dict[str, str] | None,
         start_time: float,
     ) -> Response:
         """Handle a slow response that eventually succeeds."""
@@ -650,6 +717,7 @@ class ChaosWebServer:
             timestamp_utc=timestamp_utc,
             path=path,
             mode_override=mode_override,
+            headers=headers,
             start_time=start_time,
             extra_delay_sec=delay,
             injection_type="slow_response",
@@ -662,6 +730,7 @@ class ChaosWebServer:
         path: str,
         mode_override: str | None,
         start_time: float,
+        headers: dict[str, str] | None = None,
         extra_delay_sec: float | None = None,
         injection_type: str | None = None,
     ) -> Response:
@@ -675,6 +744,7 @@ class ChaosWebServer:
         # Generate HTML
         web_response = self._content_generator.generate(
             path=path,
+            headers=headers,
             mode_override=mode_override,
         )
 

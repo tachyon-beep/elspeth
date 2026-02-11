@@ -363,7 +363,7 @@ allow_hits:
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced
   expires: '2026-03-10'
-- key: core/landscape/database.py:R5:LandscapeDB:_create_sqlcipher_engine:fp=9f3388a44ad58bab
+- key: core/landscape/database.py:R5:LandscapeDB:_create_sqlcipher_engine:fp=b4507bddc5587956
   owner: architecture
   reason: Framework boundary — urllib.parse query values can be str or list[str] depending on parameter multiplicity
   safety: Disambiguates URL query parsing output before type coercion; no silent data loss

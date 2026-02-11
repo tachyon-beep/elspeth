@@ -50,42 +50,57 @@ allow_hits:
   reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
   safety: Falls back to config default_content_type - preset pages may omit content_type
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=e44c01bfc2612359
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=ab49f63fe90d06ae
+  owner: architecture
+  reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (hop counter)
+  safety: Missing hop defaults to 1 (chain start) - correct for redirect loop protocol
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=bf67791952e2da07
+  owner: architecture
+  reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (max hops)
+  safety: Missing max defaults to 10 (config default) - terminates loop safely
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_redirect_hop_endpoint:fp=e5e49bd486d64b27
+  owner: architecture
+  reason: Tier 3 boundary - .get() on HTTP query params for redirect chain state (target path)
+  safety: Missing target defaults to "/" (root) - client is redirected to a valid path
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=5a963abef734e726
   owner: architecture
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
   safety: Missing path defaults to empty string - correct for catch-all route
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=660940b39f025ff0
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=3e410628f753c46c
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP request headers (optional header override)
   safety: Missing header defaults to None - no override applied
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=7c18c66398829e8c
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=2ab5dbf05268a993
   owner: architecture
   reason: isinstance check on content generator output (str vs bytes) for encoding
   safety: Both branches produce valid bytes for HTTP response body
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=1a4858478eb419c4
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=791aff658cff32fa
   owner: architecture
   reason: .get() on error message mapping - fallback for error types not in mapping
   safety: Falls back to generic status code message - never swallows errors
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=3c6429bb0b06aab6
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=1cb4248c40d1a7b5
   owner: architecture
   reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
   safety: Bytes decoded with replace - corruption helpers always receive valid str input
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=5fd2d93db826e9ce
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=0b8cc3afefc1f90e
   owner: architecture
   reason: isinstance check on content (str vs bytes) for wrong_content_type HTTP response encoding
   safety: Both branches produce valid bytes for Response body
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=6b78f9e411db704e
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=a11509366ca70587
   owner: architecture
   reason: isinstance check on content generator output (str vs bytes) for HTTP response encoding
   safety: Both branches produce valid bytes for Response body
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R4:ChaosWebServer:_record_request:fp=bfadde93482b0781
+- key: testing/chaosweb/server.py:R4:ChaosWebServer:_record_request:fp=8e596c04782b97af
   owner: architecture
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
   safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
