@@ -1,12 +1,14 @@
 # Bug Report: CSVSink Silently Writes Blank Values When Required Fields Are Missing
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - Added required-field preflight validation in `CSVSink.write()` that runs regardless of `validate_input`.
+  - Missing required schema fields now raise immediately before any file mutation.
+  - Added regression tests for fail-fast behavior, no-write-on-failure, optional-field allowance, and append preservation.
 
 
 ## Summary
@@ -101,3 +103,19 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+---
+
+## Verification (2026-02-11)
+
+- Reproduced before fix:
+  - With fixed schema and `validate_input=False`, writing a row missing a required field produced a blank CSV cell (`id,name` then `1,`) and returned success.
+- Post-fix behavior:
+  - Missing required fields raise `ValueError` before opening/writing the output file.
+  - Mid-batch missing required fields fail before writing any row.
+  - Append mode preserves existing file content when required-field validation fails.
+  - Optional schema fields (`?`) may still be omitted.
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/sinks/test_csv_sink.py tests/unit/plugins/sinks/test_csv_sink_append.py`
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/property/sinks/test_csv_sink_properties.py`
+  - `ruff check src/elspeth/plugins/sinks/csv_sink.py tests/unit/plugins/sinks/test_csv_sink.py tests/unit/plugins/sinks/test_csv_sink_append.py tests/property/sinks/test_csv_sink_properties.py`

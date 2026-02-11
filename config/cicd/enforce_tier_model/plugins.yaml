@@ -306,12 +306,12 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=529df26a8624a42d
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=5513c655d6bb1799
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
   expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=688e26cbcb3aa309
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=4b1188b665744b55
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
