@@ -102,6 +102,7 @@ cython_debug/
 *.db
 *.sqlite
 *.sqlite3
+*.journal.jsonl
 
 # Test outputs and analysis artifacts
 test-results.txt
@@ -133,8 +134,9 @@ mutants/
 .worktrees/
 
 # Example outputs (dynamic data, not tracked)
-examples/*/output/*
-examples/*/runs/*
+# Use ** to match nested paths (prevents accidental deep-nesting commits)
+examples/**/output/*
+examples/**/runs/*
 !examples/*/output/
 !examples/*/runs/
 !examples/*/output/.gitkeep
