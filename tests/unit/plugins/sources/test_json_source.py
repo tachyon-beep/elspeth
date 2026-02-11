@@ -397,7 +397,7 @@ class TestJSONSourceQuarantineYielding:
 
 
 class TestJSONSourceParseErrors:
-    """Tests for JSON source handling of parse errors (JSONDecodeError).
+    """Tests for JSON source handling of parse/decode errors.
 
     Per CLAUDE.md Three-Tier Trust Model, external data (Tier 3) should be
     quarantined on parse errors, not crash the pipeline.
@@ -473,6 +473,62 @@ class TestJSONSourceParseErrors:
         results = list(source.load(ctx))
 
         # Only 2 valid rows - malformed line discarded
+        assert len(results) == 2
+        assert all(not r.is_quarantined for r in results)
+        assert results[0].row == {"id": 1}
+        assert results[1].row == {"id": 3}
+
+    def test_jsonl_invalid_encoding_line_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Invalid-encoding JSONL line is quarantined, not crash the pipeline."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "data.jsonl"
+        jsonl_file.write_bytes(b'{"id": 1}\n\xff\xfe\n{"id": 3}\n')
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "encoding": "utf-8",
+                "on_validation_failure": "quarantine",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 3
+        assert results[0].is_quarantined is False
+        assert results[0].row == {"id": 1}
+        assert results[2].is_quarantined is False
+        assert results[2].row == {"id": 3}
+
+        quarantined = results[1]
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_error is not None
+        assert "line 2" in quarantined.quarantine_error
+        assert "utf-8" in quarantined.quarantine_error.lower()
+        assert "__raw_bytes_hex__" in quarantined.row
+        assert quarantined.row["__line_number__"] == 2
+
+    def test_jsonl_invalid_encoding_line_with_discard_mode(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Invalid-encoding JSONL line is dropped when discard mode is configured."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "data.jsonl"
+        jsonl_file.write_bytes(b'{"id": 1}\n\xff\xfe\n{"id": 3}\n')
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "encoding": "utf-8",
+                "on_validation_failure": "discard",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        results = list(source.load(ctx))
         assert len(results) == 2
         assert all(not r.is_quarantined for r in results)
         assert results[0].row == {"id": 1}

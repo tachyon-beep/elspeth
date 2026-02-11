@@ -11,7 +11,7 @@ at parse time per canonical JSON policy. Use null for missing values.
 """
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -158,9 +158,23 @@ class JSONSource(BaseSource):
         fails to parse is quarantined, not crash the pipeline. This allows
         subsequent valid lines to still be processed.
         """
-        with open(self._path, encoding=self._encoding) as f:
-            for line_num, line in enumerate(f, start=1):
-                line = line.strip()
+        # Read JSONL as bytes so decode failures can be quarantined per-line.
+        with open(self._path, "rb") as f:
+            for line_num, raw_line in enumerate(f, start=1):
+                try:
+                    line = raw_line.decode(self._encoding).strip()
+                except UnicodeDecodeError as e:
+                    raw_row = {"__raw_bytes_hex__": raw_line.hex(), "__line_number__": line_num}
+                    error_msg = f"JSON parse error at line {line_num}: invalid {self._encoding} encoding ({e})"
+                    quarantined = self._record_parse_error(
+                        ctx=ctx,
+                        row=raw_row,
+                        error_msg=error_msg,
+                    )
+                    if quarantined is not None:
+                        yield quarantined
+                    continue
+
                 if not line:  # Skip empty lines
                     continue
 
@@ -173,20 +187,13 @@ class JSONSource(BaseSource):
                     # Store raw line + metadata for audit traceability
                     raw_row = {"__raw_line__": line, "__line_number__": line_num}
                     error_msg = f"JSON parse error at line {line_num}: {e}"
-
-                    ctx.record_validation_error(
+                    quarantined = self._record_parse_error(
+                        ctx=ctx,
                         row=raw_row,
-                        error=error_msg,
-                        schema_mode="parse",  # Distinct from schema validation
-                        destination=self._on_validation_failure,
+                        error_msg=error_msg,
                     )
-
-                    if self._on_validation_failure != "discard":
-                        yield SourceRow.quarantined(
-                            row=raw_row,
-                            error=error_msg,
-                            destination=self._on_validation_failure,
-                        )
+                    if quarantined is not None:
+                        yield quarantined
                     continue
 
                 yield from self._validate_and_yield(row, ctx)
@@ -205,21 +212,13 @@ class JSONSource(BaseSource):
                 else:
                     # ValueError from _reject_nonfinite_constant (NaN/Infinity)
                     error_msg = f"JSON parse error: {e}"
-                ctx.record_validation_error(
+                quarantined = self._record_parse_error(
+                    ctx=ctx,
                     row={"file_path": str(self._path), "error": error_msg},
-                    error=error_msg,
-                    schema_mode="parse",  # File-level parse, not schema validation
-                    destination=self._on_validation_failure,
+                    error_msg=error_msg,
                 )
-
-                # Yield quarantined row if not discarding
-                # This allows audit trail to show the file-level failure
-                if self._on_validation_failure != "discard":
-                    yield SourceRow.quarantined(
-                        row={"file_path": str(self._path), "parse_error": str(e)},
-                        error=error_msg,
-                        destination=self._on_validation_failure,
-                    )
+                if quarantined is not None:
+                    yield quarantined
                 return  # Stop processing this file
 
         # Extract from nested key if specified
@@ -330,6 +329,28 @@ class JSONSource(BaseSource):
                     error=str(e),
                     destination=self._on_validation_failure,
                 )
+
+    def _record_parse_error(
+        self,
+        ctx: PluginContext,
+        row: Mapping[str, object],
+        error_msg: str,
+    ) -> SourceRow | None:
+        """Record a parse error and return quarantined row unless discard mode."""
+        row_payload = dict(row)
+        ctx.record_validation_error(
+            row=row_payload,
+            error=error_msg,
+            schema_mode="parse",
+            destination=self._on_validation_failure,
+        )
+        if self._on_validation_failure == "discard":
+            return None
+        return SourceRow.quarantined(
+            row=row_payload,
+            error=error_msg,
+            destination=self._on_validation_failure,
+        )
 
     def close(self) -> None:
         """Release resources (no-op for JSON source)."""
