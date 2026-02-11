@@ -1,12 +1,14 @@
 # Bug Report: JSON array mode silently ignores `mode=append` and truncates existing files
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - Added config-level validation to reject `format="json"` with `mode="append"` in `JSONSinkConfig`.
+  - Added a defensive runtime guard in `_write_json_array()` to fail fast if append mode is ever forced for JSON array output.
+  - Added unit tests for explicit/implicit JSON-array append rejection and JSONL append non-regression.
 
 
 ## Summary
@@ -98,3 +100,16 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md` (artifact hashing contract)
+
+---
+
+## Verification (2026-02-11)
+
+- Reproduction before fix: confirmed `format="json"` + `mode="append"` silently overwrote prior array content.
+- Post-fix behavior:
+  - `JSONSink({"format": "json", "mode": "append", ...})` now raises `PluginConfigError`.
+  - `JSONSink({"path": "*.json", "mode": "append", ...})` (auto-detected JSON array) also raises `PluginConfigError`.
+  - JSONL append mode remains supported and appends correctly.
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/sinks/test_json_sink.py tests/unit/plugins/sinks/test_json_sink_resume.py`
+  - `ruff check src/elspeth/plugins/sinks/json_sink.py tests/unit/plugins/sinks/test_json_sink.py`

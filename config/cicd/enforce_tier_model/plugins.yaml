@@ -89,7 +89,7 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sinks/json_sink.py:R5:JSONSink:validate_output_target:fp=8dc25260f8a13296
+- key: plugins/sinks/json_sink.py:R5:JSONSink:validate_output_target:fp=78857e43dc69519e
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -321,12 +321,12 @@ allow_hits:
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
   expires: null
-- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=11a12d24c049f460
+- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=6734d84d40b2178e
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
   expires: null
-- key: plugins/sinks/json_sink.py:R1:JSONSink:_apply_display_headers:fp=c5e1158dff11755a
+- key: plugins/sinks/json_sink.py:R1:JSONSink:_apply_display_headers:fp=e4e90c2776c1a966
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
