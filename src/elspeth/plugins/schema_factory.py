@@ -11,8 +11,7 @@ CRITICAL: The `allow_coercion` parameter enforces the three-tier trust model:
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, create_model, model_validator
 
@@ -75,6 +74,15 @@ def _reject_non_finite_observed_values(data: Any) -> Any:
     return data
 
 
+class _ObservedPluginSchema(PluginSchema):
+    """PluginSchema base for observed mode with non-finite rejection."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_non_finite_values(cls, data: Any) -> Any:
+        return _reject_non_finite_observed_values(data)
+
+
 def create_schema_from_config(
     config: SchemaConfig,
     name: str,
@@ -117,22 +125,14 @@ def _create_dynamic_schema(name: str) -> type[PluginSchema]:
 
     Note: Dynamic schemas don't do type checking, so coercion is irrelevant.
     """
-    validators: dict[str, Callable[..., Any]] = {
-        "_reject_non_finite_observed_values": cast(
-            Callable[..., Any],
-            model_validator(mode="before")(_reject_non_finite_observed_values),
-        )
-    }
-
     return create_model(
         name,
-        __base__=PluginSchema,
+        __base__=_ObservedPluginSchema,
         __module__=__name__,
         __config__=ConfigDict(
             extra="allow",
             # No strict setting needed - no fields to validate types against
         ),
-        __validators__=validators,
     )
 
 
