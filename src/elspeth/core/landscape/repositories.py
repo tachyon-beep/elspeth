@@ -498,6 +498,7 @@ class TokenOutcomeRepository:
 
         Raises:
             ValueError: If is_terminal is not 0 or 1 (Tier 1 audit integrity violation)
+            ValueError: If outcome and is_terminal disagree (Tier 1 audit integrity violation)
         """
         # Tier 1 validation: is_terminal must be exactly 0 or 1
         # Per Data Manifesto: audit DB is OUR data - crash on any anomaly
@@ -505,12 +506,19 @@ class TokenOutcomeRepository:
             raise ValueError(
                 f"TokenOutcome {row.outcome_id} has invalid is_terminal={row.is_terminal!r} (expected 0 or 1) - audit integrity violation"
             )
+        outcome = RowOutcome(row.outcome)
+        is_terminal = row.is_terminal == 1
+        if is_terminal != outcome.is_terminal:
+            raise ValueError(
+                f"TokenOutcome {row.outcome_id} has inconsistent is_terminal={row.is_terminal!r} for outcome={outcome.value!r} "
+                f"(expected {1 if outcome.is_terminal else 0}) - audit integrity violation"
+            )
         return TokenOutcome(
             outcome_id=row.outcome_id,
             run_id=row.run_id,
             token_id=row.token_id,
-            outcome=RowOutcome(row.outcome),  # Convert HERE
-            is_terminal=row.is_terminal == 1,  # DB stores as Integer, now validated
+            outcome=outcome,
+            is_terminal=is_terminal,  # DB stores as Integer, now fully validated
             recorded_at=row.recorded_at,
             sink_name=row.sink_name,
             batch_id=row.batch_id,

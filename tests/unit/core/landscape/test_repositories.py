@@ -1190,10 +1190,12 @@ class TestTokenOutcomeRepository:
         ],
     )
     def test_all_row_outcome_values(self, outcome_value: str) -> None:
-        sa_row = self._make_outcome_row(outcome=outcome_value, is_terminal=1)
+        expected_outcome = RowOutcome(outcome_value)
+        sa_row = self._make_outcome_row(outcome=outcome_value, is_terminal=1 if expected_outcome.is_terminal else 0)
         repo = TokenOutcomeRepository(session=Mock())
         result = repo.load(sa_row)
-        assert result.outcome == RowOutcome(outcome_value)
+        assert result.outcome == expected_outcome
+        assert result.is_terminal is expected_outcome.is_terminal
 
     def test_is_terminal_1_becomes_true(self) -> None:
         sa_row = self._make_outcome_row(is_terminal=1)
@@ -1202,10 +1204,22 @@ class TestTokenOutcomeRepository:
         assert result.is_terminal is True
 
     def test_is_terminal_0_becomes_false(self) -> None:
-        sa_row = self._make_outcome_row(is_terminal=0)
+        sa_row = self._make_outcome_row(outcome="buffered", is_terminal=0)
         repo = TokenOutcomeRepository(session=Mock())
         result = repo.load(sa_row)
         assert result.is_terminal is False
+
+    def test_outcome_buffered_with_terminal_1_raises_value_error(self) -> None:
+        sa_row = self._make_outcome_row(outcome="buffered", is_terminal=1)
+        repo = TokenOutcomeRepository(session=Mock())
+        with pytest.raises(ValueError, match="inconsistent is_terminal"):
+            repo.load(sa_row)
+
+    def test_outcome_completed_with_terminal_0_raises_value_error(self) -> None:
+        sa_row = self._make_outcome_row(outcome="completed", is_terminal=0)
+        repo = TokenOutcomeRepository(session=Mock())
+        with pytest.raises(ValueError, match="inconsistent is_terminal"):
+            repo.load(sa_row)
 
     def test_is_terminal_2_raises_value_error(self) -> None:
         sa_row = self._make_outcome_row(is_terminal=2)
