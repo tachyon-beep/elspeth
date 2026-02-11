@@ -322,6 +322,8 @@ class ChaosWebServer:
                     request_id=request_id,
                     timestamp_utc=timestamp_utc,
                     path=path,
+                    mode_override=mode_override,
+                    headers=request_headers,
                     start_time=start_time,
                 )
             if decision.category == WebErrorCategory.MALFORMED:
@@ -416,6 +418,8 @@ class ChaosWebServer:
         request_id: str,
         timestamp_utc: str,
         path: str,
+        mode_override: str | None,
+        headers: dict[str, str] | None,
         start_time: float,
     ) -> Response:
         """Handle connection-level errors (timeout, reset, stall, incomplete)."""
@@ -488,7 +492,11 @@ class ChaosWebServer:
             # Send headers + partial body, then close connection
             incomplete_bytes = decision.incomplete_bytes if decision.incomplete_bytes is not None else 500
             # Generate full HTML then truncate
-            web_response = self._content_generator.generate(path=path)
+            web_response = self._content_generator.generate(
+                path=path,
+                headers=headers,
+                mode_override=mode_override,
+            )
             content = web_response.content
             if isinstance(content, str):
                 content = content.encode("utf-8")
