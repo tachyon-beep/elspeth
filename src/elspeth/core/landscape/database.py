@@ -8,7 +8,7 @@ with appropriate settings for each.
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 from sqlalchemy import Connection, create_engine, event
 from sqlalchemy.engine import Engine
@@ -196,8 +196,23 @@ class LandscapeDB:
         # Resolve relative paths the same way SQLite does
         resolved_path = str(Path(db_path).resolve())
 
+        # Forward URL query params as connect kwargs (parity with non-encrypted
+        # path, where create_engine extracts them automatically).  Coerce known
+        # sqlite3.connect() params from their string URL representation.
+        connect_kwargs: dict[str, Any] = {}
+        for key, raw_value in parsed.query.items():
+            value = raw_value if isinstance(raw_value, str) else raw_value[0]
+            if key in ("check_same_thread", "uri"):
+                connect_kwargs[key] = value.lower() in ("true", "1", "yes")
+            elif key == "timeout":
+                connect_kwargs[key] = float(value)
+            elif key in ("detect_types", "cached_statements"):
+                connect_kwargs[key] = int(value)
+            else:
+                connect_kwargs[key] = value
+
         def _creator() -> object:
-            conn = sqlcipher3.connect(resolved_path)
+            conn = sqlcipher3.connect(resolved_path, **connect_kwargs)
             # PRAGMA key MUST be the first statement — SQLCipher contract.
             # Escape double quotes in the passphrase (SQLite literal syntax:
             # a literal " inside a double-quoted string is written as "").

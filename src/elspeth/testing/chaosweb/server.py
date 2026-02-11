@@ -388,7 +388,12 @@ class ChaosWebServer:
                 injection_type="connection_reset",
                 latency_ms=elapsed_ms,
             )
-            raise ConnectionResetError("Connection reset by server")
+
+            async def _reset_body() -> Any:
+                yield b""
+                raise ConnectionResetError("Connection reset by server")
+
+            return _StreamingDisconnect(content=_reset_body(), status_code=200)
 
         if error_type == "connection_stall":
             start_delay = decision.start_delay_sec if decision.start_delay_sec is not None else 0.0
@@ -408,7 +413,12 @@ class ChaosWebServer:
                 latency_ms=elapsed_ms,
                 injected_delay_ms=injected_ms if injected_ms > 0 else None,
             )
-            raise ConnectionResetError("Connection stalled and was closed by server")
+
+            async def _stall_body() -> Any:
+                yield b""
+                raise ConnectionResetError("Connection stalled and was closed by server")
+
+            return _StreamingDisconnect(content=_stall_body(), status_code=200)
 
         if error_type == "incomplete_response":
             # Send headers + partial body, then close connection
