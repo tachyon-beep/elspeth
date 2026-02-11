@@ -1,12 +1,14 @@
 # Bug Report: FieldMapper Renames Drop Original Field Names in Output Contracts
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - `narrow_contract_to_output` now accepts optional rename metadata and preserves source field contract metadata when renames are applied.
+  - `FieldMapper` now passes applied source→target mappings when narrowing contracts.
+  - Added regression tests proving renamed fields preserve `original_name` lineage and `headers: original` sinks emit source headers after rename.
 
 
 ## Summary
@@ -101,3 +103,19 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/completed/2026-02-02-unified-schema-contracts-design.md`
+
+---
+
+## Verification (2026-02-12)
+
+- Reproduced before fix:
+  - `amount_usd -> price` rename produced output contract field `price` with `original_name="price"`.
+  - CSV sink with `headers: original` emitted `price` header instead of source header.
+- Post-fix behavior:
+  - Renamed output field `price` preserves `original_name="Amount USD"` (and source metadata).
+  - CSV sink with `headers: original` emits `Amount USD` header after FieldMapper rename.
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/transforms/test_field_mapper.py`
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/sinks/test_csv_sink_headers.py`
+  - `.venv/bin/ruff check src/elspeth/contracts/contract_propagation.py src/elspeth/plugins/transforms/field_mapper.py tests/unit/plugins/transforms/test_field_mapper.py`
+  - `.venv/bin/mypy src/elspeth/contracts/contract_propagation.py src/elspeth/plugins/transforms/field_mapper.py`

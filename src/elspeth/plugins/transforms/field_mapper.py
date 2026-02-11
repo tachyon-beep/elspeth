@@ -109,6 +109,7 @@ class FieldMapper(BaseTransform):
             output = copy.deepcopy(row_dict)
 
         # Apply mappings
+        applied_mappings: dict[str, str] = {}
         for source, target in self._mapping.items():
             value = get_nested_field(row_dict, source)
 
@@ -124,21 +125,22 @@ class FieldMapper(BaseTransform):
                 del output[source]
 
             output[target] = value
+            applied_mappings[source] = target
 
         # Track field changes
         fields_modified: list[str] = []
         fields_added: list[str] = []
-        for source, target in self._mapping.items():
-            if get_nested_field(row_dict, source) is not MISSING:
-                if target in row_dict:
-                    fields_modified.append(target)
-                else:
-                    fields_added.append(target)
+        for target in applied_mappings.values():
+            if target in row_dict:
+                fields_modified.append(target)
+            else:
+                fields_added.append(target)
 
         # Update contract to reflect field mapping (renames and removals)
         output_contract = narrow_contract_to_output(
             input_contract=row.contract,
             output_row=output,
+            renamed_fields=applied_mappings,
         )
 
         return TransformResult.success(

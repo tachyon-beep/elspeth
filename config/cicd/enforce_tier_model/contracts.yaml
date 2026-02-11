@@ -106,17 +106,17 @@ allow_hits:
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
   safety: ValueError raised for invalid config - explicit validation failure
   expires: null
-- key: contracts/contract_propagation.py:R6:propagate_contract:fp=fbcdf96127213894
+- key: contracts/contract_propagation.py:R6:propagate_contract:fp=8b917cc920b53d77
   owner: architecture
   reason: Type narrowing failure is silently skipped - non-primitive types aren't included in contract
   safety: Field continues in data without contract tracking - intentional behavior
   expires: null
-- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=b2e116f9ad91bb8f
+- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=cf05b95c241651a9
   owner: architecture
   reason: Type resolution errors are logged and field is excluded from narrowed contract
   safety: Contract narrowing continues without failed field - explicit logging
   expires: null
-- key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=b77bb8f4e1cd3d1d
+- key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=368e4bbac0c4fcec
   owner: architecture
   reason: Optional lookup for original name - new fields from transforms may not have input mapping
   safety: Fallback to output field's original_name is correct behavior for transform-added fields
