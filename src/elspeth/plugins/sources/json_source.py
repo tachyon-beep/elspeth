@@ -119,8 +119,8 @@ class JSONSource(BaseSource):
 
         initial_contract = create_contract_from_config(self._schema_config)
 
-        # For FIXED/FLEXIBLE schemas, contract is locked immediately
-        # For OBSERVED schemas, ContractBuilder will lock after first valid row
+        # For FIXED schemas, contract is locked immediately.
+        # For FLEXIBLE/OBSERVED schemas, ContractBuilder locks after first valid row.
         if initial_contract.locked:
             self.set_schema_contract(initial_contract)
             self._contract_builder = None
@@ -135,7 +135,7 @@ class JSONSource(BaseSource):
         - Valid rows are yielded as SourceRow.valid()
         - Invalid rows are yielded as SourceRow.quarantined()
 
-        For OBSERVED schemas, the first valid row locks the contract with
+        For FLEXIBLE/OBSERVED schemas, the first valid row locks the contract with
         inferred types. Subsequent rows validate against the locked contract.
 
         Yields:
@@ -148,13 +148,18 @@ class JSONSource(BaseSource):
         if not self._path.exists():
             raise FileNotFoundError(f"JSON file not found: {self._path}")
 
-        # Track first valid row for OBSERVED mode type inference
+        # Track first valid row for FLEXIBLE/OBSERVED type inference
         self._first_valid_row_processed = False
 
         if self._format == "jsonl":
             yield from self._load_jsonl(ctx)
         else:
             yield from self._load_json_array(ctx)
+
+        # CRITICAL: keep contract state consistent when no valid rows were seen.
+        # Mirrors CSVSource behavior for all-invalid/empty inputs.
+        if not self._first_valid_row_processed and self._contract_builder is not None:
+            self.set_schema_contract(self._contract_builder.contract.with_locked())
 
     def _load_jsonl(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Load from JSONL format (one JSON object per line).
@@ -308,7 +313,7 @@ class JSONSource(BaseSource):
     def _validate_and_yield(self, row: dict[str, Any], ctx: PluginContext) -> Iterator[SourceRow]:
         """Validate a row and yield if valid, otherwise quarantine.
 
-        For OBSERVED schemas, the first valid row triggers type inference and
+        For FLEXIBLE/OBSERVED schemas, the first valid row triggers type inference and
         locks the contract. Subsequent rows validate against the locked contract.
 
         Args:
@@ -323,7 +328,7 @@ class JSONSource(BaseSource):
             validated = self._schema_class.model_validate(row)
             validated_row = validated.to_row()
 
-            # For OBSERVED schemas, process first valid row to lock contract
+            # For FLEXIBLE/OBSERVED schemas, process first valid row to lock contract
             if self._contract_builder is not None and not self._first_valid_row_processed:
                 # JSON sources don't normalize field names, so identity mapping
                 field_resolution = {k: k for k in validated_row}

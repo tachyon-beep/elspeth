@@ -1,16 +1,27 @@
 # Bug Report: FLEXIBLE contracts are locked at creation, blocking infer-and-lock for extra fields
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
-- Verification summary:
-  - FLEXIBLE contracts are still created locked (`locked = not config.is_observed`).
-  - First-row inference still short-circuits when `contract.locked` is true, so FLEXIBLE extras are not inferred on first row.
-- Current evidence:
-  - `src/elspeth/contracts/schema_contract_factory.py:91`
-  - `src/elspeth/contracts/contract_builder.py:71`
+- Classification: **Fixed**
+- Resolution summary:
+  - `create_contract_from_config` now locks only `fixed` mode, so FLEXIBLE starts unlocked for first-row infer-and-lock.
+  - JSON and Azure Blob sources now lock pending contracts at end-of-load when no valid rows are seen, preserving consistent contract availability.
+  - Regression tests now cover FLEXIBLE contract creation, first-row extra inference, and all-invalid-row fallback behavior.
+- Key changes:
+  - `src/elspeth/contracts/schema_contract_factory.py`
+  - `src/elspeth/plugins/sources/json_source.py`
+  - `src/elspeth/plugins/azure/blob_source.py`
+  - `tests/unit/contracts/test_schema_contract_factory.py`
+  - `tests/unit/contracts/test_contract_builder.py`
+  - `tests/unit/plugins/sources/test_json_source.py`
+  - `tests/unit/plugins/transforms/azure/test_blob_source.py`
+  - `tests/integration/plugins/sources/test_contract.py`
+- Verification:
+  - `uv run pytest -q tests/unit/contracts/test_schema_contract_factory.py tests/unit/contracts/test_contract_builder.py tests/unit/plugins/sources/test_json_source.py tests/unit/plugins/transforms/azure/test_blob_source.py tests/integration/plugins/sources/test_contract.py`
+  - `uv run ruff check src/elspeth/contracts/schema_contract_factory.py src/elspeth/plugins/sources/json_source.py src/elspeth/plugins/azure/blob_source.py tests/unit/contracts/test_schema_contract_factory.py tests/unit/contracts/test_contract_builder.py tests/unit/plugins/sources/test_json_source.py tests/unit/plugins/transforms/azure/test_blob_source.py tests/integration/plugins/sources/test_contract.py`
+  - `uv run mypy src/elspeth/contracts/schema_contract_factory.py src/elspeth/plugins/sources/json_source.py src/elspeth/plugins/azure/blob_source.py`
 
 ## Summary
 

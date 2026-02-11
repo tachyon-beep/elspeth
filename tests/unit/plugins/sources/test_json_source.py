@@ -219,6 +219,86 @@ class TestJSONSource:
         assert JSONSource.plugin_version == "1.0.0"
 
 
+class TestJSONSourceFlexibleContract:
+    """Regression tests for FLEXIBLE first-row infer-and-lock semantics."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_flexible_infers_extra_field_and_enforces_type_after_lock(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """First valid row infers extras; contract catches later type drift."""
+        from elspeth.contracts.errors import TypeMismatchViolation
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        data = [
+            {"id": 1, "extra": "alpha"},
+            {"id": 2, "extra": 42},  # type drift: int vs inferred str
+        ]
+        json_file.write_text(json.dumps(data))
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "schema": {"mode": "flexible", "fields": ["id: int"]},
+                "on_validation_failure": "quarantine",
+            }
+        )
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 2
+        assert rows[0].is_quarantined is False
+        assert rows[1].is_quarantined is False
+
+        contract = source.get_schema_contract()
+        assert contract is not None
+        assert contract.mode == "FLEXIBLE"
+        assert contract.locked is True
+        assert {field.normalized_name for field in contract.fields} == {"id", "extra"}
+
+        violations = contract.validate(rows[1].row)
+        assert len(violations) == 1
+        assert isinstance(violations[0], TypeMismatchViolation)
+        assert violations[0].normalized_name == "extra"
+        assert violations[0].expected_type is str
+        assert violations[0].actual_type is int
+
+    def test_flexible_all_invalid_rows_still_publish_locked_declared_contract(
+        self,
+        tmp_path: Path,
+        ctx: PluginContext,
+    ) -> None:
+        """All-invalid FLEXIBLE input keeps declared fields and locks contract."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        data = [
+            {"id": "bad"},
+            {"id": "still_bad"},
+        ]
+        json_file.write_text(json.dumps(data))
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "schema": {"mode": "flexible", "fields": ["id: int"]},
+                "on_validation_failure": "quarantine",
+            }
+        )
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 2
+        assert all(row.is_quarantined for row in rows)
+
+        contract = source.get_schema_contract()
+        assert contract is not None
+        assert contract.mode == "FLEXIBLE"
+        assert contract.locked is True
+        assert [field.normalized_name for field in contract.fields] == ["id"]
+
+
 class TestJSONSourceConfigValidation:
     """Test JSONSource config validation."""
 

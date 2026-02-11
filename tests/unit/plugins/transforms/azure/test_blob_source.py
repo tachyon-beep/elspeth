@@ -392,6 +392,74 @@ class TestAzureBlobSourceJSON:
         assert results[0].quarantine_error is not None
         assert "data_key 'items' not found" in results[0].quarantine_error
 
+    def test_flexible_infers_extra_field_and_enforces_type_after_lock(
+        self,
+        mock_blob_client: MagicMock,
+        ctx: PluginContext,
+    ) -> None:
+        """First valid row infers extras; contract catches later type drift."""
+        from elspeth.contracts.errors import TypeMismatchViolation
+
+        json_data = b'[{"id": 1, "extra": "alpha"}, {"id": 2, "extra": 42}]'
+        mock_client = MagicMock()
+        mock_client.download_blob.return_value.readall.return_value = json_data
+        mock_blob_client.return_value = mock_client
+
+        source = AzureBlobSource(
+            make_config(
+                format="json",
+                schema={"mode": "flexible", "fields": ["id: int"]},
+                on_validation_failure="quarantine",
+            )
+        )
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 2
+        assert rows[0].is_quarantined is False
+        assert rows[1].is_quarantined is False
+
+        contract = source.get_schema_contract()
+        assert contract is not None
+        assert contract.mode == "FLEXIBLE"
+        assert contract.locked is True
+        assert {field.normalized_name for field in contract.fields} == {"id", "extra"}
+
+        violations = contract.validate(rows[1].row)
+        assert len(violations) == 1
+        assert isinstance(violations[0], TypeMismatchViolation)
+        assert violations[0].normalized_name == "extra"
+        assert violations[0].expected_type is str
+        assert violations[0].actual_type is int
+
+    def test_flexible_all_invalid_rows_still_publish_locked_declared_contract(
+        self,
+        mock_blob_client: MagicMock,
+        ctx: PluginContext,
+    ) -> None:
+        """All-invalid FLEXIBLE input keeps declared fields and locks contract."""
+        json_data = b'[{"id": "bad"}, {"id": "still_bad"}]'
+        mock_client = MagicMock()
+        mock_client.download_blob.return_value.readall.return_value = json_data
+        mock_blob_client.return_value = mock_client
+
+        source = AzureBlobSource(
+            make_config(
+                format="json",
+                schema={"mode": "flexible", "fields": ["id: int"]},
+                on_validation_failure="quarantine",
+            )
+        )
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 2
+        assert all(row.is_quarantined for row in rows)
+
+        contract = source.get_schema_contract()
+        assert contract is not None
+        assert contract.mode == "FLEXIBLE"
+        assert contract.locked is True
+        assert [field.normalized_name for field in contract.fields] == ["id"]
+
 
 class TestAzureBlobSourceJSONL:
     """Tests for JSONL loading from Azure Blob."""
