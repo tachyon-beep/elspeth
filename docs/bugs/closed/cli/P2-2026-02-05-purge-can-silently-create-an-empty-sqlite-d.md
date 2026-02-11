@@ -1,18 +1,17 @@
 # Bug Report: `purge` can silently create an empty SQLite DB and skip real payloads
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - `purge` still accepts `config.landscape.url` from `settings.yaml` without an existence check for file-backed SQLite databases.
-  - `LandscapeDB` initialization still creates tables, so a missing file with an existing parent directory can produce a brand-new empty DB.
-  - Reproduced behavior: running `purge --dry-run` with a missing configured SQLite file created the DB and reported no expired payloads.
+  - `purge` now validates file-backed SQLite URLs from `settings.yaml` before connecting.
+  - Missing configured SQLite files now return an error and do not create a new database file.
+  - Existing configured SQLite files continue to work.
 - Current evidence:
-  - `src/elspeth/cli.py:1249`
-  - `src/elspeth/core/landscape/database.py:102`
-  - `src/elspeth/core/landscape/database.py:252`
+  - `src/elspeth/cli.py` (`_validate_existing_sqlite_db_url` and `purge` settings path)
+  - `tests/unit/cli/test_purge_command.py`
 
 ## Summary
 
@@ -103,3 +102,28 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` (auditability standard)
+
+## Verification Status
+
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution (2026-02-12)
+
+**Fixed by:** Codex (GPT-5)
+
+**Changes:**
+- `src/elspeth/cli.py`: Added `_validate_existing_sqlite_db_url(...)` and invoked it when `purge` uses `config.landscape.url` from `settings.yaml`.
+- `tests/unit/cli/test_purge_command.py`: Added regression tests for:
+  - missing file-backed SQLite URL from settings (fails fast, no DB file creation)
+  - existing file-backed SQLite URL from settings (dry-run succeeds)
+
+**Verification:**
+- `.venv/bin/python -m pytest -q tests/unit/cli/test_purge_command.py`
+- `.venv/bin/python -m pytest -q tests/unit/cli/test_cli_helpers_db.py`
+- `.venv/bin/python -m pytest -q tests/unit/cli/test_error_boundaries.py -k missing_database`
+- `.venv/bin/python -m ruff check src/elspeth/cli.py tests/unit/cli/test_purge_command.py`
+- `.venv/bin/python -m mypy src/elspeth/cli.py`

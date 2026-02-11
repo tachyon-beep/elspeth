@@ -238,6 +238,24 @@ def _ensure_output_directories(config: ElspethSettings) -> list[str]:
     return errors
 
 
+def _validate_existing_sqlite_db_url(db_url: str, *, source: str) -> None:
+    """Fail fast when a file-backed SQLite URL points to a missing file."""
+    from sqlalchemy.engine.url import make_url
+
+    parsed_url = make_url(db_url)
+    if not parsed_url.drivername.startswith("sqlite"):
+        return
+
+    db_path = parsed_url.database
+    if db_path is None or db_path == ":memory:":
+        return
+
+    resolved = Path(db_path).expanduser().resolve()
+    if not resolved.exists():
+        typer.echo(f"Error: Database file not found ({source}): {resolved}", err=True)
+        raise typer.Exit(1) from None
+
+
 def _load_raw_yaml(config_path: Path) -> dict[str, Any]:
     """Load YAML without environment variable resolution.
 
@@ -1248,6 +1266,7 @@ def purge(
         db_url = f"sqlite:///{db_path}"
     elif config:
         db_url = config.landscape.url
+        _validate_existing_sqlite_db_url(db_url, source="settings.yaml")
         typer.echo(f"Using database from settings.yaml: {db_url}")
     else:
         typer.echo("Error: No settings.yaml found and --database not provided.", err=True)
