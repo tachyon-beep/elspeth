@@ -69,7 +69,7 @@ allow_hits:
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/utils.py:R5:get_nested_field:fp=65234e1b71a7a0fc
+- key: plugins/utils.py:R5:get_nested_field:fp=b9f0121cf1ecd05f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

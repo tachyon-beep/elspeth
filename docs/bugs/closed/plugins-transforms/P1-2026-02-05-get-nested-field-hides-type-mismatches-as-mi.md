@@ -1,12 +1,14 @@
 # Bug Report: get_nested_field Hides Type Mismatches as “Missing” in Pipeline Data
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - `get_nested_field` now raises `TypeError` when an intermediate path value is not a dict.
+  - Missing keys still return the default sentinel/value.
+  - Added/updated tests to ensure non-dict intermediates crash in both utility and FieldMapper call paths.
 
 
 ## Summary
@@ -101,3 +103,19 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md:81`, `CLAUDE.md:86`, `CLAUDE.md:918`, `CLAUDE.md:920`
+
+---
+
+## Verification (2026-02-12)
+
+- Reproduced before fix:
+  - `field_mapper` with mapping `user.name -> origin` and row `{"user": "string_not_dict"}`:
+    - `strict=False`: mapping silently skipped.
+    - `strict=True`: returned `missing_field` error instead of type violation.
+- Post-fix behavior:
+  - `get_nested_field(..., "user.name")` raises `TypeError` for non-dict intermediate values.
+  - FieldMapper now propagates this type mismatch (strict and non-strict), surfacing upstream bugs instead of masking them as missing.
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/test_utils.py tests/unit/plugins/transforms/test_field_mapper.py`
+  - `.venv/bin/ruff check src/elspeth/plugins/utils.py tests/unit/plugins/test_utils.py tests/unit/plugins/transforms/test_field_mapper.py`
+  - `.venv/bin/mypy src/elspeth/plugins/utils.py src/elspeth/plugins/transforms/field_mapper.py`

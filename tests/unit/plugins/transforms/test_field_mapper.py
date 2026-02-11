@@ -162,6 +162,36 @@ class TestFieldMapper:
         assert result.row["origin"] == "api"
         assert "meta" in result.row  # Original nested structure preserved
 
+    def test_nested_field_type_mismatch_raises_in_non_strict_mode(self, ctx: PluginContext) -> None:
+        """Non-dict intermediate on dotted path raises type error (upstream bug)."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "mapping": {"user.name": "origin"},
+                "strict": False,
+            }
+        )
+
+        with pytest.raises(TypeError, match="expected dict"):
+            transform.process(make_pipeline_row({"user": "string_not_dict"}), ctx)
+
+    def test_nested_field_type_mismatch_raises_in_strict_mode(self, ctx: PluginContext) -> None:
+        """Strict mode should not mask type mismatches as missing fields."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "mapping": {"user.name": "origin"},
+                "strict": True,
+            }
+        )
+
+        with pytest.raises(TypeError, match="expected dict"):
+            transform.process(make_pipeline_row({"user": "string_not_dict"}), ctx)
+
     def test_empty_mapping_passthrough(self, ctx: PluginContext) -> None:
         """Empty mapping acts as passthrough."""
         from elspeth.plugins.transforms.field_mapper import FieldMapper
