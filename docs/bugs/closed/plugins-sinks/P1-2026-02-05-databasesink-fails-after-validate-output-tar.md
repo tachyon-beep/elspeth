@@ -1,12 +1,14 @@
 # Bug Report: DatabaseSink Fails After `validate_output_target()` Due to Missing Metadata Initialization
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - Added a shared DatabaseSink initializer that keeps engine and metadata initialized together.
+  - `validate_output_target()` and `_ensure_table()` now use the same initializer, eliminating partial initialization state.
+  - Added regression tests covering validate-then-write behavior in resume flow.
 
 
 ## Summary
@@ -98,3 +100,15 @@
 
 - Related issues/PRs: N/A
 - Related design docs: docs/plans/2026-02-03-pipelinerow-migration.md
+
+---
+
+## Verification (2026-02-11)
+
+- Reproduced before fix:
+  - `validate_output_target()` followed by first `write()` raised `RuntimeError("Database sink write() called before initialization")`.
+- Post-fix behavior:
+  - Resume flow (`configure_for_resume()` -> `validate_output_target()` -> `write()`) succeeds without initialization errors.
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/sinks/test_database_sink_resume.py tests/integration/config/test_cli_resume_schema_validation.py::TestDatabaseSinkResumeSchemaValidation`
+  - `ruff check src/elspeth/plugins/sinks/database_sink.py tests/unit/plugins/sinks/test_database_sink_resume.py tests/integration/config/test_cli_resume_schema_validation.py`
