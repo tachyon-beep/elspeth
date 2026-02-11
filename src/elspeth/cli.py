@@ -7,6 +7,8 @@ Entry point for the elspeth CLI tool.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -28,6 +30,7 @@ from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape import LandscapeDB
+    from elspeth.engine import Orchestrator, PipelineConfig
     from elspeth.engine.orchestrator import RowPlugin
     from elspeth.plugins.manager import PluginManager
     from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
@@ -676,6 +679,133 @@ def explain(
             db.close()
 
 
+@dataclass(frozen=True, slots=True)
+class _OrchestratorContext:
+    """Shared context yielded by _orchestrator_context()."""
+
+    pipeline_config: PipelineConfig
+    orchestrator: Orchestrator
+
+
+@contextmanager
+def _orchestrator_context(
+    config: ElspethSettings,
+    graph: ExecutionGraph,
+    plugins: dict[str, Any],
+    *,
+    db: LandscapeDB,
+    formatter_prefix: str = "Run",
+    output_format: Literal["console", "json"] = "console",
+    checkpoint_always: bool = False,
+) -> Iterator[_OrchestratorContext]:
+    """Shared orchestrator setup and teardown for run/resume CLI paths.
+
+    Handles:
+    - Plugin unpacking and aggregation wiring
+    - PipelineConfig construction
+    - EventBus + formatter subscription
+    - Runtime*Config creation (rate_limit, concurrency, checkpoint, telemetry)
+    - RateLimitRegistry, CheckpointManager, TelemetryManager lifecycle
+    - Orchestrator construction
+
+    Teardown (always runs): closes rate_limit_registry and telemetry_manager.
+
+    Args:
+        config: Validated ElspethSettings
+        graph: Validated ExecutionGraph (schemas populated)
+        plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
+        db: LandscapeDB connection (caller owns close lifecycle)
+        formatter_prefix: Prefix for console formatters ("Run" or "Resume")
+        output_format: 'console' or 'json'
+        checkpoint_always: If True, always create CheckpointManager (resume needs it).
+            If False, only create when checkpoint config is enabled (normal run).
+
+    Yields:
+        _OrchestratorContext with pipeline_config and orchestrator
+    """
+    from elspeth.cli_formatters import create_console_formatters, create_json_formatters, subscribe_formatters
+    from elspeth.contracts.config.runtime import (
+        RuntimeCheckpointConfig,
+        RuntimeConcurrencyConfig,
+        RuntimeRateLimitConfig,
+        RuntimeTelemetryConfig,
+    )
+    from elspeth.core import EventBus
+    from elspeth.core.checkpoint import CheckpointManager
+    from elspeth.core.config import AggregationSettings
+    from elspeth.core.rate_limit import RateLimitRegistry
+    from elspeth.engine import Orchestrator as _Orchestrator
+    from elspeth.engine import PipelineConfig as _PipelineConfig
+    from elspeth.telemetry import create_telemetry_manager
+
+    # Unpack pre-instantiated plugins
+    source: SourceProtocol = plugins["source"]
+    sinks: dict[str, SinkProtocol] = plugins["sinks"]
+
+    # Build transforms list: row_plugins + aggregations (with node_id)
+    transforms: list[RowPlugin] = [wired.plugin for wired in plugins["transforms"]]
+
+    agg_id_map = graph.get_aggregation_id_map()
+    aggregation_settings: dict[str, AggregationSettings] = {}
+
+    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
+        node_id = agg_id_map[agg_name]
+        aggregation_settings[node_id] = agg_config
+        transform.node_id = node_id
+        transforms.append(transform)
+
+    # Build PipelineConfig
+    pipeline_config = _PipelineConfig(
+        source=source,
+        transforms=transforms,
+        sinks=sinks,
+        config=resolve_config(config),
+        gates=list(config.gates),
+        aggregation_settings=aggregation_settings,
+    )
+
+    # EventBus + formatters
+    event_bus = EventBus()
+    formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix=formatter_prefix)
+    subscribe_formatters(event_bus, formatters)
+
+    # Runtime configs
+    rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+    concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+    checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+    telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+
+    rate_limit_registry: RateLimitRegistry | None = None
+    telemetry_manager = None
+
+    try:
+        rate_limit_registry = RateLimitRegistry(rate_limit_config)
+        telemetry_manager = create_telemetry_manager(telemetry_config)
+
+        # Checkpoint manager: always for resume, conditional for run
+        checkpoint_manager = CheckpointManager(db) if checkpoint_always or checkpoint_config.enabled else None
+
+        orchestrator = _Orchestrator(
+            db,
+            event_bus=event_bus,
+            rate_limit_registry=rate_limit_registry,
+            concurrency_config=concurrency_config,
+            checkpoint_manager=checkpoint_manager,
+            checkpoint_config=checkpoint_config,
+            telemetry_manager=telemetry_manager,
+        )
+
+        yield _OrchestratorContext(
+            pipeline_config=pipeline_config,
+            orchestrator=orchestrator,
+        )
+    finally:
+        if rate_limit_registry is not None:
+            rate_limit_registry.close()
+        if telemetry_manager is not None:
+            telemetry_manager.close()
+
+
 def _execute_pipeline_with_instances(
     config: ElspethSettings,
     graph: ExecutionGraph,
@@ -687,9 +817,6 @@ def _execute_pipeline_with_instances(
 ) -> ExecutionResult:
     """Execute pipeline using pre-instantiated plugin instances.
 
-    NEW execution path that reuses plugins instantiated during graph construction.
-    Eliminates double instantiation.
-
     Args:
         config: Validated ElspethSettings
         graph: Validated ExecutionGraph (schemas populated)
@@ -698,35 +825,12 @@ def _execute_pipeline_with_instances(
         output_format: 'console' or 'json'
         secret_resolutions: Optional list of secret resolution records from
             load_secrets_from_config(). Passed to orchestrator for audit recording.
+        passphrase: Optional SQLCipher passphrase for encrypted audit DB
 
     Returns:
         ExecutionResult with run_id, status, rows_processed
     """
-    from elspeth.core.config import AggregationSettings
     from elspeth.core.landscape import LandscapeDB
-    from elspeth.engine import Orchestrator, PipelineConfig
-
-    # Use pre-instantiated plugins with explicit protocol types
-    source: SourceProtocol = plugins["source"]
-    sinks: dict[str, SinkProtocol] = plugins["sinks"]
-
-    # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[RowPlugin] = [wired.plugin for wired in plugins["transforms"]]
-
-    # Add aggregation transforms with node_id attached
-    agg_id_map = graph.get_aggregation_id_map()
-    aggregation_settings: dict[str, AggregationSettings] = {}
-
-    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
-        node_id = agg_id_map[agg_name]
-        aggregation_settings[node_id] = agg_config
-
-        # Set node_id so processor can identify as aggregation
-        transform.node_id = node_id
-        transforms.append(transform)
-
-    # Get database
-    db_url = config.landscape.url
 
     # Warn if JSONL journal is enabled alongside SQLCipher — journal is plaintext
     if passphrase is not None and config.landscape.dump_to_jsonl:
@@ -738,7 +842,7 @@ def _execute_pipeline_with_instances(
         )
 
     db = LandscapeDB.from_url(
-        db_url,
+        config.landscape.url,
         passphrase=passphrase,
         dump_to_jsonl=config.landscape.dump_to_jsonl,
         dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
@@ -752,7 +856,6 @@ def _execute_pipeline_with_instances(
     )
 
     # Create payload store for audit compliance
-    # (CLAUDE.md: "Source entry - Raw data stored before any processing")
     from elspeth.core.payload_store import FilesystemPayloadStore
 
     if config.payload_store.backend != "filesystem":
@@ -763,81 +866,32 @@ def _execute_pipeline_with_instances(
         raise typer.Exit(1)
     payload_store = FilesystemPayloadStore(config.payload_store.base_path)
 
-    # Initialize rate_limit_registry to None so it's defined in finally block
-    rate_limit_registry = None
-    telemetry_manager = None
-
     try:
-        # Build PipelineConfig with pre-instantiated plugins
-        pipeline_config = PipelineConfig(
-            source=source,
-            transforms=transforms,
-            sinks=sinks,
-            config=resolve_config(config),
-            gates=list(config.gates),
-            aggregation_settings=aggregation_settings,
-        )
-
         if verbose:
             typer.echo("Starting pipeline execution...")
 
-        # Create event bus and subscribe formatters
-        from elspeth.cli_formatters import create_console_formatters, create_json_formatters, subscribe_formatters
-        from elspeth.core import EventBus
+        with _orchestrator_context(
+            config,
+            graph,
+            plugins,
+            db=db,
+            formatter_prefix="Run",
+            output_format=output_format,
+        ) as ctx:
+            result = ctx.orchestrator.run(
+                ctx.pipeline_config,
+                graph=graph,
+                settings=config,
+                payload_store=payload_store,
+                secret_resolutions=secret_resolutions,
+            )
 
-        event_bus = EventBus()
-        formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix="Run")
-        subscribe_formatters(event_bus, formatters)
-
-        # Create runtime configs for external calls and checkpointing
-        from elspeth.contracts.config.runtime import (
-            RuntimeCheckpointConfig,
-            RuntimeConcurrencyConfig,
-            RuntimeRateLimitConfig,
-            RuntimeTelemetryConfig,
-        )
-        from elspeth.core.checkpoint import CheckpointManager
-        from elspeth.core.rate_limit import RateLimitRegistry
-        from elspeth.telemetry import create_telemetry_manager
-
-        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
-        rate_limit_registry = RateLimitRegistry(rate_limit_config)
-        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
-        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
-        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
-        telemetry_manager = create_telemetry_manager(telemetry_config)
-
-        # Create checkpoint manager if checkpointing is enabled
-        checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
-
-        # Execute via Orchestrator (creates full audit trail)
-        orchestrator = Orchestrator(
-            db,
-            event_bus=event_bus,
-            rate_limit_registry=rate_limit_registry,
-            concurrency_config=concurrency_config,
-            checkpoint_manager=checkpoint_manager,
-            checkpoint_config=checkpoint_config,
-            telemetry_manager=telemetry_manager,
-        )
-        result = orchestrator.run(
-            pipeline_config,
-            graph=graph,
-            settings=config,
-            payload_store=payload_store,
-            secret_resolutions=secret_resolutions,
-        )
-
-        return {
-            "run_id": result.run_id,
-            "status": result.status,  # RunStatus enum (str subclass)
-            "rows_processed": result.rows_processed,
-        }
+            return {
+                "run_id": result.run_id,
+                "status": result.status,  # RunStatus enum (str subclass)
+                "rows_processed": result.rows_processed,
+            }
     finally:
-        if rate_limit_registry is not None:
-            rate_limit_registry.close()
-        if telemetry_manager is not None:
-            telemetry_manager.close()
         db.close()
 
 
@@ -1300,113 +1354,37 @@ def _execute_resume_with_instances(
 ) -> Any:  # Returns RunResult from orchestrator.resume()
     """Execute resume using pre-instantiated plugins.
 
-    Similar to _execute_pipeline_with_instances but for resume operations.
-
     Args:
         config: Validated ElspethSettings
         graph: Validated ExecutionGraph
         plugins: Pre-instantiated plugins (with NullSource)
         resume_point: Resume point information
         payload_store: Payload store for retrieving row data
-        db: LandscapeDB connection
+        db: LandscapeDB connection (caller owns close lifecycle)
         output_format: 'console' or 'json'
 
     Returns:
         RunResult from orchestrator.resume()
     """
-    from elspeth.core.checkpoint import CheckpointManager
-    from elspeth.core.config import AggregationSettings
-    from elspeth.engine import Orchestrator, PipelineConfig
+    if payload_store is None:
+        raise ValueError("payload_store is required for resume operations")
 
-    # Use pre-instantiated plugins with explicit protocol types
-    source: SourceProtocol = plugins["source"]
-    sinks: dict[str, SinkProtocol] = plugins["sinks"]
-
-    # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[RowPlugin] = [wired.plugin for wired in plugins["transforms"]]
-
-    # Add aggregation transforms with node_id attached
-    agg_id_map = graph.get_aggregation_id_map()
-    aggregation_settings: dict[str, AggregationSettings] = {}
-
-    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
-        node_id = agg_id_map[agg_name]
-        aggregation_settings[node_id] = agg_config
-
-        # Set node_id so processor can identify as aggregation
-        transform.node_id = node_id
-        transforms.append(transform)
-
-    # Build PipelineConfig with pre-instantiated plugins
-    pipeline_config = PipelineConfig(
-        source=source,
-        transforms=transforms,
-        sinks=sinks,
-        config=resolve_config(config),
-        gates=list(config.gates),
-        aggregation_settings=aggregation_settings,
-    )
-
-    # Create event bus and subscribe formatters
-    from elspeth.cli_formatters import create_console_formatters, create_json_formatters, subscribe_formatters
-    from elspeth.core import EventBus
-
-    event_bus = EventBus()
-    formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix="Resume")
-    subscribe_formatters(event_bus, formatters)
-
-    # Create runtime configs for external calls and checkpointing
-    from elspeth.contracts.config.runtime import (
-        RuntimeCheckpointConfig,
-        RuntimeConcurrencyConfig,
-        RuntimeRateLimitConfig,
-        RuntimeTelemetryConfig,
-    )
-    from elspeth.core.rate_limit import RateLimitRegistry
-    from elspeth.telemetry import create_telemetry_manager
-
-    # Initialize to None so they're defined in finally block even if creation fails
-    rate_limit_registry = None
-    telemetry_manager = None
-
-    try:
-        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
-        rate_limit_registry = RateLimitRegistry(rate_limit_config)
-        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
-        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
-        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
-        telemetry_manager = create_telemetry_manager(telemetry_config)
-
-        # Create checkpoint manager and orchestrator for resume
-        checkpoint_manager = CheckpointManager(db)
-        orchestrator = Orchestrator(
-            db,
-            event_bus=event_bus,
-            checkpoint_manager=checkpoint_manager,
-            checkpoint_config=checkpoint_config,
-            rate_limit_registry=rate_limit_registry,
-            concurrency_config=concurrency_config,
-            telemetry_manager=telemetry_manager,
-        )
-
-        # Execute resume (payload_store is required for resume)
-        if payload_store is None:
-            raise ValueError("payload_store is required for resume operations")
-        result = orchestrator.resume(
+    with _orchestrator_context(
+        config,
+        graph,
+        plugins,
+        db=db,
+        formatter_prefix="Resume",
+        output_format=output_format,
+        checkpoint_always=True,
+    ) as ctx:
+        return ctx.orchestrator.resume(
             resume_point=resume_point,
-            config=pipeline_config,
+            config=ctx.pipeline_config,
             graph=graph,
             payload_store=payload_store,
             settings=config,
         )
-
-        return result
-    finally:
-        # Clean up rate limit registry and telemetry (always, even on failure)
-        if rate_limit_registry is not None:
-            rate_limit_registry.close()
-        if telemetry_manager is not None:
-            telemetry_manager.close()
 
 
 def _build_resume_graphs(

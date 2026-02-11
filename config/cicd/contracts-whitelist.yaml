@@ -120,6 +120,7 @@ allowed_dict_patterns:
   # CLI - plugin instantiation from configuration
   - "src/elspeth/cli.py:_build_resume_graphs:plugins"
   - "src/elspeth/cli_helpers.py:instantiate_plugins_from_config:return"
+  - "src/elspeth/cli.py:_orchestrator_context:plugins"
   - "src/elspeth/cli.py:_execute_pipeline_with_instances:plugins"
   - "src/elspeth/cli.py:_execute_resume_with_instances:plugins"
   - "src/elspeth/cli.py:_load_raw_yaml:return"
