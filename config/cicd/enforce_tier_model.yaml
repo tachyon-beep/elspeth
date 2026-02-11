@@ -1437,42 +1437,42 @@ allow_hits:
   reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
   safety: Falls back to config default_content_type - preset pages may omit content_type
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=b1a7475ca2ec6ad8
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=e44c01bfc2612359
   owner: architecture
   reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
   safety: Missing path defaults to empty string - correct for catch-all route
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=356e4e65a64206cd
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=660940b39f025ff0
   owner: architecture
   reason: Tier 3 boundary - .get() on HTTP request headers (optional header override)
   safety: Missing header defaults to None - no override applied
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=e84a303908b0e6ad
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=7c18c66398829e8c
   owner: architecture
   reason: isinstance check on content generator output (str vs bytes) for encoding
   safety: Both branches produce valid bytes for HTTP response body
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=b4ed75053835fcaa
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=1a4858478eb419c4
   owner: architecture
   reason: .get() on error message mapping - fallback for error types not in mapping
   safety: Falls back to generic status code message - never swallows errors
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=762539baa0bade9f
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=3c6429bb0b06aab6
   owner: architecture
   reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
   safety: Bytes decoded with replace - corruption helpers always receive valid str input
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=6031dd683d80b200
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=5fd2d93db826e9ce
   owner: architecture
   reason: isinstance check on content (str vs bytes) for wrong_content_type HTTP response encoding
   safety: Both branches produce valid bytes for Response body
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=85671d97e81fc16d
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=6b78f9e411db704e
   owner: architecture
   reason: isinstance check on content generator output (str vs bytes) for HTTP response encoding
   safety: Both branches produce valid bytes for Response body
   expires: '2026-05-13'
-- key: testing/chaosweb/server.py:R4:ChaosWebServer:_record_request:fp=f02bc49b98ba1487
+- key: testing/chaosweb/server.py:R4:ChaosWebServer:_record_request:fp=bfadde93482b0781
   owner: architecture
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
   safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
@@ -1522,37 +1522,37 @@ allow_hits:
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=99aa4256034d0404
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=58cc3ba582d39fc1
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=40d716b87ce5675c
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=ecb4544f65194888
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=21a073b8bdc2c154
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=62622c244fae8178
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=684c59dc629d693e
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=d058d6e47f789305
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional fields from external HTTP clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=8ccabe4dfc512dc8
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=91a3fcade1ef1d2c
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=9b9ba02d9dfdb908
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=798a6079a1211756
   owner: architecture
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get with defaults for optional response fields from external clients
   expires: '2026-05-13'
-- key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=16ec1dd670ebe4e1
+- key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=03fae35d0a4b1983
   owner: architecture
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
   safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
@@ -1627,25 +1627,30 @@ allow_hits:
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=face415b8e4b5e9c
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=314d97263c63f4ef
   owner: architecture
   reason: contextlib.suppress on ProgrammingError during connection cleanup
   safety: Only suppresses error for already-closed connections during teardown
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R9:MetricsStore:rebuild_timeseries:fp=20da87aa36d72667
+- key: testing/chaosengine/metrics_store.py:R9:MetricsStore:rebuild_timeseries:fp=dfb516aeb64113be
   owner: architecture
   reason: dict.pop extracts latency_ms from classified metrics row - field is optional in variable-shape metrics data
   safety: None default is correct - latency is not present in all metric types
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R5:MetricsStore:rebuild_timeseries:fp=b7cf4f71877df83c
+- key: testing/chaosengine/metrics_store.py:R5:MetricsStore:rebuild_timeseries:fp=9bd42e4003c1d713
   owner: architecture
   reason: isinstance(int) filters numeric metric values for aggregation - variable-shape metrics contain mixed types
   safety: Non-int values are correctly skipped during summation
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R1:MetricsStore:rebuild_timeseries:fp=eba360b3ef712841
+- key: testing/chaosengine/metrics_store.py:R1:MetricsStore:rebuild_timeseries:fp=06bbb83bf410a1e6
   owner: architecture
   reason: dict.get with default 0 for running totals accumulator - key may not exist on first encounter
   safety: Standard accumulator pattern - 0 default is mathematically correct for summation
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:_cleanup_stale_connections:fp=b1b840bcf067814d
+  owner: architecture
+  reason: contextlib.suppress on ProgrammingError during stale connection cleanup
+  safety: Only suppresses error for already-closed connections from dead threads during cleanup
   expires: '2026-05-13'
 - key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=850a983ac17874c6
   owner: architecture

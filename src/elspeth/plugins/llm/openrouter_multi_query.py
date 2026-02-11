@@ -234,15 +234,17 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            if is_capacity_error(e.response.status_code):
-                raise CapacityError(e.response.status_code, str(e)) from e
+            status_code = e.response.status_code
+            if is_capacity_error(status_code):
+                raise CapacityError(status_code, str(e)) from e
             return TransformResult.error(
                 {
                     "reason": "api_call_failed",
                     "error": str(e),
+                    "status_code": status_code,
                     "query": spec.output_prefix,
                 },
-                retryable=False,
+                retryable=status_code >= 500,
             )
         except httpx.RequestError as e:
             return TransformResult.error(
@@ -251,7 +253,7 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                     "error": str(e),
                     "query": spec.output_prefix,
                 },
-                retryable=False,
+                retryable=True,
             )
 
         # 7. Parse JSON response from HTTP (EXTERNAL DATA - wrap)

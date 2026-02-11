@@ -551,6 +551,113 @@ class TestContentSafetyBatchProcessing:
         finally:
             transform.close()
 
+    def test_non_string_configured_field_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Non-string value in explicitly-configured field fails CLOSED.
+
+        Security transform cannot analyze non-string content. Silently skipping
+        would be a fail-OPEN vulnerability — the field goes unscanned.
+        """
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        # Set up mock response for the string field that gets processed
+        # before the non-string field is encountered
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["content", "score"],
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            # score is an int — configured field with non-string value
+            row_data = {"content": "safe text", "score": 42, "id": 1}
+            row = make_pipeline_row(row_data)
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "non_string_field"
+            assert result.reason["field"] == "score"
+            assert result.reason["actual_type"] == "int"
+            assert result.retryable is False
+        finally:
+            transform.close()
+
+    def test_all_mode_ignores_non_string_fields(self, mock_httpx_client: MagicMock) -> None:
+        """When fields='all', non-string fields are correctly ignored.
+
+        In 'all' mode, _get_fields_to_scan pre-filters to string-valued fields,
+        so non-string fields never reach the type check. This is by design.
+        """
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        mock_response = _create_mock_http_response(
+            {
+                "categoriesAnalysis": [
+                    {"category": "Hate", "severity": 0},
+                    {"category": "Violence", "severity": 0},
+                    {"category": "Sexual", "severity": 0},
+                    {"category": "SelfHarm", "severity": 0},
+                ]
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzureContentSafety(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": "all",
+                "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            # Mix of string and non-string fields
+            row_data = {"content": "safe", "count": 42, "flag": True, "id": 1}
+            row = make_pipeline_row(row_data)
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
+            assert result.status == "success"
+            # Only "content" is a string — one API call
+            assert mock_httpx_client.post.call_count == 1
+        finally:
+            transform.close()
+
     def test_malformed_api_response_returns_error(self, mock_httpx_client: MagicMock) -> None:
         """Malformed API responses return error result."""
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety

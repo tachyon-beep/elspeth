@@ -30,6 +30,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
+from elspeth.testing.chaosengine.config_loader import deep_merge
 from elspeth.testing.chaosengine.latency import LatencySimulator
 from elspeth.testing.chaosengine.types import LatencyConfig
 from elspeth.testing.chaosweb.config import (
@@ -133,21 +134,24 @@ class ChaosWebServer:
         return data
 
     def update_config(self, updates: dict[str, Any]) -> None:
-        """Update server configuration at runtime."""
+        """Update server configuration at runtime.
+
+        Uses deep_merge so partial nested updates preserve existing fields.
+        """
         if "error_injection" in updates:
             current = self._error_injector._config.model_dump()
-            current.update(updates["error_injection"])
-            self._error_injector = WebErrorInjector(WebErrorInjectionConfig(**current))
+            merged = deep_merge(current, updates["error_injection"])
+            self._error_injector = WebErrorInjector(WebErrorInjectionConfig(**merged))
 
         if "content" in updates:
             current = self._content_generator._config.model_dump()
-            current.update(updates["content"])
-            self._content_generator = ContentGenerator(WebContentConfig(**current))
+            merged = deep_merge(current, updates["content"])
+            self._content_generator = ContentGenerator(WebContentConfig(**merged))
 
         if "latency" in updates:
             current = self._latency_simulator._config.model_dump()
-            current.update(updates["latency"])
-            self._latency_simulator = LatencySimulator(LatencyConfig(**current))
+            merged = deep_merge(current, updates["latency"])
+            self._latency_simulator = LatencySimulator(LatencyConfig(**merged))
 
     def _get_current_config(self) -> dict[str, Any]:
         """Get current configuration as dict."""

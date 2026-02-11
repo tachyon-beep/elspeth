@@ -19,8 +19,6 @@ from elspeth.testing.chaosengine.config_loader import (
 from elspeth.testing.chaosengine.config_loader import (
     load_preset as _load_preset,
 )
-
-# Re-export shared config types from chaosengine for backward compatibility.
 from elspeth.testing.chaosengine.types import (
     LatencyConfig,
     MetricsConfig,

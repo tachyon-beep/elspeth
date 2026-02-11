@@ -131,10 +131,10 @@ class MetricsStore:
         self._run_id = run_id if run_id is not None else str(uuid.uuid4())
         self._started_utc = datetime.now(UTC).isoformat()
 
-        # Thread-local storage for connections
+        # Thread-local storage for connections, keyed by thread ID
         self._local = threading.local()
         self._lock = threading.Lock()
-        self._connections: list[sqlite3.Connection] = []
+        self._connections: dict[int, sqlite3.Connection] = {}
 
         # Detect in-memory databases and URI usage
         self._use_uri = config.database.startswith("file:")
@@ -162,6 +162,7 @@ class MetricsStore:
             connection: sqlite3.Connection = self._local.connection
             return connection
         except AttributeError:
+            self._cleanup_stale_connections()
             conn = sqlite3.connect(
                 self._config.database,
                 check_same_thread=False,
@@ -176,9 +177,20 @@ class MetricsStore:
                 conn.execute("PRAGMA synchronous=NORMAL")
             conn.row_factory = sqlite3.Row
             self._local.connection = conn
+            thread_id = threading.get_ident()
             with self._lock:
-                self._connections.append(conn)
+                self._connections[thread_id] = conn
             return conn
+
+    def _cleanup_stale_connections(self) -> None:
+        """Close connections from threads that have exited."""
+        live_thread_ids = {t.ident for t in threading.enumerate()}
+        with self._lock:
+            dead_ids = [tid for tid in self._connections if tid not in live_thread_ids]
+            for tid in dead_ids:
+                with contextlib.suppress(sqlite3.ProgrammingError):
+                    self._connections[tid].close()
+                del self._connections[tid]
 
     def _init_schema(self) -> None:
         """Initialize database schema."""
@@ -227,7 +239,13 @@ class MetricsStore:
 
         Args:
             **kwargs: Column name=value pairs for the requests table.
+
+        Raises:
+            ValueError: If any kwarg key is not a column in the schema.
         """
+        unknown = set(kwargs) - set(self._request_col_names)
+        if unknown:
+            raise ValueError(f"Unknown columns for requests table: {sorted(unknown)}. Valid columns: {sorted(self._request_col_names)}")
         conn = self._get_connection()
         cols = list(kwargs.keys())
         vals = list(kwargs.values())
@@ -405,60 +423,66 @@ class MetricsStore:
     def get_stats(self) -> dict[str, Any]:
         """Get summary statistics for the current run.
 
+        Stats are derived from the schema — only columns present in
+        request_columns are queried. This avoids hardcoding plugin-specific
+        column names like 'outcome' or 'status_code'.
+
         Returns:
-            Dictionary with summary statistics including run_id, started_utc,
-            total_requests, requests_by_outcome, requests_by_status_code,
-            latency_stats, and error_rate.
+            Dictionary with summary statistics. Keys are conditional on
+            which columns exist in the schema.
         """
         conn = self._get_connection()
+        col_names = set(self._request_col_names)
 
         cursor = conn.execute("SELECT COUNT(*) FROM requests")
         total_requests = cursor.fetchone()[0]
 
-        cursor = conn.execute("SELECT outcome, COUNT(*) FROM requests GROUP BY outcome")
-        requests_by_outcome = {row[0]: row[1] for row in cursor.fetchall()}
-
-        cursor = conn.execute("SELECT status_code, COUNT(*) FROM requests WHERE status_code IS NOT NULL GROUP BY status_code")
-        requests_by_status_code = {row[0]: row[1] for row in cursor.fetchall()}
-
-        # Latency statistics
-        cursor = conn.execute("SELECT AVG(latency_ms), MAX(latency_ms) FROM requests WHERE latency_ms IS NOT NULL")
-        row = cursor.fetchone()
-        avg_latency = row[0]
-        max_latency = row[1]
-
-        cursor = conn.execute("SELECT latency_ms FROM requests WHERE latency_ms IS NOT NULL ORDER BY latency_ms")
-        latencies = [r[0] for r in cursor.fetchall()]
-
-        p50_latency = None
-        p95_latency = None
-        p99_latency = None
-
-        if latencies:
-            p50_latency = latencies[min(int(len(latencies) * 0.50), len(latencies) - 1)]
-            p95_latency = latencies[min(int(len(latencies) * 0.95), len(latencies) - 1)]
-            p99_latency = latencies[min(int(len(latencies) * 0.99), len(latencies) - 1)]
-
-        error_rate = 0.0
-        if total_requests > 0:
-            error_count = sum(count for outcome, count in requests_by_outcome.items() if outcome != "success")
-            error_rate = (error_count / total_requests) * 100
-
-        return {
+        stats: dict[str, Any] = {
             "run_id": self._run_id,
             "started_utc": self._started_utc,
             "total_requests": total_requests,
-            "requests_by_outcome": requests_by_outcome,
-            "requests_by_status_code": requests_by_status_code,
-            "latency_stats": {
-                "avg_ms": avg_latency,
+        }
+
+        if "outcome" in col_names:
+            cursor = conn.execute("SELECT outcome, COUNT(*) FROM requests GROUP BY outcome")
+            requests_by_outcome = {row[0]: row[1] for row in cursor.fetchall()}
+            stats["requests_by_outcome"] = requests_by_outcome
+
+            if total_requests > 0:
+                error_count = sum(count for outcome, count in requests_by_outcome.items() if outcome != "success")
+                stats["error_rate"] = (error_count / total_requests) * 100
+            else:
+                stats["error_rate"] = 0.0
+
+        if "status_code" in col_names:
+            cursor = conn.execute("SELECT status_code, COUNT(*) FROM requests WHERE status_code IS NOT NULL GROUP BY status_code")
+            stats["requests_by_status_code"] = {row[0]: row[1] for row in cursor.fetchall()}
+
+        if "latency_ms" in col_names:
+            cursor = conn.execute("SELECT AVG(latency_ms), MAX(latency_ms) FROM requests WHERE latency_ms IS NOT NULL")
+            row = cursor.fetchone()
+
+            cursor = conn.execute("SELECT latency_ms FROM requests WHERE latency_ms IS NOT NULL ORDER BY latency_ms")
+            latencies = [r[0] for r in cursor.fetchall()]
+
+            p50_latency = None
+            p95_latency = None
+            p99_latency = None
+
+            if latencies:
+                p50_latency = latencies[min(int(len(latencies) * 0.50), len(latencies) - 1)]
+                p95_latency = latencies[min(int(len(latencies) * 0.95), len(latencies) - 1)]
+                p99_latency = latencies[min(int(len(latencies) * 0.99), len(latencies) - 1)]
+
+            stats["latency_stats"] = {
+                "avg_ms": row[0],
                 "p50_ms": p50_latency,
                 "p95_ms": p95_latency,
                 "p99_ms": p99_latency,
-                "max_ms": max_latency,
-            },
-            "error_rate": error_rate,
-        }
+                "max_ms": row[1],
+            }
+
+        return stats
 
     def export_data(self) -> dict[str, Any]:
         """Export raw requests and time-series data."""
@@ -555,7 +579,7 @@ class MetricsStore:
     def close(self) -> None:
         """Close all database connections across all threads."""
         with self._lock:
-            for conn in self._connections:
+            for conn in self._connections.values():
                 with contextlib.suppress(sqlite3.ProgrammingError):
                     conn.close()
             self._connections.clear()

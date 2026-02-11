@@ -231,6 +231,7 @@ TransformErrorCategory = Literal[
     "content_safety_violation",
     "prompt_injection_detected",
     "unknown_category",  # Unknown category from external API (fail-closed)
+    "non_string_field",  # Explicitly-configured field is non-string (security fail-closed)
     # Contract violations (schema validation)
     "contract_violation",
     "multiple_contract_violations",
@@ -364,6 +365,7 @@ class TransformErrorReason(TypedDict):
     # Type validation context
     expected: NotRequired[str]
     actual: NotRequired[str]
+    actual_type: NotRequired[str]
     value: NotRequired[str]
 
     # Rate limiting/timeout context

@@ -27,8 +27,6 @@ Usage:
         ...
 """
 
-# Re-export shared types from chaosengine
-from elspeth.testing.chaosengine.types import LatencyConfig, MetricsConfig, ServerConfig
 from elspeth.testing.chaosweb.config import (
     ChaosWebConfig,
     WebBurstConfig,
@@ -53,9 +51,6 @@ __all__ = [
     "ChaosWebConfig",
     "ChaosWebServer",
     "ContentGenerator",
-    "LatencyConfig",
-    "MetricsConfig",
-    "ServerConfig",
     "WebBurstConfig",
     "WebContentConfig",
     "WebErrorCategory",

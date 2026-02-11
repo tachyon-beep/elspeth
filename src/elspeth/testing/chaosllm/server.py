@@ -29,6 +29,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from elspeth.testing.chaosengine.config_loader import deep_merge
+from elspeth.testing.chaosengine.latency import LatencySimulator
 from elspeth.testing.chaosengine.types import LatencyConfig
 from elspeth.testing.chaosllm.config import (
     ChaosLLMConfig,
@@ -36,7 +38,6 @@ from elspeth.testing.chaosllm.config import (
     ResponseConfig,
 )
 from elspeth.testing.chaosllm.error_injector import ErrorDecision, ErrorInjector
-from elspeth.testing.chaosllm.latency_simulator import LatencySimulator
 from elspeth.testing.chaosllm.metrics import MetricsRecorder
 from elspeth.testing.chaosllm.response_generator import ResponseGenerator
 
@@ -162,26 +163,28 @@ class ChaosLLMServer:
     def update_config(self, updates: dict[str, Any]) -> None:
         """Update server configuration at runtime.
 
+        Uses deep_merge so partial nested updates (e.g. ``{burst: {enabled: true}}``)
+        preserve existing nested fields instead of resetting them to defaults.
+
         Args:
             updates: Dict with sections to update (error_injection, response, latency)
         """
         if "error_injection" in updates:
-            # Merge with existing config
             current_error = self._error_injector._config.model_dump()
-            current_error.update(updates["error_injection"])
-            error_config = ErrorInjectionConfig(**current_error)
+            merged = deep_merge(current_error, updates["error_injection"])
+            error_config = ErrorInjectionConfig(**merged)
             self._error_injector = ErrorInjector(error_config)
 
         if "response" in updates:
             current_response = self._response_generator._config.model_dump()
-            current_response.update(updates["response"])
-            response_config = ResponseConfig(**current_response)
+            merged = deep_merge(current_response, updates["response"])
+            response_config = ResponseConfig(**merged)
             self._response_generator = ResponseGenerator(response_config)
 
         if "latency" in updates:
             current_latency = self._latency_simulator._config.model_dump()
-            current_latency.update(updates["latency"])
-            latency_config = LatencyConfig(**current_latency)
+            merged = deep_merge(current_latency, updates["latency"])
+            latency_config = LatencyConfig(**merged)
             self._latency_simulator = LatencySimulator(latency_config)
 
     def _get_current_config(self) -> dict[str, Any]:

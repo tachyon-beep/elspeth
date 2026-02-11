@@ -273,7 +273,18 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
             value = row_dict[field_name]
             if not isinstance(value, str):
-                continue
+                # Explicitly-configured field is non-string — fail CLOSED.
+                # Security transform cannot analyze non-string content for prompt injection.
+                # ("all" mode pre-filters to string fields in _get_fields_to_scan,
+                # so this branch only fires for explicitly-configured fields.)
+                return TransformResult.error(
+                    {
+                        "reason": "non_string_field",
+                        "field": field_name,
+                        "actual_type": type(value).__name__,
+                    },
+                    retryable=False,
+                )
 
             # Call Azure API with state_id for audit trail
             try:

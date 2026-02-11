@@ -26,8 +26,6 @@ Usage:
         ...
 """
 
-from elspeth.testing.chaosengine.latency import LatencySimulator
-from elspeth.testing.chaosengine.types import LatencyConfig, MetricsConfig, ServerConfig
 from elspeth.testing.chaosllm.config import (
     DEFAULT_MEMORY_DB,
     ChaosLLMConfig,
@@ -49,14 +47,10 @@ __all__ = [
     "ErrorDecision",
     "ErrorInjectionConfig",
     "ErrorInjector",
-    "LatencyConfig",
-    "LatencySimulator",
-    "MetricsConfig",
     "MetricsRecorder",
     "OpenAIResponse",
     "ResponseConfig",
     "ResponseGenerator",
-    "ServerConfig",
     "create_app",
     "list_presets",
     "load_config",

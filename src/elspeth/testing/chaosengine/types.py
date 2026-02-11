@@ -8,6 +8,7 @@ MetricsConfig, LatencyConfig) and generic types for the injection engine
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
@@ -95,6 +96,14 @@ class ErrorSpec:
     tag: str
     weight: float
 
+    def __post_init__(self) -> None:
+        if not self.tag:
+            raise ValueError("ErrorSpec tag must not be empty")
+        if not math.isfinite(self.weight):
+            raise ValueError(f"ErrorSpec weight must be finite, got {self.weight}")
+        if self.weight < 0:
+            raise ValueError(f"ErrorSpec weight must be non-negative, got {self.weight}")
+
 
 @dataclass(frozen=True, slots=True)
 class BurstConfig:
@@ -112,6 +121,16 @@ class BurstConfig:
     enabled: bool = False
     interval_sec: float = 30.0
     duration_sec: float = 5.0
+
+    def __post_init__(self) -> None:
+        if self.interval_sec <= 0:
+            raise ValueError(f"interval_sec must be positive, got {self.interval_sec}")
+        if self.duration_sec <= 0:
+            raise ValueError(f"duration_sec must be positive, got {self.duration_sec}")
+        if self.enabled and self.duration_sec >= self.interval_sec:
+            raise ValueError(
+                f"duration_sec ({self.duration_sec}) must be less than interval_sec ({self.interval_sec}) when burst is enabled"
+            )
 
 
 # =============================================================================

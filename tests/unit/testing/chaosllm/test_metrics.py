@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
-from elspeth.testing.chaosllm.config import MetricsConfig
+from elspeth.testing.chaosengine.types import MetricsConfig
 from elspeth.testing.chaosllm.metrics import (
     MetricsRecorder,
     RequestRecord,

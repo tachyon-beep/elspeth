@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from starlette.testclient import TestClient
 
-from elspeth.testing.chaosllm.config import LatencyConfig, MetricsConfig
+from elspeth.testing.chaosengine.types import LatencyConfig, MetricsConfig
 from elspeth.testing.chaosweb.config import (
     ChaosWebConfig,
     WebErrorInjectionConfig,

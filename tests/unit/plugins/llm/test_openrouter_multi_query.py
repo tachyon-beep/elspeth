@@ -293,6 +293,91 @@ class TestSingleQueryProcessing:
 
             assert exc_info.value.status_code == 503
 
+    def test_process_single_query_network_error_is_retryable(self) -> None:
+        """Network errors (httpx.RequestError) should be retryable."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = mock_client_class.return_value
+            mock_client.post.side_effect = httpx.ConnectError("Connection refused")
+
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "api_call_failed"
+            assert result.retryable is True
+
+    def test_process_single_query_server_error_is_retryable(self) -> None:
+        """HTTP 5xx server errors should be retryable (transient)."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = mock_client_class.return_value
+            mock_response = Mock(spec=httpx.Response)
+            mock_response.status_code = 500
+            mock_response.headers = {"content-type": "text/html"}
+            mock_response.content = b""
+            mock_response.text = "Internal Server Error"
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "Internal Server Error",
+                request=Mock(),
+                response=mock_response,
+            )
+            mock_client.post.return_value = mock_response
+
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "api_call_failed"
+            assert result.reason["status_code"] == 500
+            assert result.retryable is True
+
+    def test_process_single_query_client_error_not_retryable(self) -> None:
+        """HTTP 4xx client errors (non-capacity) should NOT be retryable."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = mock_client_class.return_value
+            mock_response = Mock(spec=httpx.Response)
+            mock_response.status_code = 400
+            mock_response.headers = {"content-type": "application/json"}
+            mock_response.content = b""
+            mock_response.text = "Bad Request"
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "Bad Request",
+                request=Mock(),
+                response=mock_response,
+            )
+            mock_client.post.return_value = mock_response
+
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "api_call_failed"
+            assert result.reason["status_code"] == 400
+            assert result.retryable is False
+
     def test_process_single_query_handles_template_error(self, chaosllm_server) -> None:
         """Template rendering errors return error result with details."""
         from elspeth.plugins.llm.templates import TemplateError
