@@ -766,6 +766,10 @@ Examples:
     # Run with PostgreSQL
     elspeth-mcp --database postgresql://user:pass@host/dbname
 
+    # Run with SQLCipher-encrypted database
+    export ELSPETH_AUDIT_KEY="my-passphrase"
+    elspeth-mcp --database sqlite:///./state/audit.db --passphrase-env ELSPETH_AUDIT_KEY
+
     # Interactive mode - finds and prompts for databases
     elspeth-mcp
 
@@ -783,6 +787,12 @@ Environment Variables:
         "--search-dir",
         default=".",
         help="Directory to search for databases (default: current directory)",
+    )
+    parser.add_argument(
+        "--passphrase-env",
+        default=None,
+        metavar="VAR",
+        help="Environment variable holding the SQLCipher passphrase (required for encrypted databases)",
     )
 
     args = parser.parse_args()
@@ -825,12 +835,22 @@ Environment Variables:
 
         database_url = f"sqlite:///{db_path}"
 
-    # No passphrase — the MCP server is an ad-hoc analysis tool with no
-    # settings file.  Without explicit backend=sqlcipher config, passing a
-    # passphrase to a plain SQLite database causes "file is not a database".
+    # Resolve SQLCipher passphrase when --passphrase-env is provided.
+    # Without this flag we pass None — sending a passphrase to a plain
+    # SQLite database causes "file is not a database".
+    passphrase: str | None = None
+    if args.passphrase_env is not None:
+        passphrase = os.environ.get(args.passphrase_env)
+        if passphrase is None:
+            sys.stderr.write(
+                f"Error: environment variable {args.passphrase_env} is not set.\n"
+                f'Set it with: export {args.passphrase_env}="your-passphrase"\n'
+            )
+            sys.exit(1)
+
     import asyncio
 
-    asyncio.run(run_server(database_url, passphrase=None))
+    asyncio.run(run_server(database_url, passphrase=passphrase))
 
 
 if __name__ == "__main__":
