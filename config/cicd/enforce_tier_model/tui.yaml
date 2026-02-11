@@ -1,0 +1,121 @@
+allow_hits:
+- key: tui/screens/explain_screen.py:R6:ExplainScreen:_load_node_state:fp=ea0af175990905a8
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/screens/explain_screen.py:R5:ExplainScreen:load:fp=2c2f53eeaf62b1aa
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/screens/explain_screen.py:R5:ExplainScreen:retry:fp=aaa04b3313221b0e
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=efa021de94ac3b1f
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=c487c413733875f2
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=d83a6cacd8813583
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=561bead45d07791c
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=b9a8fe28fc3a2a35
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=db3f916fb4b5df04
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f86a38f7c1fdf563
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=e0e83f67901e3bc7
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=2fe3f91f56f42b8c
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=ab6e5fba4141cf4d
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=d1f89dde14fd37d2
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=a6f1d850a7f12c4f
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=4689219565e309cc
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=6eefee9df94392dd
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f40067b280807118
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=a4ecc4a0cc77230c
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=872b14cd5cb8103d
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=675ba5371c46f70a
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=03b59094c0a9934c
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R5:NodeDetailPanel:render_content:fp=2fe98f01ca3be04d
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=a105e6d08eb1e3b9
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'

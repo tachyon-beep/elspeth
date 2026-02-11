@@ -1,0 +1,257 @@
+per_file_rules:
+- pattern: testing/__init__.py
+  rules:
+  - R5
+  reason: Test factories accept dict|PipelineRow for convenience - isinstance() for input coercion, not bug masking
+  expires: null
+allow_hits:
+- key: testing/chaosllm_mcp/server.py:R6:_find_metrics_databases:fp=2bcfbfc1388cd9d8
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: testing/chaosllm/cli.py:R6:_version_callback:fp=2356e21cffe3cb94
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: testing/chaosllm/cli.py:R6:show_config:fp=f771ba918fdda859
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=e1b2cc34d0a57eea
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: testing/chaosllm_mcp/server.py:R4:create_server:call_tool:fp=e2c9b6f8afcfe19a
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: testing/chaosweb/content_generator.py:R5:PresetBank:from_jsonl:fp=5bb9a6693c3dd667
+  owner: architecture
+  reason: Tier 3 boundary - isinstance validates JSONL line is dict before constructing preset entry
+  safety: Non-dict lines are skipped with warning - no silent data loss
+  expires: '2026-05-13'
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=75fd810807ade422
+  owner: architecture
+  reason: Tier 3 boundary - .get() on parsed JSONL object for optional url field
+  safety: Missing url defaults to empty string - correct for optional preset metadata
+  expires: '2026-05-13'
+- key: testing/chaosweb/content_generator.py:R1:PresetBank:from_jsonl:fp=8b9ab029569b4717
+  owner: architecture
+  reason: Tier 3 boundary - .get() on parsed JSONL object for optional content_type field
+  safety: Missing content_type defaults to text/html - correct for HTML preset pages
+  expires: '2026-05-13'
+- key: testing/chaosweb/content_generator.py:R1:ContentGenerator:_generate_preset_html:fp=506ee7df36063e2f
+  owner: architecture
+  reason: Tier 3 boundary - .get() on preset page dict for optional content_type override
+  safety: Falls back to config default_content_type - preset pages may omit content_type
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=e44c01bfc2612359
+  owner: architecture
+  reason: Tier 3 boundary - .get() on Starlette path_params dict (HTTP request data)
+  safety: Missing path defaults to empty string - correct for catch-all route
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_page_endpoint:fp=660940b39f025ff0
+  owner: architecture
+  reason: Tier 3 boundary - .get() on HTTP request headers (optional header override)
+  safety: Missing header defaults to None - no override applied
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_connection_error:fp=7c18c66398829e8c
+  owner: architecture
+  reason: isinstance check on content generator output (str vs bytes) for encoding
+  safety: Both branches produce valid bytes for HTTP response body
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R1:ChaosWebServer:_handle_http_error:fp=1a4858478eb419c4
+  owner: architecture
+  reason: .get() on error message mapping - fallback for error types not in mapping
+  safety: Falls back to generic status code message - never swallows errors
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=3c6429bb0b06aab6
+  owner: architecture
+  reason: isinstance check on WebResponse.content (str|bytes) to extract str for corruption helpers
+  safety: Bytes decoded with replace - corruption helpers always receive valid str input
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_malformed_content:fp=5fd2d93db826e9ce
+  owner: architecture
+  reason: isinstance check on content (str vs bytes) for wrong_content_type HTTP response encoding
+  safety: Both branches produce valid bytes for Response body
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R5:ChaosWebServer:_handle_success:fp=6b78f9e411db704e
+  owner: architecture
+  reason: isinstance check on content generator output (str vs bytes) for HTTP response encoding
+  safety: Both branches produce valid bytes for Response body
+  expires: '2026-05-13'
+- key: testing/chaosweb/server.py:R4:ChaosWebServer:_record_request:fp=bfadde93482b0781
+  owner: architecture
+  reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
+  safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
+  expires: '2026-05-13'
+- key: testing/chaosweb/cli.py:R6:_version_callback:fp=4b75b810cbdea9ee
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Falls back to 'version unknown' on ImportError - correct for optional version detection
+  expires: '2026-05-13'
+- key: testing/chaosweb/cli.py:R6:show_config:fp=f771ba918fdda859
+  owner: architecture
+  reason: Silent recovery with explicit error handling path - YAML optional fallback to JSON
+  safety: Falls back to JSON format if yaml module unavailable - data still displayed
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=58cc3ba582d39fc1
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional fields from external HTTP clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=ecb4544f65194888
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional fields from external HTTP clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=62622c244fae8178
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional fields from external HTTP clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=d058d6e47f789305
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional fields from external HTTP clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=91a3fcade1ef1d2c
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional response fields from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=798a6079a1211756
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get with defaults for optional response fields from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/server.py:R4:ChaosLLMServer:_record_request:fp=03fae35d0a4b1983
+  owner: architecture
+  reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
+  safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
+  expires: '2026-05-13'
+- key: testing/chaosllm/config.py:R5:ErrorInjectionConfig:parse_range:fp=2657656f67c463e5
+  owner: architecture
+  reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
+  safety: Validates Tier 3 YAML input before Pydantic model creation
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R5:PresetBank:from_jsonl:fp=a86816a07f74c3f6
+  owner: architecture
+  reason: Tier 3 boundary - isinstance validates parsed JSONL line is dict
+  safety: Validates external file content structure
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=a8c9a60ae65dd0bb
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=212c20a2d2bb6f58
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=248a7a57585fd7d3
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=8444830c61835261
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=8959edf972100f7c
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=aa0f0406e96ca11a
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in OpenAI-compatible request body
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=9679ab169116214b
+  owner: architecture
+  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
+  safety: dict.get for optional content field in message objects
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=bfa8acfbd7900147
+  owner: architecture
+  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
+  safety: dict.get for optional content field in message objects
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=ab7676eb746544fa
+  owner: architecture
+  reason: External HTTP request body - messages array traversal per OpenAI spec (Tier 3)
+  safety: dict.get for optional content field in message objects
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=81d2bdf4b540c7c4
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in request body from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=6af6c617a221c648
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in request body from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=76256e0aba84d00e
+  owner: architecture
+  reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
+  safety: dict.get for optional fields in request body from external clients
+  expires: '2026-05-13'
+- key: testing/chaosllm/response_generator.py:R6:ResponseGenerator:generate:fp=057a32bd206c52e6
+  owner: architecture
+  reason: Template override rendering catch - Jinja2 errors from external template input (Tier 3 header override)
+  safety: Logs warning with template details and returns error content instead of crashing
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=314d97263c63f4ef
+  owner: architecture
+  reason: contextlib.suppress on ProgrammingError during connection cleanup
+  safety: Only suppresses error for already-closed connections during teardown
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R9:MetricsStore:rebuild_timeseries:fp=dfb516aeb64113be
+  owner: architecture
+  reason: dict.pop extracts latency_ms from classified metrics row - field is optional in variable-shape metrics data
+  safety: None default is correct - latency is not present in all metric types
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R5:MetricsStore:rebuild_timeseries:fp=9bd42e4003c1d713
+  owner: architecture
+  reason: isinstance(int) filters numeric metric values for aggregation - variable-shape metrics contain mixed types
+  safety: Non-int values are correctly skipped during summation
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R1:MetricsStore:rebuild_timeseries:fp=06bbb83bf410a1e6
+  owner: architecture
+  reason: dict.get with default 0 for running totals accumulator - key may not exist on first encounter
+  safety: Standard accumulator pattern - 0 default is mathematically correct for summation
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:_cleanup_stale_connections:fp=b1b840bcf067814d
+  owner: architecture
+  reason: contextlib.suppress on ProgrammingError during stale connection cleanup
+  safety: Only suppresses error for already-closed connections from dead threads during cleanup
+  expires: '2026-05-13'
+- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=6978d8fc67582da3
+  owner: architecture
+  reason: Type dispatch for recursive merge - isinstance(dict) for nested structure
+  safety: Recursive merge must distinguish dict from leaf values
+  expires: '2026-05-13'
+- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=57ea68262114b146
+  owner: architecture
+  reason: Type dispatch for recursive merge - isinstance(dict) for nested structure
+  safety: Recursive merge must distinguish dict from leaf values
+  expires: '2026-05-13'
+- key: testing/chaosengine/config_loader.py:R5:load_preset:fp=5f0adced3846bc6d
+  owner: architecture
+  reason: Tier 3 boundary - isinstance validates parsed YAML is dict before Pydantic
+  safety: Validates external file content structure type
+  expires: '2026-05-13'
+- key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=2587dd7f799b9412
+  owner: architecture
+  reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
+  safety: Validates Tier 3 YAML input before Pydantic model creation
+  expires: '2026-05-13'

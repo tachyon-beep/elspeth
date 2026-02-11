@@ -1,0 +1,238 @@
+per_file_rules:
+- pattern: engine/expression_parser.py
+  rules:
+  - R5
+  - R3
+  reason: AST-based expression parser requires isinstance() for node type dispatch and try/except for unknown AST node types
+  expires: null
+allow_hits:
+- key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=a183521ba11a8ee6
+  owner: bugfix
+  reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
+  safety: TypeError raised with expression details - explicit failure, not silent coercion
+  expires: null
+- key: engine/triggers.py:R5:TriggerEvaluator:should_trigger:fp=bac17c66d1886d99
+  owner: bugfix
+  reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
+  safety: TypeError raised with expression details - explicit failure, not silent coercion
+  expires: null
+- key: engine/executors.py:R4:SinkExecutor:write:fp=b27e21e1a0da4008
+  owner: architecture
+  reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
+  safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
+  expires: null
+- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=c5f4c4f695cabe87
+  owner: architecture
+  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=3125065ec11fe578
+  owner: architecture
+  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/batch_adapter.py:R5:RowWaiter:wait:fp=98c907e643e5e178
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=21ce5807da316aa4
+  owner: architecture
+  reason: isinstance() check required to find batch-aware transforms - protocol contract verification
+  safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
+  expires: '2026-05-02'
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=2352904d4428b11d
+  owner: architecture
+  reason: isinstance(e, TimeoutError) for retry timeout handling in batch transform path
+  safety: Exception type discrimination for retry logic - required for correct timeout eviction
+  expires: '2026-05-02'
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=56f3a579f88d5ffd
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
+    yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=77747672c9068241
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
+    yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=259322ade70bdfbf
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
+    yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=14f8e573bdd6cf19
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
+    yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=c49862f9d3b0ef3f
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
+    yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=297f2a692482e05c
+  owner: P2-2026-02-02
+  reason: Pattern is .get() followed by explicit None check raising RuntimeError
+  safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=e6d0879131bea763
+  owner: P2-2026-02-02
+  reason: Version check for checkpoint format - None from missing key triggers ValueError
+  safety: ValueError raised for missing or wrong version - explicit validation pattern
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=9f70ad94e0dee7a0
+  owner: P2-2026-02-02
+  reason: Testing/inspection method that needs to work with partial setups; returns None if no batch exists
+  safety: Documented as "primarily for testing" - production uses checkpoint state
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=b70fdadd35b47754
+  owner: P2-2026-02-02
+  reason: Checkpoint recovery lookup - returns None if no state was restored for node
+  safety: Designed API contract - None is valid return for nodes without restored state
+  expires: null
+- key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=7e1f71dad437ff68
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=864f8798598aa264
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=3817cd2e5ac65a61
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=a300ae0fe73eeee2
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=ac3b6fcee8eeed57
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=411616af5f2ca497
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=932619974f1d8566
+  owner: architecture
+  reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
+  safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
+  expires: '2026-05-02'
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=76eb122944753b45
+  owner: bugfix
+  reason: JSON Schema items may not have "type" key - external data at trust boundary
+  safety: Missing type handled by subsequent "type" in item check; falls through to error
+  expires: null
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=ff1b7e567dcc1a55
+  owner: bugfix
+  reason: JSON Schema items may not have "type" key - external data at trust boundary
+  safety: Filters items by type != "null"; items without type are correctly excluded
+  expires: null
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=117a3e0e68aa409d
+  owner: bugfix
+  reason: JSON Schema "format" field is optional per spec - external data at trust boundary
+  safety: Missing format defaults to None, falls through to plain str return - correct behavior
+  expires: null
+- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=dcd7d270154917c7
+  owner: P1-2026-02-05-typecheck
+  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
+  safety: isinstance() check converts PipelineRow to dict for audit trail consistency
+  expires: null
+- key: engine/orchestrator/export.py:R1:reconstruct_schema_from_json:fp=64bce9b651db0fad
+  owner: bugfix
+  reason: JSON Schema field access - external data at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=7f5948e29583a6c2
+  owner: architecture
+  reason: Retry boundary - LLMClientError exception type check for retryable classification
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-09'
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=bd040cba51f112ec
+  owner: architecture
+  reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-09'
+- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=c8930ec890458ee9
+  owner: architecture
+  reason: Protocol dispatch to detect transforms with on_success during jump-target sink resolution
+  safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
+  expires: '2026-03-10'
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d6d89baabae99abd
+  owner: architecture
+  reason: dict.get() correct - not all branch names have coalesce point mapping
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-10'
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=5e6c1ee5159312dd
+  owner: architecture
+  reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-10'
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=7c5419575b2202aa
+  owner: architecture
+  reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-09'
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=4a489b468313543b
+  owner: architecture
+  reason: Tier 3 boundary - quarantine path handles non-dict source rows
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-09'
+- key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=2d1ec064511f75a9
+  owner: architecture
+  reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-09'
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=3be2315780c311dd
+  owner: architecture
+  reason: isinstance() check required to find batch-aware transforms - protocol contract verification
+  safety: Crashes on type mismatch - no silent fallback
+  expires: '2026-03-09'
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=ed9209a2d33784f7
+  owner: architecture
+  reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
+  safety: Explicit isinstance branching for AST eval result types
+  expires: '2026-05-13'
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=d21331be1036eedb
+  owner: architecture
+  reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
+  safety: Explicit isinstance branching for AST eval result types
+  expires: '2026-05-13'
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=aff06f9784873ca3
+  owner: architecture
+  reason: Optional edge_id lookup - edge map may not have all node combinations during routing
+  safety: Falls back to generating edge_id when not in prebuilt map
+  expires: '2026-05-13'
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=57d57e45004e1807
+  owner: architecture
+  reason: Optional edge_id lookup - edge map may not have all node combinations during routing
+  safety: Falls back to generating edge_id when not in prebuilt map
+  expires: '2026-05-13'
+- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=14c6ab0bb0a21592
+  owner: architecture
+  reason: Protocol dispatch to detect self-routing gates during jump-target sink resolution
+  safety: isinstance for NodeType discrimination in unified node processing
+  expires: '2026-05-13'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=ebd4d3689544a4d8
+  owner: architecture
+  reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
+  safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
+  expires: '2026-05-13'
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=70519330cd97fa26
+  owner: architecture
+  reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
+  safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
+  expires: '2026-05-13'

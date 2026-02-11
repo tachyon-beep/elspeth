@@ -23,6 +23,8 @@ from scripts.cicd.enforce_tier_model import (
     AllowlistEntry,
     Finding,
     TierModelVisitor,
+    _suggest_module_file,
+    format_stale_entry_text,
     load_allowlist,
     scan_file,
 )
@@ -650,3 +652,271 @@ class TestIntegration:
         stale = allowlist.get_stale_entries()
         assert len(stale) == 1
         assert stale[0].key == entry_stale.key
+
+
+# =============================================================================
+# Directory loading
+# =============================================================================
+
+
+class TestDirectoryLoading:
+    """Tests for loading allowlist from a directory of per-module YAML files."""
+
+    def test_load_directory_merges_entries(self, temp_dir: Path) -> None:
+        """Directory with defaults + module files should merge into single Allowlist."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        (allowlist_dir / "_defaults.yaml").write_text("version: 1\ndefaults:\n  fail_on_stale: true\n  fail_on_expired: false\n")
+        (allowlist_dir / "core.yaml").write_text(
+            dedent("""\
+            per_file_rules:
+              - pattern: core/config.py
+                rules: [R1, R5]
+                reason: Config parsing
+                expires: null
+            allow_hits:
+              - key: "core/events.py:R1:EventBus:emit:fp=aaa"
+                owner: test
+                reason: test
+                safety: test
+            """)
+        )
+        (allowlist_dir / "plugins.yaml").write_text(
+            dedent("""\
+            allow_hits:
+              - key: "plugins/sinks/csv_sink.py:R1:CSVSink:open:fp=bbb"
+                owner: test
+                reason: test
+                safety: test
+              - key: "plugins/sinks/json_sink.py:R1:JSONSink:open:fp=ccc"
+                owner: test
+                reason: test
+                safety: test
+            """)
+        )
+
+        allowlist = load_allowlist(allowlist_dir)
+        assert allowlist.fail_on_stale is True
+        assert allowlist.fail_on_expired is False
+        assert len(allowlist.entries) == 3
+        assert len(allowlist.per_file_rules) == 1
+
+    def test_load_directory_sorted_order(self, temp_dir: Path) -> None:
+        """Entries should merge in sorted filename order."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        (allowlist_dir / "_defaults.yaml").write_text("version: 1\ndefaults: {}\n")
+        (allowlist_dir / "b_module.yaml").write_text(
+            dedent("""\
+            allow_hits:
+              - key: "b/file.py:R1:func:fp=bbb"
+                owner: test
+                reason: from b
+                safety: test
+            """)
+        )
+        (allowlist_dir / "a_module.yaml").write_text(
+            dedent("""\
+            allow_hits:
+              - key: "a/file.py:R1:func:fp=aaa"
+                owner: test
+                reason: from a
+                safety: test
+            """)
+        )
+
+        allowlist = load_allowlist(allowlist_dir)
+        # a_module.yaml sorts before b_module.yaml
+        assert allowlist.entries[0].reason == "from a"
+        assert allowlist.entries[1].reason == "from b"
+
+    def test_load_directory_empty(self, temp_dir: Path) -> None:
+        """Empty directory should give empty allowlist with defaults."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        allowlist = load_allowlist(allowlist_dir)
+        assert len(allowlist.entries) == 0
+        assert len(allowlist.per_file_rules) == 0
+        assert allowlist.fail_on_stale is True
+        assert allowlist.fail_on_expired is True
+
+    def test_load_directory_no_defaults(self, temp_dir: Path) -> None:
+        """Missing _defaults.yaml should use hardcoded defaults."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        (allowlist_dir / "core.yaml").write_text(
+            dedent("""\
+            allow_hits:
+              - key: "core/events.py:R1:EventBus:emit:fp=aaa"
+                owner: test
+                reason: test
+                safety: test
+            """)
+        )
+
+        allowlist = load_allowlist(allowlist_dir)
+        assert len(allowlist.entries) == 1
+        # Defaults: fail_on_stale=True, fail_on_expired=True
+        assert allowlist.fail_on_stale is True
+        assert allowlist.fail_on_expired is True
+
+    def test_load_file_backward_compat(self, temp_dir: Path) -> None:
+        """Single file path should still work (backward compatibility)."""
+        allowlist_path = temp_dir / "allowlist.yaml"
+        allowlist_path.write_text(
+            dedent("""\
+            version: 1
+            defaults:
+              fail_on_stale: true
+              fail_on_expired: true
+            allow_hits:
+              - key: "src/module.py:R1:process:fp=deadbeef"
+                owner: john
+                reason: test
+                safety: test
+                expires: "2026-12-01"
+            """)
+        )
+
+        allowlist = load_allowlist(allowlist_path)
+        assert len(allowlist.entries) == 1
+        assert allowlist.entries[0].owner == "john"
+
+    def test_stale_detection_across_files(self, temp_dir: Path) -> None:
+        """Stale entries should be detected in merged allowlist from directory."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        (allowlist_dir / "_defaults.yaml").write_text("version: 1\ndefaults: {}\n")
+        (allowlist_dir / "core.yaml").write_text(
+            dedent("""\
+            allow_hits:
+              - key: "core/events.py:R1:EventBus:emit:fp=aaa"
+                owner: test
+                reason: stale entry
+                safety: test
+            """)
+        )
+        (allowlist_dir / "plugins.yaml").write_text(
+            dedent("""\
+            allow_hits:
+              - key: "plugins/sinks/csv_sink.py:R1:CSVSink:open:fp=bbb"
+                owner: test
+                reason: also stale
+                safety: test
+            """)
+        )
+
+        allowlist = load_allowlist(allowlist_dir)
+        # No findings matched — all entries are stale
+        stale = allowlist.get_stale_entries()
+        assert len(stale) == 2
+
+    def test_source_file_tracking(self, temp_dir: Path) -> None:
+        """Entries should carry their source filename."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        (allowlist_dir / "_defaults.yaml").write_text("version: 1\ndefaults: {}\n")
+        (allowlist_dir / "core.yaml").write_text(
+            dedent("""\
+            per_file_rules:
+              - pattern: core/config.py
+                rules: [R1]
+                reason: test
+                expires: null
+            allow_hits:
+              - key: "core/events.py:R1:EventBus:emit:fp=aaa"
+                owner: test
+                reason: test
+                safety: test
+            """)
+        )
+
+        allowlist = load_allowlist(allowlist_dir)
+        assert allowlist.entries[0].source_file == "core.yaml"
+        assert allowlist.per_file_rules[0].source_file == "core.yaml"
+
+    def test_format_stale_entry_with_source(self) -> None:
+        """Stale entry formatting should include source file when set."""
+        entry = AllowlistEntry(
+            key="core/events.py:R1:emit:fp=aaa",
+            owner="test",
+            reason="test reason",
+            safety="test",
+            expires=None,
+            source_file="core.yaml",
+        )
+        text = format_stale_entry_text(entry)
+        assert "Source: core.yaml" in text
+        assert "Key: core/events.py:R1:emit:fp=aaa" in text
+
+    def test_format_stale_entry_without_source(self) -> None:
+        """Stale entry formatting should omit source when empty."""
+        entry = AllowlistEntry(
+            key="core/events.py:R1:emit:fp=aaa",
+            owner="test",
+            reason="test reason",
+            safety="test",
+            expires=None,
+        )
+        text = format_stale_entry_text(entry)
+        assert "Source:" not in text
+
+    def test_suggest_module_file_directory(self, temp_dir: Path) -> None:
+        """_suggest_module_file should map findings to module YAML files."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        finding = Finding(
+            rule_id="R1",
+            file_path="core/events.py",
+            line=10,
+            col=0,
+            symbol_context=("EventBus", "emit"),
+            fingerprint="aaa",
+            code_snippet="data.get('key')",
+            message="test",
+        )
+        result = _suggest_module_file(finding, allowlist_dir)
+        assert result.endswith("core.yaml")
+
+    def test_suggest_module_file_cli(self, temp_dir: Path) -> None:
+        """Bare cli.py should map to cli.yaml."""
+        allowlist_dir = temp_dir / "allowlist"
+        allowlist_dir.mkdir()
+
+        finding = Finding(
+            rule_id="R1",
+            file_path="cli.py",
+            line=10,
+            col=0,
+            symbol_context=(),
+            fingerprint="aaa",
+            code_snippet="data.get('key')",
+            message="test",
+        )
+        result = _suggest_module_file(finding, allowlist_dir)
+        assert result.endswith("cli.yaml")
+
+    def test_suggest_module_file_single_file(self, temp_dir: Path) -> None:
+        """Single file path should return the file path as-is."""
+        allowlist_path = temp_dir / "allowlist.yaml"
+        allowlist_path.write_text("")
+
+        finding = Finding(
+            rule_id="R1",
+            file_path="core/events.py",
+            line=10,
+            col=0,
+            symbol_context=(),
+            fingerprint="aaa",
+            code_snippet="data.get('key')",
+            message="test",
+        )
+        result = _suggest_module_file(finding, allowlist_path)
+        assert result == str(allowlist_path)

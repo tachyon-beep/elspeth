@@ -14,12 +14,12 @@ on:
     paths:
       - 'src/**/*.py'
       - 'scripts/cicd/enforce_tier_model.py'
-      - 'config/cicd/enforce_tier_model.yaml'
+      - 'config/cicd/enforce_tier_model/**'
   pull_request:
     paths:
       - 'src/**/*.py'
       - 'scripts/cicd/enforce_tier_model.py'
-      - 'config/cicd/enforce_tier_model.yaml'
+      - 'config/cicd/enforce_tier_model/**'
 
 jobs:
   check:
@@ -44,7 +44,7 @@ jobs:
         run: |
           python scripts/cicd/enforce_tier_model.py check \
             --root src/elspeth \
-            --allowlist config/cicd/enforce_tier_model.yaml \
+            --allowlist config/cicd/enforce_tier_model \
             --exclude "**/__pycache__/*" \
             --format text
 
@@ -53,7 +53,7 @@ jobs:
         run: |
           python scripts/cicd/enforce_tier_model.py check \
             --root src/elspeth \
-            --allowlist config/cicd/enforce_tier_model.yaml \
+            --allowlist config/cicd/enforce_tier_model \
             --exclude "**/__pycache__/*" \
             --format json > enforce-tier-model-report.json || true
 

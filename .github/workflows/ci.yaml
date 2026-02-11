@@ -89,7 +89,7 @@ jobs:
         run: |
           python scripts/cicd/enforce_tier_model.py check \
             --root src/elspeth \
-            --allowlist config/cicd/enforce_tier_model.yaml \
+            --allowlist config/cicd/enforce_tier_model \
             --exclude "**/__pycache__/*" \
             --format text
 

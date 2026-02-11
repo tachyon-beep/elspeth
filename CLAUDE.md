@@ -322,6 +322,28 @@ class RetryManager:
 5. If internal-only: document in `INTERNAL_DEFAULTS` in `defaults.py`
 6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`
 
+### Tier Model Enforcement Allowlist
+
+The allowlist for the tier model enforcement tool (`scripts/cicd/enforce_tier_model.py`) lives in `config/cicd/enforce_tier_model/` as a directory of per-module YAML files:
+
+```text
+config/cicd/enforce_tier_model/
+├── _defaults.yaml   # version + defaults (fail_on_stale, fail_on_expired)
+├── cli.yaml         # per-file rules for cli.py, cli_helpers.py
+├── contracts.yaml   # contracts/* entries
+├── core.yaml        # core/* entries
+├── engine.yaml      # engine/* entries
+├── mcp.yaml         # mcp/* entries
+├── plugins.yaml     # plugins/* entries
+├── telemetry.yaml   # telemetry/* entries
+├── testing.yaml     # testing/* entries
+└── tui.yaml         # tui/* entries
+```
+
+**Adding a new allowlist entry:** Determine the top-level module from the finding's file path (e.g., `core/canonical.py` → `core.yaml`) and add the entry to that module's YAML file under `allow_hits:`.
+
+**The script accepts both a directory and a single file** via `--allowlist`. When no path is given, it prefers the directory if it exists, else falls back to the single-file `enforce_tier_model.yaml`.
+
 ### Composite Primary Key Pattern: nodes Table
 
 **CRITICAL:** The `nodes` table has a composite primary key `(node_id, run_id)`. This means the same `node_id` can exist in multiple runs when the same pipeline runs multiple times.
@@ -433,6 +455,9 @@ uv pip install -e ".[all]"      # Everything
 
 # Config contracts verification
 .venv/bin/python -m scripts.check_contracts
+
+# Tier model enforcement (defensive pattern detection)
+.venv/bin/python scripts/cicd/enforce_tier_model.py check --root src/elspeth --allowlist config/cicd/enforce_tier_model
 
 # CLI
 elspeth run --settings pipeline.yaml --execute        # Execute pipeline
