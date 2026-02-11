@@ -4,4 +4,5 @@ src/elspeth/engine/processor.py
 src/elspeth/engine/orchestrator.py
 src/elspeth/engine/coalesce_executor.py
 src/elspeth/engine/executors.py
-src/elspeth/core/dag.py
+src/elspeth/core/dag/graph.py
+src/elspeth/core/dag/builder.py

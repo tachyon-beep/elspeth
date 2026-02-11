@@ -4,7 +4,7 @@ allowed_external_types:
   # TUI display types - presentation-specific, not cross-boundary contracts
   - "tui/types:TokenDisplayInfo"
   # DAG wiring helper type shared between CLI instantiation and graph construction
-  - "core/dag:WiredTransform"
+  - "core/dag/models:WiredTransform"
   # SSRF safety type - security infrastructure, tightly coupled to validation logic
   - "core/security/web:SSRFSafeRequest"
   # Engine types used in testing factories - test infrastructure wraps these for convenience

@@ -70,7 +70,7 @@ DYNAMIC_SCHEMA_LOCATIONS: tuple[WhitelistEntry, ...] = (
 
 PLUGIN_CONFIG_LOCATIONS: tuple[WhitelistEntry, ...] = (
     WhitelistEntry(
-        location="core/dag.py:NodeConfig",
+        location="core/dag/models.py:NodeConfig",
         type_used="dict[str, Any] (TypeAlias)",
         justification=(
             "Node config varies by node type: source configs have path/delimiter, "
