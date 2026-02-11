@@ -1,5 +1,18 @@
 # Bug Report: TransformErrorReason Contract Omits Fields Emitted by Contract-Violation Helpers
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `TransformErrorReason` still lacks the contract-violation keys emitted by helper serializers (e.g., `violation_type`, `expected_type`, `count`, `violations`).
+  - Violation helper functions still emit those extra keys today, so schema/output mismatch remains.
+- Current evidence:
+  - `src/elspeth/contracts/errors.py:251`
+  - `src/elspeth/contracts/errors.py:607`
+  - `src/elspeth/contracts/errors.py:769`
+
 ## Summary
 
 - `ContractViolation.to_error_reason()` and `violations_to_error_reason()` emit fields that are not declared in `TransformErrorReason`, creating a schema/contract mismatch for transform error payloads.

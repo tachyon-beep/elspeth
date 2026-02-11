@@ -1,5 +1,18 @@
 # Bug Report: Contract propagation drops complex-type output fields, breaking downstream access
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Contract propagation still skips new fields when type normalization raises `TypeError` (for dict/list values).
+  - Existing unit tests currently assert and preserve this skip behavior.
+- Current evidence:
+  - `src/elspeth/contracts/contract_propagation.py:47`
+  - `src/elspeth/contracts/contract_propagation.py:113`
+  - `tests/unit/contracts/test_contract_propagation.py:431`
+
 ## Summary
 
 - New output fields with non-primitive values (dict/list) are silently skipped during contract propagation, so the output contract omits fields that actually exist in the data (e.g., JSONExplode `item`, LLM `{response_field}_usage`), which breaks downstream access in FIXED mode and undermines contract guarantees.

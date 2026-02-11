@@ -1,5 +1,18 @@
 # Bug Report: resolve_headers masks contract corruption in ORIGINAL mode
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - ORIGINAL header mode still falls back to normalized field names when `contract.get_field()` returns `None`.
+  - `SchemaContract.get_field()` still returns `None` on lookup miss via `.get(...)`, enabling silent fallback behavior.
+- Current evidence:
+  - `src/elspeth/contracts/header_modes.py:94`
+  - `src/elspeth/contracts/header_modes.py:97`
+  - `src/elspeth/contracts/schema_contract.py:137`
+
 ## Summary
 
 - `resolve_headers()` silently falls back to normalized names when a contract lookup fails, masking internal contract corruption instead of crashing as required by the Tier 1 trust model.

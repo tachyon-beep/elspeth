@@ -1,5 +1,18 @@
 # Bug Report: Optional Float Fields Lose Type Enforcement in Transform Output Contracts
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Optional float schema types still pass through `Annotated[...] | None` extraction and resolve to `python_type=object` in output contracts.
+  - Contract validation still skips type enforcement when `python_type is object`.
+- Current evidence:
+  - `src/elspeth/contracts/transform_contract.py:37`
+  - `src/elspeth/contracts/transform_contract.py:44`
+  - `src/elspeth/contracts/schema_contract.py:223`
+
 ## Summary
 
 - Optional float fields created via `create_schema_from_config()` become `python_type=object` in the output `SchemaContract`, so type mismatches are never flagged.

@@ -1,5 +1,17 @@
 # Bug Report: Observed schema silently accepts non-list `fields` values
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Observed-mode validation still only rejects non-empty list `fields`.
+  - Non-list values such as string/dict still bypass the observed-mode `fields` guard.
+- Current evidence:
+  - `src/elspeth/contracts/schema.py:324`
+  - `src/elspeth/contracts/schema.py:334`
+
 ## Summary
 
 - `SchemaConfig.from_dict()` in observed mode ignores `fields` when it is a string or dict, silently accepting invalid config instead of raising a validation error.

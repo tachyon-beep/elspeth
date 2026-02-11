@@ -1,5 +1,17 @@
 # Bug Report: Missing-value sentinels (pd.NA, np.datetime64("NaT")) not normalized to `type(None)`
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `pd.NA` handling is still missing in contract type normalization.
+  - `np.datetime64` values are still normalized as `datetime` without a `np.isnat()` check for `NaT`.
+- Current evidence:
+  - `src/elspeth/contracts/type_normalization.py:55`
+  - `src/elspeth/contracts/type_normalization.py:67`
+
 ## Summary
 
 - `normalize_type_for_contract()` treats `pd.NA` as an unsupported type and treats `np.datetime64("NaT")` as a valid `datetime`, which can crash first-row contract inference and allow missing datetimes to pass type checks.

@@ -1,5 +1,18 @@
 # Bug Report: RuntimeRateLimitProtocol Incomplete vs. RateLimitRegistry Usage
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `RuntimeRateLimitProtocol` still exposes only `enabled` and `default_requests_per_minute`.
+  - `RateLimitRegistry` still uses `get_service_config(...)` and `persistence_path`, which are absent from the protocol contract.
+- Current evidence:
+  - `src/elspeth/contracts/config/protocols.py:81`
+  - `src/elspeth/contracts/config/protocols.py:97`
+  - `src/elspeth/core/rate_limit/registry.py:95`
+
 ## Summary
 
 - `RuntimeRateLimitProtocol` omits `persistence_path` and `get_service_config`, but `RateLimitRegistry` relies on both, so the protocol does not actually describe the minimal interface the registry requires.

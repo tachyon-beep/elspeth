@@ -1,5 +1,18 @@
 # Bug Report: Operation Status/Type Not Validated in Audit Contract
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `Operation.operation_type` and `Operation.status` remain typed as `Literal[...]` fields with no runtime validation hook.
+  - No `__post_init__` enforcement exists to reject invalid values at object construction.
+- Current evidence:
+  - `src/elspeth/contracts/audit.py:625`
+  - `src/elspeth/contracts/audit.py:630`
+  - `src/elspeth/contracts/audit.py:637`
+
 ## Summary
 
 - `Operation.operation_type` and `Operation.status` are plain string Literals with no runtime validation, so invalid values can be loaded from the audit DB without crashing.

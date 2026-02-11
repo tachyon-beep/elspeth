@@ -1,5 +1,18 @@
 # Bug Report: ContractAuditRecord JSON Is Not Deterministic After Contract Merges
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - Contract audit serialization still preserves incoming field order and does not sort fields before emitting JSON.
+  - Merge ordering can still originate from set-union iteration, so deterministic ordering is not guaranteed.
+- Current evidence:
+  - `src/elspeth/contracts/contract_records.py:115`
+  - `src/elspeth/contracts/contract_records.py:139`
+  - `src/elspeth/contracts/schema_contract.py:416`
+
 ## Summary
 
 - `ContractAuditRecord.to_json()` claims deterministic serialization, but field ordering is inherited from `SchemaContract.fields`, which can be non-deterministic after merges, yielding different JSON strings for identical contracts.

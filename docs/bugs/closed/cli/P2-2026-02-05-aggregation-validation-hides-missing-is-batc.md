@@ -1,5 +1,19 @@
 # Bug Report: Aggregation validation hides missing `is_batch_aware` attribute with `getattr`
 
+**Status: CLOSED (Fixed)**
+
+## Status Update (2026-02-11)
+
+- Classification: **Fixed**
+- Verification summary:
+  - Aggregation validation now uses direct attribute access (`transform.is_batch_aware`) instead of `getattr(..., False)`.
+  - Missing `is_batch_aware` now surfaces as an `AttributeError` (interface violation) rather than being masked as `False`.
+  - Existing regression coverage validates aggregation gating behavior in `tests/unit/cli/test_cli_helpers.py`.
+- Current evidence:
+  - `src/elspeth/cli_helpers.py:65` (direct `transform.is_batch_aware` access)
+  - `tests/unit/cli/test_cli_helpers.py:105`
+  - `tests/unit/cli/test_cli_helpers.py:213`
+
 ## Summary
 
 - Aggregation validation uses `getattr(..., False)` on a system-owned transform, masking a missing `is_batch_aware` attribute (interface violation) as a configuration error.

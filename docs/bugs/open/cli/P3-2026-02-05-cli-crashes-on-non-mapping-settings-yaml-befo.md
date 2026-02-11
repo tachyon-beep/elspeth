@@ -1,5 +1,19 @@
 # Bug Report: CLI crashes on non-mapping settings YAML before validation
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `_load_raw_yaml()` still returns parsed YAML without enforcing a mapping root.
+  - `_load_settings_with_secrets()` still calls `raw_config.get(...)` directly.
+  - Reproduced behavior: top-level list YAML still raises uncaught `AttributeError` in both `validate` and `run --dry-run`.
+- Current evidence:
+  - `src/elspeth/cli.py:241`
+  - `src/elspeth/cli.py:249`
+  - `src/elspeth/cli.py:287`
+
 ## Summary
 
 - `_load_raw_yaml()` and `_extract_secrets_config()` assume the YAML root is a mapping, so a non-mapping settings file triggers an uncaught `AttributeError` instead of a clear validation error.

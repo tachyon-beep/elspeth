@@ -1,5 +1,19 @@
 # Bug Report: `purge` can silently create an empty SQLite DB and skip real payloads
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - `purge` still accepts `config.landscape.url` from `settings.yaml` without an existence check for file-backed SQLite databases.
+  - `LandscapeDB` initialization still creates tables, so a missing file with an existing parent directory can produce a brand-new empty DB.
+  - Reproduced behavior: running `purge --dry-run` with a missing configured SQLite file created the DB and reported no expired payloads.
+- Current evidence:
+  - `src/elspeth/cli.py:1249`
+  - `src/elspeth/core/landscape/database.py:102`
+  - `src/elspeth/core/landscape/database.py:252`
+
 ## Summary
 
 - When `elspeth purge` relies on `settings.yaml` for the database URL, it doesn’t verify SQLite file existence, so `LandscapeDB.from_url()` can create a new empty DB and the purge reports “no payloads” while real payloads remain.

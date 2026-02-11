@@ -1,5 +1,17 @@
 # Bug Report: FLEXIBLE contracts are locked at creation, blocking infer-and-lock for extra fields
 
+**Status: OPEN**
+
+## Status Update (2026-02-11)
+
+- Classification: **Still open**
+- Verification summary:
+  - FLEXIBLE contracts are still created locked (`locked = not config.is_observed`).
+  - First-row inference still short-circuits when `contract.locked` is true, so FLEXIBLE extras are not inferred on first row.
+- Current evidence:
+  - `src/elspeth/contracts/schema_contract_factory.py:91`
+  - `src/elspeth/contracts/contract_builder.py:71`
+
 ## Summary
 
 - `create_contract_from_config` locks FLEXIBLE schemas immediately, so extra fields are never inferred or type-validated on the first row as required by the schema contract design.
