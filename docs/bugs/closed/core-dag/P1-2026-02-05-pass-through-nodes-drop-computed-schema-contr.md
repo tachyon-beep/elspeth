@@ -95,3 +95,12 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` auditability standard
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after re-verification against current code.
+- Verification summary: pass-through schema propagation now uses computed schema selection rather than copying only raw upstream config.
+- Evidence:
+  - `src/elspeth/core/dag/builder.py:492` assigns gate schema via `_best_schema_dict(producer_id)`.
+  - `src/elspeth/core/dag/builder.py:711` and `src/elspeth/core/dag/builder.py:727` assign coalesce/deferred gate schemas via `_best_schema_dict(...)`.
+  - `tests/unit/core/test_dag_schema_propagation.py` passes with coverage for computed schema propagation.

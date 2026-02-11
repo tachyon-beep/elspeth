@@ -91,3 +91,12 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` (Canonical JSON section)
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after re-verification against current code.
+- Verification summary: JSON validation now rejects non-finite constants (`NaN`, `Infinity`, `-Infinity`) during parse.
+- Evidence:
+  - `src/elspeth/plugins/llm/validation.py:63` uses `json.loads(..., parse_constant=_reject_nonfinite_constant)`.
+  - `src/elspeth/plugins/llm/validation.py:64` treats parse-constant failures as `ValidationError(reason="invalid_json")`.
+  - `tests/property/plugins/llm/test_response_validation_properties.py` passes with non-finite rejection coverage.

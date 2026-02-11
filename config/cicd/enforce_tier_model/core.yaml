@@ -313,32 +313,32 @@ allow_hits:
 - key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=0bc9a6b3b94f93c9
   owner: architecture
   reason: Graceful handling of purged payloads - retention policy may have deleted response data
-- key: core/dag/builder.py:R2:build_execution_graph:fp=90ba994a92e555ca
+- key: core/dag/builder.py:R2:build_execution_graph:fp=41b8bffbf0744eea
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
   safety: Missing metadata is handled as None; core schema enforcement still validates edges
   expires: '2026-03-10'
-- key: core/dag/builder.py:R2:build_execution_graph:fp=fb631a3f5860750a
+- key: core/dag/builder.py:R2:build_execution_graph:fp=406e4b57a6bea9e5
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select aggregation plugins
   safety: Missing metadata is handled as None; aggregation schemas still validated via contracts
   expires: '2026-03-10'
-- key: core/dag/builder.py:R8:build_execution_graph:fp=2b4556977b542b72
+- key: core/dag/builder.py:R8:build_execution_graph:fp=46f830f519308eec
   owner: architecture
   reason: setdefault used for route-label grouping while building gate continue-route diagnostics
   safety: Grouping is deterministic and validated before runtime routing
   expires: '2026-03-10'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=369b909c1e2bd9d6
+- key: core/dag/builder.py:R1:build_execution_graph:fp=bcb4e6135cfe02c1
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-10'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=b6075a13f8f0cf4e
+- key: core/dag/builder.py:R1:build_execution_graph:fp=558ac31b1c086a15
   owner: architecture
   reason: Gate default-continue target lookup during fallthrough edge wiring
   safety: Missing target is handled explicitly — ambiguous gates are skipped
   expires: '2026-03-10'
-- key: core/dag/builder.py:R5:build_execution_graph:fp=452cd9afea21bcd5
+- key: core/dag/builder.py:R5:build_execution_graph:fp=2bcc9328e8841353
   owner: architecture
   reason: isinstance check for dict vs NodeConfig on config field during schema population
   safety: Crashes on type mismatch - no silent fallback
@@ -373,3 +373,35 @@ allow_hits:
   reason: Tier 1 type restoration — isinstance on our own serialized checkpoint format to detect datetime type tags
   safety: Non-str values fall through without coercion — no silent wrong behavior
   expires: '2026-03-13'
+# sanitize_for_canonical — Tier-3 boundary function that replaces non-finite floats with None
+- key: core/canonical.py:R5:sanitize_for_canonical:fp=fa2c9e77fb483e64
+  owner: bugfix
+  reason: Tier-3 boundary — isinstance required for recursive dict/list/float traversal to sanitize quarantine data
+  safety: Replaces NaN/Infinity with None; audit trail records original error separately
+  expires: '2026-05-12'
+- key: core/canonical.py:R5:sanitize_for_canonical:fp=a62e82dede848bc4
+  owner: bugfix
+  reason: Tier-3 boundary — isinstance required for recursive dict/list/float traversal to sanitize quarantine data
+  safety: Replaces NaN/Infinity with None; audit trail records original error separately
+  expires: '2026-05-12'
+- key: core/canonical.py:R5:sanitize_for_canonical:fp=2b4757edad0f464c
+  owner: bugfix
+  reason: Tier-3 boundary — isinstance required for float type check before math.isnan/isinf
+  safety: Only replaces non-finite floats; all other types pass through unchanged
+  expires: '2026-05-12'
+# Landscape recording — quarantine path fallback hashing for non-canonical data
+- key: core/landscape/_node_state_recording.py:R6:NodeStateRecordingMixin:begin_node_state:fp=a8722d244132a13d
+  owner: bugfix
+  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
+  safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
+  expires: '2026-05-12'
+- key: core/landscape/_token_recording.py:R6:TokenRecordingMixin:create_row:fp=f0ae8689d56c839f
+  owner: bugfix
+  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
+  safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained
+  expires: '2026-05-12'
+- key: core/landscape/_token_recording.py:R6:TokenRecordingMixin:create_row:fp=e515a2616da9a84e
+  owner: bugfix
+  reason: Tier-3 boundary — quarantined row payload may contain NaN/Infinity that canonical_json rejects
+  safety: Falls back to json.dumps(repr()) for payload storage; original error recorded in quarantine metadata
+  expires: '2026-05-12'

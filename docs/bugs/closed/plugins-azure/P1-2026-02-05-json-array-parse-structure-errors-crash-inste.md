@@ -89,3 +89,12 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md:59`, `CLAUDE.md:66`
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after re-verification against current code.
+- Verification summary: JSON array parse/structure failures now produce validation records and quarantine output instead of hard-crashing.
+- Evidence:
+  - `src/elspeth/plugins/azure/blob_source.py:594` defines `_record_file_level_error(...)` for parse/structure handling.
+  - `src/elspeth/plugins/azure/blob_source.py:621`-`src/elspeth/plugins/azure/blob_source.py:643` routes decode/parse/type errors through that quarantine path.
+  - `tests/unit/plugins/transforms/azure/test_blob_source.py` passes with JSON parse/structure error coverage.

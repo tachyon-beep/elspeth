@@ -70,7 +70,7 @@ from elspeth.contracts.types import (
     NodeID,
     SinkName,
 )
-from elspeth.core.canonical import stable_hash
+from elspeth.core.canonical import repr_hash, sanitize_for_canonical, stable_hash
 from elspeth.core.config import AggregationSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -996,10 +996,14 @@ class Orchestrator:
                     plugin_version = plugin.plugin_version
                     determinism = plugin.determinism
 
-                # Get schema_config from node_info config
-                # DataPluginConfig enforces that all data plugins have schema
-                schema_dict = node_info.config["schema"]
-                schema_config = SchemaConfig.from_dict(schema_dict)
+                # Get schema_config — prefer computed output_schema_config
+                # (includes guaranteed_fields, audit_fields from LLM transforms)
+                # over raw config["schema"] which may omit computed contract fields.
+                if node_info.output_schema_config is not None:
+                    schema_config = node_info.output_schema_config
+                else:
+                    schema_dict = node_info.config["schema"]
+                    schema_config = SchemaConfig.from_dict(schema_dict)
 
                 # Get output_contract for source nodes
                 # Sources have get_schema_contract() method that returns their output contract
@@ -1282,7 +1286,13 @@ class Orchestrator:
                                     f"source._on_validation_failure='{config.source._on_validation_failure}'."
                                 )
 
-                            # Destination validated - proceed with routing
+                            # Destination validated - proceed with routing.
+                            # Sanitize quarantine data at Tier-3 boundary: replace non-finite
+                            # floats (NaN, Infinity) with None so downstream canonical JSON
+                            # and stable_hash operations succeed. The quarantine_error records
+                            # what was originally wrong with the data.
+                            source_item.row = sanitize_for_canonical(source_item.row)
+
                             # Create a token for the quarantined row using specialized method
                             # (quarantine rows don't have contracts - they failed validation)
                             quarantine_token = processor.token_manager.create_quarantine_token(
@@ -1302,6 +1312,7 @@ class Orchestrator:
                                 run_id=run_id,
                                 step_index=0,
                                 input_data=quarantine_data,
+                                quarantined=True,
                             )
                             recorder.complete_node_state(
                                 state_id=source_state.state_id,
@@ -1337,13 +1348,20 @@ class Orchestrator:
                             )
 
                             # Emit RowCreated telemetry AFTER Landscape recording succeeds
+                            # Quarantined rows are Tier-3 data that may contain non-canonical
+                            # values (NaN, Infinity). Use stable_hash when possible, fall back
+                            # to repr_hash for non-canonical data.
+                            try:
+                                quarantine_content_hash = stable_hash(source_item.row)
+                            except (ValueError, TypeError):
+                                quarantine_content_hash = repr_hash(source_item.row)
                             self._emit_telemetry(
                                 RowCreated(
                                     timestamp=datetime.now(UTC),
                                     run_id=run_id,
                                     row_id=quarantine_token.row_id,
                                     token_id=quarantine_token.token_id,
-                                    content_hash=stable_hash(source_item.row),
+                                    content_hash=quarantine_content_hash,
                                 )
                             )
 

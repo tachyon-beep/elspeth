@@ -191,11 +191,16 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=4a489b468313543b
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=41dd0edfdcabc69e
   owner: architecture
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
+- key: engine/orchestrator/core.py:R6:Orchestrator:_execute_run:fp=c77f343cb78be3af
+  owner: bugfix
+  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
+  safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
+  expires: '2026-05-12'
 - key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=2d1ec064511f75a9
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware

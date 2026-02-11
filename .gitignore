@@ -156,6 +156,9 @@ landscape.db-wal
 # This must be at the end to override any earlier ignore patterns
 !.gitkeep
 
+# pre-commit cache
+.pre-commit-cache/
+
 # bv (beads viewer) local config and caches
 .bv/
 .perles/config.yaml

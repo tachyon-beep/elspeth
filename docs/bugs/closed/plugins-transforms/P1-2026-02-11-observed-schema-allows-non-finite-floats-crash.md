@@ -91,3 +91,12 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md:631-642`
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after re-verification against current code.
+- Verification summary: observed-mode schemas now reject non-finite float values at validation time via a shared model validator.
+- Evidence:
+  - `src/elspeth/plugins/schema_factory.py:77` adds `_ObservedPluginSchema` with a `model_validator(mode=\"before\")`.
+  - `src/elspeth/plugins/schema_factory.py:123` creates dynamic observed schemas using `__base__=_ObservedPluginSchema`.
+  - `tests/unit/plugins/test_schema_factory.py` passes with observed-schema non-finite rejection coverage.

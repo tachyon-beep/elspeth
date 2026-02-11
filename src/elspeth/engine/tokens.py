@@ -168,12 +168,14 @@ class TokenManager:
         # Create PipelineRow with minimal contract
         pipeline_row = PipelineRow(row_data, quarantine_contract)
 
-        # Create row record
+        # Create row record — quarantined=True enables safe hashing for
+        # Tier-3 external data that may contain non-canonical values (NaN, Infinity)
         row = self._recorder.create_row(
             run_id=run_id,
             source_node_id=source_node_id,
             row_index=row_index,
             data=pipeline_row.to_dict(),
+            quarantined=True,
         )
 
         # Create initial token

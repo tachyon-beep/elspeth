@@ -90,3 +90,12 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after re-verification against current code.
+- Verification summary: quarantined-row telemetry hashing now guards canonical hashing and falls back to `repr_hash` for non-canonical data.
+- Evidence:
+  - `src/elspeth/engine/orchestrator/core.py:1354` computes `stable_hash(...)` in a `try`.
+  - `src/elspeth/engine/orchestrator/core.py:1357` falls back to `repr_hash(...)` on `ValueError`/`TypeError`.
+  - `tests/integration/pipeline/orchestrator/test_quarantine_routing.py` passes with non-canonical quarantine coverage.

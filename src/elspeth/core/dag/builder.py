@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 
@@ -103,6 +103,22 @@ def build_execution_graph(
             )
 
         return NodeID(generated)
+
+    def _best_schema_dict(nid: NodeID) -> dict[str, Any]:
+        """Get best available schema dict from a node.
+
+        Prefers computed output_schema_config (includes guaranteed_fields,
+        audit_fields from e.g., LLM transforms) over raw config["schema"].
+        Pass-through nodes (gates, coalesce) should inherit the computed
+        schema so audit records reflect actual data contracts.
+        """
+        info = graph.get_node_info(nid)
+        if info.output_schema_config is not None:
+            return info.output_schema_config.to_dict()
+        # config["schema"] is Any from NodeConfig (dict[str, Any] value access).
+        # It's always a dict at runtime — ensured by DataPluginConfig validation.
+        schema: dict[str, Any] = info.config["schema"]
+        return schema
 
     def _sink_name_set() -> set[str]:
         return {str(name) for name in sink_ids}
@@ -474,9 +490,9 @@ def build_execution_graph(
                 f"Gate '{gate_name}' input '{input_connection}' has no producer.{hint}\nAvailable connections: {', '.join(sorted(producers.keys()))}"
             )
         producer_id, _producer_label = producers[input_connection]
-        if "schema" in graph.get_node_info(producer_id).config:
-            upstream_schema = graph.get_node_info(producer_id).config["schema"]
-            graph.get_node_info(gate_id).config["schema"] = upstream_schema
+        upstream_info = graph.get_node_info(producer_id)
+        if upstream_info.output_schema_config is not None or "schema" in upstream_info.config:
+            graph.get_node_info(gate_id).config["schema"] = _best_schema_dict(producer_id)
         else:
             deferred_config_gate_schemas.append((gate_id, gate_name, input_connection))
 
@@ -695,10 +711,10 @@ def build_execution_graph(
             raise GraphValidationError(f"Coalesce node '{coalesce_id}' has no incoming branches; cannot determine schema for audit.")
 
         first_from_node = incoming_edges[0][0]
-        first_schema = graph.get_node_info(first_from_node).config["schema"]
+        first_schema = _best_schema_dict(NodeID(first_from_node))
 
         for from_node, _to_node in incoming_edges[1:]:
-            other_schema = graph.get_node_info(from_node).config["schema"]
+            other_schema = _best_schema_dict(NodeID(from_node))
             if other_schema != first_schema:
                 raise GraphValidationError(
                     f"Coalesce node '{coalesce_id}' receives mismatched schema configs from branches. "
@@ -711,8 +727,7 @@ def build_execution_graph(
     # because their upstream producer (e.g., coalesce) didn't have schema yet.
     for gate_id, _gate_name, input_connection in deferred_config_gate_schemas:
         producer_id, _producer_label = producers[input_connection]
-        upstream_schema = graph.get_node_info(producer_id).config["schema"]
-        graph.get_node_info(gate_id).config["schema"] = upstream_schema
+        graph.get_node_info(gate_id).config["schema"] = _best_schema_dict(producer_id)
 
     # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
     graph.validate_edge_compatibility()

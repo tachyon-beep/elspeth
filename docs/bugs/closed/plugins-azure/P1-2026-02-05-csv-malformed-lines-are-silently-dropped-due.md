@@ -88,3 +88,12 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md:66`, `CLAUDE.md:647`
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after re-verification against current code.
+- Verification summary: CSV parsing no longer silently drops malformed lines; parse errors are surfaced for quarantine/audit handling.
+- Evidence:
+  - `src/elspeth/plugins/azure/blob_source.py:511` sets `on_bad_lines=\"error\"`.
+  - `src/elspeth/plugins/azure/blob_source.py:513`-`src/elspeth/plugins/azure/blob_source.py:532` records parse failure and emits a quarantined row (if configured).
+  - `tests/unit/plugins/transforms/azure/test_blob_source.py` passes with malformed CSV coverage.

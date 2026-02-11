@@ -534,3 +534,103 @@ class TestQuarantineHappyPath:
         assert result.rows_succeeded == 5
         assert len(default_sink.results) == 5
         assert len(quarantine_sink.results) == 3
+
+
+class TestQuarantineNonCanonicalData:
+    """P1-2026-02-05: Quarantined rows with non-canonical data (NaN, Infinity)
+    must not crash the pipeline during telemetry hash computation.
+
+    stable_hash() uses canonical JSON which rejects NaN/Infinity per RFC 8785.
+    Quarantined rows are Tier-3 external data that may contain these values.
+    The fix uses repr_hash() as a fallback for non-canonical data.
+    """
+
+    def test_quarantined_row_with_nan_does_not_crash(self, payload_store) -> None:
+        """Quarantined row containing NaN should route to quarantine sink, not crash."""
+        db = LandscapeDB.in_memory()
+        source = QuarantineSource(
+            valid_rows=[{"value": 1}],
+            quarantine_rows=[
+                ({"value": float("nan")}, "NaN value not allowed"),
+            ],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_quarantined == 1
+        assert len(quarantine_sink.results) == 1
+        assert len(default_sink.results) == 1
+
+    def test_quarantined_row_with_infinity_does_not_crash(self, payload_store) -> None:
+        """Quarantined row containing Infinity should route to quarantine sink, not crash."""
+        db = LandscapeDB.in_memory()
+        source = QuarantineSource(
+            valid_rows=[],
+            quarantine_rows=[
+                ({"score": float("inf")}, "Infinity not allowed"),
+                ({"score": float("-inf")}, "Negative infinity not allowed"),
+            ],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_quarantined == 2
+        assert len(quarantine_sink.results) == 2
+
+    def test_quarantined_row_with_canonical_data_uses_stable_hash(self, payload_store) -> None:
+        """Quarantined rows with canonical data should still use stable_hash (not repr_hash)
+        so hashes are consistent with non-quarantined rows containing the same data.
+        """
+        db = LandscapeDB.in_memory()
+        # Normal dict data that IS canonical — should use stable_hash
+        source = QuarantineSource(
+            valid_rows=[{"value": 42}],
+            quarantine_rows=[
+                ({"value": 42}, "Business logic rejection"),
+            ],
+            quarantine_destination="quarantine",
+            on_validation_failure="quarantine",
+        )
+        default_sink = CollectSink("default")
+        quarantine_sink = CollectSink("quarantine")
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_quarantined == 1
+        assert result.rows_succeeded == 1
+
+        # Both valid and quarantined rows completed without crash
+        assert len(default_sink.results) == 1
+        assert len(quarantine_sink.results) == 1
