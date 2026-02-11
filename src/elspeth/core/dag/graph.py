@@ -329,9 +329,9 @@ class ExecutionGraph:
         for connection_name in consumers:
             if connection_name not in producers:
                 suggestions = _suggest_similar(connection_name, sorted(producers.keys()))
-                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
                 raise GraphValidationError(
-                    f"No producer for connection '{connection_name}'.{hint}\nAvailable connections: {sorted(producers.keys())}"
+                    f"No producer for connection '{connection_name}'.{hint}\nAvailable connections: {', '.join(sorted(producers.keys()))}"
                 )
 
         connection_names = set(producers.keys()) | set(consumers.keys())

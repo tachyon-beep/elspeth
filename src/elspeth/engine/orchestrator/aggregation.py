@@ -244,7 +244,6 @@ def check_aggregation_timeouts(
                 raise RuntimeError("Aggregation continuation work item missing current_node_id")
             downstream_results = processor.process_token(
                 token=work_item.token,
-                transforms=config.transforms,
                 ctx=ctx,
                 current_node_id=work_item.current_node_id,
                 coalesce_node_id=work_item.coalesce_node_id,
@@ -380,7 +379,6 @@ def flush_remaining_aggregation_buffers(
                 raise RuntimeError("Aggregation continuation work item missing current_node_id")
             downstream_results = processor.process_token(
                 token=work_item.token,
-                transforms=config.transforms,
                 ctx=ctx,
                 current_node_id=work_item.current_node_id,
                 coalesce_node_id=work_item.coalesce_node_id,

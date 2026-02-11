@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import CoalesceName, NodeID
-from elspeth.engine.orchestrator.types import ExecutionCounters, RowPlugin
+from elspeth.engine.orchestrator.types import ExecutionCounters
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
@@ -123,7 +123,6 @@ def handle_coalesce_timeouts(
     coalesce_executor: CoalesceExecutor,
     coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
-    config_transforms: list[RowPlugin],
     config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
@@ -142,7 +141,6 @@ def handle_coalesce_timeouts(
         coalesce_executor: CoalesceExecutor managing join barriers
         coalesce_node_map: Maps CoalesceName -> coalesce node ID in graph
         processor: RowProcessor for downstream processing
-        config_transforms: Pipeline transform list for process_token
         config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         ctx: Plugin context for transform execution
         counters: Mutable ExecutionCounters to update
@@ -162,7 +160,6 @@ def handle_coalesce_timeouts(
                 # continuation metadata and return COMPLETED with sink_name when terminal.
                 continuation_results = processor.process_token(
                     token=outcome.merged_token,
-                    transforms=config_transforms,
                     ctx=ctx,
                     current_node_id=coalesce_node_id,
                     coalesce_node_id=coalesce_node_id,
@@ -182,7 +179,6 @@ def flush_coalesce_pending(
     coalesce_executor: CoalesceExecutor,
     coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
-    config_transforms: list[RowPlugin],
     config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
@@ -199,7 +195,6 @@ def flush_coalesce_pending(
         coalesce_executor: CoalesceExecutor managing join barriers
         coalesce_node_map: Maps CoalesceName -> coalesce node ID in graph
         processor: RowProcessor for downstream processing
-        config_transforms: Pipeline transform list for process_token
         config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         ctx: Plugin context for transform execution
         counters: Mutable ExecutionCounters to update
@@ -220,7 +215,6 @@ def flush_coalesce_pending(
             # continuation metadata and return COMPLETED with sink_name when terminal.
             continuation_results = processor.process_token(
                 token=outcome.merged_token,
-                transforms=config_transforms,
                 ctx=ctx,
                 current_node_id=coalesce_node_map[coalesce_name],
                 coalesce_node_id=coalesce_node_map[coalesce_name],

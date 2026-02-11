@@ -1097,7 +1097,6 @@ class TestProcessRowGateBranching:
 
         results = processor.process_token(
             token=token,
-            transforms=[],
             ctx=ctx,
             current_node_id=None,
         )
@@ -1419,7 +1418,6 @@ class TestProcessToken:
 
         results = processor.process_token(
             token=token,
-            transforms=[],
             ctx=ctx,
             current_node_id=NodeID("source-0"),
         )
@@ -1444,7 +1442,6 @@ class TestProcessToken:
 
         results = processor.process_token(
             token=token,
-            transforms=[],
             ctx=ctx,
             current_node_id=NodeID("coalesce::merge"),
             coalesce_node_id=NodeID("coalesce::merge"),
@@ -1485,7 +1482,6 @@ class TestProcessToken:
         ):
             results = processor.process_token(
                 token=token,
-                transforms=[transform],
                 ctx=ctx,
                 current_node_id=NodeID("coalesce::merge"),
                 coalesce_node_id=NodeID("coalesce::merge"),
@@ -1514,7 +1510,7 @@ class TestDrainWorkQueueIterationGuard:
         token = make_token_info(data={"value": 1})
 
         # Mock _process_single_token to always produce more work
-        def infinite_loop_producer(token, transforms, ctx, current_node_id, **kwargs):
+        def infinite_loop_producer(token, ctx, current_node_id, **kwargs):
             new_token = make_token_info(data={"value": 1})
             return (None, [_WorkItem(token=new_token, current_node_id=NodeID("source-0"))])
 
@@ -1524,7 +1520,6 @@ class TestDrainWorkQueueIterationGuard:
         ):
             processor._drain_work_queue(
                 _WorkItem(token=token, current_node_id=NodeID("source-0")),
-                transforms=[],
                 ctx=ctx,
             )
 
@@ -2702,7 +2697,6 @@ class TestCoalesceTraversalInvariant:
         with pytest.raises(OrchestrationInvariantError, match="downstream of coalesce"):
             processor._process_single_token(
                 token=token,
-                transforms=[transform],
                 ctx=ctx,
                 current_node_id=downstream_node,  # step 3 > coalesce step 2
                 coalesce_node_id=coalesce_node,
@@ -2749,7 +2743,6 @@ class TestCoalesceTraversalInvariant:
         # traversal ordering, not coalesce executor presence.
         result, _ = processor._process_single_token(
             token=token,
-            transforms=[],
             ctx=ctx,
             current_node_id=coalesce_node,
             coalesce_node_id=coalesce_node,
@@ -2771,7 +2764,6 @@ class TestTerminalWorkItemInvariant:
         with pytest.raises(OrchestrationInvariantError, match="current_node_id=None"):
             processor._process_single_token(
                 token=token,
-                transforms=[],
                 ctx=ctx,
                 current_node_id=None,
             )
@@ -2785,7 +2777,6 @@ class TestTerminalWorkItemInvariant:
 
         result, _child_items = processor._process_single_token(
             token=token,
-            transforms=[],
             ctx=ctx,
             current_node_id=None,
             on_success_sink="terminal_sink",

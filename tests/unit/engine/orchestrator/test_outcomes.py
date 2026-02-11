@@ -10,7 +10,6 @@ _execute_run() and _process_resumed_rows(). These tests verify that:
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -307,7 +306,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock(), Mock()],
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
@@ -335,12 +333,10 @@ class TestHandleCoalesceTimeouts:
         ]
 
         ctx = Mock()
-        transforms: list[Any] = [Mock(), Mock(), Mock()]
         handle_coalesce_timeouts(
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=transforms,
             config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
@@ -351,7 +347,6 @@ class TestHandleCoalesceTimeouts:
         assert counters.rows_succeeded == 1
         processor.process_token.assert_called_once_with(
             token=merged_token,
-            transforms=transforms,
             ctx=ctx,
             current_node_id=NodeID("coalesce::merge_1"),
             coalesce_node_id=NodeID("coalesce::merge_1"),
@@ -373,12 +368,10 @@ class TestHandleCoalesceTimeouts:
         processor.process_token.return_value = [_make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output")]
 
         ctx = Mock()
-        transforms: list[Any] = [Mock()]
         handle_coalesce_timeouts(
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=transforms,
             config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
@@ -390,7 +383,6 @@ class TestHandleCoalesceTimeouts:
         assert len(pending["output"]) == 1
         processor.process_token.assert_called_once_with(
             token=merged_token,
-            transforms=transforms,
             ctx=ctx,
             current_node_id=NodeID("coalesce::merge_1"),
             coalesce_node_id=NodeID("coalesce::merge_1"),
@@ -411,7 +403,6 @@ class TestHandleCoalesceTimeouts:
             coalesce_executor=executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock(), Mock()],
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
@@ -452,12 +443,10 @@ class TestFlushCoalescePending:
         node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
         ctx = Mock()
-        transforms: list[Any] = [Mock(), Mock()]
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=transforms,
             config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
@@ -468,7 +457,6 @@ class TestFlushCoalescePending:
         assert counters.rows_succeeded == 1
         processor.process_token.assert_called_once_with(
             token=merged_token,
-            transforms=transforms,
             ctx=ctx,
             current_node_id=NodeID("coalesce::merge_1"),
             coalesce_node_id=NodeID("coalesce::merge_1"),
@@ -494,12 +482,10 @@ class TestFlushCoalescePending:
         node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
         ctx = Mock()
-        transforms: list[Any] = [Mock()]
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
             coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=transforms,
             config_sinks={"output": Mock()},
             ctx=ctx,
             counters=counters,
@@ -511,7 +497,6 @@ class TestFlushCoalescePending:
         assert len(pending["output"]) == 1
         processor.process_token.assert_called_once_with(
             token=merged_token,
-            transforms=transforms,
             ctx=ctx,
             current_node_id=NodeID("coalesce::merge_1"),
             coalesce_node_id=NodeID("coalesce::merge_1"),
@@ -535,7 +520,6 @@ class TestFlushCoalescePending:
             coalesce_executor=coalesce_executor,
             coalesce_node_map={},
             processor=Mock(),
-            config_transforms=[],
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
@@ -556,7 +540,6 @@ class TestFlushCoalescePending:
             coalesce_executor=coalesce_executor,
             coalesce_node_map={},
             processor=Mock(),
-            config_transforms=[],
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,

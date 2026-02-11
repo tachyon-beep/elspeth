@@ -469,9 +469,9 @@ def build_execution_graph(
     for gate_id, gate_name, input_connection in config_gate_schema_inputs:
         if input_connection not in producers:
             suggestions = _suggest_similar(input_connection, sorted(producers.keys()))
-            hint = f" Did you mean: {suggestions}?" if suggestions else ""
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(
-                f"Gate '{gate_name}' input '{input_connection}' has no producer.{hint}\nAvailable connections: {sorted(producers.keys())}"
+                f"Gate '{gate_name}' input '{input_connection}' has no producer.{hint}\nAvailable connections: {', '.join(sorted(producers.keys()))}"
             )
         producer_id, _producer_label = producers[input_connection]
         if "schema" in graph.get_node_info(producer_id).config:
@@ -518,7 +518,7 @@ def build_execution_graph(
     for gate_id, route_label, target in gate_route_connections:
         if target not in consumers:
             suggestions = _suggest_similar(target, sorted(consumers.keys()))
-            hint = f" Did you mean: {suggestions}?" if suggestions else ""
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(f"Gate route target '{target}' is neither a sink nor a known connection name.{hint}")
         graph._route_resolution_map[(gate_id, route_label)] = RouteDestination.processing_node(consumers[target])
 
@@ -535,7 +535,7 @@ def build_execution_graph(
             graph.add_edge(tid, sink_ids[SinkName(on_success)], label="on_success", mode=RoutingMode.MOVE)
         elif on_success not in consumers:
             suggestions = _suggest_similar(on_success, sorted(consumers.keys()))
-            hint = f" Did you mean: {suggestions}?" if suggestions else ""
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(
                 f"Transform '{wired.settings.name}' on_success '{on_success}' is neither a sink nor a known connection.{hint}"
             )
@@ -549,7 +549,7 @@ def build_execution_graph(
             graph.add_edge(aid, sink_ids[SinkName(on_success)], label="on_success", mode=RoutingMode.MOVE)
         elif on_success not in consumers:
             suggestions = _suggest_similar(on_success, sorted(consumers.keys()))
-            hint = f" Did you mean: {suggestions}?" if suggestions else ""
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(
                 f"Aggregation '{agg_settings.name}' on_success '{on_success}' is neither a sink nor a known connection.{hint}"
             )
@@ -587,7 +587,7 @@ def build_execution_graph(
             )
     elif source_on_success not in consumers:
         suggestions = _suggest_similar(source_on_success, sorted(str(s) for s in sink_ids))
-        hint = f" Did you mean: {suggestions}?" if suggestions else ""
+        hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
         raise GraphValidationError(
             f"Source '{source.name}' on_success '{source_on_success}' is neither a sink nor a known connection.{hint}"
         )
@@ -629,10 +629,10 @@ def build_execution_graph(
         if on_error is not None and on_error != "discard":
             if SinkName(on_error) not in sink_ids:
                 suggestions = _suggest_similar(on_error, sorted(str(s) for s in sink_ids))
-                hint = f" Did you mean: {suggestions}?" if suggestions else ""
+                hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
                 raise GraphValidationError(
                     f"Transform '{wired.settings.name}' on_error '{on_error}' references unknown sink.{hint} "
-                    f"Available sinks: {sorted(str(s) for s in sink_ids)}"
+                    f"Available sinks: {', '.join(sorted(str(s) for s in sink_ids))}"
                 )
             graph.add_edge(
                 transform_ids_by_name[wired.settings.name],

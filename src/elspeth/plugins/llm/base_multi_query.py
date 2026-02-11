@@ -58,6 +58,7 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
     """
 
     creates_tokens = False  # Does not create new tokens (1 row in -> 1 row out)
+    transforms_adds_fields = True  # Multi-query adds output_prefix result fields per query spec
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     plugin_version = "1.0.0"
 

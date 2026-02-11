@@ -813,11 +813,7 @@ class RowProcessor:
                     )
                 else:
                     # No more transforms and no coalesce - return COMPLETED
-                    if transform.on_success is None:
-                        raise OrchestrationInvariantError(
-                            f"Aggregation transform '{transform.name}' reached terminal position "
-                            f"but has no on_success configured. This is a DAG validation bug."
-                        )
+                    # RowResult.__post_init__ enforces sink_name is set for COMPLETED
                     results.append(
                         RowResult(
                             token=updated_token,
@@ -895,11 +891,7 @@ class RowProcessor:
                         )
                 else:
                     # No more transforms and no coalesce - return COMPLETED
-                    if transform.on_success is None:
-                        raise OrchestrationInvariantError(
-                            f"Aggregation transform '{transform.name}' reached terminal position "
-                            f"but has no on_success configured. This is a DAG validation bug."
-                        )
+                    # RowResult.__post_init__ enforces sink_name is set for COMPLETED
                     for token in expanded_tokens:
                         results.append(
                             RowResult(
@@ -1134,11 +1126,7 @@ class RowProcessor:
                     return ([], child_items)
                 else:
                     # No more transforms and no coalesce - return COMPLETED for all tokens
-                    if transform.on_success is None:
-                        raise OrchestrationInvariantError(
-                            f"Aggregation transform '{transform.name}' reached terminal position "
-                            f"but has no on_success configured. This is a DAG validation bug."
-                        )
+                    # RowResult.__post_init__ enforces sink_name is set for COMPLETED
                     passthrough_results: list[RowResult] = []
                     for token, enriched_data in zip(buffered_tokens, pipeline_rows, strict=True):
                         # Update token, preserving all lineage metadata
@@ -1252,11 +1240,7 @@ class RowProcessor:
                     return (triggering_result, child_items)
                 else:
                     # No more transforms and no coalesce - return COMPLETED for expanded tokens
-                    if transform.on_success is None:
-                        raise OrchestrationInvariantError(
-                            f"Aggregation transform '{transform.name}' reached terminal position "
-                            f"but has no on_success configured. This is a DAG validation bug."
-                        )
+                    # RowResult.__post_init__ enforces sink_name is set for COMPLETED
                     output_results: list[RowResult] = [triggering_result]
                     for token in expanded_tokens:
                         output_results.append(
@@ -1541,7 +1525,6 @@ class RowProcessor:
                 coalesce_node_id=coalesce_node_id,
                 coalesce_name=coalesce_name,
             ),
-            transforms,
             ctx,
         )
 
@@ -1606,14 +1589,12 @@ class RowProcessor:
                 coalesce_node_id=coalesce_node_id,
                 coalesce_name=coalesce_name,
             ),
-            transforms,
             ctx,
         )
 
     def process_token(
         self,
         token: TokenInfo,
-        transforms: list[Any],
         ctx: PluginContext,
         *,
         current_node_id: NodeID,
@@ -1631,7 +1612,6 @@ class RowProcessor:
                 coalesce_node_id=coalesce_node_id,
                 coalesce_name=coalesce_name,
             ),
-            transforms,
             ctx,
         )
 
@@ -1816,7 +1796,6 @@ class RowProcessor:
     def _drain_work_queue(
         self,
         initial_item: _WorkItem,
-        transforms: list[Any],
         ctx: PluginContext,
     ) -> list[RowResult]:
         """Drain the work queue, processing tokens until empty.
@@ -1838,7 +1817,6 @@ class RowProcessor:
                 item = work_queue.popleft()
                 result, child_items = self._process_single_token(
                     token=item.token,
-                    transforms=transforms,
                     ctx=ctx,
                     current_node_id=item.current_node_id,
                     coalesce_node_id=item.coalesce_node_id,
@@ -1859,7 +1837,6 @@ class RowProcessor:
     def _process_single_token(
         self,
         token: TokenInfo,
-        transforms: list[Any],
         ctx: PluginContext,
         current_node_id: NodeID | None,
         coalesce_node_id: NodeID | None = None,
@@ -1870,7 +1847,6 @@ class RowProcessor:
 
         Args:
             token: Token to process
-            transforms: List of transform plugins
             ctx: Plugin context
             current_node_id: Node ID to start processing from. None is valid only
                 for terminal work items that already have explicit sink context
