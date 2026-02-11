@@ -134,7 +134,11 @@ class TestWebErrorDecisionFactories:
     @given(redirect_type=st.sampled_from(sorted(WEB_REDIRECT_TYPES)))
     def test_redirect_has_correct_category(self, redirect_type: str) -> None:
         """Property: redirect() always has REDIRECT category with status 301."""
-        d = WebErrorDecision.redirect(redirect_type)
+        # Each redirect type requires its specific field
+        if redirect_type == "ssrf_redirect":
+            d = WebErrorDecision.redirect(redirect_type, redirect_target="http://169.254.169.254/")
+        else:
+            d = WebErrorDecision.redirect(redirect_type, redirect_hops=3)
         assert d.should_inject
         assert d.category == WebErrorCategory.REDIRECT
         assert d.status_code == 301

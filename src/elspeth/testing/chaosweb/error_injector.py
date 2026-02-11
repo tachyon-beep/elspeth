@@ -113,6 +113,50 @@ class WebErrorDecision:
     incomplete_bytes: int | None = None  # Bytes to send before disconnect
     encoding_actual: str | None = None  # Actual encoding for mismatch scenarios
 
+    def __post_init__(self) -> None:
+        """Validate invariants between fields."""
+        if self.error_type is None:
+            # Success case: no other fields should be set
+            if self.category is not None:
+                raise ValueError("Success decision must not have a category")
+            return
+
+        if self.category is None:
+            raise ValueError(f"Error decision '{self.error_type}' must have a category")
+
+        if self.category == WebErrorCategory.HTTP:
+            if self.status_code is None:
+                raise ValueError(f"HTTP error '{self.error_type}' must have a status_code")
+            if not (100 <= self.status_code <= 599):
+                raise ValueError(f"HTTP status_code must be 100-599, got {self.status_code}")
+            if self.malformed_type is not None:
+                raise ValueError("HTTP error must not have malformed_type")
+
+        elif self.category == WebErrorCategory.CONNECTION:
+            if self.retry_after_sec is not None:
+                raise ValueError("Connection error must not have retry_after_sec")
+            if self.malformed_type is not None:
+                raise ValueError("Connection error must not have malformed_type")
+
+        elif self.category == WebErrorCategory.MALFORMED:
+            if self.malformed_type is None:
+                raise ValueError("Malformed error must have malformed_type")
+            if self.status_code is not None and self.status_code != 200:
+                raise ValueError(f"Malformed error must have status_code 200, got {self.status_code}")
+
+        elif self.category == WebErrorCategory.REDIRECT:
+            if self.redirect_target is None and self.redirect_hops is None:
+                raise ValueError("Redirect error must have redirect_target or redirect_hops")
+
+        if self.retry_after_sec is not None and self.retry_after_sec < 0:
+            raise ValueError(f"retry_after_sec must be non-negative, got {self.retry_after_sec}")
+        if self.delay_sec is not None and self.delay_sec < 0:
+            raise ValueError(f"delay_sec must be non-negative, got {self.delay_sec}")
+        if self.start_delay_sec is not None and self.start_delay_sec < 0:
+            raise ValueError(f"start_delay_sec must be non-negative, got {self.start_delay_sec}")
+        if self.incomplete_bytes is not None and self.incomplete_bytes < 0:
+            raise ValueError(f"incomplete_bytes must be non-negative, got {self.incomplete_bytes}")
+
     @classmethod
     def success(cls) -> "WebErrorDecision":
         """Create a decision for a successful (no error) response."""

@@ -16,9 +16,12 @@ from typing import Any
 
 import jinja2
 import jinja2.sandbox
+import structlog
 
 from elspeth.testing.chaosengine.vocabulary import ENGLISH_VOCABULARY, LOREM_VOCABULARY
 from elspeth.testing.chaosllm.config import ResponseConfig
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,14 +282,21 @@ class ResponseGenerator:
     def _generate_template_response(self, request: dict[str, Any]) -> str:
         """Generate response from Jinja2 template."""
         template_str = self._config.template.body
-        template = self._jinja_env.from_string(template_str)
-
-        # Provide request context to template
-        return template.render(
-            request=request,
-            messages=request.get("messages", []),
-            model=request.get("model", "unknown"),
-        )
+        try:
+            template = self._jinja_env.from_string(template_str)
+            return template.render(
+                request=request,
+                messages=request.get("messages", []),
+                model=request.get("model", "unknown"),
+            )
+        except jinja2.TemplateError as exc:
+            logger.warning(
+                "template_rendering_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                template_length=len(template_str),
+            )
+            return f"Template rendering error: {type(exc).__name__}"
 
     def _generate_echo_response(self, request: dict[str, Any]) -> str:
         """Echo parts of the input prompt."""
@@ -373,12 +383,21 @@ class ResponseGenerator:
             if template_override is not None:
                 if len(template_override) > max_len:
                     raise ValueError(f"Template override exceeds max length ({len(template_override)} > {max_len})")
-                template = self._jinja_env.from_string(template_override)
-                content = template.render(
-                    request=request,
-                    messages=request.get("messages", []),
-                    model=request.get("model", "unknown"),
-                )
+                try:
+                    template = self._jinja_env.from_string(template_override)
+                    content = template.render(
+                        request=request,
+                        messages=request.get("messages", []),
+                        model=request.get("model", "unknown"),
+                    )
+                except jinja2.TemplateError as exc:
+                    logger.warning(
+                        "template_override_rendering_failed",
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                        template_length=len(template_override),
+                    )
+                    content = f"Template rendering error: {type(exc).__name__}"
             else:
                 content = self._generate_template_response(request)
         elif mode == "echo":

@@ -8,6 +8,7 @@ utilities from its own `load_config()` function.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -122,7 +123,14 @@ def load_config[ConfigT: BaseModel](
         if not config_file.exists():
             raise FileNotFoundError(f"Config file not found: {config_file}")
         with config_file.open() as f:
-            file_config = yaml.safe_load(f) or {}
+            file_config = yaml.safe_load(f)
+        if file_config is None:
+            warnings.warn(
+                f"Config file '{config_file}' is empty or contains only comments; all settings will use defaults",
+                UserWarning,
+                stacklevel=2,
+            )
+            file_config = {}
         config_dict = deep_merge(config_dict, file_config)
 
     # Layer 3: CLI overrides (highest precedence)

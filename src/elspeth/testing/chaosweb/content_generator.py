@@ -19,9 +19,12 @@ from pathlib import Path
 
 import jinja2
 import jinja2.sandbox
+import structlog
 
 from elspeth.testing.chaosengine.vocabulary import ENGLISH_VOCABULARY, LOREM_VOCABULARY
 from elspeth.testing.chaosweb.config import WebContentConfig
+
+logger = structlog.get_logger(__name__)
 
 # HTML structural elements used in random generation.
 # Each entry is (tag, is_block, can_contain_text).
@@ -313,7 +316,13 @@ class ContentGenerator:
                 headers=headers,
                 query_params={},
             )
-        except jinja2.TemplateError:
+        except jinja2.TemplateError as exc:
+            logger.warning(
+                "template_rendering_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                template_length=len(template_str),
+            )
             return self._error_page("Template Error", "Failed to render template")
 
         # Cap output length
@@ -489,14 +498,17 @@ def inject_malformed_meta(content: str) -> str:
     return malformed_meta + content
 
 
-def generate_wrong_content_type() -> str:
+_WRONG_CONTENT_TYPES: tuple[str, ...] = (
+    "application/pdf",
+    "application/octet-stream",
+    "image/jpeg",
+    "application/xml",
+    "text/plain",
+    "application/json",
+)
+
+
+def generate_wrong_content_type(rng: random_module.Random | None = None) -> str:
     """Return a realistic non-HTML content type for wrong_content_type injection."""
-    wrong_types = [
-        "application/pdf",
-        "application/octet-stream",
-        "image/jpeg",
-        "application/xml",
-        "text/plain",
-        "application/json",
-    ]
-    return random_module.choice(wrong_types)
+    r = rng if rng is not None else random_module.Random()
+    return r.choice(_WRONG_CONTENT_TYPES)

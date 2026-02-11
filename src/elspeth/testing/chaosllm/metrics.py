@@ -7,7 +7,7 @@ for LLM-specific request recording and outcome classification.
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from elspeth.testing.chaosengine.metrics_store import MetricsStore
 from elspeth.testing.chaosengine.types import ColumnDef, MetricsConfig, MetricsSchema
@@ -95,38 +95,32 @@ class RequestRecord:
     response_mode: str | None = None
 
 
+class OutcomeClassification(NamedTuple):
+    """Classification of a request outcome for time-series aggregation."""
+
+    is_success: bool
+    is_rate_limited: bool
+    is_capacity_error: bool
+    is_server_error: bool
+    is_client_error: bool
+    is_connection_error: bool
+    is_malformed: bool
+
+
 def _classify_outcome(
     outcome: str,
     status_code: int | None,
     error_type: str | None,
-) -> tuple[bool, bool, bool, bool, bool, bool, bool]:
-    """Classify an outcome for time-series aggregation.
-
-    Returns a tuple of booleans for:
-    (success, rate_limited, capacity_error, server_error, client_error,
-     connection_error, malformed)
-    """
-    is_success = outcome == "success"
-    is_rate_limited = status_code == 429
-    is_capacity_error = status_code == 529
-    is_server_error = status_code is not None and 500 <= status_code < 600 and status_code != 529
-    is_client_error = status_code is not None and 400 <= status_code < 500 and status_code != 429
-    is_connection_error = status_code is None and error_type in (
-        "timeout",
-        "connection_failed",
-        "connection_stall",
-        "connection_reset",
-    )
-    is_malformed = outcome == "error_malformed"
-
-    return (
-        is_success,
-        is_rate_limited,
-        is_capacity_error,
-        is_server_error,
-        is_client_error,
-        is_connection_error,
-        is_malformed,
+) -> OutcomeClassification:
+    """Classify an outcome for time-series aggregation."""
+    return OutcomeClassification(
+        is_success=outcome == "success",
+        is_rate_limited=status_code == 429,
+        is_capacity_error=status_code == 529,
+        is_server_error=status_code is not None and 500 <= status_code < 600 and status_code != 529,
+        is_client_error=status_code is not None and 400 <= status_code < 500 and status_code != 429,
+        is_connection_error=status_code is None and error_type in ("timeout", "connection_failed", "connection_stall", "connection_reset"),
+        is_malformed=outcome == "error_malformed",
     )
 
 
@@ -136,24 +130,16 @@ def _classify_row(row: sqlite3.Row) -> dict[str, int | float | None]:
     Adapter between sqlite3.Row and _classify_outcome, returning the
     counter dict expected by MetricsStore.rebuild_timeseries().
     """
-    (
-        is_success,
-        is_rate_limited,
-        is_capacity_error,
-        is_server_error,
-        is_client_error,
-        is_connection_error,
-        is_malformed,
-    ) = _classify_outcome(row["outcome"], row["status_code"], row["error_type"])
+    c = _classify_outcome(row["outcome"], row["status_code"], row["error_type"])
 
     return {
-        "requests_success": int(is_success),
-        "requests_rate_limited": int(is_rate_limited),
-        "requests_capacity_error": int(is_capacity_error),
-        "requests_server_error": int(is_server_error),
-        "requests_client_error": int(is_client_error),
-        "requests_connection_error": int(is_connection_error),
-        "requests_malformed": int(is_malformed),
+        "requests_success": int(c.is_success),
+        "requests_rate_limited": int(c.is_rate_limited),
+        "requests_capacity_error": int(c.is_capacity_error),
+        "requests_server_error": int(c.is_server_error),
+        "requests_client_error": int(c.is_client_error),
+        "requests_connection_error": int(c.is_connection_error),
+        "requests_malformed": int(c.is_malformed),
         "latency_ms": row["latency_ms"],
     }
 
@@ -270,26 +256,18 @@ class MetricsRecorder:
         )
 
         # Classify and update time-series
-        (
-            is_success,
-            is_rate_limited,
-            is_capacity_error,
-            is_server_error,
-            is_client_error,
-            is_connection_error,
-            is_malformed,
-        ) = _classify_outcome(outcome, status_code, error_type)
+        c = _classify_outcome(outcome, status_code, error_type)
 
         bucket = self._store.get_bucket_utc(timestamp_utc)
         self._store.update_timeseries(
             bucket,
-            requests_success=int(is_success),
-            requests_rate_limited=int(is_rate_limited),
-            requests_capacity_error=int(is_capacity_error),
-            requests_server_error=int(is_server_error),
-            requests_client_error=int(is_client_error),
-            requests_connection_error=int(is_connection_error),
-            requests_malformed=int(is_malformed),
+            requests_success=int(c.is_success),
+            requests_rate_limited=int(c.is_rate_limited),
+            requests_capacity_error=int(c.is_capacity_error),
+            requests_server_error=int(c.is_server_error),
+            requests_client_error=int(c.is_client_error),
+            requests_connection_error=int(c.is_connection_error),
+            requests_malformed=int(c.is_malformed),
         )
 
         # Update latency statistics for the bucket
