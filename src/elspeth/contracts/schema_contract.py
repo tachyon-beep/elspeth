@@ -341,27 +341,39 @@ class SchemaContract:
             KeyError: If checkpoint has unknown python_type
             ValueError: If restored hash doesn't match stored hash
         """
-        fields = tuple(
-            FieldContract(
-                normalized_name=f["normalized_name"],
-                original_name=f["original_name"],
-                python_type=CONTRACT_TYPE_MAP[f["python_type"]],  # KeyError on unknown = correct! (Tier 1)
-                required=f["required"],
-                source=f["source"],
+        # Tier 1 data: crash on corruption, but with informative messages.
+        # to_checkpoint_format() writes "fields", "mode", "locked", "version_hash" —
+        # if any are missing, the checkpoint is corrupted.
+        try:
+            fields = tuple(
+                FieldContract(
+                    normalized_name=f["normalized_name"],
+                    original_name=f["original_name"],
+                    python_type=CONTRACT_TYPE_MAP[f["python_type"]],
+                    required=f["required"],
+                    source=f["source"],
+                )
+                for f in data["fields"]
             )
-            for f in data["fields"]
-        )
+        except KeyError as e:
+            raise KeyError(f"Corrupt SchemaContract checkpoint: missing key {e}. Top-level keys: {sorted(data.keys())}") from e
 
-        contract = cls(
-            mode=data["mode"],
-            fields=fields,
-            locked=data["locked"],
-        )
+        try:
+            contract = cls(
+                mode=data["mode"],
+                fields=fields,
+                locked=data["locked"],
+            )
+        except KeyError as e:
+            raise KeyError(f"Corrupt SchemaContract checkpoint: missing key {e}. Top-level keys: {sorted(data.keys())}") from e
 
         # Verify integrity (Tier 1 audit requirement)
         # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
         # to_checkpoint_format() ALWAYS writes version_hash, so missing = corruption
-        expected_hash = data["version_hash"]  # KeyError if missing = correct!
+        try:
+            expected_hash = data["version_hash"]
+        except KeyError:
+            raise KeyError(f"Corrupt SchemaContract checkpoint: missing 'version_hash'. Top-level keys: {sorted(data.keys())}") from None
         actual_hash = contract.version_hash()
         if actual_hash != expected_hash:
             raise ValueError(
@@ -676,7 +688,26 @@ class PipelineRow:
             Restored PipelineRow
 
         Raises:
-            KeyError: If contract version not in registry
+            KeyError: If checkpoint is missing required keys or contract version
+                not in registry. Error messages include available keys for debugging.
         """
-        contract = contract_registry[checkpoint_data["contract_version"]]
-        return cls(data=checkpoint_data["data"], contract=contract)
+        try:
+            version = checkpoint_data["contract_version"]
+        except KeyError:
+            raise KeyError(
+                f"Corrupt PipelineRow checkpoint: missing 'contract_version'. Available keys: {sorted(checkpoint_data.keys())}"
+            ) from None
+
+        try:
+            contract = contract_registry[version]
+        except KeyError:
+            raise KeyError(
+                f"Contract version '{version}' not in registry. Available versions: {sorted(contract_registry.keys())}"
+            ) from None
+
+        try:
+            data = checkpoint_data["data"]
+        except KeyError:
+            raise KeyError(f"Corrupt PipelineRow checkpoint: missing 'data'. Available keys: {sorted(checkpoint_data.keys())}") from None
+
+        return cls(data=data, contract=contract)

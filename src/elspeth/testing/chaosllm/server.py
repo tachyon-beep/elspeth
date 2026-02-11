@@ -18,6 +18,7 @@ Usage:
 
 import asyncio
 import json
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
@@ -95,6 +96,7 @@ class ChaosLLMServer:
             config: Server configuration
         """
         self._config = config
+        self._config_lock = threading.Lock()
         self._error_injector = ErrorInjector(config.error_injection)
         self._response_generator = ResponseGenerator(config.response)
         self._latency_simulator = LatencySimulator(config.latency)
@@ -166,34 +168,50 @@ class ChaosLLMServer:
         Uses deep_merge so partial nested updates (e.g. ``{burst: {enabled: true}}``)
         preserve existing nested fields instead of resetting them to defaults.
 
+        Components are built outside the lock (may involve validation), then
+        swapped atomically under _config_lock to prevent concurrent request
+        handlers from seeing a half-updated configuration.
+
         Args:
             updates: Dict with sections to update (error_injection, response, latency)
         """
+        # Build new components outside the lock (validation may be expensive)
+        new_error: ErrorInjector | None = None
+        new_response: ResponseGenerator | None = None
+        new_latency: LatencySimulator | None = None
+
         if "error_injection" in updates:
             current_error = self._error_injector.config.model_dump()
             merged = deep_merge(current_error, updates["error_injection"])
-            error_config = ErrorInjectionConfig(**merged)
-            self._error_injector = ErrorInjector(error_config)
+            new_error = ErrorInjector(ErrorInjectionConfig(**merged))
 
         if "response" in updates:
             current_response = self._response_generator.config.model_dump()
             merged = deep_merge(current_response, updates["response"])
-            response_config = ResponseConfig(**merged)
-            self._response_generator = ResponseGenerator(response_config)
+            new_response = ResponseGenerator(ResponseConfig(**merged))
 
         if "latency" in updates:
             current_latency = self._latency_simulator.config.model_dump()
             merged = deep_merge(current_latency, updates["latency"])
-            latency_config = LatencyConfig(**merged)
-            self._latency_simulator = LatencySimulator(latency_config)
+            new_latency = LatencySimulator(LatencyConfig(**merged))
+
+        # Swap atomically under lock
+        with self._config_lock:
+            if new_error is not None:
+                self._error_injector = new_error
+            if new_response is not None:
+                self._response_generator = new_response
+            if new_latency is not None:
+                self._latency_simulator = new_latency
 
     def _get_current_config(self) -> dict[str, Any]:
         """Get current configuration as dict."""
-        return {
-            "error_injection": self._error_injector.config.model_dump(),
-            "response": self._response_generator.config.model_dump(),
-            "latency": self._latency_simulator.config.model_dump(),
-        }
+        with self._config_lock:
+            return {
+                "error_injection": self._error_injector.config.model_dump(),
+                "response": self._response_generator.config.model_dump(),
+                "latency": self._latency_simulator.config.model_dump(),
+            }
 
     def _record_run_info(self) -> None:
         """Persist run info for the current metrics run."""
@@ -279,13 +297,20 @@ class ChaosLLMServer:
         start_time = time.monotonic()
         timestamp_utc = datetime.now(UTC).isoformat()
 
+        # Snapshot components under lock so a concurrent update_config()
+        # cannot produce a half-updated view during request processing.
+        with self._config_lock:
+            error_injector = self._error_injector
+            response_generator = self._response_generator
+            latency_simulator = self._latency_simulator
+
         # Parse request body
         body = await request.json()
         model = body.get("model", "gpt-4")
         messages = body.get("messages", [])
 
         # Extract override headers (only if config allows)
-        if self._response_generator.config.allow_header_overrides:
+        if response_generator.config.allow_header_overrides:
             mode_override = request.headers.get("X-Fake-Response-Mode")
             template_override = request.headers.get("X-Fake-Template")
         else:
@@ -293,7 +318,7 @@ class ChaosLLMServer:
             template_override = None
 
         # Check for error injection
-        decision = self._error_injector.decide()
+        decision = error_injector.decide()
 
         if decision.should_inject:
             if decision.error_type == "slow_response":
@@ -307,6 +332,8 @@ class ChaosLLMServer:
                     mode_override=mode_override,
                     template_override=template_override,
                     start_time=start_time,
+                    response_generator=response_generator,
+                    latency_simulator=latency_simulator,
                 )
             return await self._handle_error_injection(
                 decision=decision,
@@ -329,6 +356,8 @@ class ChaosLLMServer:
             mode_override=mode_override,
             template_override=template_override,
             start_time=start_time,
+            response_generator=response_generator,
+            latency_simulator=latency_simulator,
         )
 
     async def _handle_slow_response(
@@ -342,6 +371,8 @@ class ChaosLLMServer:
         mode_override: str | None,
         template_override: str | None,
         start_time: float,
+        response_generator: ResponseGenerator,
+        latency_simulator: LatencySimulator,
     ) -> JSONResponse:
         """Handle a slow response that eventually succeeds."""
         delay = decision.delay_sec if decision.delay_sec is not None else 15.0
@@ -356,6 +387,8 @@ class ChaosLLMServer:
             start_time=start_time,
             extra_delay_sec=delay,
             injection_type="slow_response",
+            response_generator=response_generator,
+            latency_simulator=latency_simulator,
         )
 
     async def _handle_error_injection(
@@ -661,18 +694,20 @@ class ChaosLLMServer:
         mode_override: str | None,
         template_override: str | None,
         start_time: float,
+        response_generator: ResponseGenerator,
+        latency_simulator: LatencySimulator,
         extra_delay_sec: float | None = None,
         injection_type: str | None = None,
     ) -> JSONResponse:
         """Handle a successful response with latency simulation."""
         # Add latency
-        delay = self._latency_simulator.simulate()
+        delay = latency_simulator.simulate()
         total_delay = delay + (extra_delay_sec or 0.0)
         if total_delay > 0:
             await asyncio.sleep(total_delay)
 
         # Generate response
-        response = self._response_generator.generate(
+        response = response_generator.generate(
             body,
             mode_override=mode_override,
             template_override=template_override,
@@ -693,7 +728,7 @@ class ChaosLLMServer:
             message_count=len(body.get("messages", [])),
             prompt_tokens_approx=response.prompt_tokens,
             response_tokens=response.completion_tokens,
-            response_mode=mode_override or self._response_generator.config.mode,
+            response_mode=mode_override or response_generator.config.mode,
             injection_type=injection_type,
         )
 

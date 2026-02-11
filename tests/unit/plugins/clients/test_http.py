@@ -326,42 +326,44 @@ def test_get_telemetry_failure_doesnt_corrupt_audit(http_client, mock_recorder, 
 
 
 @respx.mock
-def test_header_fingerprinting_with_missing_key(http_client, mock_recorder):
+def test_header_fingerprinting_with_missing_key(http_client, mock_recorder, monkeypatch):
     """Sensitive headers should be removed when fingerprint key is missing."""
-    # Ensure no fingerprint key
-    with patch.dict("os.environ", {}, clear=True):
-        # Ensure ELSPETH_ALLOW_RAW_SECRETS is not set
-        respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
+    # Remove fingerprint key and raw secrets flag without clearing entire env
+    monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+    monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
-        http_client.post(
-            "https://api.example.com/secure",
-            json={},
-            headers={"Authorization": "Bearer secret"},
-        )
+    respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
 
-        # Verify sensitive header was removed (not stored)
-        call_args = mock_recorder.record_call.call_args[1]
-        assert "Authorization" not in call_args["request_data"]["headers"]
+    http_client.post(
+        "https://api.example.com/secure",
+        json={},
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    # Verify sensitive header was removed (not stored)
+    call_args = mock_recorder.record_call.call_args[1]
+    assert "Authorization" not in call_args["request_data"]["headers"]
 
 
 @respx.mock
-def test_header_fingerprinting_in_dev_mode(http_client, mock_recorder):
+def test_header_fingerprinting_in_dev_mode(http_client, mock_recorder, monkeypatch):
     """Dev mode (ELSPETH_ALLOW_RAW_SECRETS=true) should remove sensitive headers."""
-    with patch.dict("os.environ", {"ELSPETH_ALLOW_RAW_SECRETS": "true"}):
-        respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
+    monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
 
-        http_client.post(
-            "https://api.example.com/secure",
-            json={},
-            headers={"Authorization": "Bearer dev-token", "X-Custom": "value"},
-        )
+    respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
 
-        # Verify sensitive header removed, non-sensitive kept
-        call_args = mock_recorder.record_call.call_args[1]
-        headers = call_args["request_data"]["headers"]
+    http_client.post(
+        "https://api.example.com/secure",
+        json={},
+        headers={"Authorization": "Bearer dev-token", "X-Custom": "value"},
+    )
 
-        assert "Authorization" not in headers
-        assert headers["X-Custom"] == "value"
+    # Verify sensitive header removed, non-sensitive kept
+    call_args = mock_recorder.record_call.call_args[1]
+    headers = call_args["request_data"]["headers"]
+
+    assert "Authorization" not in headers
+    assert headers["X-Custom"] == "value"
 
 
 def test_sensitive_header_detection(http_client):

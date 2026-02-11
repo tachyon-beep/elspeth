@@ -4,16 +4,13 @@
 Provides structured span creation for pipeline execution.
 Falls back to no-op mode when no tracer is configured.
 
-Span Hierarchy:
-    run:{run_id}
-    ├── source:{source_name}
-    │   └── load
-    ├── row:{row_id}
-    │   ├── transform:{transform_name}
-    │   ├── gate:{gate_name}
-    │   └── sink:{sink_name}
-    └── aggregation:{agg_name}
-        └── flush
+Span Hierarchy (span names are static; IDs are set as attributes):
+    run                          [run.id=<run_id>]
+    ├── source:<source_name>
+    ├── row                      [row.id=<row_id>, token.id=<token_id>]
+    │   ├── transform:<name>
+    │   └── sink:<name>
+    └── aggregation:<name>
 """
 
 from collections.abc import Iterator, Sequence
