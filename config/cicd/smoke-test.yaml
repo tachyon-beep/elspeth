@@ -17,8 +17,7 @@
 # Source: null source yields no rows (instant completion)
 source:
   plugin: "null"
-  options:
-    on_success: output
+  on_success: output
 
 # Sink: JSON output for verification
 sinks:

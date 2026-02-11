@@ -180,6 +180,8 @@ class AuditedHTTPClient(AuditedClientBase):
         {
             "auth",
             "authkey",
+            "authtoken",
+            "accesstoken",
             "apikey",
             "authorization",
             "key",

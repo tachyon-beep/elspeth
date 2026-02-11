@@ -428,6 +428,9 @@ def test_sensitive_header_detection(http_client):
         "X-Password-Hash",  # segment "password"
         "X-Credential-Id",  # segment "credential"
         "XAuthorization",  # compact x+authorization form
+        # Concatenated forms without delimiters (regression: P2 header filtering)
+        "X-AuthToken",  # "authtoken" compound word
+        "X-AccessToken",  # "accesstoken" compound word
     ]
 
     for header in sensitive_word:
