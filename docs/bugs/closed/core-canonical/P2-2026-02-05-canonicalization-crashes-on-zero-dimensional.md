@@ -1,6 +1,6 @@
 # Bug Report: Canonicalization Crashes on Zero‑Dimensional NumPy Arrays
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -103,3 +103,27 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` (Canonical JSON section)
+
+## Verification Status
+
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution (2026-02-12)
+
+**Fixed by:** Codex (GPT-5)
+
+**Changes:**
+- `src/elspeth/core/canonical.py`: Added explicit `np.ndarray` `ndim == 0` handling so scalar arrays normalize as scalar primitives via `obj.item()`.
+- `tests/unit/core/test_canonical.py`: Added regression coverage for `_normalize_value(np.array(...))`, `canonical_json({"value": np.array(5)})`, and `stable_hash` parity against scalar values.
+
+**Verification:**
+- Repro before fix: `canonical_json(np.array(5))` raised `TypeError: 'int' object is not iterable`.
+- Post-fix tests:
+  - `uv run pytest -q tests/unit/core/test_canonical.py`
+  - `uv run pytest -q tests/property/canonical/test_nan_rejection.py tests/property/canonical/test_hash_determinism.py`
+  - `uv run ruff check src/elspeth/core/canonical.py tests/unit/core/test_canonical.py`
+  - `UV_CACHE_DIR=.uv-cache uv run --with mypy mypy src/elspeth/core/canonical.py`
