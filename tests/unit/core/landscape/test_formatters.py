@@ -351,8 +351,8 @@ class TestJSONFormatter:
 
         assert isinstance(output, str)
 
-    def test_json_formatter_handles_datetime_via_default(self) -> None:
-        """JSON formatter should handle datetime via default=str."""
+    def test_json_formatter_serializes_datetime_to_iso(self) -> None:
+        """JSON formatter serializes datetime via serialize_datetime()."""
         formatter = JSONFormatter()
 
         record = {
@@ -362,7 +362,31 @@ class TestJSONFormatter:
         output = formatter.format(record)
 
         parsed = json.loads(output)
-        assert "2024-01-15" in parsed["timestamp"]
+        assert parsed["timestamp"] == "2024-01-15T10:30:00+00:00"
+
+    def test_json_formatter_rejects_nan(self) -> None:
+        """JSON formatter must reject NaN values for audit integrity."""
+        formatter = JSONFormatter()
+
+        with pytest.raises(ValueError, match="NaN"):
+            formatter.format({"latency_ms": float("nan")})
+
+    def test_json_formatter_rejects_infinity(self) -> None:
+        """JSON formatter must reject Infinity values for audit integrity."""
+        formatter = JSONFormatter()
+
+        with pytest.raises(ValueError, match="Infinity"):
+            formatter.format({"latency_ms": float("inf")})
+
+    def test_json_formatter_rejects_unknown_object_types(self) -> None:
+        """Unknown objects should fail instead of being silently coerced."""
+        formatter = JSONFormatter()
+
+        class UnknownType:
+            pass
+
+        with pytest.raises(TypeError):
+            formatter.format({"obj": UnknownType()})
 
     def test_json_formatter_handles_lists(self) -> None:
         """JSON formatter should preserve lists."""

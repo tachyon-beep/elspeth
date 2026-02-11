@@ -104,7 +104,8 @@ class JSONFormatter:
 
     def format(self, record: dict[str, Any]) -> str:
         """Format as JSON line."""
-        return json.dumps(record, default=str)
+        normalized = serialize_datetime(record)
+        return json.dumps(normalized, allow_nan=False)
 
 
 class LineageTextFormatter:
