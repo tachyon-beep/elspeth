@@ -428,6 +428,30 @@ class TestCSVSourceQuarantineYielding:
         # Third row valid (line 5 in file)
         assert not results[2].is_quarantined
 
+    def test_skip_rows_respects_multiline_csv_record_boundaries(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """skip_rows should skip full CSV records, not raw lines."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "multiline_skip.csv"
+        # Record 1 spans two physical lines due to quoted newline and should be skipped atomically.
+        csv_file.write_text('comment,"line1\nline2"\nheader1,header2\n1,2\n')
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 1,
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        # Header remains aligned after record-based skip; only one valid data row is produced.
+        assert len(results) == 1
+        assert results[0].is_quarantined is False
+        assert results[0].row == {"header1": "1", "header2": "2"}
+
     def test_empty_rows_are_skipped(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Empty rows (blank lines) should be skipped without generating errors.
 

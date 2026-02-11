@@ -131,12 +131,12 @@ class CSVSource(BaseSource):
         # CRITICAL: newline='' required for proper embedded newline handling
         # See: https://docs.python.org/3/library/csv.html
         with open(self._path, encoding=self._encoding, newline="") as f:
-            # Skip header rows as configured
-            for _ in range(self._skip_rows):
-                next(f, None)
-
             # Create csv.reader on file handle for multiline field support
             reader = csv.reader(f, delimiter=self._delimiter)
+
+            # Skip CSV records as configured (not raw lines), preserving multiline alignment
+            for _ in range(self._skip_rows):
+                next(reader, None)
 
             # Determine headers based on config
             if self._columns is not None:
@@ -182,7 +182,7 @@ class CSVSource(BaseSource):
                     # CSV parsing error (bad quoting, unmatched quotes, etc.)
                     # Quarantine this row instead of crashing the run
                     row_num += 1
-                    physical_line = reader.line_num + self._skip_rows
+                    physical_line = reader.line_num
                     raw_row = {
                         "__raw_line__": "(unparseable due to csv.Error)",
                         "__line_number__": physical_line,
@@ -211,9 +211,8 @@ class CSVSource(BaseSource):
                     continue
 
                 row_num += 1
-                # reader.line_num tracks physical line position (including multiline fields)
-                # Add skip_rows to get true file position (reader counts from 1 after skipped lines)
-                physical_line = reader.line_num + self._skip_rows
+                # reader.line_num tracks physical file line position (including multiline fields)
+                physical_line = reader.line_num
 
                 # Column count validation - quarantine malformed rows in both header and headerless modes
                 # Per Three-Tier Trust Model: source data is Tier 3 (zero trust), quarantine bad rows

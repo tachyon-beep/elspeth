@@ -1,12 +1,14 @@
 # Bug Report: skip_rows Uses Line-Based Skipping and Breaks Multiline CSV Records
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - `CSVSource` now skips records through `csv.reader` (`next(reader, None)`) rather than raw file lines.
+  - Line-number accounting now uses `reader.line_num` directly, preserving accurate physical line reporting.
+  - Added regression coverage for `skip_rows` with multiline quoted skipped records.
 
 
 ## Summary
@@ -89,10 +91,24 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/plugins/sources/test_csv_source.py -k skip_rows_multiline`
+- Suggested tests to run: `.venv/bin/python -m pytest tests/unit/plugins/sources/test_csv_source.py -k skip_rows`
 - New tests required: yes, multiline skip_rows regression test.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## Verification (2026-02-11)
+
+- Reproduced prior failure:
+  - With `skip_rows: 1` and first record `comment,"line1\nline2"`, parsing became misaligned and quarantined downstream rows due to header corruption.
+- Post-fix behavior:
+  - Record-based skip preserves multiline record boundaries; header/data parsing remains aligned.
+  - Regression test confirms one valid output row (`{"header1": "1", "header2": "2"}`) for the multiline skip scenario.
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/sources/test_csv_source.py -k "skip_rows"`
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/sources/test_csv_source.py`
+  - `.venv/bin/ruff check src/elspeth/plugins/sources/csv_source.py tests/unit/plugins/sources/test_csv_source.py`
