@@ -97,7 +97,7 @@ class WiredTransform:
     def __post_init__(self) -> None:
         """Ensure wiring metadata matches the instantiated plugin."""
         if self.plugin.name != self.settings.plugin:
-            raise ValueError(
+            raise GraphValidationError(
                 f"WiredTransform mismatch: settings.plugin='{self.settings.plugin}' but plugin instance name='{self.plugin.name}'."
             )
 
