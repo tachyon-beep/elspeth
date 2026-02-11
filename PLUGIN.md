@@ -53,6 +53,11 @@ from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 
+class DoubleValueConfig(TransformDataConfig):
+    """Config with custom field."""
+    field: str = "value"
+
+
 class DoubleValueTransform(BaseTransform):
     """Double a numeric field value."""
 
@@ -60,9 +65,9 @@ class DoubleValueTransform(BaseTransform):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = TransformDataConfig.from_dict(config)
-        self._field = config.get("field", "value")
-        self._on_error = cfg.on_error
+        cfg = DoubleValueConfig.from_dict(config)
+        self._field = cfg.field
+        self.on_error = cfg.on_error
 
         assert cfg.schema_config is not None
         schema = create_schema_from_config(
@@ -104,11 +109,14 @@ class ElspethBuiltinTransforms:
 
 ```yaml
 transforms:
-  - plugin: double_value
-    options:
-      schema:
-        fields: dynamic
-      field: price
+- name: double_price
+  plugin: double_value
+  input: validated           # Explicit input connection
+  on_success: doubled        # Named output connection
+  options:
+    schema:
+      fields: dynamic
+    field: price
 ```
 
 **Test it:**
@@ -187,7 +195,7 @@ class MyTransform(BaseTransform):
         cfg = MyTransformConfig.from_dict(config)
         self._multiplier = cfg.multiplier
         self._target_field = cfg.target_field
-        self._on_error = cfg.on_error
+        self.on_error = cfg.on_error
 
         assert cfg.schema_config is not None
         schema = create_schema_from_config(
@@ -227,6 +235,8 @@ class MyTransform(BaseTransform):
 | `name` | `str` | Unique plugin identifier (class attribute) |
 | `input_schema` | `type[PluginSchema]` | Expected input row schema |
 | `output_schema` | `type[PluginSchema]` | Produced output row schema |
+| `on_error` | `str \| None` | Sink name for error routing (plain attribute, set in `__init__`) |
+| `on_success` | `str \| None` | Output connection name (plain attribute, set in `__init__`) |
 | `determinism` | `Determinism` | Reproducibility level (default: `DETERMINISTIC`) |
 | `plugin_version` | `str` | Plugin version for audit trail (default: `"0.0.0"`) |
 
@@ -276,11 +286,13 @@ class BatchStatsTransform(BaseTransform):
 
 ```yaml
 aggregations:
-  - name: compute_stats
-    plugin: batch_stats
-    trigger:
-      count: 100  # Process every 100 rows
-    output_mode: single  # N inputs → 1 output
+- name: compute_stats
+  plugin: batch_stats
+  input: processed           # Explicit input connection
+  on_success: stats_out      # Named output connection
+  trigger:
+    count: 100  # Process every 100 rows
+  output_mode: single  # N inputs → 1 output
 ```
 
 </details>
@@ -696,6 +708,7 @@ class MyTransform(BaseTransform):
 
 - [ ] Has `name` class attribute
 - [ ] Has required schema attributes (`input_schema`, `output_schema`)
+- [ ] `on_error` and `on_success` set as plain attributes in `__init__`
 - [ ] Config extends correct base class (`TransformDataConfig`, `SourceDataConfig`)
 - [ ] Schema created with correct `allow_coercion`
 - [ ] Registered in `hookimpl.py`

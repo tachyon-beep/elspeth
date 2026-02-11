@@ -1,9 +1,9 @@
 COMPLETE REQUIREMENTS LIST - ELSPETH Architecture
 =================================================
 
-**Last Updated:** 2026-01-22 (Comprehensive 10-Agent Post-P0-Fix Update)
-**Audit Method:** 10 parallel agents reviewed all sections after P0 payload storage fix
-**Previous Audit:** 2026-01-21
+**Last Updated:** 2026-02-12 (RC-2.5 synchronization update)
+**Audit Method:** 10 parallel agents reviewed all sections after P0 payload storage fix (2026-01-22); RC-2.5 additions appended 2026-02-12
+**Previous Audit:** 2026-01-22
 
 Legend:
 - ✅ IMPLEMENTED - Code exists and matches requirement
@@ -204,7 +204,7 @@ Legend:
 | RTE-001 | RoutingKind: CONTINUE, ROUTE_TO_SINK, FORK_TO_PATHS | plugin-protocol.md:667-674 | ✅ IMPLEMENTED | `enums.py:115-123` |
 | RTE-002 | Gate routing via config-driven expressions | plugin-protocol.md:654-683 | ✅ IMPLEMENTED | `expression_parser.py` + `executors.py` |
 | RTE-003 | Fork creates child tokens with parent lineage | plugin-protocol.md:764-792 | ✅ IMPLEMENTED | `tokens.py:88-140`, `recorder.py:785-840` |
-| RTE-004 | Route resolution map for edge → destination | plugin-protocol.md:682-683 | ✅ IMPLEMENTED | `dag.py:get_route_resolution_map()` |
+| RTE-004 | Route resolution map for edge → destination | plugin-protocol.md:682-683 | ✅ IMPLEMENTED | `dag/get_route_resolution_map()` |
 | RTE-005 | Routing audit: condition, result, route, destination | plugin-protocol.md:724-726 | ✅ IMPLEMENTED | `recorder.py:1056-1162` |
 
 ### 4.1 Gate Configuration Validation (🆕)
@@ -223,7 +223,7 @@ Legend:
 
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
-| SOP-001 | Gate evaluates condition expression on row data | plugin-protocol.md:654-658 | ✅ IMPLEMENTED | `executors.py:463-650` |
+| SOP-001 | Gate evaluates condition expression on row data | plugin-protocol.md:654-658 | ✅ IMPLEMENTED | `executors/463-650` |
 | SOP-002 | Gate `routes` map labels to destinations | plugin-protocol.md:668-670 | ✅ IMPLEMENTED | `config.py:161-292` |
 | SOP-003 | Gate destinations: `continue` or sink_name | plugin-protocol.md:669-670 | ✅ IMPLEMENTED | `config.py:227-230` |
 | SOP-004 | Expression parser uses restricted syntax (NOT eval) | plugin-protocol.md:700-719 | ✅ IMPLEMENTED | `expression_parser.py:1-465` - AST-based |
@@ -256,7 +256,7 @@ Legend:
 
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
-| SOP-019 | Aggregation collects tokens until trigger fires | plugin-protocol.md:879-881 | ✅ IMPLEMENTED | `executors.py:746-793` |
+| SOP-019 | Aggregation collects tokens until trigger fires | plugin-protocol.md:879-881 | ✅ IMPLEMENTED | `executors/746-793` |
 | SOP-020 | Trigger: `count` - fire after N tokens | plugin-protocol.md:900 | ✅ IMPLEMENTED | `triggers.py:95-98` |
 | SOP-021 | Trigger: `timeout` - fire after duration | plugin-protocol.md:901 | ✅ IMPLEMENTED | `triggers.py:100-103` |
 | SOP-022 | Trigger: `condition` - fire on matching row | plugin-protocol.md:902 | ✅ IMPLEMENTED | `triggers.py:106-116` |
@@ -272,8 +272,8 @@ Legend:
 | SOP-027 | 🆕 Token expansion for 1→N deaggregation | Phase 4 | ✅ IMPLEMENTED | `tokens.py:209-246`, `recorder.py:887-956` |
 | SOP-028 | 🆕 Coalesce timeout recovery semantics | Phase 4 | ✅ IMPLEMENTED | `coalesce_executor.py:303-453` |
 | SOP-029 | 🆕 Coalesce end-of-source flush | Phase 4 | ✅ IMPLEMENTED | `coalesce_executor.py:380-420` |
-| SOP-030 | 🆕 Transform error routing with quarantine | Phase 4 | ✅ IMPLEMENTED | `executors.py:236-275` |
-| SOP-031 | 🆕 Aggregation checkpoint/restore | Phase 5 | ✅ IMPLEMENTED | `executors.py:1034-1085` |
+| SOP-030 | 🆕 Transform error routing with quarantine | Phase 4 | ✅ IMPLEMENTED | `executors/236-275` |
+| SOP-031 | 🆕 Aggregation checkpoint/restore | Phase 5 | ✅ IMPLEMENTED | `executors/1034-1085` |
 | SOP-032 | 🆕 Gate configuration validation at startup | Phase 4 | ✅ IMPLEMENTED | `config.py:161-292` validators |
 
 ---
@@ -282,10 +282,10 @@ Legend:
 
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
-| DAG-001 | Pipelines compile to DAG | architecture.md:166-184 | ✅ IMPLEMENTED | `dag.py:228-413` |
-| DAG-002 | DAG validation using NetworkX | CLAUDE.md | ✅ IMPLEMENTED | `dag.py:40-49` wraps `MultiDiGraph` |
-| DAG-003 | Acyclicity check on graph | architecture.md:793 | ✅ IMPLEMENTED | `dag.py:111-134` - `nx.is_directed_acyclic_graph()` |
-| DAG-004 | Topological sort for execution | architecture.md:793 | ✅ IMPLEMENTED | `dag.py:153-165` - `nx.topological_sort()` |
+| DAG-001 | Pipelines compile to DAG | architecture.md:166-184 | ✅ IMPLEMENTED | `dag/228-413` |
+| DAG-002 | DAG validation using NetworkX | CLAUDE.md | ✅ IMPLEMENTED | `dag/40-49` wraps `MultiDiGraph` |
+| DAG-003 | Acyclicity check on graph | architecture.md:793 | ✅ IMPLEMENTED | `dag/111-134` - `nx.is_directed_acyclic_graph()` |
+| DAG-004 | Topological sort for execution | architecture.md:793 | ✅ IMPLEMENTED | `dag/153-165` - `nx.topological_sort()` |
 | DAG-005 | Linear pipelines as degenerate DAG | architecture.md:228-241 | ✅ IMPLEMENTED | Linear flow naturally degenerates |
 
 ---
@@ -503,7 +503,7 @@ Legend:
 | PLG-007 | External Data (Source input): Zero trust, coercion OK | plugin-protocol.md:75 | ✅ IMPLEMENTED | Sources use `allow_coercion=True` |
 | PLG-008 | Pipeline Data (Post-source): Elevated trust, no coerce | plugin-protocol.md:76 | ✅ IMPLEMENTED | Transforms use `allow_coercion=False` |
 | PLG-009 | Our Code (Plugin internals): Full trust, let crash | plugin-protocol.md:77 | ✅ IMPLEMENTED | No defensive patterns |
-| PLG-010 | Type-safe ≠ operation-safe (wrap VALUE operations) | plugin-protocol.md:79-91 | ✅ IMPLEMENTED | `executors.py:224-249` |
+| PLG-010 | Type-safe ≠ operation-safe (wrap VALUE operations) | plugin-protocol.md:79-91 | ✅ IMPLEMENTED | `executors/224-249` |
 | PLG-011 | Sources MAY coerce types; Transforms/Sinks MUST NOT | plugin-protocol.md:111-119 | ✅ IMPLEMENTED | Schema factory parameter |
 | PLG-012 | Input/output schema declaration on plugins | plugin-protocol.md:200-207 | ✅ IMPLEMENTED | `base.py:44-45,78-79` |
 | PLG-013 | Engine validates schema compatibility at construction | plugin-protocol.md:1024-1029 | ✅ IMPLEMENTED | `schema_validator.py` |
@@ -526,10 +526,10 @@ Legend:
 |----------------|-------------|--------|--------|----------|
 | ENG-001 | RowProcessor with span lifecycle | architecture.md:950 | ✅ IMPLEMENTED | `processor.py:50-530` |
 | ENG-002 | Retry with attempt tracking (tenacity) | architecture.md:951 | ✅ IMPLEMENTED | `retry.py:25-31,128-182` |
-| ENG-003 | Artifact pipeline (topological sort) | architecture.md:952 | ✅ IMPLEMENTED | `dag.py` + `executors.py:938-1050` |
+| ENG-003 | Artifact pipeline (topological sort) | architecture.md:952 | ✅ IMPLEMENTED | `dag.py` + `executors/938-1050` |
 | ENG-004 | Standard orchestrator | architecture.md:953 | ✅ IMPLEMENTED | `orchestrator.py:88-816` |
 | ENG-005 | OpenTelemetry span emission | architecture.md:954 | ✅ IMPLEMENTED | `spans.py:47-243` |
-| ENG-006 | Aggregation accept/trigger/flush lifecycle | subsystems:387-391 | ✅ IMPLEMENTED | `executors.py:665-935` |
+| ENG-006 | Aggregation accept/trigger/flush lifecycle | subsystems:387-391 | ✅ IMPLEMENTED | `executors/665-935` |
 | ENG-007 | Aggregation crash recovery via query | subsystems:476-495 | ✅ IMPLEMENTED | `processor.py:137-139` |
 
 ### 14.1 Engine - Batch Processing Architecture (🆕)
@@ -602,11 +602,11 @@ Legend:
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
 | RTY-001 | `RetryConfig.from_settings()` maps Pydantic → internal | WP-15 | ✅ IMPLEMENTED | `retry.py:86-101` |
-| RTY-002 | `execute_transform()` accepts attempt parameter | WP-15 | ✅ IMPLEMENTED | `executors.py:116-124` |
+| RTY-002 | `execute_transform()` accepts attempt parameter | WP-15 | ✅ IMPLEMENTED | `executors/116-124` |
 | RTY-003 | RowProcessor uses RetryManager for transform exec | WP-15 | ✅ IMPLEMENTED | `processor.py:131-190` |
 | RTY-004 | Transient exceptions retried; programming errors not | WP-15 | ✅ IMPLEMENTED | `processor.py:426-429` |
 | RTY-005 | MaxRetriesExceeded returns RowOutcome.FAILED | WP-15 | ✅ IMPLEMENTED | `processor.py:700-710` |
-| RTY-006 | Each attempt creates separate node_state record | WP-15 | ✅ IMPLEMENTED | `executors.py:160-166` |
+| RTY-006 | Each attempt creates separate node_state record | WP-15 | ✅ IMPLEMENTED | `executors/160-166` |
 | RTY-007 | Orchestrator creates RetryManager from RetrySettings | WP-15 | ✅ IMPLEMENTED | `orchestrator.py:538-554` |
 
 ---
@@ -626,6 +626,66 @@ Legend:
 | AUD-009 | 🆕 Source row payloads persisted before processing | Bug analysis | ✅ FIXED | Closed: P0-2026-01-22-source-row-payloads-never-persisted.md (commit 3399faf) |
 | AUD-010 | 🆕 Fork destinations validated at startup | Bug analysis | ✅ FIXED | Closed: P1-2026-01-20-fork-to-paths-empty-destinations-allowed.md |
 | AUD-011 | 🆕 Schema compatibility checks handle optional/Any types | Bug analysis | ✅ FIXED | Closed: P1-2026-01-20-schema-compatibility-check-fails-on-optional-and-any.md |
+
+---
+
+## 20. DECLARATIVE DAG WIRING REQUIREMENTS (🆕 RC-2.5)
+
+| Requirement ID | Requirement | Source | Status | Evidence |
+|----------------|-------------|--------|--------|----------|
+| DAG-006 | 🆕 Explicit `on_success` connection naming for sources | ADR-005 | ✅ IMPLEMENTED | `config.py` — `SourceSettings.on_success` |
+| DAG-007 | 🆕 Explicit `input` connection declaration for transforms | ADR-005 | ✅ IMPLEMENTED | `config.py` — `TransformSettings.input` |
+| DAG-008 | 🆕 Explicit `on_success` output connection for transforms | ADR-005 | ✅ IMPLEMENTED | `config.py` — `TransformSettings.on_success` |
+| DAG-009 | 🆕 Gate `input` connection declaration | ADR-005 | ✅ IMPLEMENTED | `config.py` — `GateSettings.input` |
+| DAG-010 | 🆕 Connection name validation (character classes) | ADR-005 | ✅ IMPLEMENTED | `config.py` validators, `test_connection_name_validation.py` |
+| DAG-011 | 🆕 Reserved connection name protection | ADR-005 | ✅ IMPLEMENTED | `config.py` — reserved names like `continue` prevented |
+| DAG-012 | 🆕 DAGNavigator for edge traversal and next-node resolution | Refactoring | ✅ IMPLEMENTED | `engine/dag_navigator.py` |
+| DAG-013 | 🆕 Node-ID based work queue (replaces step index) | ADR-005 | ✅ IMPLEMENTED | `processor.py` — `WorkItem.node_id` |
+| DAG-014 | 🆕 Gate route fan-out to multiple processing connections | ADR-005 | ✅ IMPLEMENTED | `dag/builder.py` |
+| DAG-015 | 🆕 Gate-to-gate route jump resolution | Engine | ✅ IMPLEMENTED | `processor.py`, `dag_navigator.py` |
+
+---
+
+## 21. SQLCIPHER ENCRYPTION REQUIREMENTS (🆕 RC-2.5)
+
+| Requirement ID | Requirement | Source | Status | Evidence |
+|----------------|-------------|--------|--------|----------|
+| SEC-001 | 🆕 SQLCipher encryption-at-rest for audit database | Security | ✅ IMPLEMENTED | `core/landscape/database.py` |
+| SEC-002 | 🆕 `audit.passphrase` config option | Security | ✅ IMPLEMENTED | `core/config.py` — `LandscapeSettings.passphrase` |
+| SEC-003 | 🆕 `ELSPETH_AUDIT_PASSPHRASE` environment variable | Security | ✅ IMPLEMENTED | `cli.py`, `cli_helpers.py` |
+| SEC-004 | 🆕 SQLCipher URI option preservation | Security | ✅ IMPLEMENTED | `database.py` — URI parsing with passphrase guard |
+| SEC-005 | 🆕 MCP passphrase forwarding for encrypted databases | Security | ✅ IMPLEMENTED | `mcp/__init__.py` entrypoint |
+| SEC-006 | 🆕 Backend validation (reject sqlcipher without pysqlcipher3) | Security | ✅ IMPLEMENTED | `database.py` |
+
+---
+
+## 22. CHAOS TESTING REQUIREMENTS (🆕 RC-2.5)
+
+| Requirement ID | Requirement | Source | Status | Evidence |
+|----------------|-------------|--------|--------|----------|
+| CHT-001 | 🆕 ChaosWeb server for web_scrape testing | Testing | ✅ IMPLEMENTED | `testing/chaosweb/server.py` |
+| CHT-002 | 🆕 ChaosWeb HTTP error injection (4xx, 5xx, timeouts) | Testing | ✅ IMPLEMENTED | `testing/chaosweb/error_injector.py` |
+| CHT-003 | 🆕 ChaosWeb content generation with configurable HTML | Testing | ✅ IMPLEMENTED | `testing/chaosweb/content_generator.py` |
+| CHT-004 | 🆕 ChaosWeb preset profiles (gentle, realistic, stress) | Testing | ✅ IMPLEMENTED | `testing/chaosweb/presets/` (5 presets) |
+| CHT-005 | 🆕 ChaosWeb metrics recording | Testing | ✅ IMPLEMENTED | `testing/chaosweb/metrics.py` |
+| CHT-006 | 🆕 ChaosWeb CLI (`chaosweb serve`) | Testing | ✅ IMPLEMENTED | `testing/chaosweb/cli.py` |
+| CHT-007 | 🆕 ChaosWeb pytest fixtures | Testing | ✅ IMPLEMENTED | `testing/chaosweb/__init__.py`, `tests/fixtures/chaosweb.py` |
+| CHT-008 | 🆕 ChaosEngine shared core via composition | Refactoring | ✅ IMPLEMENTED | `testing/chaosengine/` (7 modules) |
+
+---
+
+## 23. REFACTORING REQUIREMENTS (🆕 RC-2.5)
+
+| Requirement ID | Requirement | Source | Status | Evidence |
+|----------------|-------------|--------|--------|----------|
+| REF-001 | 🆕 executors.py split into one-file-per-executor package | Code quality | ✅ IMPLEMENTED | `engine/executors/` (transform, gate, sink, aggregation, types) |
+| REF-002 | 🆕 dag.py split into dag/ package | Code quality | ✅ IMPLEMENTED | `core/dag/` (builder, graph, models) |
+| REF-003 | 🆕 MCP server.py split into domain modules | Code quality | ✅ IMPLEMENTED | `mcp/analyzers/` (contracts, diagnostics, queries, reports) |
+| REF-004 | 🆕 Dead protocol removal (GateProtocol, CoalesceProtocol) | Cleanup | ✅ IMPLEMENTED | Gate plugins fully removed from codebase |
+| REF-005 | 🆕 BaseMultiQueryTransform deduplication | Code quality | ✅ IMPLEMENTED | `plugins/llm/base_multi_query.py` |
+| REF-006 | 🆕 on_error/on_success as plain attributes (not properties) | Simplification | ✅ IMPLEMENTED | `plugins/base.py`, all transforms |
+| REF-007 | 🆕 Tier model allowlist split into per-module files | CI/CD | ✅ IMPLEMENTED | `config/cicd/enforce_tier_model/` (10 YAML files) |
+| REF-008 | 🆕 CLI _orchestrator_context extraction | Code quality | ✅ IMPLEMENTED | `cli.py` — shared context manager for run/resume |
 
 ---
 
@@ -656,6 +716,12 @@ Legend:
 ### Phase 6: LLM & External Calls ✅ SIGNIFICANTLY COMPLETE
 - LLM Transforms: 8/8 NEW (100%)
 - External Calls: 7/10 (70%)
+
+### RC-2.5: Routing, Security, Testing ✅ COMPLETE
+- Declarative DAG Wiring: 10/10 NEW (100%)
+- SQLCipher Encryption: 6/6 NEW (100%)
+- Chaos Testing: 8/8 NEW (100%)
+- Refactoring: 8/8 NEW (100%)
 
 ---
 
@@ -712,5 +778,6 @@ Minor issues, documentation, or tech debt. See `docs/bugs/open/P3-*.md` for full
 ---
 
 *Audit performed by 10 parallel agents on 2026-01-22 (comprehensive post-P0-fix update)*
-*Total requirements: 323 | Implemented: 281 (87%) | Partial: 28 (9%) | Not Implemented: 14 (4%)*
-*New requirements discovered: 77 (including P0 fix analysis, new transforms, and governance features)*
+*RC-2.5 additions appended 2026-02-12 (declarative DAG wiring, SQLCipher, ChaosWeb, refactoring)*
+*Total requirements: 365 | Implemented: 323 (88%) | Partial: 28 (8%) | Not Implemented: 14 (4%)*
+*New requirements in RC-2.5: 42 (DAG wiring, SQLCipher, chaos testing, refactoring)*

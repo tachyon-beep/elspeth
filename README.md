@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-![Status: RC-2](https://img.shields.io/badge/status-RC--2-yellow.svg)
+![Status: RC-2.5](https://img.shields.io/badge/status-RC--2.5-yellow.svg)
 
 Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every decision traceable to its source.
 
@@ -21,7 +21,10 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
   - [Running Pipelines](#running-pipelines)
   - [Explaining Decisions](#explaining-decisions)
   - [Audit Trail Export](#audit-trail-export)
-- [ChaosLLM Testing](#chaosllm-testing)
+- [Chaos Testing](#chaos-testing)
+  - [ChaosLLM](#chaosllm)
+  - [ChaosWeb](#chaosweb)
+- [Landscape MCP Server](#landscape-mcp-server)
 - [Configuration](#configuration)
 - [Docker](#docker)
 - [Architecture](#architecture)
@@ -36,12 +39,15 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
 
 - **Complete Audit Trail** - Every transform, every routing decision, every external call recorded with payload storage
 - **Explain Any Decision** - `elspeth explain --run latest --row 42 --database <path/to/audit.db>` launches TUI to explore why any row reached its destination
-- **Plugin Architecture** - Extensible sources, transforms, gates, and sinks via pluggy with dynamic discovery
+- **Declarative DAG Wiring** - Every edge is explicitly named and validated at construction time — no implicit routing
 - **Conditional Routing** - Gates route rows to different sinks based on config-driven expressions (AST-parsed, no eval)
+- **Plugin Architecture** - Extensible sources, transforms, and sinks via pluggy with dynamic discovery
+- **Encryption at Rest** - SQLCipher encryption for the Landscape audit database via passphrase or environment variable
 - **Resilient Execution** - Checkpointing for crash recovery, retry logic with backoff, rate limiting, payload retention policies
 - **Signed Exports** - HMAC-signed audit exports for legal-grade integrity verification with manifest hash chains
 - **LLM Integration** - Azure OpenAI and OpenRouter support with pooled execution, batch processing, and multi-query
-- **ChaosLLM Testing** - Fake LLM server for load/stress testing with error injection, latency simulation, and MCP analysis tools
+- **Landscape MCP Server** - Read-only MCP analysis server for debugging pipeline failures against the audit database
+- **Chaos Testing** - ChaosLLM (fake LLM) and ChaosWeb (fake web server) for load/stress testing with error injection, latency simulation, and metrics
 
 ---
 
@@ -85,16 +91,19 @@ SENSE (Sources)  →  DECIDE (Transforms/Gates)  →  ACT (Sinks)
 | **Decide** | Transform and classify rows | LLM query, ML inference, rules engine, threshold gate |
 | **Act** | Route to appropriate outputs | File output, database insert, alert webhook, review queue |
 
-**Gates** are special transforms that route rows to different sinks based on classification:
+**Gates** route rows to different sinks based on config-driven expressions:
 
 ```yaml
 gates:
-  - name: safety_check
-    condition: "row['risk_score'] > 0.8"
-    routes:
-      "true": high_risk_review
-      "false": continue
+- name: safety_check
+  input: processed          # Explicit input connection
+  condition: "row['risk_score'] > 0.8"
+  routes:
+    "true": high_risk_review  # Route to named sink
+    "false": approved         # Route to named sink
 ```
+
+Every edge in the DAG is explicitly declared — no implicit routing conventions.
 
 ---
 
@@ -218,19 +227,18 @@ landscape:
 
 ---
 
-## ChaosLLM Testing
+## Chaos Testing
 
-ChaosLLM is a fake LLM server for load and stress testing pipelines without real API calls.
+ELSPETH includes chaos testing servers for load and stress testing without real external calls.
 
-**Features:**
+### ChaosLLM
 
-- OpenAI + Azure OpenAI compatible chat completion endpoints
+Fake LLM server compatible with OpenAI and Azure OpenAI chat completion endpoints.
+
 - Error injection: rate limits (429), server errors (5xx), timeouts, disconnects, malformed JSON
 - Latency simulation and burst patterns for AIMD testing
 - Response modes: random, template (Jinja2), echo, preset bank (JSONL)
 - SQLite metrics with MCP analysis tools
-
-**Quick start:**
 
 ```bash
 # Start server with stress testing preset
@@ -239,9 +247,6 @@ chaosllm serve --preset=stress_aimd
 # Run on custom port with 20% rate limit errors
 chaosllm serve --port=9000 --rate-limit-pct=20
 
-# Generate structured JSON with templates
-chaosllm serve --response-mode=template
-
 # Analyze metrics
 chaosllm-mcp --database ./chaosllm-metrics.db
 ```
@@ -249,6 +254,51 @@ chaosllm-mcp --database ./chaosllm-metrics.db
 > **Note:** All `chaosllm` commands also work as `elspeth chaosllm`.
 
 See `docs/testing/chaosllm.md` for complete configuration and usage.
+
+### ChaosWeb
+
+Fake web server for testing the `web_scrape` transform with configurable failure modes.
+
+- HTTP error injection: 4xx/5xx codes, timeouts, connection resets, slow responses
+- Content generation: HTML pages with configurable structure and encoding
+- Preset profiles: `gentle`, `realistic`, `silent`, `stress_scraping`, `stress_extreme`
+- Request metrics and failure tracking
+
+```bash
+# Start with realistic failure profile
+chaosweb serve --preset=realistic
+
+# Custom error rate and port
+chaosweb serve --port=9001 --error-rate=30
+
+# Use in pipeline settings
+# source.options.base_url: http://localhost:9001
+```
+
+> **Note:** All `chaosweb` commands also work as `elspeth chaosweb`.
+
+See `examples/chaosweb/` for a complete pipeline example.
+
+---
+
+## Landscape MCP Server
+
+A read-only MCP server for debugging pipeline failures against the audit database:
+
+```bash
+# Auto-discover databases
+elspeth-mcp
+
+# Explicit database path
+elspeth-mcp --database sqlite:///./runs/audit.db
+
+# Encrypted database
+ELSPETH_AUDIT_PASSPHRASE="secret" elspeth-mcp --database sqlite:///./runs/audit.db
+```
+
+Key tools: `diagnose()` (what's broken?), `get_failure_context(run_id)` (deep dive), `explain_token(run_id, token_id)` (row lineage), `get_performance_report(run_id)` (bottlenecks).
+
+See `docs/guides/landscape-mcp-analysis.md` for the full tool reference.
 
 ---
 
@@ -260,37 +310,40 @@ See `docs/testing/chaosllm.md` for complete configuration and usage.
 # pipeline.yaml
 source:
   plugin: csv
+  on_success: validated       # Named output connection
   options:
     path: data/input.csv
     schema:
       fields: dynamic
+
+transforms:
+- name: enrich
+  plugin: field_mapper
+  input: validated            # Connects to source output
+  on_success: enriched        # Named output connection
+  options:
+    schema:
+      fields: dynamic
+    mapping:
+      old_name: new_name
+
+gates:
+- name: quality_gate
+  input: enriched             # Connects to transform output
+  condition: "row['score'] >= 0.7"
+  routes:
+    "true": results           # Route to named sink
+    "false": flagged          # Route to named sink
 
 sinks:
   results:
     plugin: csv
     options:
       path: output/results.csv
-
   flagged:
     plugin: csv
     options:
       path: output/flagged.csv
-
-transforms:
-  - plugin: field_mapper
-    options:
-      schema:
-        fields: dynamic
-      mappings:
-        old_name: new_name
-      on_success: results
-
-gates:
-  - name: quality_gate
-    condition: "row['score'] >= 0.7"
-    routes:
-      "true": continue
-      "false": flagged
 
 landscape:
   url: sqlite:///./audit.db
@@ -362,6 +415,9 @@ export OPENROUTER_API_KEY="sk-or-..."
 
 # Signed exports
 export ELSPETH_SIGNING_KEY="your-signing-key"
+
+# Audit database encryption (SQLCipher)
+export ELSPETH_AUDIT_PASSPHRASE="your-audit-passphrase"
 ```
 
 ELSPETH automatically loads `.env` files. Use `--no-dotenv` to skip in CI/CD.
@@ -479,17 +535,23 @@ See [Docker Guide](docs/guides/docker.md) for complete deployment documentation.
 ```text
 elspeth/
 ├── src/elspeth/
-│   ├── core/           # Config, canonical JSON, DAG, rate limiting, retention
-│   │   └── landscape/  # Audit trail (recorder, exporter, schema)
-│   ├── contracts/      # Type contracts, schemas, protocol definitions
-│   ├── engine/         # Orchestrator, processor, executors, retry
-│   ├── plugins/        # Sources, transforms, sinks, LLM integrations
-│   ├── tui/            # Terminal UI (Textual)
-│   └── cli.py          # Typer CLI
+│   ├── core/               # Config, canonical JSON, rate limiting, retention
+│   │   ├── dag/            # DAG construction, validation, graph models (NetworkX)
+│   │   └── landscape/      # Audit trail (recorder, exporter, schema, SQLCipher)
+│   ├── contracts/          # Type contracts, schemas, protocol definitions
+│   ├── engine/             # Orchestrator, processor, retry, DAG navigator
+│   │   └── executors/      # Transform, gate, sink, aggregation executors
+│   ├── plugins/            # Sources, transforms, sinks, LLM integrations
+│   ├── mcp/                # Landscape MCP analysis server
+│   ├── testing/            # ChaosLLM, ChaosWeb, ChaosEngine test servers
+│   ├── tui/                # Terminal UI (Textual)
+│   └── cli.py              # Typer CLI
 └── tests/
-    ├── unit/           # Unit tests
-    ├── integration/    # Integration tests
-    └── contracts/      # Protocol contract tests
+    ├── unit/               # Unit tests
+    ├── integration/        # Integration tests
+    ├── property/           # Hypothesis property-based tests
+    ├── e2e/                # End-to-end pipeline tests
+    └── performance/        # Benchmarks, stress, scalability tests
 ```
 
 | Component | Technology | Purpose |
@@ -498,8 +560,10 @@ elspeth/
 | TUI | Textual | Interactive lineage explorer |
 | Config | Dynaconf + Pydantic | Multi-source with env var expansion |
 | Plugins | pluggy | Dynamic discovery, extensible components |
-| Audit | SQLAlchemy Core | SQLite (dev) / PostgreSQL (prod) |
+| Audit | SQLAlchemy Core | SQLite/SQLCipher (dev) / PostgreSQL (prod) |
+| MCP | Landscape MCP Server | Read-only audit database analysis and debugging |
 | Canonical | RFC 8785 (JCS) | Deterministic JSON hashing |
+| DAG | NetworkX | Graph validation, topological sort, cycle detection |
 | LLM | Azure OpenAI + OpenRouter | Direct integration with pooled execution |
 | Templates | Jinja2 | Prompt templating and path generation |
 
@@ -514,9 +578,9 @@ See [Architecture Documentation](ARCHITECTURE.md) for C4 diagrams and detailed d
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Developers | C4 diagrams, data flows, component details |
 | [PLUGIN.md](PLUGIN.md) | Plugin Authors | How to create sources, transforms, sinks |
 | [docs/design/requirements.md](docs/design/requirements.md) | All | 323 verified requirements with implementation status |
-| [docs/design/adr/](docs/design/adr/) | Architects | Architecture Decision Records (why we built it this way) |
+| [docs/design/adr/](docs/design/adr/) | Architects | Architecture Decision Records (5 ADRs including sink routing and DAG wiring) |
 | [CLAUDE.md](CLAUDE.md) | AI Assistants | Project context, trust model, patterns |
-| [docs/guides/](docs/guides/) | All | Tutorials and how-to guides |
+| [docs/guides/](docs/guides/) | All | Tutorials, MCP analysis guide, data trust model |
 | [docs/reference/](docs/reference/) | Developers | Configuration reference |
 | [docs/runbooks/](docs/runbooks/) | Operators | Deployment and operations |
 

@@ -2,8 +2,8 @@
 
 C4 model documentation for the ELSPETH auditable pipeline framework.
 
-**Last Updated:** 2026-02-05 (synchronized with architecture analysis 2026-02-02)
-**Framework Version:** 0.1.0 (RC-2)
+**Last Updated:** 2026-02-12 (synchronized with RC-2.5 branch)
+**Framework Version:** 0.1.0 (RC-2.5)
 **Architecture Grade:** A- (Production Ready)
 
 ---
@@ -15,10 +15,10 @@ C4 model documentation for the ELSPETH auditable pipeline framework.
 | **What is ELSPETH?** | Auditable Sense/Decide/Act pipeline framework |
 | **Core subsystems?** | 20 subsystems across 5 architectural tiers |
 | **Data flow?** | Source → Transforms/Gates → Sinks (all recorded) |
-| **Audit storage?** | SQLite (dev) / PostgreSQL (prod) |
+| **Audit storage?** | SQLite/SQLCipher (dev) / PostgreSQL (prod) |
 | **Extension model?** | pluggy-based plugin system |
-| **Production LOC** | ~58,000 Python lines |
-| **Test LOC** | ~187,000 Python lines (3.2:1 ratio) |
+| **Production LOC** | ~74,000 Python lines |
+| **Test LOC** | ~201,000 Python lines (2.7:1 ratio) |
 | **Architecture Grade** | A- (Production Ready) |
 
 ---
@@ -120,7 +120,7 @@ C4Container
         Container(contracts, "Contracts", "Python", "Shared data types and protocols (leaf)")
     }
 
-    ContainerDb(auditdb, "Audit Database", "SQLite/PostgreSQL", "Stores complete audit trail")
+    ContainerDb(auditdb, "Audit Database", "SQLite/SQLCipher/PostgreSQL", "Stores complete audit trail")
     ContainerDb(payloads, "Payload Store", "Filesystem", "Large blob storage")
 
     Rel(operator, cli, "Executes pipelines")
@@ -151,21 +151,22 @@ C4Container
 
 | Container | Technology | LOC | Purpose |
 |-----------|------------|-----|---------|
-| **CLI** | Typer | ~2,150 | User commands: `run`, `explain`, `validate`, `resume` |
+| **CLI** | Typer | ~2,200 | User commands: `run`, `explain`, `validate`, `resume` |
 | **TUI** | Textual | ~800 | Interactive lineage exploration |
-| **MCP Server** | Python | ~400 | Read-only analysis API for Claude Code investigation |
-| **Engine** | Python | ~9,500 | Run lifecycle, row processing, DAG execution |
-| **Plugins** | pluggy | ~8,000 | Extensible sources, transforms, gates, sinks, clients |
-| **Landscape** | SQLAlchemy Core | ~4,500 | Audit recording and querying (47+ methods) |
+| **MCP Server** | Python | ~3,600 | Read-only analysis API with domain-specific analyzers |
+| **Engine** | Python | ~12,000 | Run lifecycle, row processing, DAG execution |
+| **Plugins** | pluggy | ~20,600 | Extensible sources, transforms, sinks, LLM, clients |
+| **Landscape** | SQLAlchemy Core | ~7,000 | Audit recording and querying, SQLCipher support |
+| **Testing** | Python | ~9,500 | ChaosLLM, ChaosWeb, ChaosEngine test servers |
 | **Telemetry** | Python | ~1,200 | Real-time event export (OTLP, Datadog, Azure Monitor) |
 | **Checkpoint** | Python | ~600 | Crash recovery with topology validation |
 | **Rate Limiting** | pyrate-limiter | ~300 | External call throttling with persistence |
-| **Core** | Python | ~3,000 | Config, canonical JSON, DAG, payload store |
-| **Contracts** | Python | ~2,500 | Shared dataclasses, enums, protocols (leaf module) |
-| **Audit DB** | SQLite/PostgreSQL | — | Complete audit trail storage (21 tables) |
+| **Core** | Python | ~5,000 | Config, canonical JSON, DAG package, payload store |
+| **Contracts** | Python | ~8,300 | Shared dataclasses, enums, protocols (leaf module) |
+| **Audit DB** | SQLite/SQLCipher/PostgreSQL | — | Complete audit trail storage (21 tables) |
 | **Payload Store** | Filesystem | — | Content-addressable blob storage with retention |
 
-**Total Production LOC:** ~58,000 | **Total Test LOC:** ~187,000 | **Test Ratio:** 3.2:1
+**Total Production LOC:** ~74,000 | **Total Test LOC:** ~201,000 | **Test Ratio:** 2.7:1
 
 ---
 
@@ -180,10 +181,11 @@ C4Component
     title Engine Component Diagram
 
     Container_Boundary(engine, "Engine Subsystem") {
-        Component(orchestrator, "Orchestrator", "Python Class", "Full run lifecycle management")
+        Component(orchestrator, "Orchestrator", "Python Package", "Full run lifecycle management")
         Component(processor, "RowProcessor", "Python Class", "Row-by-row DAG traversal")
+        Component(navigator, "DAGNavigator", "Python Class", "DAG edge traversal and next-node resolution")
         Component(tokens, "TokenManager", "Python Class", "Token identity through forks/joins")
-        Component(executors, "Executors", "Python Classes", "Transform, Gate, Sink, Aggregation execution")
+        Component(executors, "Executors", "Python Package", "Transform, gate, sink, aggregation execution")
         Component(retry, "RetryManager", "tenacity", "Retry logic with backoff")
         Component(spans, "SpanFactory", "OpenTelemetry", "Tracing integration")
         Component(triggers, "Triggers", "Python", "Aggregation trigger evaluation")
@@ -191,6 +193,7 @@ C4Component
     }
 
     Rel(orchestrator, processor, "Creates and uses")
+    Rel(processor, navigator, "Resolves next nodes via")
     Rel(processor, tokens, "Manages tokens via")
     Rel(processor, executors, "Delegates to")
     Rel(executors, retry, "Uses for transient failures")
@@ -201,15 +204,16 @@ C4Component
 
 | Component | File | LOC | Responsibility |
 |-----------|------|-----|----------------|
-| **Orchestrator** | `orchestrator.py` | ~3,100 | Begin run → register nodes/edges → process rows → complete run |
-| **RowProcessor** | `processor.py` | ~1,918 | Work queue-based DAG traversal, fork/join handling |
-| **TokenManager** | `tokens.py` | ~283 | Create, fork, coalesce, expand tokens |
-| **Executors** | `executors.py` | ~1,903 | Execute transforms, gates, sinks, aggregations |
-| **CoalesceExecutor** | `coalesce_executor.py` | ~798 | Fork/join merge barrier with policy-driven merging |
+| **Orchestrator** | `orchestrator/` | ~3,500 | Begin run → register nodes/edges → process rows → complete run |
+| **RowProcessor** | `processor.py` | ~1,860 | Work queue-based DAG traversal, fork/join handling |
+| **DAGNavigator** | `dag_navigator.py` | ~250 | DAG edge traversal and next-node resolution |
+| **TokenManager** | `tokens.py` | ~393 | Create, fork, coalesce, expand tokens |
+| **Executors** | `executors/` | ~2,190 | Transform, gate, sink, aggregation execution (5 modules) |
+| **CoalesceExecutor** | `coalesce_executor.py` | ~1,054 | Fork/join merge barrier with policy-driven merging |
 | **RetryManager** | `retry.py` | ~146 | Tenacity-based retry with exponential backoff |
 | **SpanFactory** | `spans.py` | ~298 | Create OpenTelemetry spans for observability |
 | **Triggers** | `triggers.py` | ~301 | Evaluate count/timeout/condition triggers for aggregation |
-| **ExpressionParser** | `expression_parser.py` | ~580 | Safe AST-based expression evaluation (no eval) |
+| **ExpressionParser** | `expression_parser.py` | ~652 | Safe AST-based expression evaluation (no eval) |
 | **BatchAdapter** | `batch_adapter.py` | ~226 | Batch transform output routing |
 | **Clock** | `clock.py` | ~11 | Testable time abstraction |
 
@@ -231,7 +235,7 @@ C4Component
         Component(reproducibility, "Reproducibility", "Python", "Grade computation")
     }
 
-    ContainerDb_Ext(db, "SQLite/PostgreSQL")
+    ContainerDb_Ext(db, "SQLite/SQLCipher/PostgreSQL")
 
     Rel(recorder, database, "Uses for operations")
     Rel(recorder, schema, "Inserts/updates via")
@@ -244,15 +248,15 @@ C4Component
 
 | Component | File | LOC | Responsibility |
 |-----------|------|-----|----------------|
-| **LandscapeRecorder** | `recorder.py` | ~2,700 | High-level recording API (47+ methods) |
-| **LandscapeDB** | `database.py` | ~321 | Connection management, schema validation |
-| **Schema** | `schema.py` | ~375 | SQLAlchemy table definitions (21 tables) |
-| **Repositories** | `repositories.py` | ~250 | Row→Object conversion with Tier 1 validation |
-| **Lineage** | `lineage.py` | ~180 | `explain()` queries for complete lineage |
-| **Exporter** | `exporter.py` | ~200 | Audit data export (JSON, CSV) |
-| **Formatters** | `formatters.py` | ~150 | Data serialization, datetime handling |
-| **Journal** | `journal.py` | ~200 | JSONL change journaling backup stream |
-| **Reproducibility** | `reproducibility.py` | ~130 | Grade computation (FULL → ATTRIBUTABLE_ONLY) |
+| **LandscapeRecorder** | `recorder.py` + mixins | ~3,200 | High-level recording API (47+ methods, split into recording mixins) |
+| **LandscapeDB** | `database.py` | ~477 | Connection management, schema validation, SQLCipher support |
+| **Schema** | `schema.py` | ~510 | SQLAlchemy table definitions (21 tables) |
+| **Repositories** | `repositories.py` | ~581 | Row→Object conversion with Tier 1 validation |
+| **Lineage** | `lineage.py` | ~210 | `explain()` queries for complete lineage |
+| **Exporter** | `exporter.py` | ~554 | Audit data export (JSON, CSV) |
+| **Formatters** | `formatters.py` | ~229 | Data serialization, datetime handling |
+| **Journal** | `journal.py` | ~290 | JSONL change journaling backup stream |
+| **Reproducibility** | `reproducibility.py` | ~153 | Grade computation (FULL → ATTRIBUTABLE_ONLY) |
 
 ### Audit Trail Tables (21 Total)
 
@@ -353,7 +357,7 @@ C4Component
 
 | Component | Count/Purpose |
 |-----------|---------------|
-| **Protocols** | 4 runtime-checkable interfaces (Source, Transform, Gate, Sink) |
+| **Protocols** | 4 runtime-checkable interfaces (Source, Transform, BatchTransform, Sink) |
 | **Base Classes** | Abstract implementations with common functionality |
 | **Results** | Typed results (`TransformResult`, `GateResult`, `SourceRow`) |
 | **PluginContext** | Runtime context passed to all plugin methods |
@@ -575,7 +579,7 @@ C4Deployment
 
 | Environment | Audit DB | Payload Store |
 |-------------|----------|---------------|
-| Development | SQLite (`landscape.db`) | Local filesystem |
+| Development | SQLite/SQLCipher (`landscape.db`) | Local filesystem |
 | Production | PostgreSQL | S3/Azure Blob Storage |
 
 ---
@@ -660,7 +664,7 @@ graph LR
 
     subgraph Core[core/]
         Landscape[landscape/]
-        DAG[dag.py]
+        DAG[dag/]
         Config[config.py]
         Canonical[canonical.py]
         Checkpoint[checkpoint/]
@@ -669,9 +673,10 @@ graph LR
     end
 
     subgraph Engine[engine/]
-        Orch[orchestrator.py]
+        Orch[orchestrator/]
         Proc[processor.py]
-        Exec[executors.py]
+        Nav[dag_navigator.py]
+        Exec[executors/]
     end
 
     subgraph Plugins[plugins/]
@@ -848,6 +853,9 @@ ELSPETH uses ADRs to document significant architectural choices.
 |-----|-------|----------|-----------|
 | **ADR-001** | Plugin-level concurrency | Pool-based with FIFO ordering | Maintains auditability while enabling parallelism |
 | **ADR-002** | Routing copy mode limitation | Move-only (no copy) | Prevents ambiguous audit trail for routed tokens |
+| **ADR-003** | Schema validation lifecycle | Two-phase (contract → type) at DAG construction | Catches mismatches before processing |
+| **ADR-004** | Explicit sink routing | Named DAG edges replace implicit convention | Enables auditable routing decisions |
+| **ADR-005** | Declarative DAG wiring | `input`/`on_success` connections | Every edge explicitly declared and validated |
 
 ### Implicit Architectural Decisions
 
@@ -873,7 +881,7 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 | Dimension | Grade | Status |
 |-----------|-------|--------|
 | **Maintainability** | A | Excellent - Clean modules, consistent patterns |
-| **Testability** | A+ | Exceptional - 3.2:1 test ratio, mutation testing |
+| **Testability** | A+ | Exceptional - 2.7:1 test ratio, mutation testing |
 | **Type Safety** | A | Excellent - mypy strict, protocols, NewType aliases |
 | **Documentation** | A- | Very Good - CLAUDE.md (10K+ words), ADRs, runbooks |
 | **Error Handling** | A | Excellent - Three-tier trust model |
@@ -889,14 +897,14 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 2. **Three-Tier Trust Model** - Clear rules for data handling at each boundary
 3. **Clean Layering** - Contracts as leaf module, clear separation of concerns
 4. **Protocol-Based Design** - Runtime-checkable interfaces, structural typing
-5. **Comprehensive Testing** - 187K test LOC vs 58K production LOC (3.2:1 ratio)
+5. **Comprehensive Testing** - 201K test LOC vs 74K production LOC (2.7:1 ratio)
 6. **No Legacy Code Policy** - Clean evolution, no backwards compatibility shims
 
 ### Areas for Future Improvement
 
 | Area | Concern | Priority |
 |------|---------|----------|
-| **Large Files** | 5 files exceed 1,500 LOC (orchestrator.py: 3,100) | Medium |
+| **Large Files** | orchestrator/core.py (~2,070 LOC), processor.py (~1,860 LOC) | Medium |
 | **Aggregation Complexity** | Multiple state machines (buffer/trigger/flush) | Medium |
 | **Composite PK Queries** | `nodes` table joins require care | Low |
 | **API Documentation** | No generated docs (pdoc/sphinx) | Low |
@@ -907,7 +915,7 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 |----------|--------|----------|
 | **Audit Integrity** | ✅ Low Risk | Tier 1 crash policy, NaN/Infinity rejected |
 | **Type Safety** | ✅ Low Risk | mypy strict, runtime protocol verification |
-| **Test Coverage** | ✅ Low Risk | 3.2:1 ratio, mutation testing, property tests |
+| **Test Coverage** | ✅ Low Risk | 2.7:1 ratio, mutation testing, property tests |
 | **Resume Safety** | ✅ Low Risk | Full topology hash (BUG-COMPAT-01 fix applied) |
 
 ---
@@ -941,10 +949,11 @@ Based on comprehensive analysis (2026-02-02), ELSPETH demonstrates exceptional a
 12. **Quality Assessment** - Architecture grade and risk analysis
 
 **Key Metrics:**
-- Production LOC: ~58,000
-- Test LOC: ~187,000 (3.2:1 ratio)
-- Subsystems: 20
+- Production LOC: ~74,000 (234 Python files)
+- Test LOC: ~201,000 (2.7:1 ratio)
+- Subsystems: 22
 - Plugins: 29+
+- ADRs: 5
 - Architecture Grade: A-
 
 All diagrams use Mermaid syntax for version control compatibility.
