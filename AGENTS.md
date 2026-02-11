@@ -31,6 +31,14 @@ Rule 0. Read CLAUDE.md.
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
+## Tier-Model Rule Intent (R5 / Type Checks)
+
+- The goal is not a mechanical rewrite from `isinstance(...)` to `type(...) is ...`.
+- The required reasoning step is: "Can this value ever be a different type during normal operation?"
+- If the answer is "no," remove defensive runtime type checks and trust contracts.
+- If the answer is "yes" at a real trust boundary, validate explicitly and fail clearly (do not silently coerce or skip).
+- PR/commit notes should briefly state this reasoning when changing R5-related code.
+
 <!-- bv-agent-instructions-v1 -->
 
 ---
