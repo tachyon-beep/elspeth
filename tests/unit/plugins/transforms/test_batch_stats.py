@@ -329,8 +329,8 @@ class TestBatchStatsGroupByHomogeneity:
         with pytest.raises(ValueError, match="Heterogeneous"):
             transform.process(rows, ctx)
 
-    def test_group_by_field_missing_from_all_rows(self, ctx: PluginContext) -> None:
-        """group_by field absent from all rows — no group_by in output."""
+    def test_group_by_field_missing_from_all_rows_raises(self, ctx: PluginContext) -> None:
+        """Configured group_by missing from all rows should fail fast."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
@@ -340,8 +340,19 @@ class TestBatchStatsGroupByHomogeneity:
             _make_row({"id": 2, "amount": 20.0}),
         ]
 
-        result = transform.process(rows, ctx)
+        with pytest.raises(KeyError):
+            transform.process(rows, ctx)
 
-        assert result.status == "success"
-        assert result.row is not None
-        assert "category" not in result.row.to_dict()
+    def test_group_by_field_missing_from_later_row_raises(self, ctx: PluginContext) -> None:
+        """Configured group_by missing from any row should fail fast."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
+
+        rows = [
+            _make_row({"id": 1, "amount": 10.0, "category": "sales"}),
+            _make_row({"id": 2, "amount": 20.0}),
+        ]
+
+        with pytest.raises(KeyError):
+            transform.process(rows, ctx)

@@ -1,12 +1,14 @@
 # Bug Report: BatchStats silently drops configured `group_by` field instead of failing fast
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - Updated `BatchStats` to require configured `group_by` in every batch row using direct field access.
+  - Missing configured `group_by` now fails fast with `KeyError` instead of silent omission.
+  - Added unit coverage for missing `group_by` in both first row and later rows.
 
 
 ## Summary
@@ -99,3 +101,16 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+---
+
+## Verification (2026-02-11)
+
+- Reproduced before fix: configured `group_by` was silently omitted when absent from rows.
+- Post-fix behavior:
+  - Missing configured `group_by` raises `KeyError`.
+  - Heterogeneous `group_by` values continue to raise `ValueError`.
+  - Homogeneous `group_by` continues to be emitted in output.
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/transforms/test_batch_stats.py tests/unit/plugins/transforms/test_batch_stats_integration.py`
+  - `ruff check src/elspeth/plugins/transforms/batch_stats.py tests/unit/plugins/transforms/test_batch_stats.py`

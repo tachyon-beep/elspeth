@@ -192,25 +192,20 @@ class BatchStats(BaseTransform):
         if skipped_non_finite > 0:
             result["skipped_non_finite"] = skipped_non_finite
 
-        # Include group_by field — validate homogeneity across batch
+        # Include group_by field — validate homogeneity across batch.
+        # group_by is configured contract, so missing field is an upstream bug.
         if self._group_by and rows:
-            group_value = None
-            group_present = False
-            for row in rows:
-                if self._group_by in row:
-                    val = row[self._group_by]
-                    if not group_present:
-                        group_value = val
-                        group_present = True
-                    elif val != group_value:
-                        raise ValueError(
-                            f"Heterogeneous '{self._group_by}' values in batch: "
-                            f"first row has {group_value!r}, found {val!r}. "
-                            f"Configure the aggregation trigger to group by "
-                            f"'{self._group_by}' or remove group_by config."
-                        )
-            if group_present:
-                result[self._group_by] = group_value
+            group_value = rows[0][self._group_by]
+            for row in rows[1:]:
+                val = row[self._group_by]
+                if val != group_value:
+                    raise ValueError(
+                        f"Heterogeneous '{self._group_by}' values in batch: "
+                        f"first row has {group_value!r}, found {val!r}. "
+                        f"Configure the aggregation trigger to group by "
+                        f"'{self._group_by}' or remove group_by config."
+                    )
+            result[self._group_by] = group_value
 
         # Determine which fields were added
         fields_added = ["count", "sum", "batch_size"]
@@ -218,7 +213,7 @@ class BatchStats(BaseTransform):
             fields_added.append("mean")
         if skipped_non_finite > 0:
             fields_added.append("skipped_non_finite")
-        if self._group_by and self._group_by in result:
+        if self._group_by and rows:
             fields_added.append(self._group_by)
 
         # Create OBSERVED contract from output fields for transform mode
