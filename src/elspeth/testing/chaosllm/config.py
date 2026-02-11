@@ -8,14 +8,13 @@ Configuration precedence: CLI > YAML file > preset > defaults.
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.testing.chaosengine.config_loader import (
-    deep_merge as _deep_merge,
+    list_presets as _list_presets,
 )
 from elspeth.testing.chaosengine.config_loader import (
-    list_presets as _list_presets,
+    load_config as _load_config,
 )
 from elspeth.testing.chaosengine.config_loader import (
     load_preset as _load_preset,
@@ -431,40 +430,11 @@ def load_config(
     2. config_file - User's YAML configuration file
     3. preset - Named preset configuration
     4. defaults - Built-in Pydantic defaults
-
-    Args:
-        preset: Optional preset name to use as base
-        config_file: Optional path to YAML config file
-        cli_overrides: Optional dict of CLI flag overrides
-
-    Returns:
-        Validated ChaosLLMConfig instance
-
-    Raises:
-        FileNotFoundError: If preset or config_file not found
-        yaml.YAMLError: If YAML is malformed
-        pydantic.ValidationError: If final config fails validation
     """
-    config_dict: dict[str, Any] = {}
-
-    # Layer 1: Preset (lowest precedence of explicit config)
-    if preset is not None:
-        config_dict = load_preset(preset)
-
-    # Layer 2: Config file
-    if config_file is not None:
-        if not config_file.exists():
-            raise FileNotFoundError(f"Config file not found: {config_file}")
-        with config_file.open() as f:
-            file_config = yaml.safe_load(f) or {}
-        config_dict = _deep_merge(config_dict, file_config)
-
-    # Layer 3: CLI overrides (highest precedence)
-    if cli_overrides is not None:
-        config_dict = _deep_merge(config_dict, cli_overrides)
-
-    # Record preset name used for this config (if any)
-    config_dict["preset_name"] = preset
-
-    # Validate and return
-    return ChaosLLMConfig(**config_dict)
+    return _load_config(
+        ChaosLLMConfig,
+        _get_presets_dir(),
+        preset=preset,
+        config_file=config_file,
+        cli_overrides=cli_overrides,
+    )

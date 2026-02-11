@@ -17,6 +17,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from elspeth.testing.chaosengine.config_loader import deep_merge as _deep_merge
 from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
 from elspeth.testing.chaosllm.config import (
     ChaosLLMConfig,
@@ -24,7 +25,6 @@ from elspeth.testing.chaosllm.config import (
     LatencyConfig,
     RandomResponseConfig,
     ServerConfig,
-    _deep_merge,
 )
 from elspeth.testing.chaosllm.metrics import _classify_outcome
 

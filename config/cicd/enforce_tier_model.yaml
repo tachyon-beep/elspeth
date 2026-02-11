@@ -1557,7 +1557,7 @@ allow_hits:
   reason: Metrics isolation - recording is best-effort side-effect that must not crash HTTP responses
   safety: Exception logged via structlog with request_id and exc_info; intended chaos response always served
   expires: '2026-05-13'
-- key: testing/chaosllm/config.py:R5:ErrorInjectionConfig:parse_range:fp=9d09ec61470d8455
+- key: testing/chaosllm/config.py:R5:ErrorInjectionConfig:parse_range:fp=2657656f67c463e5
   owner: architecture
   reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
   safety: Validates Tier 3 YAML input before Pydantic model creation
@@ -1647,22 +1647,22 @@ allow_hits:
   reason: dict.get with default 0 for running totals accumulator - key may not exist on first encounter
   safety: Standard accumulator pattern - 0 default is mathematically correct for summation
   expires: '2026-05-13'
-- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=d90637e14460de3a
+- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=850a983ac17874c6
   owner: architecture
   reason: Type dispatch for recursive merge - isinstance(dict) for nested structure
   safety: Recursive merge must distinguish dict from leaf values
   expires: '2026-05-13'
-- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=8b73206ee5e565c4
+- key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=6c031ba73761cd69
   owner: architecture
   reason: Type dispatch for recursive merge - isinstance(dict) for nested structure
   safety: Recursive merge must distinguish dict from leaf values
   expires: '2026-05-13'
-- key: testing/chaosengine/config_loader.py:R5:load_preset:fp=3103a5332f99a196
+- key: testing/chaosengine/config_loader.py:R5:load_preset:fp=0719a67a6e835a2b
   owner: architecture
   reason: Tier 3 boundary - isinstance validates parsed YAML is dict before Pydantic
   safety: Validates external file content structure type
   expires: '2026-05-13'
-- key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=9c20553e8b6645d7
+- key: testing/chaosweb/config.py:R5:WebErrorInjectionConfig:parse_range:fp=2587dd7f799b9412
   owner: architecture
   reason: Pydantic before-validator - isinstance checks raw YAML value type for range coercion
   safety: Validates Tier 3 YAML input before Pydantic model creation

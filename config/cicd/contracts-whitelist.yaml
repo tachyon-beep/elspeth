@@ -427,6 +427,7 @@ allowed_dict_patterns:
   - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:base"
   - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:override"
   - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:return"
+  - "src/elspeth/testing/chaosengine/config_loader.py:load_config:cli_overrides"
   - "src/elspeth/testing/chaosengine/config_loader.py:load_preset:return"
 
   # ChaosWeb - fault-injection test server for web scraping resilience testing

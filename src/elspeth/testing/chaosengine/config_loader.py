@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -73,3 +74,63 @@ def load_preset(presets_dir: Path, preset_name: str) -> dict[str, Any]:
         if not isinstance(loaded, dict):
             raise ValueError(f"Preset '{preset_name}' must be a YAML mapping, got {type(loaded).__name__}")
         return loaded
+
+
+def load_config[ConfigT: BaseModel](
+    config_cls: type[ConfigT],
+    presets_dir: Path,
+    *,
+    preset: str | None = None,
+    config_file: Path | None = None,
+    cli_overrides: dict[str, Any] | None = None,
+) -> ConfigT:
+    """Load a chaos server configuration with precedence handling.
+
+    Generic implementation shared by all chaos plugins. Layers config
+    from preset, YAML file, and CLI overrides, then validates through
+    the given Pydantic model class.
+
+    Precedence (highest to lowest):
+    1. cli_overrides - Direct overrides from CLI flags
+    2. config_file - User's YAML configuration file
+    3. preset - Named preset configuration
+    4. defaults - Built-in Pydantic defaults
+
+    Args:
+        config_cls: The Pydantic model class to validate into.
+        presets_dir: Path to the plugin's presets directory.
+        preset: Optional preset name to use as base.
+        config_file: Optional path to YAML config file.
+        cli_overrides: Optional dict of CLI flag overrides.
+
+    Returns:
+        Validated config instance of type ``config_cls``.
+
+    Raises:
+        FileNotFoundError: If preset or config_file not found.
+        yaml.YAMLError: If YAML is malformed.
+        pydantic.ValidationError: If final config fails validation.
+    """
+    config_dict: dict[str, Any] = {}
+
+    # Layer 1: Preset (lowest precedence of explicit config)
+    if preset is not None:
+        config_dict = load_preset(presets_dir, preset)
+
+    # Layer 2: Config file
+    if config_file is not None:
+        if not config_file.exists():
+            raise FileNotFoundError(f"Config file not found: {config_file}")
+        with config_file.open() as f:
+            file_config = yaml.safe_load(f) or {}
+        config_dict = deep_merge(config_dict, file_config)
+
+    # Layer 3: CLI overrides (highest precedence)
+    if cli_overrides is not None:
+        config_dict = deep_merge(config_dict, cli_overrides)
+
+    # Record preset name used for this config (if any)
+    config_dict["preset_name"] = preset
+
+    # Validate and return
+    return config_cls(**config_dict)

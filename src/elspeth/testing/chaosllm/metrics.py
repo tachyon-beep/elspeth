@@ -5,8 +5,8 @@ The MetricsRecorder provides typed wrappers around the shared MetricsStore
 for LLM-specific request recording and outcome classification.
 """
 
+import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from typing import Any
 
 from elspeth.testing.chaosengine.metrics_store import MetricsStore
@@ -128,6 +128,34 @@ def _classify_outcome(
         is_connection_error,
         is_malformed,
     )
+
+
+def _classify_row(row: sqlite3.Row) -> dict[str, int | float | None]:
+    """Classify a request row for timeseries rebuild.
+
+    Adapter between sqlite3.Row and _classify_outcome, returning the
+    counter dict expected by MetricsStore.rebuild_timeseries().
+    """
+    (
+        is_success,
+        is_rate_limited,
+        is_capacity_error,
+        is_server_error,
+        is_client_error,
+        is_connection_error,
+        is_malformed,
+    ) = _classify_outcome(row["outcome"], row["status_code"], row["error_type"])
+
+    return {
+        "requests_success": int(is_success),
+        "requests_rate_limited": int(is_rate_limited),
+        "requests_capacity_error": int(is_capacity_error),
+        "requests_server_error": int(is_server_error),
+        "requests_client_error": int(is_client_error),
+        "requests_connection_error": int(is_connection_error),
+        "requests_malformed": int(is_malformed),
+        "latency_ms": row["latency_ms"],
+    }
 
 
 class MetricsRecorder:
@@ -276,113 +304,7 @@ class MetricsRecorder:
         This is useful for rebuilding aggregations after data corrections
         or for ensuring consistency.
         """
-        conn = self._store._get_connection()
-
-        # Clear existing time-series data
-        conn.execute("DELETE FROM timeseries")
-
-        # Get all unique buckets from requests
-        cursor = conn.execute("SELECT DISTINCT timestamp_utc FROM requests ORDER BY timestamp_utc")
-        timestamps = [row[0] for row in cursor.fetchall()]
-
-        # Group by bucket and rebuild
-        seen_buckets: set[str] = set()
-        for ts in timestamps:
-            bucket = self._store.get_bucket_utc(ts)
-            if bucket in seen_buckets:
-                continue
-            seen_buckets.add(bucket)
-
-            # Get bucket boundaries
-            bucket_dt = datetime.fromisoformat(bucket)
-            bucket_end_dt = bucket_dt + timedelta(seconds=self._config.timeseries_bucket_sec)
-            bucket_end = bucket_end_dt.isoformat()
-
-            # Query all requests in this bucket
-            cursor = conn.execute(
-                """
-                SELECT outcome, status_code, error_type, latency_ms
-                FROM requests
-                WHERE timestamp_utc >= ? AND timestamp_utc < ?
-                """,
-                (bucket, bucket_end),
-            )
-
-            rows = cursor.fetchall()
-            if not rows:
-                continue
-
-            # Aggregate statistics
-            total = len(rows)
-            success = 0
-            rate_limited = 0
-            capacity_error = 0
-            server_error = 0
-            client_error = 0
-            connection_error = 0
-            malformed = 0
-            latencies: list[float] = []
-
-            for row in rows:
-                row_outcome, row_status_code, row_error_type, row_latency_ms = row
-                (
-                    is_success,
-                    is_rate_limited,
-                    is_capacity_error,
-                    is_server_error,
-                    is_client_error,
-                    is_connection_error,
-                    is_malformed,
-                ) = _classify_outcome(row_outcome, row_status_code, row_error_type)
-
-                if is_success:
-                    success += 1
-                if is_rate_limited:
-                    rate_limited += 1
-                if is_capacity_error:
-                    capacity_error += 1
-                if is_server_error:
-                    server_error += 1
-                if is_client_error:
-                    client_error += 1
-                if is_connection_error:
-                    connection_error += 1
-                if is_malformed:
-                    malformed += 1
-                if row_latency_ms is not None:
-                    latencies.append(row_latency_ms)
-
-            avg_latency = sum(latencies) / len(latencies) if latencies else None
-            p99_latency = None
-            if latencies:
-                latencies.sort()
-                p99_index = min(int(len(latencies) * 0.99), len(latencies) - 1)
-                p99_latency = latencies[p99_index]
-
-            conn.execute(
-                """
-                INSERT INTO timeseries (
-                    bucket_utc, requests_total, requests_success, requests_rate_limited,
-                    requests_capacity_error, requests_server_error, requests_client_error,
-                    requests_connection_error, requests_malformed, avg_latency_ms, p99_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    bucket,
-                    total,
-                    success,
-                    rate_limited,
-                    capacity_error,
-                    server_error,
-                    client_error,
-                    connection_error,
-                    malformed,
-                    avg_latency,
-                    p99_latency,
-                ),
-            )
-
-        conn.commit()
+        self._store.rebuild_timeseries(_classify_row)
 
     def reset(
         self,

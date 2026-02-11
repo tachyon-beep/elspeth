@@ -13,6 +13,7 @@ import contextlib
 import sqlite3
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -303,6 +304,92 @@ class MetricsStore:
             "UPDATE timeseries SET avg_latency_ms = ?, p99_latency_ms = ? WHERE bucket_utc = ?",
             (avg_latency, p99_latency, bucket_utc),
         )
+
+    def rebuild_timeseries(
+        self,
+        classify: Callable[[sqlite3.Row], dict[str, int | float | None]],
+    ) -> None:
+        """Rebuild all timeseries buckets from raw request data.
+
+        Clears the timeseries table and re-aggregates from the requests table
+        using a caller-supplied classifier. This keeps domain-specific outcome
+        classification in the domain layer while database access stays here.
+
+        Args:
+            classify: A callable that receives a sqlite3.Row from the requests
+                table and returns a dict of counter column names to increment
+                values (e.g. ``{"requests_success": 1, "requests_rate_limited": 0}``).
+                Must also return a ``"latency_ms"`` key with ``float | None``.
+        """
+        conn = self._get_connection()
+        bucket_sec = self._config.timeseries_bucket_sec
+
+        conn.execute("DELETE FROM timeseries")
+
+        cursor = conn.execute(
+            "SELECT DISTINCT timestamp_utc FROM requests ORDER BY timestamp_utc",
+        )
+        timestamps = [row[0] for row in cursor.fetchall()]
+
+        seen_buckets: set[str] = set()
+        for ts in timestamps:
+            bucket = _get_bucket_utc(ts, bucket_sec)
+            if bucket in seen_buckets:
+                continue
+            seen_buckets.add(bucket)
+
+            bucket_end = (datetime.fromisoformat(bucket) + timedelta(seconds=bucket_sec)).isoformat()
+
+            rows = conn.execute(
+                """
+                SELECT * FROM requests
+                WHERE timestamp_utc >= ? AND timestamp_utc < ?
+                """,
+                (bucket, bucket_end),
+            ).fetchall()
+
+            if not rows:
+                continue
+
+            # Aggregate counters and latencies across all rows in this bucket
+            totals: dict[str, int] = {}
+            latencies: list[float] = []
+
+            for row in rows:
+                classified = classify(row)
+                latency = classified.pop("latency_ms", None)
+                for col, value in classified.items():
+                    if isinstance(value, int):
+                        totals[col] = totals.get(col, 0) + value
+                if latency is not None:
+                    latencies.append(float(latency))
+
+            # Build and execute the upsert (reuse update_timeseries column logic)
+            insert_cols = ["bucket_utc", "requests_total"]
+            insert_vals: list[Any] = [bucket, len(rows)]
+            for col, value in totals.items():
+                insert_cols.append(col)
+                insert_vals.append(value)
+
+            placeholders = ", ".join("?" for _ in insert_cols)
+            col_str = ", ".join(insert_cols)
+            conn.execute(
+                f"INSERT INTO timeseries ({col_str}) VALUES ({placeholders})",
+                insert_vals,
+            )
+
+            # Latency stats
+            if latencies:
+                avg_latency = sum(latencies) / len(latencies)
+                latencies.sort()
+                p99_index = min(int(len(latencies) * 0.99), len(latencies) - 1)
+                p99_latency = latencies[p99_index]
+                conn.execute(
+                    "UPDATE timeseries SET avg_latency_ms = ?, p99_latency_ms = ? WHERE bucket_utc = ?",
+                    (avg_latency, p99_latency, bucket),
+                )
+
+        conn.commit()
 
     def get_bucket_utc(self, timestamp_utc: str) -> str:
         """Calculate the time bucket for a timestamp.
