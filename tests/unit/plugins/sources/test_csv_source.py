@@ -554,6 +554,25 @@ class TestCSVSourceFieldNormalization:
         with pytest.raises(ValueError, match="collision"):
             list(source.load(ctx))
 
+    def test_duplicate_raw_headers_raise_at_load(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Duplicate raw headers fail fast even when normalize_fields is disabled."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "duplicate_raw_headers.csv"
+        csv_file.write_text("id,id,name\n1,2,alice\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"mode": "observed"},
+                "on_validation_failure": "quarantine",
+                # normalize_fields defaults to False
+            }
+        )
+
+        with pytest.raises(ValueError, match="Duplicate raw header names"):
+            list(source.load(ctx))
+
     def test_field_resolution_stored_for_audit(self, tmp_path: Path, ctx: PluginContext) -> None:
         """field_resolution is stored on source for audit trail."""
         from elspeth.plugins.sources.csv_source import CSVSource

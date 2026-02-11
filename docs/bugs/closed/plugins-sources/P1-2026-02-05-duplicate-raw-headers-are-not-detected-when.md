@@ -1,12 +1,14 @@
 # Bug Report: Duplicate Raw Headers Are Not Detected When `normalize_fields=False`, Causing Silent Column Loss
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+  - Duplicate raw headers are now rejected in `resolve_field_names(...)` when `normalize_fields=False`.
+  - `CSVSource.load(...)` now fails fast on `id,id` headers instead of silently collapsing data.
+  - Regression tests cover resolver and CSV source paths.
 
 
 ## Summary
@@ -98,3 +100,26 @@
 
 - Related issues/PRs: N/A
 - Related design docs: Unknown
+
+## Verification Status
+
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution (2026-02-12)
+
+**Fixed by:** Codex (GPT-5)
+
+**Changes:**
+- `src/elspeth/plugins/sources/field_normalization.py`: Added `check_duplicate_raw_headers(...)` and invoked it in raw-header passthrough mode (`normalize_fields=False`) before audit mapping construction.
+- `tests/unit/plugins/sources/test_field_normalization.py`: Added regression test asserting duplicate raw headers raise `ValueError` with column positions.
+- `tests/unit/plugins/sources/test_csv_source.py`: Added regression test asserting duplicate raw headers fail at load start.
+
+**Verification:**
+- `.venv/bin/python -m pytest -q tests/unit/plugins/sources/test_field_normalization.py tests/unit/plugins/sources/test_csv_source.py`
+- `.venv/bin/python -m pytest -q tests/property/sources/test_field_normalization_properties.py`
+- `.venv/bin/python -m pytest -q tests/unit/plugins/transforms/azure/test_blob_source.py -k csv`
+- `.venv/bin/python -m ruff check src/elspeth/plugins/sources/field_normalization.py tests/unit/plugins/sources/test_field_normalization.py tests/unit/plugins/sources/test_csv_source.py`
