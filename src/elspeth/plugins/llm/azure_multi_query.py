@@ -116,7 +116,11 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
     def _close_all_clients(self) -> None:
         with self._llm_clients_lock:
             self._llm_clients.clear()
-        self._underlying_client = None
+        with self._underlying_client_lock:
+            client = self._underlying_client
+            self._underlying_client = None
+        if client is not None:
+            client.close()
 
     def _record_row_langfuse_trace(
         self,
@@ -355,7 +359,16 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
         fields_added = [f"{spec.output_prefix}_{fc.suffix}" for fc in self._output_mapping.values()]
         observed = SchemaContract(
             mode="OBSERVED",
-            fields=tuple(FieldContract(k, k, object, False, "inferred") for k in output),
+            fields=tuple(
+                FieldContract(
+                    k,
+                    k,
+                    type(v) if v is not None and type(v) in (int, str, float, bool) else object,
+                    False,
+                    "inferred",
+                )
+                for k, v in output.items()
+            ),
             locked=True,
         )
         return TransformResult.success(

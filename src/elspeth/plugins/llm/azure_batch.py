@@ -1258,22 +1258,27 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Create OBSERVED contract from union of ALL output row keys (not just first)
         # Error rows may have extra fields (e.g. _error) that the first row lacks
+        # Infer python_type from first non-None value seen per key across all rows
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
-        all_keys: dict[str, None] = {}
+        _PRIMITIVE_TYPES = (int, str, float, bool)
+        all_keys: dict[str, type] = {}
         for r in output_rows:
-            for key in r:
-                all_keys[key] = None
+            for key, value in r.items():
+                if key not in all_keys:
+                    all_keys[key] = type(value) if value is not None and type(value) in _PRIMITIVE_TYPES else object
+                elif all_keys[key] is object and value is not None and type(value) in _PRIMITIVE_TYPES:
+                    all_keys[key] = type(value)
 
         fields = tuple(
             FieldContract(
                 normalized_name=key,
                 original_name=key,
-                python_type=object,  # OBSERVED mode - infer all as object type
+                python_type=inferred_type,
                 required=False,
                 source="inferred",
             )
-            for key in all_keys
+            for key, inferred_type in all_keys.items()
         )
         output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         return TransformResult.success_multi(

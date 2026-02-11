@@ -249,55 +249,62 @@ allow_hits:
   reason: Tier 2 row filtering — isinstance selects str fields for scanning
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=5ebfe1bb3a77f354
+# _analyze_prompt: Tier 3 boundary — Azure Prompt Shield API response validation
+# Refactored to support analysis_type config (user_prompt/document/both)
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=f36e9ff80839e633
   owner: architecture
-  reason: Tier 3 boundary — validates Azure response structure before parsing
-  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  reason: Tier 3 boundary — isinstance check on data before .get() (Azure API response)
+  safety: MalformedResponseError raised on wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=ec7bffed1b84a52f
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=6a16137fe3456586
   owner: architecture
   reason: Tier 3 boundary — .get() on Azure API response to extract userPromptAnalysis
   safety: MalformedResponseError raised if field missing or wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=9e2efc70e9c2a9dc
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=fc77bfc1466ceb02
   owner: architecture
   reason: Tier 3 boundary — validates userPromptAnalysis is dict from Azure response
-  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  safety: MalformedResponseError raised on wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=3b3f342da93a70a8
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=8dced5da65bac939
   owner: architecture
   reason: Tier 3 boundary — .get() on Azure response to extract attackDetected field
   safety: MalformedResponseError raised if field missing or wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=c841d2c305e52b38
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=26563e04e526eb0c
   owner: architecture
   reason: Tier 3 boundary — validates attackDetected is bool from Azure response
-  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  safety: MalformedResponseError raised on wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=40253c1ac93c9dee
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=d6e521cc7434465a
+  owner: architecture
+  reason: Tier 3 boundary — isinstance check on data before .get() for documentsAnalysis
+  safety: MalformedResponseError raised on wrong type
+  expires: '2026-05-02'
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=79ca99232d475d15
   owner: architecture
   reason: Tier 3 boundary — .get() on Azure response to extract documentsAnalysis
   safety: MalformedResponseError raised if field missing or wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=f580cd433ba3ceaa
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=f0d2d26e6db3b0f0
   owner: architecture
   reason: Tier 3 boundary — validates documentsAnalysis is list from Azure response
-  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  safety: MalformedResponseError raised on wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=7253081edf54b8ad
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=86268888f61bf825
   owner: architecture
   reason: Tier 3 boundary — validates each document entry is dict from Azure response
-  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  safety: MalformedResponseError raised on wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=6fc4cb2a3c9fe209
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=8a246f87b27c5cb7
   owner: architecture
   reason: Tier 3 boundary — .get() on document dict to extract attackDetected
   safety: MalformedResponseError raised if field missing or wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=decde02c66d672a3
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=4ab43fcbe8760d53
   owner: architecture
   reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
-  safety: MalformedResponseError raised on wrong type, caught as non-retryable error
+  safety: MalformedResponseError raised on wrong type
   expires: '2026-05-02'
 - key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=cb8f391ad82b21df
   owner: architecture

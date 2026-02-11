@@ -37,6 +37,11 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: core/rate_limit/limiter.py:R6:RateLimiter:close:fp=f514b4ec0ac7c76f
+  owner: architecture
+  reason: Framework boundary — pyrate-limiter _leaker attribute may not exist across library versions
+  safety: Graceful degradation to no cleanup if attribute missing; thread dies naturally
+  expires: '2026-05-02'
 - key: core/events.py:R1:EventBus:emit:fp=9291c1b6dd51107b
   owner: architecture
   reason: Optional field access at trust boundary
@@ -358,6 +363,11 @@ allow_hits:
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced
   expires: '2026-03-10'
+- key: core/landscape/database.py:R5:LandscapeDB:_create_sqlcipher_engine:fp=9f3388a44ad58bab
+  owner: architecture
+  reason: Framework boundary — urllib.parse query values can be str or list[str] depending on parameter multiplicity
+  safety: Disambiguates URL query parsing output before type coercion; no silent data loss
+  expires: '2026-05-02'
 - key: core/checkpoint/serialization.py:R5:_restore_types:fp=4af58e44b9e1dded
   owner: architecture
   reason: Tier 1 type restoration — isinstance on our own serialized checkpoint format to detect datetime type tags

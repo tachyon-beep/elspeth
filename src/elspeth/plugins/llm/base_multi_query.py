@@ -353,7 +353,16 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         ]
         observed = SchemaContract(
             mode="OBSERVED",
-            fields=tuple(FieldContract(k, k, object, False, "inferred") for k in output),
+            fields=tuple(
+                FieldContract(
+                    k,
+                    k,
+                    type(v) if v is not None and type(v) in (int, str, float, bool) else object,
+                    False,
+                    "inferred",
+                )
+                for k, v in output.items()
+            ),
             locked=True,
         )
         return TransformResult.success(

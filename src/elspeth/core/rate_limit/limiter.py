@@ -240,9 +240,15 @@ class RateLimiter:
     def close(self) -> None:
         """Close the rate limiter and release resources."""
         # Get reference to the leaker thread before disposing.
-        # The limiter's bucket_factory has a _leaker attribute.
-        # We capture (thread, ident) pair because ident may become None after thread exits.
-        leaker = self._limiter.bucket_factory._leaker
+        # pyrate-limiter's BucketFactory._leaker is the background thread that
+        # drains bucket tokens. This is a third-party library internal (Tier 3
+        # framework boundary) — the attribute may change across versions.
+        # If the internal API changes, we skip graceful cleanup and let the
+        # thread die naturally (the custom excepthook is still a safety net).
+        try:
+            leaker = self._limiter.bucket_factory._leaker  # type: ignore[union-attr]
+        except AttributeError:
+            leaker = None
         leaker_ident: int | None = None
         if leaker is not None and leaker.is_alive() and leaker.ident is not None:
             leaker_ident = leaker.ident  # Capture before it can become None

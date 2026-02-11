@@ -535,8 +535,11 @@ class TestExcepthookSuppression:
         # Acquire to ensure leaker thread is active
         limiter.acquire()
 
-        # Get leaker ident before close
-        leaker = limiter._limiter.bucket_factory._leaker
+        # Get leaker ident before close (framework boundary — private attr)
+        try:
+            leaker = limiter._limiter.bucket_factory._leaker  # type: ignore[union-attr]
+        except AttributeError:
+            leaker = None
         leaker_ident = leaker.ident if leaker is not None else None
 
         # Close the limiter - this should clean up thread idents

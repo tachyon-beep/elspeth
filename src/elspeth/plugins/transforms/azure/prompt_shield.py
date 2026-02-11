@@ -46,6 +46,10 @@ class AzurePromptShieldConfig(TransformDataConfig):
         schema: Schema configuration
 
     Optional:
+        analysis_type: Which analysis to run (default "both")
+            - "both": Analyze as both user prompt and document (double cost)
+            - "user_prompt": Only check for user prompt attacks (jailbreak)
+            - "document": Only check for document attacks (prompt injection)
         max_capacity_retry_seconds: Timeout for capacity error retries (default 3600)
 
     Example YAML:
@@ -55,6 +59,7 @@ class AzurePromptShieldConfig(TransformDataConfig):
               endpoint: https://my-resource.cognitiveservices.azure.com
               api_key: ${AZURE_CONTENT_SAFETY_KEY}
               fields: [prompt, user_message]
+              analysis_type: user_prompt
               on_error: quarantine_sink
               schema:
                 mode: observed
@@ -65,6 +70,13 @@ class AzurePromptShieldConfig(TransformDataConfig):
     fields: str | list[str] = Field(
         ...,
         description="Field name(s) to analyze, or 'all' for all string fields",
+    )
+
+    # Analysis type control — avoids double API cost when only one analysis is needed
+    analysis_type: str = Field(
+        "both",
+        pattern=r"^(both|user_prompt|document)$",
+        description="Which analysis to run: 'both', 'user_prompt', or 'document'",
     )
 
     # Batch processing timeout
@@ -118,6 +130,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self._endpoint = cfg.endpoint.rstrip("/")
         self._api_key = cfg.api_key
         self._fields = cfg.fields
+        self._analysis_type = cfg.analysis_type
         self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
 
         schema = create_schema_from_config(
@@ -398,17 +411,27 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
             document_attack: True if prompt injection detected in any document
 
         Uses AuditedHTTPClient for automatic audit recording and telemetry emission.
+        Respects self._analysis_type to avoid double API cost when only one
+        analysis path is needed.
         """
         # Use AuditedHTTPClient - handles recording and telemetry automatically
         http_client = self._get_http_client(state_id)
 
         url = f"{self._endpoint}/contentsafety/text:shieldPrompt?api-version={self.API_VERSION}"
 
+        # Build request body based on analysis_type to avoid double cost.
+        # "both" (default): text analyzed as both user prompt and document
+        # "user_prompt": only user prompt analysis (empty documents list)
+        # "document": only document analysis (empty user prompt)
+        if self._analysis_type == "user_prompt":
+            request_body = {"userPrompt": text, "documents": []}
+        elif self._analysis_type == "document":
+            request_body = {"userPrompt": "", "documents": [text]}
+        else:
+            request_body = {"userPrompt": text, "documents": [text]}
+
         # Make HTTP call - AuditedHTTPClient records to Landscape and emits telemetry
-        response = http_client.post(
-            url,
-            json={"userPrompt": text, "documents": [text]},
-        )
+        response = http_client.post(url, json=request_body)
         response.raise_for_status()
 
         # Parse response - Azure API responses are external data (Tier 3: Zero Trust)
@@ -423,30 +446,36 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         except Exception as e:
             raise MalformedResponseError(f"Invalid JSON in response: {e}") from e
 
-        # Validate userPromptAnalysis structure
-        user_prompt_analysis = data.get("userPromptAnalysis") if isinstance(data, dict) else None
-        if not isinstance(user_prompt_analysis, dict):
-            raise MalformedResponseError(f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}")
-
-        user_attack = user_prompt_analysis.get("attackDetected")
-        if not isinstance(user_attack, bool):
-            raise MalformedResponseError(f"userPromptAnalysis.attackDetected must be bool, got {type(user_attack).__name__}")
-
-        # Validate documentsAnalysis structure
-        documents_analysis = data.get("documentsAnalysis")
-        if not isinstance(documents_analysis, list):
-            raise MalformedResponseError(f"documentsAnalysis must be list, got {type(documents_analysis).__name__}")
-
-        # Validate each document entry and check for attacks
+        user_attack = False
         doc_attack = False
-        for i, doc in enumerate(documents_analysis):
-            if not isinstance(doc, dict):
-                raise MalformedResponseError(f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}")
-            attack_detected = doc.get("attackDetected")
-            if not isinstance(attack_detected, bool):
-                raise MalformedResponseError(f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}")
-            if attack_detected:
-                doc_attack = True
+
+        # Validate and extract user prompt analysis (skip if analysis_type="document")
+        if self._analysis_type != "document":
+            user_prompt_analysis = data.get("userPromptAnalysis") if isinstance(data, dict) else None
+            if not isinstance(user_prompt_analysis, dict):
+                raise MalformedResponseError(f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}")
+
+            detected = user_prompt_analysis.get("attackDetected")
+            if not isinstance(detected, bool):
+                raise MalformedResponseError(f"userPromptAnalysis.attackDetected must be bool, got {type(detected).__name__}")
+            user_attack = detected
+
+        # Validate and extract document analysis (skip if analysis_type="user_prompt")
+        if self._analysis_type != "user_prompt":
+            documents_analysis = data.get("documentsAnalysis") if isinstance(data, dict) else None
+            if not isinstance(documents_analysis, list):
+                raise MalformedResponseError(f"documentsAnalysis must be list, got {type(documents_analysis).__name__}")
+
+            for i, doc in enumerate(documents_analysis):
+                if not isinstance(doc, dict):
+                    raise MalformedResponseError(f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}")
+                attack_detected = doc.get("attackDetected")
+                if not isinstance(attack_detected, bool):
+                    raise MalformedResponseError(
+                        f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}"
+                    )
+                if attack_detected:
+                    doc_attack = True
 
         return {
             "user_prompt_attack": user_attack,
