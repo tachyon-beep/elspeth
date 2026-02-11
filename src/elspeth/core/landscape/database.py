@@ -277,8 +277,8 @@ class LandscapeDB:
                 raise SchemaCompatibilityError(
                     "Cannot open Landscape database — file is encrypted or passphrase is incorrect.\n\n"
                     "If this is an encrypted (SQLCipher) database, ensure:\n"
-                    "  1. The correct passphrase is set in the environment variable\n"
-                    f"     (default: ELSPETH_AUDIT_KEY)\n"
+                    "  1. The correct passphrase is set in the configured environment variable\n"
+                    "     (landscape.encryption_key_env in settings.yaml, default: ELSPETH_AUDIT_KEY)\n"
                     "  2. backend: sqlcipher is set in settings.yaml\n\n"
                     f"Database: {self.connection_string}"
                 ) from e

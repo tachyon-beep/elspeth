@@ -123,14 +123,27 @@ class DAGNavigator:
     ) -> WorkItem:
         """Create node-id based work item."""
         resolved_coalesce_node_id = coalesce_node_id
-        if resolved_coalesce_node_id is None and coalesce_name is not None:
-            resolved_coalesce_node_id = self._coalesce_node_ids[coalesce_name]
+        resolved_coalesce_name = coalesce_name
+
+        # Resolve missing node id from name (existing behavior)
+        if resolved_coalesce_node_id is None and resolved_coalesce_name is not None:
+            resolved_coalesce_node_id = self._coalesce_node_ids[resolved_coalesce_name]
+        # Resolve missing name from node id (symmetric resolution)
+        elif resolved_coalesce_node_id is not None and resolved_coalesce_name is None:
+            try:
+                resolved_coalesce_name = self._coalesce_name_by_node_id[resolved_coalesce_node_id]
+            except KeyError as exc:
+                raise OrchestrationInvariantError(
+                    f"Unknown coalesce node id '{resolved_coalesce_node_id}' — "
+                    f"not in coalesce_name_by_node_id map. "
+                    f"Known coalesce nodes: {sorted(self._coalesce_name_by_node_id.keys())}"
+                ) from exc
 
         return WorkItem(
             token=token,
             current_node_id=current_node_id,
             coalesce_node_id=resolved_coalesce_node_id,
-            coalesce_name=coalesce_name,
+            coalesce_name=resolved_coalesce_name,
             on_success_sink=on_success_sink,
         )
 

@@ -172,8 +172,8 @@ row_plugins:                         source
   - quality_gate                        │
   - privacy_gate          ───→          ▼
   - main_eval                        quality_gate ──→ quarantine
-    options:                             │ (continue)
-      on_success: results               ▼
+    on_success: results                  │ (continue)
+                                        ▼
                                      privacy_gate ──→ review
                                         │ (continue)
                                         ▼
