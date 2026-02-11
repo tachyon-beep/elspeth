@@ -123,8 +123,6 @@ sinks:
       schema:
         fields: dynamic
 
-default_sink: output
-
 # Audit trail
 landscape:
   url: sqlite:///examples/threshold_gate/runs/audit.db
@@ -273,8 +271,6 @@ sinks:
       path: /app/output/high_values.csv  # Container path!
       schema:
         fields: dynamic
-
-default_sink: output
 
 # Audit trail
 landscape:

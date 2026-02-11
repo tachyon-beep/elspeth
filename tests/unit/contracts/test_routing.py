@@ -63,6 +63,13 @@ class TestRoutingAction:
         ):
             RoutingAction.route("above", mode=RoutingMode.COPY)
 
+    def test_route_with_string_mode_raises_type_error(self) -> None:
+        """route requires RoutingMode enum, not a raw string."""
+        from elspeth.contracts import RoutingAction
+
+        with pytest.raises(TypeError, match="mode must be RoutingMode"):
+            RoutingAction.route("above", mode="move")  # type: ignore[arg-type]
+
     def test_route_with_reason(self) -> None:
         """route can include audit reason."""
         from elspeth.contracts import RoutingAction
@@ -235,6 +242,56 @@ class TestRoutingAction:
                 kind=RoutingKind.ROUTE,
                 destinations=("sink_a", "sink_b"),
                 mode=RoutingMode.MOVE,
+            )
+
+    def test_constructor_with_string_mode_raises_type_error(self) -> None:
+        """Direct constructor requires enum mode."""
+        from elspeth.contracts import RoutingAction, RoutingKind
+
+        with pytest.raises(TypeError, match="mode must be RoutingMode"):
+            RoutingAction(
+                kind=RoutingKind.ROUTE,
+                destinations=("sink_a",),
+                mode="move",  # type: ignore[arg-type]
+            )
+
+
+class TestRouteDestination:
+    """Tests for RouteDestination dataclass invariants."""
+
+    def test_sink_destination_requires_sink_name(self) -> None:
+        """SINK destination must include sink_name."""
+        from elspeth.contracts import RouteDestination, RouteDestinationKind
+
+        with pytest.raises(ValueError, match="requires non-empty sink_name"):
+            RouteDestination(kind=RouteDestinationKind.SINK)
+
+    def test_processing_destination_requires_next_node_id(self) -> None:
+        """PROCESSING_NODE destination must include next_node_id."""
+        from elspeth.contracts import RouteDestination, RouteDestinationKind
+
+        with pytest.raises(ValueError, match="requires non-empty next_node_id"):
+            RouteDestination(kind=RouteDestinationKind.PROCESSING_NODE)
+
+    def test_continue_destination_rejects_payload_fields(self) -> None:
+        """CONTINUE destination cannot carry sink or node payloads."""
+        from elspeth.contracts import NodeID, RouteDestination, RouteDestinationKind, SinkName
+
+        with pytest.raises(ValueError, match="must not include sink_name or next_node_id"):
+            RouteDestination(kind=RouteDestinationKind.CONTINUE, sink_name=SinkName("out"))
+
+        with pytest.raises(ValueError, match="must not include sink_name or next_node_id"):
+            RouteDestination(kind=RouteDestinationKind.CONTINUE, next_node_id=NodeID("transform-1"))
+
+    def test_processing_destination_rejects_sink_name(self) -> None:
+        """PROCESSING_NODE destination cannot carry sink_name."""
+        from elspeth.contracts import NodeID, RouteDestination, RouteDestinationKind, SinkName
+
+        with pytest.raises(ValueError, match="must not include sink_name"):
+            RouteDestination(
+                kind=RouteDestinationKind.PROCESSING_NODE,
+                sink_name=SinkName("out"),
+                next_node_id=NodeID("transform-1"),
             )
 
 

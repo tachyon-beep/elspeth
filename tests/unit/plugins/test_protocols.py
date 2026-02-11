@@ -34,6 +34,7 @@ class TestSourceProtocol:
             determinism = Determinism.IO_READ
             plugin_version = "1.0.0"
             _on_validation_failure = "discard"
+            on_success = "output"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -107,6 +108,7 @@ class TestSourceProtocol:
             determinism = Determinism.IO_READ
             plugin_version = "1.0.0"
             _on_validation_failure = "discard"
+            on_success = "output"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -163,11 +165,8 @@ class TestTransformProtocol:
             is_batch_aware = False  # Batch support (structural aggregation)
             creates_tokens = False  # Deaggregation (multi-row output)
             transforms_adds_fields = False  # Schema evolution tracking
-            _on_error: str | None = None  # Error routing (WP-11.99b)
-
-            @property
-            def on_error(self) -> str | None:
-                return self._on_error
+            on_error: str | None = None  # Error routing (WP-11.99b)
+            on_success: str | None = None  # Success routing
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -204,6 +203,7 @@ class TestTransformProtocol:
 
         result = transform.process(make_pipeline_row({"value": 21}), ctx)
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"value": 21, "doubled": 42}
 
 
@@ -233,6 +233,7 @@ class TestTransformBatchSupport:
         transform = SingleTransform({})
         ctx = PluginContext(run_id="test", config={})
         result = transform.process(make_pipeline_row({"value": 1}), ctx)
+        assert result.row is not None
         assert result.row.to_dict() == {"processed": 1}
 
     def test_transform_process_batch_rows(self) -> None:
@@ -268,6 +269,7 @@ class TestTransformBatchSupport:
 
         # Batch mode
         result = transform.process([make_pipeline_row({"value": 1}), make_pipeline_row({"value": 2}), make_pipeline_row({"value": 3})], ctx)
+        assert result.row is not None
         assert result.row.to_dict() == {"total": 6, "count": 3}
 
     def test_transform_is_batch_aware_default_false(self) -> None:
@@ -345,109 +347,33 @@ class TestAggregationProtocolDeleted:
         assert not hasattr(base, "BaseAggregation"), "BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform"
 
 
-class TestCoalesceProtocol:
-    """Coalesce plugin protocol (merge parallel paths)."""
+class TestCoalesceProtocolDeleted:
+    """Verify CoalesceProtocol has been deleted.
 
-    def test_coalesce_policy_types(self) -> None:
-        from elspeth.plugins.protocols import CoalescePolicy
+    Coalesce is now fully structural:
+    - Engine holds tokens via CoalesceExecutor (engine/coalesce_executor.py)
+    - Engine evaluates merge conditions based on CoalesceSettings policy
+    - Engine merges data via CoalesceSettings merge strategy (union/nested/select)
+    - No plugin-level coalesce interface
+    """
 
-        # All policies should exist
-        assert CoalescePolicy.REQUIRE_ALL.value == "require_all"
-        assert CoalescePolicy.QUORUM.value == "quorum"
-        assert CoalescePolicy.BEST_EFFORT.value == "best_effort"
-        assert CoalescePolicy.FIRST.value == "first"
+    def test_coalesce_protocol_deleted(self) -> None:
+        """CoalesceProtocol should be deleted (coalesce is structural)."""
+        import elspeth.plugins.protocols as protocols
 
-    def test_quorum_requires_threshold(self) -> None:
-        """QUORUM policy needs a quorum_threshold."""
-        from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.protocols import CoalescePolicy, CoalesceProtocol
+        assert not hasattr(protocols, "CoalesceProtocol"), "CoalesceProtocol should be deleted - coalesce is structural"
 
-        class OutputSchema(PluginSchema):
-            combined: str
+    def test_coalesce_policy_enum_deleted(self) -> None:
+        """CoalescePolicy enum should be deleted (superseded by Literal strings in CoalesceSettings)."""
+        import elspeth.plugins.protocols as protocols
 
-        class QuorumCoalesce:
-            name = "quorum_merge"
-            policy = CoalescePolicy.QUORUM
-            quorum_threshold = 2  # At least 2 branches must arrive
-            output_schema = OutputSchema
-            node_id: str | None = None  # Set by orchestrator
-            config: dict[str, Any]  # Set in __init__
-            determinism = Determinism.DETERMINISTIC
-            plugin_version = "1.0.0"
+        assert not hasattr(protocols, "CoalescePolicy"), "CoalescePolicy should be deleted - use CoalesceSettings.policy Literal"
 
-            def __init__(self, config: dict[str, Any]) -> None:
-                self.config = config
-                self.expected_branches = ["branch_a", "branch_b", "branch_c"]
+    def test_plugin_protocol_deleted(self) -> None:
+        """PluginProtocol should be deleted (never used)."""
+        import elspeth.plugins.protocols as protocols
 
-            def merge(self, branch_outputs: dict[str, dict[str, Any]], ctx: PluginContext) -> dict[str, Any]:
-                return {"combined": "+".join(branch_outputs.keys())}
-
-            def on_start(self, ctx: PluginContext) -> None:
-                pass
-
-            def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-        coalesce = QuorumCoalesce({})
-
-        # IMPORTANT: Verify protocol conformance at runtime
-        # mypy may report this as unreachable due to structural subtyping analysis
-        # but runtime_checkable protocols DO work at runtime
-        assert isinstance(
-            coalesce,  # type: ignore[unreachable]
-            CoalesceProtocol,
-        ), "Must conform to CoalesceProtocol"
-
-        assert coalesce.quorum_threshold == 2  # type: ignore[unreachable]
-        assert len(coalesce.expected_branches) == 3  # type: ignore[unreachable]
-
-    def test_coalesce_merge_behavior(self) -> None:
-        """Test merge() combines branch outputs correctly."""
-        from elspeth.contracts import Determinism, PluginSchema
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.protocols import CoalescePolicy, CoalesceProtocol
-
-        class OutputSchema(PluginSchema):
-            total: int
-
-        class SumCoalesce:
-            name = "sum_merge"
-            policy = CoalescePolicy.REQUIRE_ALL
-            quorum_threshold = None
-            output_schema = OutputSchema
-            node_id: str | None = None  # Set by orchestrator
-            config: dict[str, Any]  # Set in __init__
-            determinism = Determinism.DETERMINISTIC
-            plugin_version = "1.0.0"
-
-            def __init__(self, config: dict[str, Any]) -> None:
-                self.config = config
-                self.expected_branches = ["branch_a", "branch_b"]
-
-            def merge(self, branch_outputs: dict[str, dict[str, Any]], ctx: PluginContext) -> dict[str, Any]:
-                total = sum(out["value"] for out in branch_outputs.values())
-                return {"total": total}
-
-            def on_start(self, ctx: PluginContext) -> None:
-                pass
-
-            def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-        coalesce = SumCoalesce({})
-        # mypy may report this as unreachable due to structural subtyping analysis
-        # but runtime_checkable protocols DO work at runtime
-        assert isinstance(coalesce, CoalesceProtocol)  # type: ignore[unreachable]
-
-        ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
-
-        branch_outputs = {
-            "branch_a": {"value": 10},
-            "branch_b": {"value": 20},
-        }
-        result = coalesce.merge(branch_outputs, ctx)
-        assert result == {"total": 30}
+        assert not hasattr(protocols, "PluginProtocol"), "PluginProtocol should be deleted - never imported or used"
 
 
 class TestSinkProtocol:

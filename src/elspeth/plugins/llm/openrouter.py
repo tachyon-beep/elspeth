@@ -125,8 +125,11 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         # Parse OpenRouter-specific config (includes all LLMConfig fields)
         cfg = OpenRouterConfig.from_dict(config)
 
-        # Store OpenRouter-specific settings
-        self._api_key = cfg.api_key
+        # Pre-build auth headers — avoids storing the raw API key as a named attribute
+        self._request_headers = {
+            "Authorization": f"Bearer {cfg.api_key}",
+            "HTTP-Referer": "https://github.com/elspeth-rapid",  # Required by OpenRouter
+        }
         self._base_url = cfg.base_url
         self._timeout = cfg.timeout_seconds
 
@@ -145,7 +148,6 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         self._temperature = cfg.temperature
         self._max_tokens = cfg.max_tokens
         self._response_field = cfg.response_field
-        self._on_error = cfg.on_error
 
         # Schema from config (TransformDataConfig guarantees schema_config is not None)
         schema_config = cfg.schema_config
@@ -691,10 +693,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                     telemetry_emit=self._telemetry_emit,
                     timeout=self._timeout,
                     base_url=self._base_url,
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "HTTP-Referer": "https://github.com/elspeth-rapid",  # Required by OpenRouter
-                    },
+                    headers=self._request_headers,
                     limiter=self._limiter,
                 )
             return self._http_clients[state_id]

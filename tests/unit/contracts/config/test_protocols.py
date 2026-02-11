@@ -71,6 +71,7 @@ PROTOCOL_EXPECTED_PROPERTIES: dict[type, set[str]] = {
         "granularity",
         "backpressure_mode",
         "fail_on_total_exporter_failure",
+        "max_consecutive_failures",
         "exporter_configs",
     },
 }
@@ -183,6 +184,7 @@ class _FakeTelemetryComplete:
     granularity: TelemetryGranularity = TelemetryGranularity.LIFECYCLE
     backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
     fail_on_total_exporter_failure: bool = True
+    max_consecutive_failures: int = 10
     exporter_configs: tuple[ExporterConfig, ...] = ()
 
 
@@ -191,6 +193,7 @@ class _FakeTelemetryMissingGranularity:
     enabled: bool = False
     backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
     fail_on_total_exporter_failure: bool = True
+    max_consecutive_failures: int = 10
     exporter_configs: tuple[ExporterConfig, ...] = ()
 
 
@@ -257,7 +260,7 @@ class TestRuntimeCheckable:
 
 class TestRealImplementations:
     @pytest.mark.parametrize("protocol,config_cls", PROTOCOL_CONFIG_PAIRS)
-    def test_default_instance_satisfies_protocol(self, protocol: type, config_cls: type) -> None:
+    def test_default_instance_satisfies_protocol(self, protocol: type, config_cls: Any) -> None:
         instance = config_cls.default()
         assert isinstance(instance, protocol)
 
@@ -286,7 +289,7 @@ class TestRealImplementations:
         assert isinstance(config, RuntimeRetryProtocol)
 
     @pytest.mark.parametrize("protocol,config_cls", PROTOCOL_CONFIG_PAIRS)
-    def test_real_instance_does_not_satisfy_wrong_protocol(self, protocol: type, config_cls: type) -> None:
+    def test_real_instance_does_not_satisfy_wrong_protocol(self, protocol: type, config_cls: Any) -> None:
         instance = config_cls.default()
         # Pick a protocol that is NOT the matching one
         wrong_protocols = [p for p in ALL_PROTOCOLS if p is not protocol]
@@ -377,9 +380,9 @@ class TestProtocolCompleteness:
         props = _get_protocol_property_names(RuntimeCheckpointProtocol)
         assert len(props) == 3
 
-    def test_telemetry_protocol_has_5_properties(self) -> None:
+    def test_telemetry_protocol_has_6_properties(self) -> None:
         props = _get_protocol_property_names(RuntimeTelemetryProtocol)
-        assert len(props) == 5
+        assert len(props) == 6
 
     @pytest.mark.parametrize(
         "protocol",
@@ -417,14 +420,14 @@ class TestProtocolCompleteness:
 
 class TestCrossValidation:
     @pytest.mark.parametrize("protocol,config_cls", PROTOCOL_CONFIG_PAIRS)
-    def test_runtime_config_has_all_protocol_properties(self, protocol: type, config_cls: type) -> None:
+    def test_runtime_config_has_all_protocol_properties(self, protocol: type, config_cls: Any) -> None:
         protocol_props = _get_protocol_property_names(protocol)
         config_fields = set(config_cls.__dataclass_fields__.keys())
         missing = protocol_props - config_fields
         assert not missing, f"{config_cls.__name__} is missing protocol properties: {missing}"
 
     @pytest.mark.parametrize("protocol,config_cls", PROTOCOL_CONFIG_PAIRS)
-    def test_protocol_property_types_match_config_annotations(self, protocol: type, config_cls: type) -> None:
+    def test_protocol_property_types_match_config_annotations(self, protocol: type, config_cls: Any) -> None:
         protocol_props = _get_protocol_property_names(protocol)
         config_fields = config_cls.__dataclass_fields__
 
@@ -441,7 +444,7 @@ class TestCrossValidation:
             )
 
     @pytest.mark.parametrize("protocol,config_cls", PROTOCOL_CONFIG_PAIRS)
-    def test_default_instance_exposes_all_protocol_properties(self, protocol: type, config_cls: type) -> None:
+    def test_default_instance_exposes_all_protocol_properties(self, protocol: type, config_cls: Any) -> None:
         instance = config_cls.default()
         protocol_props = _get_protocol_property_names(protocol)
         for prop_name in protocol_props:

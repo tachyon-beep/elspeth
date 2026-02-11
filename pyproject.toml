@@ -118,6 +118,11 @@ mcp = [
     "mcp>=1.0,<2",  # Model Context Protocol SDK
 ]
 
+security = [
+    # SQLCipher DBAPI2 binding for AES-256 encryption at rest
+    "sqlcipher3>=0.5.4,<1",
+]
+
 tracing-azure = [
     # Tier 2: Azure AI tracing for LLM plugins
     # Uses the "distro" package which bundles OpenTelemetry instrumentations
@@ -174,13 +179,17 @@ all = [
     # tracing dependencies
     "azure-monitor-opentelemetry>=1.6,<2",
     "langfuse>=3.12,<4",
+    # security dependencies
+    "sqlcipher3>=0.5.4,<1",
 ]
 
 [project.scripts]
 elspeth = "elspeth.cli:app"
 elspeth-mcp = "elspeth.mcp:main"
+chaosengine = "elspeth.testing.chaosengine.cli:main"
 chaosllm = "elspeth.testing.chaosllm.cli:main"
 chaosllm-mcp = "elspeth.testing.chaosllm.cli:mcp_main_entry"
+chaosweb = "elspeth.testing.chaosweb.cli:main"
 check-contracts = "scripts.check_contracts:main"
 
 [project.urls]
@@ -264,6 +273,7 @@ module = [
     "azure.*",
     "mcp.*",
     "ddtrace.*",
+    "sqlcipher3.*",
 ]
 ignore_missing_imports = true
 

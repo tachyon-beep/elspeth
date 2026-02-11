@@ -166,7 +166,10 @@ class ExplainScreen:
 
             # Organize nodes by type
             source_nodes = [n for n in nodes if n.node_type == NodeType.SOURCE]
-            transform_nodes = [n for n in nodes if n.node_type == NodeType.TRANSFORM]
+            # Processing nodes: transforms, gates, aggregations, coalesces
+            # All appear in the transform chain in pipeline order
+            _PROCESSING_TYPES = {NodeType.TRANSFORM, NodeType.GATE, NodeType.AGGREGATION, NodeType.COALESCE}
+            transform_nodes = [n for n in nodes if n.node_type in _PROCESSING_TYPES]
             sink_nodes = [n for n in nodes if n.node_type == NodeType.SINK]
 
             lineage_data: LineageData = {
@@ -177,8 +180,8 @@ class ExplainScreen:
                 }
                 if source_nodes
                 else {"name": "unknown", "node_id": None},
-                "transforms": [{"name": n.plugin_name, "node_id": n.node_id} for n in transform_nodes],
-                "sinks": [{"name": n.plugin_name, "node_id": n.node_id} for n in sink_nodes],
+                "transforms": [{"name": n.plugin_name, "node_id": n.node_id, "node_type": n.node_type.value} for n in transform_nodes],
+                "sinks": [{"name": n.plugin_name, "node_id": n.node_id, "node_type": n.node_type.value} for n in sink_nodes],
                 "tokens": [],  # Tokens loaded separately when needed
             }
             tree = LineageTree(lineage_data)

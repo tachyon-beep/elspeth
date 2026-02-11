@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo, TransformErrorReason
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -31,7 +32,7 @@ from elspeth.contracts.results import (
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 from elspeth.engine.retry import MaxRetriesExceeded
-from tests.fixtures.factories import make_pipeline_row
+from elspeth.testing import make_pipeline_row
 
 
 def _make_observed_contract() -> SchemaContract:
@@ -64,6 +65,7 @@ class TestTransformResultMultiRow:
         result = TransformResult.success(make_pipeline_row({"id": 1}), success_reason={"action": "test"})
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"id": 1}
         assert result.rows is None
 
@@ -196,7 +198,7 @@ class TestTransformResult:
         """
         with pytest.raises(ValueError, match="MUST provide success_reason"):
             # Using the dataclass directly to bypass factory's keyword-only arg
-            TransformResult(status="success", row={"x": 1}, reason=None)
+            TransformResult(status="success", row=make_pipeline_row({"x": 1}), reason=None)
 
     def test_error_factory(self) -> None:
         """Error factory creates result with status='error' and reason."""
@@ -319,18 +321,29 @@ class TestRowResult:
     """Tests for RowResult."""
 
     def test_creation(self) -> None:
-        """RowResult stores token, data, outcome, and optional sink_name."""
+        """COMPLETED RowResult stores token, data, outcome, and required sink_name."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
         result = RowResult(
             token=token,
             final_data={"x": 1, "processed": True},
             outcome=RowOutcome.COMPLETED,
+            sink_name="processed",
         )
 
         assert result.token == token
         assert result.final_data == {"x": 1, "processed": True}
         assert result.outcome == RowOutcome.COMPLETED
-        assert result.sink_name is None
+        assert result.sink_name == "processed"
+
+    def test_completed_without_sink_name_raises(self) -> None:
+        """COMPLETED outcome requires sink_name."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        with pytest.raises(OrchestrationInvariantError, match="COMPLETED outcome requires sink_name"):
+            RowResult(
+                token=token,
+                final_data={"x": 1},
+                outcome=RowOutcome.COMPLETED,
+            )
 
     def test_routed_with_sink_name(self) -> None:
         """ROUTED outcome includes sink_name."""
@@ -344,6 +357,55 @@ class TestRowResult:
 
         assert result.outcome == RowOutcome.ROUTED
         assert result.sink_name == "flagged"
+
+    def test_routed_without_sink_name_raises(self) -> None:
+        """ROUTED outcome requires sink_name."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        with pytest.raises(OrchestrationInvariantError, match="ROUTED outcome requires sink_name"):
+            RowResult(
+                token=token,
+                final_data={"x": 1},
+                outcome=RowOutcome.ROUTED,
+            )
+
+    def test_coalesced_without_sink_name_raises(self) -> None:
+        """COALESCED outcome requires sink_name."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        with pytest.raises(OrchestrationInvariantError, match="COALESCED outcome requires sink_name"):
+            RowResult(
+                token=token,
+                final_data={"x": 1},
+                outcome=RowOutcome.COALESCED,
+            )
+
+    def test_coalesced_with_sink_name(self) -> None:
+        """COALESCED outcome accepts sink_name."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        result = RowResult(
+            token=token,
+            final_data={"x": 1},
+            outcome=RowOutcome.COALESCED,
+            sink_name="output",
+        )
+
+        assert result.outcome == RowOutcome.COALESCED
+        assert result.sink_name == "output"
+
+    def test_is_frozen(self) -> None:
+        """RowResult is frozen — prevents post-construction mutation of sink_name/outcome."""
+        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=_wrap_dict_as_pipeline_row({"x": 1}))
+        result = RowResult(
+            token=token,
+            final_data={"x": 1},
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output",
+        )
+
+        with pytest.raises(AttributeError):
+            result.sink_name = "tampered"  # type: ignore[misc]
+
+        with pytest.raises(AttributeError):
+            result.outcome = RowOutcome.FAILED  # type: ignore[misc]
 
 
 class TestArtifactDescriptor:

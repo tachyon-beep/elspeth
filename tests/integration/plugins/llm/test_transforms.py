@@ -374,7 +374,8 @@ class TestOpenRouterLLMTransformIntegration:
     def executor(self, recorder: LandscapeRecorder) -> TransformExecutor:
         """Create TransformExecutor for testing."""
         spans = SpanFactory()
-        return TransformExecutor(recorder, spans)
+        step_resolver = lambda node_id: 0  # noqa: E731
+        return TransformExecutor(recorder, spans, step_resolver)
 
     @pytest.fixture
     def run_id(self, recorder: LandscapeRecorder) -> str:
@@ -420,19 +421,40 @@ class TestOpenRouterLLMTransformIntegration:
         return TokenInfo(row_id=row_id, token_id=token_id, row_data=pipeline_row)
 
     def _patch_httpx_for_chaosllm(self, chaosllm_server) -> Any:
-        """Route httpx.Client calls to the ChaosLLM ASGI app."""
+        """Route httpx.Client calls to the ChaosLLM ASGI app.
+
+        Suppresses Starlette's DeprecationWarning about 'timeout' on
+        TestClient — our AuditedHTTPClient passes per-request timeouts
+        which are meaningless for in-process ASGI transport.
+        """
+        import warnings
+        from contextlib import ExitStack
         from unittest.mock import patch
 
         from starlette.testclient import TestClient
 
         def _client_factory(*_args: Any, **kwargs: Any) -> httpx.Client:
             kwargs.pop("timeout", None)
+            kwargs.pop("follow_redirects", None)
             return TestClient(
                 chaosllm_server.server.app,
                 base_url=chaosllm_server.url,
             )
 
-        return patch("httpx.Client", side_effect=_client_factory)
+        stack = ExitStack()
+        stack.enter_context(
+            warnings.catch_warnings(),
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="You should not use the 'timeout' argument",
+            category=DeprecationWarning,
+            module=r"starlette\.testclient",
+        )
+        stack.enter_context(
+            patch("httpx.Client", side_effect=_client_factory),
+        )
+        return stack
 
     def test_http_client_call_and_response_parsing(
         self,
@@ -471,7 +493,6 @@ class TestOpenRouterLLMTransformIntegration:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
         # Verify result
@@ -485,6 +506,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert error_sink is None
 
         # Verify audit trail - HTTP call was recorded via AuditedHTTPClient
+        assert ctx.state_id is not None
         calls = recorder.get_calls(ctx.state_id)
         assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
         http_call = calls[0]
@@ -514,7 +536,6 @@ class TestOpenRouterLLMTransformIntegration:
                 "api_key": "test-api-key",
                 "base_url": f"{chaosllm_server.url}/v1",
                 "schema": DYNAMIC_SCHEMA,
-                "on_error": "discard",
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }
@@ -537,12 +558,12 @@ class TestOpenRouterLLMTransformIntegration:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
         assert "500" in str(exc_info.value)
 
         # Verify audit trail - error call was recorded via AuditedHTTPClient
+        assert ctx.state_id is not None
         calls = recorder.get_calls(ctx.state_id)
         assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
         assert calls[0].call_type == CallType.HTTP
@@ -569,7 +590,6 @@ class TestOpenRouterLLMTransformIntegration:
                 "api_key": "test-api-key",
                 "base_url": f"{chaosllm_server.url}/v1",
                 "schema": DYNAMIC_SCHEMA,
-                "on_error": "discard",
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }
@@ -592,12 +612,12 @@ class TestOpenRouterLLMTransformIntegration:
                 transform=transform,
                 token=token,
                 ctx=ctx,
-                step_in_pipeline=0,
             )
 
         assert "429" in str(exc_info.value)
 
         # Verify audit trail - rate limit error call was recorded
+        assert ctx.state_id is not None
         calls = recorder.get_calls(ctx.state_id)
         assert len(calls) >= 1, f"Expected at least 1 recorded call, got {len(calls)}"
         assert calls[0].call_type == CallType.HTTP

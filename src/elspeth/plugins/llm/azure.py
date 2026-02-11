@@ -144,7 +144,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Store Azure-specific config
         self._azure_endpoint = cfg.endpoint
-        self._azure_api_key = cfg.api_key
+        self._azure_api_key: str | None = cfg.api_key
         self._azure_api_version = cfg.api_version
         self._deployment_name = cfg.deployment_name
 
@@ -163,7 +163,6 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         self._temperature = cfg.temperature
         self._max_tokens = cfg.max_tokens
         self._response_field = cfg.response_field
-        self._on_error = cfg.on_error
 
         # Schema from config (TransformDataConfig guarantees schema_config is not None)
         schema_config = cfg.schema_config
@@ -532,6 +531,8 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                     api_key=self._azure_api_key,
                     api_version=self._azure_api_version,
                 )
+                # Clear plaintext key — SDK client holds its own copy internally
+                self._azure_api_key = None
             return self._underlying_client
 
     def _get_llm_client(self, state_id: str) -> AuditedLLMClient:

@@ -55,7 +55,6 @@ Nested environment variables use double underscore: `ELSPETH_LANDSCAPE__URL`.
 |-------|------|----------|---------|-------------|
 | `source` | object | **Yes** | - | Source plugin configuration (exactly one per run) |
 | `sinks` | object | **Yes** | - | Named sink configurations (at least one required) |
-| `default_sink` | string | **Yes** | - | Default sink for rows completing the pipeline |
 | `run_mode` | string | No | `"live"` | Execution mode: `live`, `replay`, `verify` |
 | `replay_from` | string | No | - | Run ID to replay/verify against (required for replay/verify modes) |
 | `transforms` | list | No | `[]` | Ordered transforms to apply |
@@ -241,8 +240,6 @@ sinks:
       path: output/quarantine.csv
       schema:
         fields: dynamic
-
-default_sink: output  # Default destination
 ```
 
 | Field | Type | Required | Description |
@@ -700,8 +697,6 @@ sinks:
       schema:
         fields: dynamic
 
-default_sink: output
-
 # Rate limiting - both transforms share this limit
 rate_limit:
   enabled: true
@@ -1151,8 +1146,6 @@ sinks:
       schema:
         fields: dynamic
 
-default_sink: output
-
 # Transforms
 transforms:
   - plugin: field_mapper
@@ -1161,6 +1154,7 @@ transforms:
         fields: dynamic
       computed:
         processed_at: "row.get('timestamp', 'unknown')"
+      on_success: output
 
 # Gates - routing decisions
 gates:

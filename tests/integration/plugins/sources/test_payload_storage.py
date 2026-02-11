@@ -64,7 +64,6 @@ def _build_simple_graph(config: PipelineConfig) -> ExecutionGraph:
     # Set the internal mappings that orchestrator expects
     graph._sink_id_map = sink_ids
     graph._transform_id_map = {}  # No transforms in this simple test
-    graph._default_sink = next(iter(config.sinks.keys()))  # Use first sink as output
 
     return graph
 
@@ -95,6 +94,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
     class _PayloadTestSource(_TestSourceBase):
         name = "test_source"
         output_schema = _TestSchema
+        on_success = "output"
 
         def __init__(self, data: list[dict[str, Any]]) -> None:
             super().__init__()

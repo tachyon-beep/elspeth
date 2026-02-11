@@ -1,0 +1,238 @@
+# Deep Routing Example — Deeply Nested Gates and Transforms
+#
+# Demonstrates a complex decision tree with 3 transforms, 5 gates, and
+# 7 terminal sinks. The DAG is 8 nodes deep at its longest path.
+#
+# Scenario: Loan application triage pipeline. Applications are screened
+# for restricted content, normalized, then routed through a cascade of
+# gates based on amount, credit score, loan type, and term length.
+#
+# DAG topology:
+#
+#   source ─(raw)─> content_screen ─┬─(screened)─> normalize ─(fields)─> trim_notes ─(trimmed)─>
+#                                   └─(on_error)─> quarantine
+#
+#     ─> [amount_tier] ─┬─ micro_loans (< 5000)
+#                       └─ regular ─> [credit_check] ─┬─ good (≥ 700) ─> [loan_type] ─┬─ mortgage ─> [term_check] ─┬─ long_term_mortgages (≥ 240)
+#                                                     │                                │                            └─ short_term_mortgages
+#                                                     │                                └─ approved_other
+#                                                     └─ poor ─> [risk_level] ─┬─ high_risk (≥ 50000)
+#                                                                              └─ manual_review
+#
+# Key concepts demonstrated:
+#   - 5 chained gates creating a 4-level deep decision tree
+#   - keyword_filter with on_error routing to quarantine
+#   - field_mapper for column renaming/restructuring
+#   - truncate for note length normalization
+#   - Every row reaches exactly one of 7 terminal sinks
+#   - Full audit lineage through 8 hops (source → screen → map → trim → 4 gates → sink)
+
+source:
+  plugin: csv
+  on_success: raw
+  options:
+    path: examples/deep_routing/input.csv
+    schema:
+      mode: fixed
+      fields:
+      - 'id: int'
+      - 'applicant: str'
+      - 'amount: int'
+      - 'credit_score: int'
+      - 'loan_type: str'
+      - 'term_months: int'
+      - 'notes: str'
+    on_validation_failure: discard
+
+transforms:
+# Stage 1: Screen for restricted content — flagged rows go to quarantine
+- name: content_screen
+  plugin: keyword_filter
+  input: raw
+  on_success: screened
+  on_error: quarantine
+  options:
+    fields: [notes]
+    blocked_patterns:
+    - "(?i)\\bpassword\\b"
+    - "(?i)\\bconfidential\\b"
+    - "(?i)\\bsecret\\b"
+    - "(?i)\\binternal\\b"
+    schema:
+      mode: observed
+
+# Stage 2: Normalize field names for downstream consumers
+- name: normalize
+  plugin: field_mapper
+  input: screened
+  on_success: fields
+  on_error: discard
+  options:
+    mapping:
+      id: application_id
+      applicant: applicant_name
+      amount: loan_amount
+      credit_score: credit_score
+      loan_type: loan_type
+      term_months: term_months
+      notes: notes
+    select_only: true
+    schema:
+      mode: observed
+
+# Stage 3: Trim notes to a reasonable display length
+- name: trim_notes
+  plugin: truncate
+  input: fields
+  on_success: trimmed
+  on_error: discard
+  options:
+    fields:
+      notes: 40
+    suffix: "..."
+    schema:
+      mode: observed
+
+gates:
+# Gate 1: Split micro-loans (< $5,000) from regular applications
+- name: amount_tier
+  input: trimmed
+  condition: row['loan_amount'] >= 5000
+  routes:
+    'true': regular
+    'false': micro_loans
+
+# Gate 2: Regular loans split by creditworthiness
+- name: credit_check
+  input: regular
+  condition: row['credit_score'] >= 700
+  routes:
+    'true': good_credit
+    'false': poor_credit
+
+# Gate 3: Good-credit applications split by loan type
+- name: loan_type
+  input: good_credit
+  condition: row['loan_type'] == 'mortgage'
+  routes:
+    'true': mortgage_path
+    'false': approved_other
+
+# Gate 4: Mortgages split by term length (long vs short)
+- name: term_check
+  input: mortgage_path
+  condition: row['term_months'] >= 240
+  routes:
+    'true': long_term_mortgages
+    'false': short_term_mortgages
+
+# Gate 5: Poor-credit applications assessed by risk (amount threshold)
+- name: risk_level
+  input: poor_credit
+  condition: row['loan_amount'] >= 50000
+  routes:
+    'true': high_risk
+    'false': manual_review
+
+sinks:
+  quarantine:
+    plugin: csv
+    options:
+      path: examples/deep_routing/output/quarantine.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'applicant: str'
+        - 'amount: int'
+        - 'credit_score: int'
+        - 'loan_type: str'
+        - 'term_months: int'
+        - 'notes: str'
+  micro_loans:
+    plugin: csv
+    options:
+      path: examples/deep_routing/output/micro_loans.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'application_id: int'
+        - 'applicant_name: str'
+        - 'loan_amount: int'
+        - 'credit_score: int'
+        - 'loan_type: str'
+        - 'term_months: int'
+        - 'notes: str'
+  approved_other:
+    plugin: csv
+    options:
+      path: examples/deep_routing/output/approved_other.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'application_id: int'
+        - 'applicant_name: str'
+        - 'loan_amount: int'
+        - 'credit_score: int'
+        - 'loan_type: str'
+        - 'term_months: int'
+        - 'notes: str'
+  long_term_mortgages:
+    plugin: csv
+    options:
+      path: examples/deep_routing/output/long_term_mortgages.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'application_id: int'
+        - 'applicant_name: str'
+        - 'loan_amount: int'
+        - 'credit_score: int'
+        - 'loan_type: str'
+        - 'term_months: int'
+        - 'notes: str'
+  short_term_mortgages:
+    plugin: csv
+    options:
+      path: examples/deep_routing/output/short_term_mortgages.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'application_id: int'
+        - 'applicant_name: str'
+        - 'loan_amount: int'
+        - 'credit_score: int'
+        - 'loan_type: str'
+        - 'term_months: int'
+        - 'notes: str'
+  high_risk:
+    plugin: csv
+    options:
+      path: examples/deep_routing/output/high_risk.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'application_id: int'
+        - 'applicant_name: str'
+        - 'loan_amount: int'
+        - 'credit_score: int'
+        - 'loan_type: str'
+        - 'term_months: int'
+        - 'notes: str'
+  manual_review:
+    plugin: csv
+    options:
+      path: examples/deep_routing/output/manual_review.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'application_id: int'
+        - 'applicant_name: str'
+        - 'loan_amount: int'
+        - 'credit_score: int'
+        - 'loan_type: str'
+        - 'term_months: int'
+        - 'notes: str'
+
+landscape:
+  url: sqlite:///examples/deep_routing/runs/audit.db

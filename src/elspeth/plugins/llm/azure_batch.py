@@ -150,7 +150,7 @@ class AzureBatchLLMTransform(BaseTransform):
         cfg = AzureBatchConfig.from_dict(config)
         self._deployment_name = cfg.deployment_name
         self._endpoint = cfg.endpoint.rstrip("/")
-        self._api_key = cfg.api_key
+        self._api_key: str | None = cfg.api_key
         self._api_version = cfg.api_version
         self._template = PromptTemplate(
             cfg.template,
@@ -165,9 +165,6 @@ class AzureBatchLLMTransform(BaseTransform):
         self._response_field = cfg.response_field
         self._poll_interval = cfg.poll_interval_seconds
         self._max_wait_hours = cfg.max_wait_hours
-
-        # Error routing - required for TransformResult.error() to work
-        self._on_error = cfg.on_error
 
         # Schema from config (TransformDataConfig guarantees schema_config is not None)
         schema_config = cfg.schema_config
@@ -358,6 +355,8 @@ class AzureBatchLLMTransform(BaseTransform):
                     api_key=self._api_key,
                     api_version=self._api_version,
                 )
+                # Clear plaintext key — SDK client holds its own copy internally
+                self._api_key = None
             return self._client
 
     def process(
@@ -474,16 +473,8 @@ class AzureBatchLLMTransform(BaseTransform):
 
         Returns:
             Checkpoint dict or None if no checkpoint
-
-        Raises:
-            RuntimeError: If checkpoint API is not available on context
         """
-        if not hasattr(ctx, "get_checkpoint"):
-            raise RuntimeError(
-                "AzureBatchLLMTransform requires checkpoint API on PluginContext. "
-                "Ensure engine provides get_checkpoint/update_checkpoint/clear_checkpoint methods."
-            )
-        return ctx.get_checkpoint()  # type: ignore[no-any-return]  # checkpoint returns dict[str, Any] | None, guarded by hasattr above
+        return ctx.get_checkpoint()
 
     def _update_checkpoint(self, ctx: PluginContext, data: dict[str, Any]) -> None:
         """Update checkpoint state.
@@ -491,15 +482,7 @@ class AzureBatchLLMTransform(BaseTransform):
         Args:
             ctx: Plugin context
             data: Checkpoint data to save
-
-        Raises:
-            RuntimeError: If checkpoint API is not available on context
         """
-        if not hasattr(ctx, "update_checkpoint"):
-            raise RuntimeError(
-                "AzureBatchLLMTransform requires checkpoint API on PluginContext. "
-                "Ensure engine provides get_checkpoint/update_checkpoint/clear_checkpoint methods."
-            )
         ctx.update_checkpoint(data)
 
     def _clear_checkpoint(self, ctx: PluginContext) -> None:
@@ -507,15 +490,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         Args:
             ctx: Plugin context
-
-        Raises:
-            RuntimeError: If checkpoint API is not available on context
         """
-        if not hasattr(ctx, "clear_checkpoint"):
-            raise RuntimeError(
-                "AzureBatchLLMTransform requires checkpoint API on PluginContext. "
-                "Ensure engine provides get_checkpoint/update_checkpoint/clear_checkpoint methods."
-            )
         ctx.clear_checkpoint()
 
     def _submit_batch(
@@ -739,8 +714,8 @@ class AzureBatchLLMTransform(BaseTransform):
                 response_data={
                     "batch_id": batch.id,
                     "status": batch.status,
-                    "output_file_id": getattr(batch, "output_file_id", None),
-                    "error_file_id": getattr(batch, "error_file_id", None),
+                    "output_file_id": getattr(batch, "output_file_id", None),  # Tier 3: SDK attr may vary by version
+                    "error_file_id": getattr(batch, "error_file_id", None),  # Tier 3: SDK attr may vary by version
                 },
                 latency_ms=(time.perf_counter() - start) * 1000,
                 provider="azure",
@@ -795,7 +770,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 "batch_id": batch_id,
             }
             error_message = None
-            if hasattr(batch, "errors") and batch.errors:
+            if hasattr(batch, "errors") and batch.errors:  # Tier 3: SDK errors attr is optional
                 error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
                 error_message = "; ".join(e.message for e in batch.errors.data)
 
@@ -1281,28 +1256,31 @@ class AzureBatchLLMTransform(BaseTransform):
                 }
             )
 
-        # Create OBSERVED contract from first output row
-        # Batch transforms don't have access to input contracts (architectural gap),
-        # so we infer an OBSERVED contract from the output data
+        # Create OBSERVED contract from union of ALL output row keys (not just first)
+        # Error rows may have extra fields (e.g. _error) that the first row lacks
+        # Infer python_type from first non-None value seen per key across all rows
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
-        if output_rows:
-            first_row = output_rows[0]
-            fields = tuple(
-                FieldContract(
-                    normalized_name=key,
-                    original_name=key,
-                    python_type=object,  # Use object for dynamic typing
-                    required=False,
-                    source="inferred",
-                )
-                for key in first_row
-            )
-            output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-        else:
-            output_contract = None
+        _PRIMITIVE_TYPES = (int, str, float, bool)
+        all_keys: dict[str, type] = {}
+        for r in output_rows:
+            for key, value in r.items():
+                if key not in all_keys:
+                    all_keys[key] = type(value) if value is not None and type(value) in _PRIMITIVE_TYPES else object
+                elif all_keys[key] is object and value is not None and type(value) in _PRIMITIVE_TYPES:
+                    all_keys[key] = type(value)
 
-        assert output_contract is not None, "output_rows is non-empty so contract was built"
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=inferred_type,
+                required=False,
+                source="inferred",
+            )
+            for key, inferred_type in all_keys.items()
+        )
+        output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],
             success_reason={"action": "enriched", "fields_added": [self._response_field]},

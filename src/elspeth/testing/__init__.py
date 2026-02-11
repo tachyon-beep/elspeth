@@ -6,7 +6,9 @@ When a backbone type's constructor changes, update the factory here.
 Tests and benchmarks that use factories need ZERO changes.
 
 This package also contains:
+- chaosengine: Shared utilities for chaos testing (injection engine, metrics store, latency)
 - chaosllm: Fake LLM server for load testing and fault injection
+- chaosweb: Fake web server for scraping pipeline resilience testing
 - chaosllm_mcp: MCP server for analyzing ChaosLLM test results
 
 Usage:
@@ -477,8 +479,14 @@ def make_flush_result(
 
 def make_execution_counters(**overrides: int) -> ExecutionCounters:
     """Build ExecutionCounters with optional overrides."""
+    from dataclasses import fields
+
     from elspeth.engine.orchestrator.types import ExecutionCounters
 
+    valid_fields = {f.name for f in fields(ExecutionCounters)}
+    invalid = set(overrides) - valid_fields
+    if invalid:
+        raise TypeError(f"Invalid ExecutionCounters fields: {sorted(invalid)}. Valid fields: {sorted(valid_fields)}")
     counters = ExecutionCounters()
     for key, value in overrides.items():
         setattr(counters, key, value)
@@ -492,16 +500,28 @@ def make_row_result(
     sink_name: str | None = None,
     error: Any | None = None,
 ) -> RowResult:
-    """Build a RowResult (final row outcome)."""
+    """Build a RowResult (final row outcome).
+
+    COMPLETED, ROUTED, and COALESCED outcomes require sink_name
+    (enforced by RowResult.__post_init__).
+    Defaults to "default" when not explicitly provided for these outcomes.
+    """
     from elspeth.contracts.enums import RowOutcome
     from elspeth.contracts.results import RowResult
+
+    resolved_outcome = outcome or RowOutcome.COMPLETED
+    # Sink-targeting outcomes require sink_name — default for test convenience
+    _SINK_OUTCOMES = {RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED}
+    resolved_sink_name = sink_name
+    if resolved_outcome in _SINK_OUTCOMES and resolved_sink_name is None:
+        resolved_sink_name = "default"
 
     token = make_token_info()
     return RowResult(
         token=token,
         final_data=data if data is not None else {"_result": True},
-        outcome=outcome or RowOutcome.COMPLETED,
-        sink_name=sink_name,
+        outcome=resolved_outcome,
+        sink_name=resolved_sink_name,
         error=error,
     )
 

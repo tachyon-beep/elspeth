@@ -32,7 +32,7 @@ def should_emit(event: TelemetryEvent, granularity: TelemetryGranularity) -> boo
     - Row events (RowCreated, TransformCompleted, GateEvaluated, TokenCompleted):
       Emit at ROWS or FULL granularity
     - External call events (ExternalCallCompleted): Emit only at FULL granularity
-    - Unknown event types: Pass through (fail-open for forward compatibility)
+    - Unknown event types: Always emit (fail-open for forward compatibility)
 
     Args:
         event: The telemetry event to check
@@ -66,6 +66,8 @@ def should_emit(event: TelemetryEvent, granularity: TelemetryGranularity) -> boo
         case ExternalCallCompleted():
             return granularity == TelemetryGranularity.FULL
 
-        # Unknown event types: pass through (forward compatibility)
+        # Unknown event types: pass through (fail-open for forward compatibility).
+        # This ensures newly introduced telemetry events are visible immediately
+        # even before this filter is explicitly updated.
         case _:
             return True

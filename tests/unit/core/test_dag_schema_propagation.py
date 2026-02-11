@@ -5,6 +5,10 @@ These tests verify that transforms with computed _output_schema_config attribute
 have their schema configs correctly propagated through from_plugin_instances()
 to NodeInfo, and that _get_schema_config_from_node() prioritizes these computed
 configs over raw config dict parsing.
+
+Also tests that pass-through nodes (gates, coalesce) inherit computed schema
+contracts from upstream transforms, so audit records reflect actual data contracts.
+(P1-2026-02-05: pass-through nodes drop computed schema contracts)
 """
 
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -13,7 +17,15 @@ import pytest
 
 from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.dag import ExecutionGraph
+from elspeth.core.config import (
+    AggregationSettings,
+    CoalesceSettings,
+    GateSettings,
+    SourceSettings,
+    TransformSettings,
+    TriggerConfig,
+)
+from elspeth.core.dag import ExecutionGraph, WiredTransform
 
 if TYPE_CHECKING:
     pass
@@ -26,11 +38,8 @@ class MockTransformWithSchemaConfig:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    _on_error: str | None = None
-
-    @property
-    def on_error(self) -> str | None:
-        return self._on_error
+    on_error: str | None = None
+    on_success: str | None = "output"
 
     def __init__(self) -> None:
         # Computed schema config with guaranteed and audit fields
@@ -49,11 +58,8 @@ class MockTransformWithoutSchemaConfig:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed", "guaranteed_fields": ["config_field"]}}
-    _on_error: str | None = None
-
-    @property
-    def on_error(self) -> str | None:
-        return self._on_error
+    on_error: str | None = None
+    on_success: str | None = "output"
 
 
 class MockSource:
@@ -63,6 +69,7 @@ class MockSource:
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     _on_validation_failure = "discard"
+    on_success = "output"
 
 
 class MockSink:
@@ -79,14 +86,26 @@ class TestOutputSchemaConfigPropagation:
     def test_output_schema_config_propagates_to_nodeinfo(self) -> None:
         """Verify _output_schema_config is extracted and stored in NodeInfo."""
         transform = MockTransformWithSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="transform_0",
+                plugin=transform.name,
+                input="source_out",
+                on_success="output",
+                on_error="discard",
+                options={},
+            ),
+        )
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),  # type: ignore[arg-type]
-            transforms=[transform],  # type: ignore[list-item]
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
             gates=[],
-            default_sink="output",
         )
 
         # Find the transform node
@@ -104,14 +123,26 @@ class TestOutputSchemaConfigPropagation:
     def test_transform_without_schema_config_has_none(self) -> None:
         """Verify transforms without _output_schema_config have None in NodeInfo."""
         transform = MockTransformWithoutSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="transform_0",
+                plugin=transform.name,
+                input="source_out",
+                on_success="output",
+                on_error="discard",
+                options={},
+            ),
+        )
 
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),  # type: ignore[arg-type]
-            transforms=[transform],  # type: ignore[list-item]
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={},
             gates=[],
-            default_sink="output",
         )
 
         # Find the transform node
@@ -320,11 +351,8 @@ class MockAggregationTransform:
     input_schema = None
     output_schema = None
     config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
-    _on_error: str | None = None
-
-    @property
-    def on_error(self) -> str | None:
-        return self._on_error
+    on_error: str | None = None
+    on_success: str | None = "output"
 
     def __init__(self) -> None:
         self._output_schema_config = SchemaConfig(
@@ -340,25 +368,26 @@ class TestAggregationSchemaConfigPropagation:
 
     def test_aggregation_schema_config_propagates(self) -> None:
         """Verify aggregation transform's _output_schema_config is stored in NodeInfo."""
-        from elspeth.core.config import AggregationSettings, TriggerConfig
-
         transform = MockAggregationTransform()
         trigger = TriggerConfig(count=10)
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="mock_agg_transform",
+            input="agg_in",
+            on_success="output",
             trigger=trigger,
             output_mode="transform",
             options={"schema": {"mode": "observed"}},
         )
 
+        source = MockSource()
         graph = ExecutionGraph.from_plugin_instances(
-            source=MockSource(),  # type: ignore[arg-type]
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="agg_in", options={}),
             transforms=[],
             sinks={"output": MockSink()},  # type: ignore[dict-item]
             aggregations={"test_agg": (transform, agg_settings)},  # type: ignore[dict-item]
             gates=[],
-            default_sink="output",
         )
 
         # Find the aggregation node
@@ -489,3 +518,226 @@ class TestGateSchemaConfigInheritance:
 
         assert gate1_guarantees == frozenset({"computed_a", "computed_b"})
         assert gate2_guarantees == frozenset({"computed_a", "computed_b"})
+
+
+class TestPassThroughNodesInheritComputedSchema:
+    """P1-2026-02-05: Gate and coalesce nodes must propagate computed
+    output_schema_config (not just raw config["schema"]) so audit metadata
+    reflects actual data contracts including guaranteed/audit fields.
+
+    These tests exercise from_plugin_instances() — the production code path.
+    """
+
+    def test_gate_config_schema_includes_computed_guaranteed_fields(self) -> None:
+        """Gate's config["schema"] should include guaranteed_fields from
+        upstream transform's computed output_schema_config.
+        """
+        transform = MockTransformWithSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="llm_step",
+                plugin=transform.name,
+                input="source_out",
+                on_success="gate_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        gate = GateSettings(
+            name="quality_gate",
+            input="gate_in",
+            condition="True",
+            routes={"true": "output", "false": "output"},
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[gate],
+        )
+
+        # Find gate node
+        gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
+        assert len(gate_nodes) == 1
+
+        gate_schema_dict = gate_nodes[0].config["schema"]
+
+        # Gate's config["schema"] must include computed guaranteed_fields
+        assert "guaranteed_fields" in gate_schema_dict
+        assert set(gate_schema_dict["guaranteed_fields"]) == {"field_a", "field_b"}
+
+        # Gate's config["schema"] must include computed audit_fields
+        assert "audit_fields" in gate_schema_dict
+        assert set(gate_schema_dict["audit_fields"]) == {"field_c", "field_d"}
+
+    def test_gate_config_schema_falls_back_to_raw_when_no_computed(self) -> None:
+        """Gate should still use raw config["schema"] when upstream has no
+        output_schema_config.
+        """
+        transform = MockTransformWithoutSchemaConfig()
+        source = MockSource()
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="basic_step",
+                plugin=transform.name,
+                input="source_out",
+                on_success="gate_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        gate = GateSettings(
+            name="quality_gate",
+            input="gate_in",
+            condition="True",
+            routes={"true": "output", "false": "output"},
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[gate],
+        )
+
+        gate_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.GATE]
+        assert len(gate_nodes) == 1
+
+        gate_schema_dict = gate_nodes[0].config["schema"]
+
+        # Should inherit raw schema with config_field
+        assert gate_schema_dict["guaranteed_fields"] == ["config_field"]
+
+    def test_coalesce_config_schema_includes_computed_fields(self) -> None:
+        """Coalesce node's config["schema"] should reflect computed
+        output_schema_config from upstream fork branches.
+        """
+        transform = MockTransformWithSchemaConfig()
+        source = MockSource()
+
+        # Transform feeds into a fork gate
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="llm_step",
+                plugin=transform.name,
+                input="source_out",
+                on_success="fork_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        fork_gate = GateSettings(
+            name="splitter",
+            input="fork_in",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["branch_a", "branch_b"],
+        )
+
+        coalesce = CoalesceSettings(
+            name="merger",
+            branches=["branch_a", "branch_b"],
+            policy="require_all",
+            merge="union",
+            on_success="output",
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[fork_gate],
+            coalesce_settings=[coalesce],
+        )
+
+        # Find coalesce node
+        coalesce_nodes = [n for n in graph.get_nodes() if n.node_type == NodeType.COALESCE]
+        assert len(coalesce_nodes) == 1
+
+        coalesce_schema_dict = coalesce_nodes[0].config["schema"]
+
+        # Coalesce must inherit computed guaranteed_fields from upstream
+        assert "guaranteed_fields" in coalesce_schema_dict
+        assert set(coalesce_schema_dict["guaranteed_fields"]) == {"field_a", "field_b"}
+
+        # Coalesce must inherit computed audit_fields from upstream
+        assert "audit_fields" in coalesce_schema_dict
+        assert set(coalesce_schema_dict["audit_fields"]) == {"field_c", "field_d"}
+
+    def test_deferred_gate_after_coalesce_inherits_computed_schema(self) -> None:
+        """A gate downstream of a coalesce node (deferred to pass 2 in builder)
+        should also inherit computed schema fields.
+        """
+        transform = MockTransformWithSchemaConfig()
+        source = MockSource()
+
+        wired = WiredTransform(
+            plugin=transform,  # type: ignore[arg-type]
+            settings=TransformSettings(
+                name="llm_step",
+                plugin=transform.name,
+                input="source_out",
+                on_success="fork_in",
+                on_error="discard",
+                options={},
+            ),
+        )
+
+        fork_gate = GateSettings(
+            name="splitter",
+            input="fork_in",
+            condition="True",
+            routes={"true": "fork", "false": "output"},
+            fork_to=["branch_a", "branch_b"],
+        )
+
+        coalesce = CoalesceSettings(
+            name="merger",
+            branches=["branch_a", "branch_b"],
+            policy="require_all",
+            merge="union",
+        )
+
+        # This gate is downstream of coalesce — resolved in pass 2
+        post_coalesce_gate = GateSettings(
+            name="final_check",
+            input="merger",
+            condition="True",
+            routes={"true": "output", "false": "output"},
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,  # type: ignore[arg-type]
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=[wired],
+            sinks={"output": MockSink()},  # type: ignore[dict-item]
+            aggregations={},
+            gates=[fork_gate, post_coalesce_gate],
+            coalesce_settings=[coalesce],
+        )
+
+        # Find the post-coalesce gate
+        gate_nodes = [n for n in graph.get_nodes() if n.plugin_name == "config_gate:final_check"]
+        assert len(gate_nodes) == 1
+
+        gate_schema_dict = gate_nodes[0].config["schema"]
+
+        # Must have computed fields propagated through coalesce from upstream
+        assert "guaranteed_fields" in gate_schema_dict
+        assert set(gate_schema_dict["guaranteed_fields"]) == {"field_a", "field_b"}
+        assert "audit_fields" in gate_schema_dict
+        assert set(gate_schema_dict["audit_fields"]) == {"field_c", "field_d"}

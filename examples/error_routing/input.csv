@@ -1,0 +1,18 @@
+id,customer,amount,category,notes
+1,Acme Corp,15000,enterprise,Renewal of annual contract
+2,Globex Inc,800,smb,New customer onboarding
+3,Initech,42000,enterprise,CONFIDENTIAL merger discussion
+4,Umbrella Ltd,3500,midmarket,Quarterly review meeting
+5,Soylent Corp,120,smb,Password reset for admin account
+6,Cyberdyne,95000,enterprise,Strategic partnership expansion
+7,Wonka Industries,7200,midmarket,Product demo requested
+8,Stark Enterprises,250,smb,Internal use only - do not share
+9,Wayne Holdings,61000,enterprise,Board presentation materials
+10,Oscorp,4800,midmarket,Follow up on password policy audit
+11,Tyrell Corp,150000,enterprise,Annual review and compliance check
+12,Weyland Corp,30,smb,Quick test entry
+13,Massive Dynamic,18800,midmarket,Integration planning session
+14,Aperture Science,500,smb,SECRET project codename alpha
+15,Hooli,22000,enterprise,Quarterly business review prep
+16,Virtucon,35000,midmarket,Large midmarket expansion deal
+17,Gekko Capital,55000,smb,Major SMB upgrade package

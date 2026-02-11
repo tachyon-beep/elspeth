@@ -1,0 +1,21 @@
+id,applicant,amount,credit_score,loan_type,term_months,notes
+1,Alice Chen,350000,780,mortgage,360,Refinancing primary residence
+2,Bob Martinez,2500,650,personal,12,Emergency car repair
+3,Carol Washington,75000,620,business,60,Warehouse expansion - CONFIDENTIAL draft
+4,David Kim,450000,810,mortgage,180,Downsizing to condo
+5,Elena Rossi,8000,720,personal,24,Home improvement project
+6,Frank Okafor,120000,580,business,84,New franchise location
+7,Grace Tanaka,1200,740,personal,6,Holiday travel expenses
+8,Hector Dubois,95000,690,mortgage,360,First-time buyer program
+9,Ivan Petrov,500000,550,business,120,Factory equipment - includes password for vendor portal
+10,Julia Santos,15000,730,personal,36,Debt consolidation
+11,Kevin Wright,280000,760,mortgage,240,Investment property purchase
+12,Lisa Johansson,3800,680,personal,18,Tuition payment
+13,Marco Bianchi,42000,640,business,48,Restaurant renovation
+14,Nina Adesanya,600000,800,mortgage,360,Luxury home purchase
+15,Oscar Huang,4500,590,personal,12,Medical expenses
+16,Priya Sharma,200000,710,mortgage,120,Commercial unit mortgage
+17,Quinn O'Brien,55000,660,business,72,Inventory financing
+18,Rosa Gutierrez,7500,750,personal,24,Wedding expenses
+19,Sven Lindqvist,1000000,830,mortgage,360,Estate acquisition
+20,Tanya Volkov,30000,630,business,36,Equipment lease buyout

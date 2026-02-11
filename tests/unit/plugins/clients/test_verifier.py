@@ -563,6 +563,117 @@ class TestCallVerifier:
         assert result.payload_missing is True
         assert verifier.get_report().missing_payloads == 1
 
+    def test_verify_hash_match_when_payload_purged(self) -> None:
+        """When payload is purged but response_hash exists, hash-based match succeeds.
+
+        P1-2026-02-05: Per CLAUDE.md "Hashes survive payload deletion — integrity
+        is always verifiable." The verifier must compare stable_hash(live_response)
+        against the recorded response_hash even when the full payload is gone.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+        original_response = {"content": "Hello, world!", "model": "gpt-4"}
+        response_hash = stable_hash(original_response)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_ref="payload_ref_123",
+            response_hash=response_hash,
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = None  # Purged
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        result = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=original_response,  # Same response
+        )
+
+        # Hash-based match should succeed
+        assert result.is_match is True
+        assert result.payload_missing is True
+        assert result.has_differences is False
+        assert result.differences == {}
+        report = verifier.get_report()
+        assert report.matches == 1
+        assert report.mismatches == 0
+        assert report.missing_payloads == 1
+
+    def test_verify_hash_mismatch_when_payload_purged(self) -> None:
+        """When payload is purged and live response differs, hash mismatch is detected.
+
+        P1-2026-02-05: Drift detection must work even in ATTRIBUTABLE_ONLY runs
+        where payloads are purged but response_hash survives.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+        original_response = {"content": "Hello, world!", "model": "gpt-4"}
+        response_hash = stable_hash(original_response)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_ref="payload_ref_123",
+            response_hash=response_hash,
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = None  # Purged
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        result = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response={"content": "DIFFERENT response", "model": "gpt-4"},
+        )
+
+        # Hash-based mismatch should be detected
+        assert result.is_match is False
+        assert result.payload_missing is True
+        assert result.has_differences is True  # Hash mismatch IS a real difference
+        assert "hash_mismatch" in result.differences
+        assert result.differences["hash_mismatch"]["recorded_hash"] == response_hash
+        report = verifier.get_report()
+        assert report.matches == 0
+        assert report.mismatches == 1
+        assert report.missing_payloads == 1
+
+    def test_verify_purged_without_hash_still_missing(self) -> None:
+        """When payload is purged and no response_hash exists, stays as missing.
+
+        Some SUCCESS calls may not have a response_hash (legacy data).
+        Without a hash, we can't verify — just mark as missing_payload.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            status=CallStatus.SUCCESS,
+            response_ref=None,
+            response_hash=None,  # No hash available
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = None
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        result = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response={"content": "Hello"},
+        )
+
+        # No hash — can't determine match, not a real "difference"
+        assert result.is_match is False
+        assert result.payload_missing is True
+        assert result.has_differences is False
+        report = verifier.get_report()
+        assert report.missing_payloads == 1
+        assert report.matches == 0
+        assert report.mismatches == 0
+
     def test_verify_order_independent_with_default_config(self) -> None:
         """Default configuration (ignore_order=True) ignores list ordering."""
         recorder = self._create_mock_recorder()

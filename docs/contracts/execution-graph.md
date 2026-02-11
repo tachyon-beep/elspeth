@@ -79,7 +79,7 @@ class NodeType(StrEnum):
 |------|-------|-------------|---------------|-------------------|-----------|
 | **Source** | Exactly 1 | N/A | Yes (declared) | N/A (produces rows) | No |
 | **Transform** | 0+ | Yes | Yes | Yes | No (except aggregation) |
-| **Gate** | 0+ | Yes | Pass-through | Optionally (plugin gates) | No |
+| **Gate** | 0+ | Yes | Pass-through | No | No |
 | **Aggregation** | 0+ | Yes | Yes | Yes (batch processing) | Yes (buffer) |
 | **Coalesce** | 0+ | Yes (multi-branch) | Pass-through (merged) | Yes (merge strategy) | Yes (pending tokens) |
 | **Sink** | 1+ | Yes | N/A | N/A (consumes rows) | No |
@@ -159,7 +159,6 @@ def from_plugin_instances(
     sinks: dict[str, SinkProtocol],
     aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
     gates: list[GateSettings],
-    default_sink: str,
     coalesce_settings: list[CoalesceSettings] | None = None,
 ) -> ExecutionGraph
 ```
@@ -181,13 +180,13 @@ def node_id(prefix: str, name: str, config: dict, sequence: int | None = None) -
 | Prefix | Node Type | Example |
 |--------|-----------|---------|
 | `source` | Source | `source_csv_a1b2c3d4e5f6` |
-| `transform` | Transform (row + plugin gates) | `transform_enrich_f6e5d4c3b2a1_0` |
+| `transform` | Transform (row) | `transform_enrich_f6e5d4c3b2a1_0` |
 | `config_gate` | Config-driven gate | `config_gate_quality_check_1a2b3c4d5e6f` |
 | `aggregation` | Aggregation | `aggregation_batch_stats_abcdef123456` |
 | `coalesce` | Coalesce | `coalesce_merge_results_123abc456def` |
 | `sink` | Sink | `sink_output_fedcba654321` |
 
-The `sequence` suffix (for transforms only) prevents collisions when two transforms have identical configurations. Plugin gates use the `transform` prefix because they are detected via `isinstance(transform, GateProtocol)` within the transform chain.
+The `sequence` suffix (for transforms only) prevents collisions when two transforms have identical configurations.
 
 ### Construction Phases
 
@@ -198,7 +197,7 @@ Phase 1: Create Nodes
     │
     ├── Source node (single)
     ├── Sink nodes (one per named sink)
-    ├── Transform chain (sequential, detecting plugin gates via isinstance)
+    ├── Transform chain (sequential)
     ├── Aggregation nodes (with trigger config)
     └── Coalesce nodes (with policy/strategy config)
     │
@@ -236,8 +235,6 @@ Phase 4: Structural Validation (called externally by orchestrator)
 
 **Transforms** (sequential chain):
 - Iterates through transforms in pipeline order
-- Detects plugin gates via `isinstance(transform, GateProtocol)`
-- For plugin gates: extracts routes, fork_to, stores in `_GateEntry`
 - Creates `continue` edges between sequential transforms
 - Maps `transform_seq → node_id` in `_transform_id_map`
 
@@ -264,7 +261,7 @@ Phase 4: Structural Validation (called externally by orchestrator)
 
 **Gate continue routes:**
 - `"continue"` label routes to the next node in the pipeline chain
-- If the gate is the last gate, `"continue"` routes to `default_sink`
+- If the gate is the last gate, `"continue"` routes to the sink specified by the source or terminal transform's `on_success` option
 
 **DIVERT edges** (structural error/quarantine routing):
 - Source `on_validation_failure` → quarantine sink (if not `"discard"`)
@@ -291,7 +288,6 @@ The `ExecutionGraph` maintains several lookup maps for O(1) access during execut
 | `_route_label_map` | `dict[tuple[NodeID, str], str]` | (gate, sink_name) → route_label |
 | `_route_resolution_map` | `dict[tuple[NodeID, str], str]` | (gate, label) → "continue" or sink_name |
 | `_coalesce_gate_index` | `dict[CoalesceName, int]` | Coalesce name → producing gate pipeline index |
-| `_default_sink` | `str` | Default output sink name |
 
 ---
 
@@ -493,7 +489,7 @@ While work queue is not empty:
     │   └── SinkExecutor.execute_sink(token, sink_name)
     │
     └── If no routing (fell through transforms):
-        └── Route to default_sink
+        └── Route to sink specified by source or terminal transform's on_success option
 
 Iteration guard: MAX_WORK_QUEUE_ITERATIONS = 10,000
 ```
@@ -618,7 +614,6 @@ All map accessors return copies to prevent external mutation of graph state.
 | `get_coalesce_id_map()` | `dict[CoalesceName, NodeID]` | Coalesce name → node ID |
 | `get_branch_to_coalesce_map()` | `dict[BranchName, CoalesceName]` | Fork branch → coalesce destination |
 | `get_coalesce_gate_index()` | `dict[CoalesceName, int]` | Coalesce → producing gate pipeline index |
-| `get_default_sink()` | `str` | Default output sink name |
 
 ### Routing Queries
 

@@ -34,28 +34,25 @@ class TestRoutingReasonSchema:
     """Tests for RoutingReason union type schema introspection."""
 
     def test_routing_reason_is_union_type(self) -> None:
-        """RoutingReason is a union of ConfigGateReason and PluginGateReason."""
+        """RoutingReason is a union of ConfigGateReason."""
         import types
 
         from elspeth.contracts import (
             ConfigGateReason,
-            PluginGateReason,
             RoutingReason,
         )
 
         assert isinstance(RoutingReason, types.UnionType)
-        # Union contains both variant types
+        # Union contains ConfigGateReason
         assert ConfigGateReason in RoutingReason.__args__
-        assert PluginGateReason in RoutingReason.__args__
 
     def test_routing_reason_variants_are_typed_dicts(self) -> None:
-        """Both RoutingReason variants are TypedDicts."""
+        """RoutingReason variant is a TypedDict."""
         from typing import is_typeddict
 
-        from elspeth.contracts import ConfigGateReason, PluginGateReason
+        from elspeth.contracts import ConfigGateReason
 
         assert is_typeddict(ConfigGateReason)
-        assert is_typeddict(PluginGateReason)
 
 
 class TestTransformSuccessReasonSchema:
@@ -125,19 +122,6 @@ class TestExecutionError:
 class TestRoutingReason:
     """Tests for RoutingReason union type usage."""
 
-    def test_routing_reason_accepts_plugin_gate_reason(self) -> None:
-        """RoutingReason union accepts PluginGateReason variant."""
-        from elspeth.contracts import PluginGateReason, RoutingReason
-
-        reason: RoutingReason = {
-            "rule": "value > threshold",
-            "matched_value": 42,
-        }
-
-        # At runtime, it's just a dict - cast to access variant-specific fields
-        plugin_reason: PluginGateReason = reason  # type: ignore[assignment]
-        assert plugin_reason["rule"] == "value > threshold"
-
     def test_routing_reason_accepts_config_gate_reason(self) -> None:
         """RoutingReason union accepts ConfigGateReason variant."""
         from elspeth.contracts import ConfigGateReason, RoutingReason
@@ -194,25 +178,13 @@ class TestTransformSuccessReason:
 
 
 class TestRoutingReasonVariants:
-    """Tests for RoutingReason 2-variant discriminated union."""
+    """Tests for RoutingReason variant structure."""
 
     def test_config_gate_reason_required_keys(self) -> None:
         """ConfigGateReason has condition and result as required."""
         from elspeth.contracts import ConfigGateReason
 
         assert ConfigGateReason.__required_keys__ == frozenset({"condition", "result"})
-
-    def test_plugin_gate_reason_required_keys(self) -> None:
-        """PluginGateReason has rule and matched_value as required."""
-        from elspeth.contracts import PluginGateReason
-
-        assert PluginGateReason.__required_keys__ == frozenset({"rule", "matched_value"})
-
-    def test_plugin_gate_reason_optional_keys(self) -> None:
-        """PluginGateReason has threshold, field, comparison as optional."""
-        from elspeth.contracts import PluginGateReason
-
-        assert PluginGateReason.__optional_keys__ == frozenset({"threshold", "field", "comparison"})
 
 
 class TestRoutingReasonUsage:
@@ -228,32 +200,6 @@ class TestRoutingReasonUsage:
         }
         assert reason["condition"] == "row['score'] > 100"
         assert reason["result"] == "true"
-
-    def test_plugin_gate_reason_minimal(self) -> None:
-        """PluginGateReason works with only required fields."""
-        from elspeth.contracts import PluginGateReason
-
-        reason: PluginGateReason = {
-            "rule": "threshold_exceeded",
-            "matched_value": 150,
-        }
-        assert reason["rule"] == "threshold_exceeded"
-        assert reason["matched_value"] == 150
-
-    def test_plugin_gate_reason_with_optional_fields(self) -> None:
-        """PluginGateReason accepts optional threshold fields."""
-        from elspeth.contracts import PluginGateReason
-
-        reason: PluginGateReason = {
-            "rule": "value exceeds threshold",
-            "matched_value": 150,
-            "threshold": 100.0,
-            "field": "score",
-            "comparison": ">",
-        }
-        assert reason["threshold"] == 100.0
-        assert reason["field"] == "score"
-        assert reason["comparison"] == ">"
 
 
 class TestTransformErrorReasonSchema:

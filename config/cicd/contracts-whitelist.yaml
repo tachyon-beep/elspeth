@@ -3,6 +3,8 @@
 allowed_external_types:
   # TUI display types - presentation-specific, not cross-boundary contracts
   - "tui/types:TokenDisplayInfo"
+  # DAG wiring helper type shared between CLI instantiation and graph construction
+  - "core/dag/models:WiredTransform"
   # SSRF safety type - security infrastructure, tightly coupled to validation logic
   - "core/security/web:SSRFSafeRequest"
   # Engine types used in testing factories - test infrastructure wraps these for convenience
@@ -29,17 +31,16 @@ allowed_dict_patterns:
   - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
 
   # Aggregation executor - checkpoint and state methods
-  - "src/elspeth/engine/executors.py:AggregationExecutor.get_buffered_rows:return (list)"
-  - "src/elspeth/engine/executors.py:AggregationExecutor.get_checkpoint_state:return"
-  - "src/elspeth/engine/executors.py:AggregationExecutor.restore_from_checkpoint:state"
-  - "src/elspeth/engine/executors.py:AggregationExecutor.restore_state:state"
-  - "src/elspeth/engine/executors.py:AggregationExecutor.get_restored_state:return"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_checkpoint_state:return"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.restore_from_checkpoint:state"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.restore_state:state"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_restored_state:return"
 
   # Orchestrator - checkpoint state (refactored into orchestrator/core.py)
   - "src/elspeth/engine/orchestrator/core.py:Orchestrator._maybe_checkpoint:aggregation_state"
 
   # Protocols - row data in plugin interface
-  - "src/elspeth/plugins/protocols.py:CoalesceProtocol.merge:return"
   - "src/elspeth/plugins/protocols.py:SinkProtocol.write:rows (list)"
 
   # Base classes - row data in plugin implementations
@@ -80,14 +81,11 @@ allowed_dict_patterns:
   # Protocols - config input
   - "src/elspeth/plugins/protocols.py:SourceProtocol.__init__:config"
   - "src/elspeth/plugins/protocols.py:TransformProtocol.__init__:config"
-  - "src/elspeth/plugins/protocols.py:GateProtocol.__init__:config"
-  - "src/elspeth/plugins/protocols.py:CoalesceProtocol.__init__:config"
   - "src/elspeth/plugins/protocols.py:SinkProtocol.__init__:config"
   - "src/elspeth/plugins/protocols.py:BatchTransformProtocol.__init__:config"
 
   # Base classes - config input
   - "src/elspeth/plugins/base.py:BaseTransform.__init__:config"
-  - "src/elspeth/plugins/base.py:BaseGate.__init__:config"
   - "src/elspeth/plugins/base.py:BaseSink.__init__:config"
   - "src/elspeth/plugins/base.py:BaseSource.__init__:config"
   - "src/elspeth/plugins/config_base.py:PluginConfig.from_dict:config"
@@ -122,10 +120,10 @@ allowed_dict_patterns:
   # CLI - plugin instantiation from configuration
   - "src/elspeth/cli.py:_build_resume_graphs:plugins"
   - "src/elspeth/cli_helpers.py:instantiate_plugins_from_config:return"
+  - "src/elspeth/cli.py:_orchestrator_context:plugins"
   - "src/elspeth/cli.py:_execute_pipeline_with_instances:plugins"
   - "src/elspeth/cli.py:_execute_resume_with_instances:plugins"
   - "src/elspeth/cli.py:_load_raw_yaml:return"
-  - "src/elspeth/cli.py:_extract_secrets_config:raw_config"
 
   # Security - secrets loading from config (Tier 3 external config)
   - "src/elspeth/core/security/config_secrets.py:load_secrets_from_config:return (list)"
@@ -147,6 +145,9 @@ allowed_dict_patterns:
 
   # Canonical representation - deterministic JSON for hashing
   - "src/elspeth/core/canonical.py:_edge_to_canonical_dict:return"
+
+  # DAG builder - schema dict extraction from node info
+  - "src/elspeth/core/dag/builder.py:_best_schema_dict:return"
 
   # Schema reconstruction - deserializing schemas from landscape database (refactored into orchestrator/export.py)
   - "src/elspeth/engine/orchestrator/export.py:reconstruct_schema_from_json:schema_dict"
@@ -265,9 +266,6 @@ allowed_dict_patterns:
   # Azure multi-query LLM (refactored: PipelineRow is now the row type at plugin boundary)
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform.__init__:config"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_single_query:row"
-  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_single_row_internal:row"
-  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._execute_queries_parallel:row"
-  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._execute_queries_sequential:row"
 
   # OpenRouter LLM (refactored: PipelineRow is now the row type at plugin boundary)
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.__init__:config"
@@ -299,6 +297,10 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
   # HTTP CLIENTS - External API trust boundary
   # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:request_data"
+  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:response_data"
+  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._record_and_emit:error_data"
+  - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient._execute_request:json"
   - "src/elspeth/plugins/clients/http.py:AuditedHTTPClient.post:json"
   - "src/elspeth/plugins/clients/replayer.py:ReplayMissError.__init__:request_data"
   - "src/elspeth/plugins/clients/replayer.py:CallReplayer.replay:request_data"
@@ -324,7 +326,6 @@ allowed_dict_patterns:
   # method receives raw config before type validation.
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/telemetry/protocols.py:ExporterProtocol.configure:config"
-  - "src/elspeth/telemetry/manager.py:TelemetryManager.health_metrics:return"
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter.configure:config"
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter._serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter.configure:config"
@@ -343,12 +344,19 @@ allowed_dict_patterns:
   - "src/elspeth/core/logging.py:_remove_internal_fields:return"
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # MCP SERVER - Genuinely dynamic patterns
+  # MCP SERVER + ANALYZER - Genuinely dynamic patterns
   # SQL query results have user-defined columns; call_tool receives MCP protocol input.
   # All other MCP returns are now typed via TypedDicts in mcp/types.py.
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:params"
-  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:return (list)"
+  # Facade (mcp/analyzer.py) - delegates to submodules
+  - "src/elspeth/mcp/analyzer.py:LandscapeAnalyzer.query:params"
+  - "src/elspeth/mcp/analyzer.py:LandscapeAnalyzer.query:return (list)"
+  # Submodule functions (mcp/analyzers/)
+  - "src/elspeth/mcp/analyzers/queries.py:explain_token:return"
+  - "src/elspeth/mcp/analyzers/queries.py:get_errors:return"
+  - "src/elspeth/mcp/analyzers/queries.py:query:params"
+  - "src/elspeth/mcp/analyzers/queries.py:query:return (list)"
+  # MCP server machinery
   - "src/elspeth/mcp/server.py:call_tool:arguments"
   # _validate_tool_args bridges Tier 3 (MCP protocol) to validated args.
   # Input is dict[str, Any] by protocol; return is validated but dynamic per-tool.
@@ -386,11 +394,8 @@ allowed_dict_patterns:
   - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.update_config:updates"
   - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._get_current_config:return"
   - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._handle_success_response:body"
-  - "src/elspeth/testing/chaosllm/config.py:load_preset:return"
-  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:base"
-  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:override"
-  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:return"
   - "src/elspeth/testing/chaosllm/config.py:load_config:cli_overrides"
+  - "src/elspeth/testing/chaosllm/config.py:load_preset:return"
   - "src/elspeth/testing/chaosllm/response_generator.py:OpenAIResponse.to_dict:return"
   - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._generate_template_response:request"
   - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._generate_echo_response:request"
@@ -418,6 +423,33 @@ allowed_dict_patterns:
   - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_success:b_list (list)"
   - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_latency:b_list (list)"
 
+  # ChaosEngine - shared utilities for chaos testing servers
+  # MetricsStore returns dynamic dicts for stats/export (schema-driven SQLite).
+  # Config loader uses dict[str, Any] for YAML config merging and preset loading.
+  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_stats:return"
+  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.export_data:return"
+  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_requests:return (list)"
+  - "src/elspeth/testing/chaosengine/metrics_store.py:MetricsStore.get_timeseries:return (list)"
+  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:base"
+  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:override"
+  - "src/elspeth/testing/chaosengine/config_loader.py:deep_merge:return"
+  - "src/elspeth/testing/chaosengine/config_loader.py:load_config:cli_overrides"
+  - "src/elspeth/testing/chaosengine/config_loader.py:load_preset:return"
+
+  # ChaosWeb - fault-injection test server for web scraping resilience testing
+  # Mirrors ChaosLLM patterns: YAML config loading, JSONL preset parsing, and
+  # metrics/admin APIs return dynamic dicts (same pattern as ChaosLLM).
+  - "src/elspeth/testing/chaosweb/config.py:load_preset:return"
+  - "src/elspeth/testing/chaosweb/config.py:load_config:cli_overrides"
+  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.get_stats:return"
+  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.export_metrics:return"
+  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer.update_config:updates"
+  - "src/elspeth/testing/chaosweb/server.py:ChaosWebServer._get_current_config:return"
+  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_stats:return"
+  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.export_data:return"
+  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_requests:return (list)"
+  - "src/elspeth/testing/chaosweb/metrics.py:WebMetricsRecorder.get_timeseries:return (list)"
+
   # ═══════════════════════════════════════════════════════════════════════════
   # BATCHING INFRASTRUCTURE - Row buffering for batch operations
   # ═══════════════════════════════════════════════════════════════════════════
@@ -431,19 +463,19 @@ allowed_dict_patterns:
   # OPENROUTER MULTI-QUERY - External API trust boundary
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._process_single_row_internal:row"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._process_single_query:row"
-  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._execute_queries_parallel:row"
-  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._execute_queries_sequential:row"
-  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.parse_output_mapping:return"
-  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.build_json_schema:return"
-  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.build_response_format:return"
 
   # Multi-query config base (JSON schema building for LLM structured output)
   - "src/elspeth/plugins/llm/multi_query.py:OutputFieldConfig.to_json_schema:return"
-  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfig.parse_output_mapping:return"
-  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfig.build_json_schema:return"
-  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfig.build_response_format:return"
+  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfigMixin.parse_output_mapping:return"
+  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfigMixin.build_json_schema:return"
+  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfigMixin.build_response_format:return"
+
+  # Base multi-query transform (shared row processing for Azure/OpenRouter)
+  - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._process_single_row_internal:row"
+  - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._execute_queries_parallel:row"
+  - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._execute_queries_sequential:row"
+  - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._process_single_query:row"
 
   # OpenRouter batch LLM (async batch API)
   - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"

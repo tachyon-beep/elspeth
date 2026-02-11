@@ -6,6 +6,7 @@ import queue
 import threading
 import time
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -363,7 +364,7 @@ class TestDropBackpressure:
         manager = TelemetryManager(config, exporters=[exporter])
         try:
             # Replace queue with a tiny one so we can fill it quickly
-            tiny_queue: queue.Queue = queue.Queue(maxsize=2)
+            tiny_queue: queue.Queue[Any] = queue.Queue(maxsize=2)
             manager._queue = tiny_queue
 
             # Block the export thread so it can't drain
@@ -374,7 +375,7 @@ class TestDropBackpressure:
                 blocker.wait(timeout=5.0)
                 original_dispatch(event)
 
-            manager._dispatch_to_exporters = slow_dispatch
+            object.__setattr__(manager, "_dispatch_to_exporters", slow_dispatch)
 
             # Send first event (picked up by thread, which then blocks)
             manager.handle_event(_lifecycle_event())
@@ -393,7 +394,7 @@ class TestDropBackpressure:
         finally:
             # Unblock thread, restore dispatch, then close
             blocker.set()
-            manager._dispatch_to_exporters = original_dispatch
+            object.__setattr__(manager, "_dispatch_to_exporters", original_dispatch)
             manager.close()
 
     def test_drop_mode_increments_events_dropped(self) -> None:
@@ -402,7 +403,7 @@ class TestDropBackpressure:
         manager = TelemetryManager(config, exporters=[exporter])
         try:
             # Replace queue with a tiny one
-            tiny_queue: queue.Queue = queue.Queue(maxsize=2)
+            tiny_queue: queue.Queue[Any] = queue.Queue(maxsize=2)
             manager._queue = tiny_queue
 
             # Block the export thread
@@ -413,7 +414,7 @@ class TestDropBackpressure:
                 blocker.wait(timeout=5.0)
                 original_dispatch(event)
 
-            manager._dispatch_to_exporters = slow_dispatch
+            object.__setattr__(manager, "_dispatch_to_exporters", slow_dispatch)
 
             # First event occupies the thread (blocked in dispatch)
             manager.handle_event(_lifecycle_event())
@@ -429,7 +430,7 @@ class TestDropBackpressure:
             assert manager.health_metrics["events_dropped"] > initial_dropped
         finally:
             blocker.set()
-            manager._dispatch_to_exporters = original_dispatch
+            object.__setattr__(manager, "_dispatch_to_exporters", original_dispatch)
             manager.close()
 
 
@@ -746,7 +747,7 @@ class TestFlush:
             def bad_flush():
                 raise RuntimeError("flush error")
 
-            exporter.flush = bad_flush
+            object.__setattr__(exporter, "flush", bad_flush)
             # Should not raise
             manager.flush()
         finally:
@@ -811,7 +812,7 @@ class TestClose:
         def bad_close():
             raise RuntimeError("close error")
 
-        exporter.close = bad_close
+        object.__setattr__(exporter, "close", bad_close)
         manager = TelemetryManager(config, exporters=[exporter])
         # Should not raise
         manager.close()

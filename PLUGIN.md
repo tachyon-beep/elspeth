@@ -1,8 +1,9 @@
 # ELSPETH Plugin Development Guide
 
-Create custom sources, transforms, gates, and sinks for ELSPETH pipelines.
+Create custom sources, transforms, and sinks for ELSPETH pipelines.
 
 > **Quick Links:**
+>
 > - [5-Minute Transform](#5-minute-transform) - Get started fast
 > - [Plugin Types](#plugin-types-overview) - Choose the right type
 > - [Contract Tests](#contract-testing) - Verify your plugin works
@@ -17,7 +18,6 @@ Create custom sources, transforms, gates, and sinks for ELSPETH pipelines.
 - [Creating Transforms](#creating-a-transform-plugin)
 - [Creating Sources](#creating-a-source-plugin)
 - [Creating Sinks](#creating-a-sink-plugin)
-- [Creating Gates](#creating-a-gate-plugin)
 - [Plugin Registration](#plugin-registration)
 - [Schema Configuration](#schema-configuration)
 - [Contract Testing](#contract-testing)
@@ -53,6 +53,11 @@ from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 
+class DoubleValueConfig(TransformDataConfig):
+    """Config with custom field."""
+    field: str = "value"
+
+
 class DoubleValueTransform(BaseTransform):
     """Double a numeric field value."""
 
@@ -60,9 +65,9 @@ class DoubleValueTransform(BaseTransform):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        cfg = TransformDataConfig.from_dict(config)
-        self._field = config.get("field", "value")
-        self._on_error = cfg.on_error
+        cfg = DoubleValueConfig.from_dict(config)
+        self._field = cfg.field
+        self.on_error = cfg.on_error
 
         assert cfg.schema_config is not None
         schema = create_schema_from_config(
@@ -104,11 +109,14 @@ class ElspethBuiltinTransforms:
 
 ```yaml
 transforms:
-  - plugin: double_value
-    options:
-      schema:
-        fields: dynamic
-      field: price
+- name: double_price
+  plugin: double_value
+  input: validated           # Explicit input connection
+  on_success: doubled        # Named output connection
+  options:
+    schema:
+      fields: dynamic
+    field: price
 ```
 
 **Test it:**
@@ -135,14 +143,13 @@ class TestDoubleValueContract(TransformContractPropertyTestBase):
 ELSPETH follows the **Sense/Decide/Act** model:
 
 ```
-SOURCE (Sense) → TRANSFORM/GATE (Decide) → SINK (Act)
+SOURCE (Sense) → TRANSFORM (Decide) → SINK (Act)
 ```
 
 | Type | Purpose | Base Class | Key Method |
 |------|---------|------------|------------|
 | **Source** | Load data from external systems | `BaseSource` | `load()` |
 | **Transform** | Process/classify rows | `BaseTransform` | `process()` |
-| **Gate** | Route rows to destinations | `BaseGate` | `evaluate()` |
 | **Sink** | Output data | `BaseSink` | `write()` |
 
 ### The Trust Model: Who Can Coerce Data?
@@ -151,7 +158,6 @@ SOURCE (Sense) → TRANSFORM/GATE (Decide) → SINK (Act)
 |-------------|-------------------|-----|
 | **Source** | ✅ Yes | External data boundary - normalize incoming data |
 | **Transform** | ❌ No | Wrong types = upstream bug → crash |
-| **Gate** | ❌ No | Wrong types = upstream bug → crash |
 | **Sink** | ❌ No | Wrong types = upstream bug → crash |
 
 **Rule:** Only sources touch untrusted external data. Everything else trusts upstream.
@@ -189,7 +195,7 @@ class MyTransform(BaseTransform):
         cfg = MyTransformConfig.from_dict(config)
         self._multiplier = cfg.multiplier
         self._target_field = cfg.target_field
-        self._on_error = cfg.on_error
+        self.on_error = cfg.on_error
 
         assert cfg.schema_config is not None
         schema = create_schema_from_config(
@@ -229,10 +235,13 @@ class MyTransform(BaseTransform):
 | `name` | `str` | Unique plugin identifier (class attribute) |
 | `input_schema` | `type[PluginSchema]` | Expected input row schema |
 | `output_schema` | `type[PluginSchema]` | Produced output row schema |
+| `on_error` | `str \| None` | Sink name for error routing (plain attribute, set in `__init__`) |
+| `on_success` | `str \| None` | Output connection name (plain attribute, set in `__init__`) |
 | `determinism` | `Determinism` | Reproducibility level (default: `DETERMINISTIC`) |
 | `plugin_version` | `str` | Plugin version for audit trail (default: `"0.0.0"`) |
 
 **Determinism levels:**
+
 - `DETERMINISTIC` - Same input always produces same output
 - `EXTERNAL_CALL` - Calls external service (LLM, API)
 - `IO_READ` - Reads from external source
@@ -274,13 +283,16 @@ class BatchStatsTransform(BaseTransform):
 ```
 
 **Pipeline config:**
+
 ```yaml
 aggregations:
-  - name: compute_stats
-    plugin: batch_stats
-    trigger:
-      count: 100  # Process every 100 rows
-    output_mode: single  # N inputs → 1 output
+- name: compute_stats
+  plugin: batch_stats
+  input: processed           # Explicit input connection
+  on_success: stats_out      # Named output connection
+  trigger:
+    count: 100  # Process every 100 rows
+  output_mode: single  # N inputs → 1 output
 ```
 
 </details>
@@ -307,6 +319,7 @@ class ExpandItemsTransform(BaseTransform):
 ```
 
 **Token semantics:**
+
 - `creates_tokens=True` + `success_multi()` → New tokens per output
 - `creates_tokens=False` + `success_multi()` → RuntimeError
 
@@ -482,110 +495,9 @@ class MySink(BaseSink):
 ### ArtifactDescriptor Requirements
 
 The audit trail requires:
+
 - `content_hash` - SHA-256 hex digest of output content
 - `size_bytes` - Output size in bytes
-
----
-
-## Creating a Gate Plugin
-
-Gates route rows to different destinations. **Most gates should use config expressions:**
-
-```yaml
-gates:
-  - name: quality_check
-    condition: "row['score'] >= 0.8"
-    routes:
-      "true": high_quality_sink
-      "false": continue
-```
-
-**Expression parser allows:**
-- Field access: `row['field']`, `row.get('field', default)`
-- Comparisons: `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`
-- Boolean ops: `and`, `or`, `not`
-- Arithmetic: `+`, `-`, `*`, `/`, `//`, `%`
-- Literals: strings, numbers, booleans, None, lists, dicts
-
-**Expression parser forbids:**
-- Function calls (except `row.get()`) - `int(x)`, `len(x)`, `str(x)` are NOT allowed
-- Comprehensions, lambdas, f-strings, attribute access (except `row.get`)
-
-**Create a plugin gate only when expressions can't express your logic:**
-
-```python
-from typing import Any
-from elspeth.contracts import Determinism, RoutingAction
-from elspeth.plugins.base import BaseGate
-from elspeth.plugins.context import PluginContext
-from elspeth.plugins.results import GateResult
-from elspeth.plugins.schema_factory import create_schema_from_config
-
-
-class MLGate(BaseGate):
-    """Route based on ML model prediction."""
-
-    name = "ml_gate"
-    determinism = Determinism.EXTERNAL_CALL  # ML inference is external
-    plugin_version = "1.0.0"
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        super().__init__(config)
-        self._threshold = config.get("threshold", 0.7)
-        self._model_path = config.get("model_path")
-        self._model = None
-
-        schema_config = config.get("schema", {"fields": "dynamic"})
-        schema = create_schema_from_config(
-            schema_config, "MLGateSchema", allow_coercion=False
-        )
-        self.input_schema = schema
-        self.output_schema = schema
-
-    def on_start(self, ctx: PluginContext) -> None:
-        if self._model_path:
-            import pickle
-            with open(self._model_path, "rb") as f:
-                self._model = pickle.load(f)
-
-    def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-        if self._model:
-            features = [row.get("f1", 0), row.get("f2", 0)]
-            score = self._model.predict_proba([features])[0][1]
-
-            if score > self._threshold:
-                row["ml_score"] = score
-                return GateResult(row=row, action=RoutingAction.route("flagged"))
-
-        return GateResult(row=row, action=RoutingAction.continue_())
-
-    def close(self) -> None:
-        self._model = None
-```
-
-### GateResult Options
-
-```python
-# Continue to next node
-GateResult(row=row, action=RoutingAction.continue_())
-
-# Route to named sink
-GateResult(row=row, action=RoutingAction.route("review_queue"))
-
-# Fork to multiple paths
-GateResult(row=row, action=RoutingAction.fork(["path_a", "path_b"]))
-```
-
-### When to Use Each Approach
-
-| Scenario | Use |
-|----------|-----|
-| `row['score'] > threshold` | Config expression |
-| Multiple conditions with AND/OR | Config expression |
-| ML model inference | Plugin gate |
-| External API validation | Plugin gate |
-| Rate limiting / quotas | Plugin gate |
-| Complex business rules | Plugin gate |
 
 ---
 
@@ -796,6 +708,7 @@ class MyTransform(BaseTransform):
 
 - [ ] Has `name` class attribute
 - [ ] Has required schema attributes (`input_schema`, `output_schema`)
+- [ ] `on_error` and `on_success` set as plain attributes in `__init__`
 - [ ] Config extends correct base class (`TransformDataConfig`, `SourceDataConfig`)
 - [ ] Schema created with correct `allow_coercion`
 - [ ] Registered in `hookimpl.py`

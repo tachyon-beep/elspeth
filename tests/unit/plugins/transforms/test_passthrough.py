@@ -43,8 +43,9 @@ class TestPassThrough:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == row
-        assert result.row is not row  # Should be a copy, not the same object
+        assert id(result.row) != id(row)  # Should be a copy, not the same object
 
     def test_process_with_nested_data(self, ctx: PluginContext) -> None:
         """Handles nested structures correctly."""
@@ -72,6 +73,7 @@ class TestPassThrough:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {}
 
     def test_close_is_idempotent(self) -> None:

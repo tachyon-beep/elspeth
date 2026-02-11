@@ -17,6 +17,7 @@
 # Source: null source yields no rows (instant completion)
 source:
   plugin: "null"
+  on_success: output
 
 # Sink: JSON output for verification
 sinks:
@@ -24,9 +25,8 @@ sinks:
     plugin: json
     options:
       path: /app/output/smoke-test-output.json
-
-# Default output sink
-default_sink: output
+      schema:
+        mode: observed
 
 # Landscape: SQLite database for audit trail
 landscape:

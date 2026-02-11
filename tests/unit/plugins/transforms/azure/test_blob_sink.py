@@ -459,9 +459,16 @@ class TestAzureBlobSinkOverwriteBehavior:
         assert call_kwargs["overwrite"] is True
 
     def test_overwrite_false_raises_if_blob_exists(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
-        """With overwrite=False, raises ValueError if blob exists."""
+        """With overwrite=False, raises ValueError if blob exists.
+
+        Azure SDK raises ResourceExistsError atomically from upload_blob(overwrite=False),
+        which blob_sink converts to ValueError for a consistent API.
+        """
+        # Create a fake ResourceExistsError (avoid importing azure SDK in tests)
+        resource_exists = type("ResourceExistsError", (Exception,), {})("Blob already exists")
+
         mock_blob_client = MagicMock()
-        mock_blob_client.exists.return_value = True
+        mock_blob_client.upload_blob.side_effect = resource_exists
         mock_container = MagicMock()
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
@@ -475,7 +482,6 @@ class TestAzureBlobSinkOverwriteBehavior:
     def test_overwrite_false_succeeds_if_blob_not_exists(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """With overwrite=False, succeeds if blob does not exist."""
         mock_blob_client = MagicMock()
-        mock_blob_client.exists.return_value = False
         mock_container = MagicMock()
         mock_container.get_blob_client.return_value = mock_blob_client
         mock_container_client.return_value = mock_container
@@ -485,6 +491,9 @@ class TestAzureBlobSinkOverwriteBehavior:
 
         result = sink.write(rows, ctx)
         assert isinstance(result, ArtifactDescriptor)
+        # Verify upload_blob was called with overwrite=False
+        mock_blob_client.upload_blob.assert_called_once()
+        assert mock_blob_client.upload_blob.call_args[1]["overwrite"] is False
 
 
 class TestAzureBlobSinkArtifactDescriptor:
@@ -551,7 +560,7 @@ class TestAzureBlobSinkErrors:
     """Tests for error handling."""
 
     def test_upload_error_propagates_with_context(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
-        """Azure upload errors propagate with context message."""
+        """Azure upload errors propagate as RuntimeError with context message."""
         mock_blob_client = MagicMock()
         mock_blob_client.upload_blob.side_effect = Exception("Network error")
         mock_container = MagicMock()
@@ -561,8 +570,12 @@ class TestAzureBlobSinkErrors:
         sink = AzureBlobSink(make_config())
         rows = [{"id": 1}]
 
-        with pytest.raises(Exception, match="Failed to upload blob"):
+        with pytest.raises(RuntimeError, match="Failed to upload blob") as exc_info:
             sink.write(rows, ctx)
+
+        # Original exception preserved in cause chain
+        assert exc_info.value.__cause__ is not None
+        assert "Network error" in str(exc_info.value.__cause__)
 
     def test_connection_error_propagates(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Connection errors propagate to caller."""

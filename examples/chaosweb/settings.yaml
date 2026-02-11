@@ -1,0 +1,94 @@
+# ChaosWeb Scraping Pipeline Example
+#
+# Demonstrates web scraping resilience testing with ChaosWeb fault injection.
+# The pipeline fetches pages from a local ChaosWeb server and handles
+# injected errors (429, 403, 404, timeouts, malformed HTML) gracefully.
+#
+# DAG topology:
+#
+#   source ─(urls)─> scraper ─┬─(scraped)─> [content_check] ─┬─ output (content >= 50 chars)
+#                              │                               └─ review (short/suspicious content)
+#                              └─(on_error)─> scrape_failures
+#
+# Prerequisites:
+#   1. Start ChaosWeb server in a separate terminal:
+#      chaosweb serve --preset=realistic --port=8200
+#
+#   2. Run this pipeline:
+#      elspeth run --settings examples/chaosweb/settings.yaml --execute
+
+source:
+  plugin: csv
+  on_success: urls
+  options:
+    path: examples/chaosweb/input.csv
+    schema:
+      mode: fixed
+      fields:
+      - 'id: int'
+      - 'url: str'
+      - 'label: str'
+    on_validation_failure: discard
+
+transforms:
+# Stage 1: Fetch pages from ChaosWeb — failures route to scrape_failures
+- name: scraper
+  plugin: web_scrape
+  input: urls
+  on_success: scraped
+  on_error: scrape_failures
+  options:
+    url_field: url
+    content_field: page_content
+    fingerprint_field: page_fingerprint
+    format: markdown
+    http:
+      abuse_contact: test@example.com
+      scraping_reason: ChaosWeb resilience testing example
+      timeout: 10
+    schema:
+      mode: observed
+
+gates:
+# Gate: Route short or suspicious content to review
+- name: content_check
+  input: scraped
+  condition: len(str(row.get('page_content', ''))) >= 50
+  routes:
+    'true': output
+    'false': review
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: examples/chaosweb/output/scraped_pages.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'url: str'
+        - 'label: str'
+        - 'page_content: str'
+        - 'page_fingerprint: str'
+  review:
+    plugin: csv
+    options:
+      path: examples/chaosweb/output/review.csv
+      schema:
+        mode: fixed
+        fields:
+        - 'id: int'
+        - 'url: str'
+        - 'label: str'
+        - 'page_content: str'
+        - 'page_fingerprint: str'
+  scrape_failures:
+    plugin: csv
+    options:
+      path: examples/chaosweb/output/scrape_failures.csv
+      schema:
+        mode: observed
+
+landscape:
+  url: sqlite:///examples/chaosweb/runs/audit.db

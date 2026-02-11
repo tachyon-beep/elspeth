@@ -6,7 +6,7 @@ Tests that require LandscapeDB (actual contract queries, SQL blocklist tests)
 are deferred to integration tier.
 """
 
-from elspeth.mcp.server import LandscapeAnalyzer
+from elspeth.mcp.analyzer import LandscapeAnalyzer
 
 
 class TestMCPToolIntegration:

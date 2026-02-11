@@ -1,7 +1,5 @@
 """Tests for DatabaseSink resume capability."""
 
-import os
-
 import pytest
 
 from elspeth.plugins.sinks.database_sink import DatabaseSink
@@ -11,11 +9,9 @@ STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int"]}
 
 
 @pytest.fixture(autouse=True)
-def allow_raw_secrets():
+def allow_raw_secrets(monkeypatch):
     """Allow raw secrets for testing."""
-    os.environ["ELSPETH_ALLOW_RAW_SECRETS"] = "true"
-    yield
-    os.environ.pop("ELSPETH_ALLOW_RAW_SECRETS", None)
+    monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
 
 
 def test_database_sink_supports_resume():

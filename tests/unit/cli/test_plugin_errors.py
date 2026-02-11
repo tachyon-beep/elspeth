@@ -19,6 +19,7 @@ def test_unknown_source_plugin_error():
     config_yaml = """
 source:
   plugin: nonexistent_source  # Unknown plugin
+  on_success: output
   options:
     path: test.csv
 
@@ -32,7 +33,6 @@ sinks:
         fields:
           - "data: str"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -55,11 +55,13 @@ def test_unknown_transform_plugin_error():
     config_dict = {
         "source": {
             "plugin": "csv",
+            "on_success": "t0_in",
             "options": {"path": "test.csv", "schema": {"mode": "observed"}, "on_validation_failure": "discard"},
         },
-        "transforms": [{"plugin": "nonexistent_transform", "options": {}}],
+        "transforms": [
+            {"plugin": "nonexistent_transform", "name": "t0", "input": "t0_in", "on_success": "out", "on_error": "discard", "options": {}}
+        ],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["data: str"]}}}},
-        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -81,6 +83,7 @@ def test_plugin_initialization_error():
     config_yaml = """
 source:
   plugin: csv
+  on_success: output
   options:
     # Missing required 'path' option
     schema: {mode: observed}
@@ -95,7 +98,6 @@ sinks:
         fields:
           - "data: str"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -125,10 +127,14 @@ def test_schema_extraction_from_instance():
     config_dict = {
         "source": {
             "plugin": "csv",
-            "options": {"path": "test.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}, "on_validation_failure": "discard"},
+            "on_success": "out",
+            "options": {
+                "path": "test.csv",
+                "schema": {"mode": "fixed", "fields": ["value: float"]},
+                "on_validation_failure": "discard",
+            },
         },
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}}}},
-        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -151,6 +157,7 @@ def test_fork_join_validation():
     config_yaml = """
 source:
   plugin: csv
+  on_success: split_in
   options:
     path: test.csv
     schema:
@@ -161,6 +168,7 @@ source:
 
 gates:
   - name: split
+    input: split_in
     condition: "row['value'] > 50"
     routes:
       "true": fork
@@ -169,20 +177,13 @@ gates:
       - branch_high
       - branch_low
 
-transforms:
-  - plugin: passthrough
-    options:
-      schema:
-        mode: fixed
-        fields:
-          - "value: float"
-
 coalesce:
   - name: merge
     branches:
       - branch_high
       - branch_low
     policy: first
+    on_success: output
 
 sinks:
   output:
@@ -202,7 +203,6 @@ sinks:
         fields:
           - "value: float"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -212,7 +212,7 @@ default_sink: output
     try:
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should pass validation - fork/join pattern with compatible schemas
-        assert result.exit_code == 0
+        assert result.exit_code == 0, f"Validation failed: {result.output}"
         # Use exact phrase to avoid matching "invalid"
         assert "pipeline configuration valid" in result.output.lower(), (
             f"Expected 'Pipeline configuration valid' in output, got: {result.output}"
@@ -234,6 +234,7 @@ def test_fork_to_separate_sinks_without_coalesce():
     config_yaml = """
 source:
   plugin: csv
+  on_success: split_in
   options:
     path: test.csv
     schema:
@@ -244,10 +245,11 @@ source:
 
 gates:
   - name: split
+    input: split_in
     condition: "row['value'] > 50"
     routes:
       "true": fork
-      "false": continue
+      "false": output
     fork_to:
       - high_values
       - low_values
@@ -278,7 +280,6 @@ sinks:
         fields:
           - "value: float"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -323,6 +324,7 @@ def test_coalesce_compatible_branch_schemas():
     config_yaml = """
 source:
   plugin: csv
+  on_success: split_in
   options:
     path: test.csv
     schema:
@@ -333,21 +335,14 @@ source:
 
 gates:
   - name: split
+    input: split_in
     condition: "row['value'] > 50"
     routes:
       "true": fork
-      "false": continue
+      "false": output
     fork_to:
       - branch_high
       - branch_low
-
-transforms:
-  - plugin: passthrough
-    options:
-      schema:
-        mode: fixed
-        fields:
-          - "value: float"
 
 # Simulate branches producing different schemas
 # (In reality this would require different transform chains per branch)
@@ -359,6 +354,7 @@ coalesce:
       - branch_high
       - branch_low
     policy: first
+    on_success: output
 
 sinks:
   output:
@@ -370,7 +366,6 @@ sinks:
         fields:
           - "value: float"
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -404,6 +399,7 @@ def test_dynamic_schema_to_specific_schema_validation():
     config_yaml_dynamic_to_specific = """
 source:
   plugin: csv
+  on_success: output
   options:
     path: test.csv
     schema: {mode: observed}  # Dynamic schema
@@ -419,7 +415,6 @@ sinks:
         fields:
           - "field_a: str"  # Specific schema
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -439,6 +434,7 @@ default_sink: output
     config_yaml_mixed = """
 source:
   plugin: csv
+  on_success: t0_in
   options:
     path: test.csv
     schema:
@@ -449,6 +445,10 @@ source:
 
 transforms:
   - plugin: passthrough
+    name: t0
+    input: t0_in
+    on_success: output
+    on_error: discard
     options:
       schema: {mode: observed}  # Dynamic transform
 
@@ -462,7 +462,6 @@ sinks:
         fields:
           - "value: float"  # Specific
 
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

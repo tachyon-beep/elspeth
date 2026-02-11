@@ -3,6 +3,7 @@
 
 These provide common functionality and ensure proper interface compliance.
 Plugins MUST subclass these base classes (BaseSource, BaseTransform, BaseSink).
+Gate routing is handled by config-driven GateSettings + ExpressionParser, not plugin classes.
 
 Why base class inheritance is required:
 - Plugin discovery uses issubclass() checks against base classes
@@ -32,7 +33,6 @@ if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.results import (
-    GateResult,
     TransformResult,
 )
 
@@ -88,13 +88,17 @@ class BaseTransform(ABC):
 
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig override this from config.
-    # None means: transform doesn't return errors, OR errors are bugs.
-    _on_error: str | None = None
+    # Always non-None at runtime (TransformSettings requires on_error).
+    # Base class default is None because injection happens post-construction
+    # via cli_helpers bridge (set from TransformSettings.on_error).
+    on_error: str | None = None
 
-    @property
-    def on_error(self) -> str | None:
-        """Error routing destination for this transform."""
-        return self._on_error
+    # Success routing configuration
+    # Terminal transforms set this to the output sink name.
+    # Always non-None at runtime (TransformSettings requires on_success).
+    # Base class default is None because injection happens post-construction
+    # via cli_helpers bridge (set from TransformSettings.on_success).
+    on_success: str | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
@@ -151,85 +155,6 @@ class BaseTransform(ABC):
 
         Override for cleanup.
         """
-        pass
-
-
-class BaseGate(ABC):
-    """Base class for gate transforms (routing decisions).
-
-    Subclass and implement evaluate() to create a gate.
-
-    Example:
-        class SafetyGate(BaseGate):
-            name = "safety"
-            input_schema = RowSchema
-            output_schema = RowSchema
-
-            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-                if self._is_suspicious(row):
-                    return GateResult(
-                        row=row.to_dict(),
-                        action=RoutingAction.route("suspicious"),  # Resolved via routes config
-                    )
-                return GateResult(row=row.to_dict(), action=RoutingAction.route("normal"))
-    """
-
-    name: str
-    input_schema: type[PluginSchema]
-    output_schema: type[PluginSchema]
-    routes: dict[str, str]
-    fork_to: list[str] | None
-    node_id: str | None = None  # Set by orchestrator after registration
-
-    # Metadata for Phase 3 audit/reproducibility
-    determinism: Determinism = Determinism.DETERMINISTIC
-    plugin_version: str = "0.0.0"
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration.
-
-        Args:
-            config: Plugin configuration (validated by GateSettings schema)
-        """
-        self.config = config
-        # GateSettings schema validates routes (required) and fork_to (optional)
-        # Trust the schema - no defensive checks needed here
-        self.routes = config["routes"]
-        self.fork_to = config.get("fork_to")
-
-    @abstractmethod
-    def evaluate(
-        self,
-        row: PipelineRow,
-        ctx: PluginContext,
-    ) -> GateResult:
-        """Evaluate a row and decide routing.
-
-        Args:
-            row: Input row as PipelineRow (immutable, supports dual-name access)
-            ctx: Plugin context
-
-        Returns:
-            GateResult with routing decision
-        """
-        ...
-
-    def close(self) -> None:  # noqa: B027 - optional override, not abstract
-        """Clean up resources after pipeline completion.
-
-        Called once after all rows have been processed. Override for closing
-        connections, flushing buffers, or releasing external resources.
-        """
-        pass
-
-    # === Lifecycle Hooks (Phase 3) ===
-
-    def on_start(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
-        """Called at start of run."""
-        pass
-
-    def on_complete(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
-        """Called at end of run."""
         pass
 
 
@@ -429,6 +354,10 @@ class BaseSource(ABC):
     # Sink name for quarantined rows, or "discard" to drop invalid rows
     # All sources must set this - config-based sources get it from SourceDataConfig
     _on_validation_failure: str
+
+    # Success routing: sink name for rows that pass source validation
+    # All sources must set this - config-based sources get it from SourceDataConfig
+    on_success: str
 
     # Schema contract for row validation (Phase 2)
     _schema_contract: "SchemaContract | None" = None

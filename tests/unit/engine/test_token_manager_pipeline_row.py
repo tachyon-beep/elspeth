@@ -7,10 +7,12 @@ import pytest
 
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from tests.fixtures.factories import make_field, make_row, make_source_row
+from elspeth.contracts.types import NodeID
+from elspeth.testing import make_field, make_row, make_source_row
+from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 
-def _make_contract():
+def _make_contract() -> SchemaContract:
     """Create a minimal schema contract for testing."""
     return SchemaContract(
         fields=(
@@ -44,7 +46,7 @@ class TestTokenManagerCreateInitialToken:
 
         contract = _make_contract()
         recorder = _make_mock_recorder()
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         source_row = make_source_row({"amount": 100}, contract=contract)
 
@@ -76,7 +78,7 @@ class TestTokenManagerCreateInitialToken:
         from elspeth.engine.tokens import TokenManager
 
         recorder = _make_mock_recorder()
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         # SourceRow without contract -- uses SourceRow.valid directly because
         # make_source_row auto-creates a contract when contract=None
@@ -104,7 +106,7 @@ class TestTokenManagerForkToken:
         child1 = Mock(token_id="child_001", branch_name="branch_a", fork_group_id="fork_group_001")
         child2 = Mock(token_id="child_002", branch_name="branch_b", fork_group_id="fork_group_001")
         recorder.fork_token.return_value = ([child1, child2], "fork_group_001")
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         # Create parent token with PipelineRow
         parent_row = make_row({"amount": 100}, contract=contract)
@@ -117,7 +119,7 @@ class TestTokenManagerForkToken:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent_token,
             branches=["branch_a", "branch_b"],
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id="run_001",
         )
 
@@ -143,7 +145,7 @@ class TestTokenManagerExpandToken:
         child1 = Mock(token_id="child_001", expand_group_id="eg_001")
         child2 = Mock(token_id="child_002", expand_group_id="eg_001")
         recorder.expand_token.return_value = ([child1, child2], "eg_001")
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         # Create parent token with PipelineRow
         parent_row = make_row({"amount": 100}, contract=contract)
@@ -163,7 +165,7 @@ class TestTokenManagerExpandToken:
             parent_token=parent_token,
             expanded_rows=expanded_rows,
             output_contract=contract,
-            step_in_pipeline=1,
+            node_id=NodeID("gate_node"),
             run_id="run_001",
         )
 
@@ -193,7 +195,7 @@ class TestTokenManagerCoalesceTokens:
             token_id="merged_001",
             join_group_id="join_001",
         )
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         # Create parent tokens with PipelineRow
         parent_row_a = make_row({"amount": 100, "branch_a_field": "a"}, contract=contract)
@@ -210,7 +212,7 @@ class TestTokenManagerCoalesceTokens:
         merged_token = manager.coalesce_tokens(
             parents=[parent_a, parent_b],
             merged_data=merged_row,
-            step_in_pipeline=3,
+            node_id=NodeID("coalesce_node"),
         )
 
         assert merged_token.token_id == "merged_001"
@@ -268,7 +270,7 @@ class TestTokenManagerUpdateRowData:
 
         contract = _make_contract()
         recorder = _make_mock_recorder()
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         original_row = make_row({"amount": 100}, contract=contract)
         token = TokenInfo(row_id="row_001", token_id="token_001", row_data=original_row)
@@ -290,7 +292,7 @@ class TestTokenManagerUpdateRowData:
 
         contract = _make_contract()
         recorder = _make_mock_recorder()
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         original_row = make_row({"amount": 100}, contract=contract)
         token = TokenInfo(
@@ -321,7 +323,7 @@ class TestTokenManagerCreateTokenForExistingRow:
         contract = _make_contract()
         recorder = _make_mock_recorder()
         recorder.create_token.return_value = Mock(token_id="new_token_001")
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=_make_step_resolver())
 
         row_data = make_row({"amount": 100}, contract=contract)
 

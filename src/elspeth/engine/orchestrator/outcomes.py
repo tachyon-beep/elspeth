@@ -18,12 +18,13 @@ timeout continuations (lines 2124, 2139-2143 in the original).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
-from elspeth.contracts.types import CoalesceName
-from elspeth.engine.orchestrator.types import ExecutionCounters, RowPlugin
+from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.types import CoalesceName, NodeID
+from elspeth.engine.orchestrator.types import ExecutionCounters
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
@@ -31,11 +32,22 @@ if TYPE_CHECKING:
     from elspeth.engine.processor import RowProcessor
 
 
+def _require_sink_name(result: Any) -> str:
+    """Require sink_name for outcomes that must route to a sink.
+
+    Replaces cast(str, result.sink_name) which is a no-op at runtime.
+    If sink_name is None, this is a Tier 1 invariant violation (our data).
+    """
+    name: str | None = result.sink_name
+    if name is None:
+        raise OrchestrationInvariantError(f"Result with outcome {result.outcome} missing sink_name. Token: {result.token}")
+    return name
+
+
 def accumulate_row_outcomes(
     results: Iterable[Any],
     counters: ExecutionCounters,
     config_sinks: Mapping[str, object],
-    default_sink_name: str,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
 ) -> None:
     """Accumulate row processing outcomes into counters and pending_tokens.
@@ -48,29 +60,35 @@ def accumulate_row_outcomes(
     In particular, COALESCED outcomes always increment rows_succeeded (fixing
     the bug where the resume path omitted this).
 
+    Routing is determined by result.sink_name (set by on_success routing in
+    the processor) rather than a default_sink_name parameter.
+
     Args:
         results: Iterable of RowProcessingResult from processor.process_row/process_token
         counters: Mutable ExecutionCounters to update
-        config_sinks: Dict of sink_name -> sink plugin (for branch routing validation)
-        default_sink_name: Default output sink name
+        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         pending_tokens: Dict of sink_name -> list of (token, pending_outcome) pairs
     """
     for result in results:
         if result.outcome == RowOutcome.COMPLETED:
             counters.rows_succeeded += 1
-            # Fork children route to branch-named sink if it exists
-            sink_name = default_sink_name
-            if result.token.branch_name is not None and result.token.branch_name in config_sinks:
-                sink_name = result.token.branch_name
-
+            # RowResult.__post_init__ guarantees sink_name is set for COMPLETED
+            sink_name = _require_sink_name(result)
+            if sink_name not in pending_tokens:
+                raise OrchestrationInvariantError(
+                    f"Sink '{sink_name}' from result.sink_name not in configured sinks. "
+                    f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                )
             pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.ROUTED:
             counters.rows_routed += 1
-            # GateExecutor contract: ROUTED outcome always has sink_name set
-            if result.sink_name is None:
-                raise RuntimeError("ROUTED outcome requires sink_name")
-            counters.routed_destinations[result.sink_name] += 1
-            pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
+            sink_name = _require_sink_name(result)
+            counters.routed_destinations[sink_name] += 1
+            if sink_name not in pending_tokens:
+                raise OrchestrationInvariantError(
+                    f"Routed sink '{sink_name}' not in configured sinks. Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                )
+            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
         elif result.outcome == RowOutcome.FAILED:
             counters.rows_failed += 1
         elif result.outcome == RowOutcome.QUARANTINED:
@@ -83,9 +101,16 @@ def accumulate_row_outcomes(
             pass
         elif result.outcome == RowOutcome.COALESCED:
             # Merged token from coalesce - route to output sink
+            # Use result.sink_name set by on_success routing
+            sink_name = _require_sink_name(result)
             counters.rows_coalesced += 1
             counters.rows_succeeded += 1
-            pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+            if sink_name not in pending_tokens:
+                raise OrchestrationInvariantError(
+                    f"Coalesced sink '{sink_name}' not in configured sinks. "
+                    f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
+                )
+            pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
         elif result.outcome == RowOutcome.EXPANDED:
             # Deaggregation parent token - children counted separately
             counters.rows_expanded += 1
@@ -96,15 +121,12 @@ def accumulate_row_outcomes(
 
 def handle_coalesce_timeouts(
     coalesce_executor: CoalesceExecutor,
-    coalesce_step_map: dict[CoalesceName, int],
+    coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
-    config_transforms: list[RowPlugin],
-    config_gates: Sequence[object],
     config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    default_sink_name: str,
 ) -> None:
     """Check and handle coalesce timeouts after processing each row.
 
@@ -117,62 +139,50 @@ def handle_coalesce_timeouts(
 
     Args:
         coalesce_executor: CoalesceExecutor managing join barriers
-        coalesce_step_map: Maps CoalesceName -> step position in pipeline
+        coalesce_node_map: Maps CoalesceName -> coalesce node ID in graph
         processor: RowProcessor for downstream processing
-        config_transforms: Pipeline transform list for process_token
-        config_gates: Pipeline gate list (for total_steps calculation)
-        config_sinks: Dict of sink_name -> sink plugin (for branch routing)
+        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         ctx: Plugin context for transform execution
         counters: Mutable ExecutionCounters to update
         pending_tokens: Dict of sink_name -> tokens to append results to
-        default_sink_name: Default sink for output
     """
-    total_steps = len(config_transforms) + len(config_gates)
     for coalesce_name_str in coalesce_executor.get_registered_names():
         coalesce_name = CoalesceName(coalesce_name_str)
-        coalesce_step = coalesce_step_map[coalesce_name]
+        coalesce_node_id = coalesce_node_map[coalesce_name]
         timed_out = coalesce_executor.check_timeouts(
             coalesce_name=coalesce_name_str,
-            step_in_pipeline=coalesce_step,
         )
         for outcome in timed_out:
             if outcome.merged_token is not None:
                 counters.rows_coalesced += 1
-                # Check if merged token should continue downstream processing
-                if coalesce_step < total_steps:
-                    # Continue processing through downstream nodes
-                    continuation_results = processor.process_token(
-                        token=outcome.merged_token,
-                        transforms=config_transforms,
-                        ctx=ctx,
-                        start_step=coalesce_step,
-                    )
-                    accumulate_row_outcomes(
-                        continuation_results,
-                        counters,
-                        config_sinks,
-                        default_sink_name,
-                        pending_tokens,
-                    )
-                else:
-                    # No downstream nodes - send directly to sink
-                    counters.rows_succeeded += 1
-                    pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
+                # Route merged token through processor from the coalesce node.
+                # Processor internals decide terminal vs non-terminal using DAG
+                # continuation metadata and return COMPLETED with sink_name when terminal.
+                continuation_results = processor.process_token(
+                    token=outcome.merged_token,
+                    ctx=ctx,
+                    current_node_id=coalesce_node_id,
+                    coalesce_node_id=coalesce_node_id,
+                    coalesce_name=coalesce_name,
+                )
+                accumulate_row_outcomes(
+                    continuation_results,
+                    counters,
+                    config_sinks,
+                    pending_tokens,
+                )
             elif outcome.failure_reason:
                 counters.rows_coalesce_failed += 1
 
 
 def flush_coalesce_pending(
     coalesce_executor: CoalesceExecutor,
-    coalesce_step_map: dict[CoalesceName, int],
+    coalesce_node_map: dict[CoalesceName, NodeID],
     processor: RowProcessor,
-    config_transforms: list[RowPlugin],
-    config_gates: Sequence[object],
     config_sinks: Mapping[str, object],
     ctx: PluginContext,
     counters: ExecutionCounters,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-    default_sink_name: str,
 ) -> None:
     """Flush pending coalesce operations at end-of-source.
 
@@ -183,20 +193,14 @@ def flush_coalesce_pending(
 
     Args:
         coalesce_executor: CoalesceExecutor managing join barriers
-        coalesce_step_map: Maps CoalesceName -> step position in pipeline
+        coalesce_node_map: Maps CoalesceName -> coalesce node ID in graph
         processor: RowProcessor for downstream processing
-        config_transforms: Pipeline transform list for process_token
-        config_gates: Pipeline gate list (for total_steps calculation)
-        config_sinks: Dict of sink_name -> sink plugin (for branch routing)
+        config_sinks: Dict of sink_name -> sink plugin (for sink validation)
         ctx: Plugin context for transform execution
         counters: Mutable ExecutionCounters to update
         pending_tokens: Dict of sink_name -> tokens to append results to
-        default_sink_name: Default sink for output
     """
-    total_steps = len(config_transforms) + len(config_gates)
-    # Convert CoalesceName -> str for CoalesceExecutor API
-    flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
-    pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
+    pending_outcomes = coalesce_executor.flush_pending()
 
     # Handle any merged tokens from flush
     for outcome in pending_outcomes:
@@ -206,27 +210,22 @@ def flush_coalesce_pending(
             # Business logic: coalesce_name is guaranteed non-None when merged_token is not None
             assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
             coalesce_name = CoalesceName(outcome.coalesce_name)
-            coalesce_step = coalesce_step_map[coalesce_name]
-            # Check if merged token should continue downstream processing
-            if coalesce_step < total_steps:
-                # Continue processing through downstream nodes
-                continuation_results = processor.process_token(
-                    token=outcome.merged_token,
-                    transforms=config_transforms,
-                    ctx=ctx,
-                    start_step=coalesce_step,
-                )
-                accumulate_row_outcomes(
-                    continuation_results,
-                    counters,
-                    config_sinks,
-                    default_sink_name,
-                    pending_tokens,
-                )
-            else:
-                # No downstream nodes - send directly to sink
-                counters.rows_succeeded += 1
-                pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
+            # Route merged token through processor from the coalesce node.
+            # Processor internals decide terminal vs non-terminal using DAG
+            # continuation metadata and return COMPLETED with sink_name when terminal.
+            continuation_results = processor.process_token(
+                token=outcome.merged_token,
+                ctx=ctx,
+                current_node_id=coalesce_node_map[coalesce_name],
+                coalesce_node_id=coalesce_node_map[coalesce_name],
+                coalesce_name=coalesce_name,
+            )
+            accumulate_row_outcomes(
+                continuation_results,
+                counters,
+                config_sinks,
+                pending_tokens,
+            )
         elif outcome.failure_reason:
             # Coalesce failed (quorum_not_met, incomplete_branches)
             # Audit trail recorded by executor: each consumed token has

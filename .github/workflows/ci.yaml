@@ -46,6 +46,11 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libsqlcipher-dev
+
       - name: Install dependencies
         run: |
           uv venv
@@ -89,7 +94,7 @@ jobs:
         run: |
           python scripts/cicd/enforce_tier_model.py check \
             --root src/elspeth \
-            --allowlist config/cicd/enforce_tier_model.yaml \
+            --allowlist config/cicd/enforce_tier_model \
             --exclude "**/__pycache__/*" \
             --format text
 
@@ -112,6 +117,11 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: ${{ env.UV_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
         run: |
@@ -154,6 +164,11 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: ${{ env.UV_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
         run: |
@@ -210,6 +225,11 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: ${{ env.UV_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libsqlcipher-dev
 
       - name: Install dependencies
         run: |

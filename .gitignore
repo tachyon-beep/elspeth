@@ -102,6 +102,7 @@ cython_debug/
 *.db
 *.sqlite
 *.sqlite3
+*.journal.jsonl
 
 # Test outputs and analysis artifacts
 test-results.txt
@@ -133,8 +134,9 @@ mutants/
 .worktrees/
 
 # Example outputs (dynamic data, not tracked)
-examples/*/output/*
-examples/*/runs/*
+# Use ** to match nested paths (prevents accidental deep-nesting commits)
+examples/**/output/*
+examples/**/runs/*
 !examples/*/output/
 !examples/*/runs/
 !examples/*/output/.gitkeep
@@ -154,6 +156,12 @@ landscape.db-wal
 # This must be at the end to override any earlier ignore patterns
 !.gitkeep
 
+# pre-commit cache
+.pre-commit-cache/
+
 # bv (beads viewer) local config and caches
 .bv/
 .perles/config.yaml
+.beads_tree/
+.keel/
+.codex/

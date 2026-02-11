@@ -43,14 +43,15 @@ landscape:
   url: sqlite:///./state/audit.db
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
+    on_validation_failure: discard
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
-default_sink: output
 """)
 
         url, _ = resolve_database_url(database=None, settings_path=settings_file)
@@ -66,14 +67,15 @@ default_sink: output
         settings_file.write_text("""
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
+    on_validation_failure: discard
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
-default_sink: output
 """)
 
         url, config = resolve_database_url(database=None, settings_path=settings_file)
@@ -93,14 +95,15 @@ landscape:
   url: sqlite:///./state/audit.db
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
+    on_validation_failure: discard
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
-default_sink: output
 """)
 
         url, _ = resolve_database_url(database=None, settings_path=None)
@@ -127,14 +130,15 @@ landscape:
   url: sqlite:///./state/audit.db
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
+    on_validation_failure: discard
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
-default_sink: output
 """)
 
         missing_settings = tmp_path / "explicit.yaml"
@@ -153,3 +157,87 @@ default_sink: output
 
         with pytest.raises(ValueError, match=r"settings\.yaml"):
             resolve_database_url(database=None, settings_path=None)
+
+
+class TestResolveAuditPassphrase:
+    """Tests for resolve_audit_passphrase helper."""
+
+    def test_returns_passphrase_for_sqlcipher_backend(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When backend=sqlcipher, reads the configured env var."""
+        from unittest.mock import MagicMock
+
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        settings = MagicMock()
+        settings.backend = "sqlcipher"
+        settings.encryption_key_env = "MY_CUSTOM_KEY"
+        monkeypatch.setenv("MY_CUSTOM_KEY", "secret-pass")
+
+        result = resolve_audit_passphrase(settings)
+        assert result == "secret-pass"
+
+    def test_raises_when_sqlcipher_env_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When backend=sqlcipher but env var is missing, raises RuntimeError."""
+        from unittest.mock import MagicMock
+
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        settings = MagicMock()
+        settings.backend = "sqlcipher"
+        settings.encryption_key_env = "MISSING_KEY_VAR"
+        monkeypatch.delenv("MISSING_KEY_VAR", raising=False)
+
+        with pytest.raises(RuntimeError, match="MISSING_KEY_VAR"):
+            resolve_audit_passphrase(settings)
+
+    def test_returns_none_for_sqlite_backend(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-sqlcipher backends return None (no encryption)."""
+        from unittest.mock import MagicMock
+
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        settings = MagicMock()
+        settings.backend = "sqlite"
+        # Even if ELSPETH_AUDIT_KEY is set, non-sqlcipher backend returns None
+        monkeypatch.setenv("ELSPETH_AUDIT_KEY", "should-be-ignored")
+
+        result = resolve_audit_passphrase(settings)
+        assert result is None
+
+    def test_no_settings_returns_none_even_with_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression: settings=None must return None even when ELSPETH_AUDIT_KEY is set.
+
+        Without explicit backend=sqlcipher config, passing a passphrase to a
+        plain SQLite database causes 'file is not a database'.
+        """
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        monkeypatch.setenv("ELSPETH_AUDIT_KEY", "should-be-ignored")
+
+        result = resolve_audit_passphrase(None)
+        assert result is None
+
+    def test_no_settings_returns_none_without_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When settings=None and no env var, returns None."""
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        monkeypatch.delenv("ELSPETH_AUDIT_KEY", raising=False)
+
+        result = resolve_audit_passphrase(None)
+        assert result is None
+
+    def test_custom_encryption_key_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression: custom encryption_key_env is respected, not just ELSPETH_AUDIT_KEY."""
+        from unittest.mock import MagicMock
+
+        from elspeth.cli_helpers import resolve_audit_passphrase
+
+        settings = MagicMock()
+        settings.backend = "sqlcipher"
+        settings.encryption_key_env = "CUSTOM_AUDIT_SECRET"
+        monkeypatch.setenv("CUSTOM_AUDIT_SECRET", "custom-value")
+        monkeypatch.setenv("ELSPETH_AUDIT_KEY", "default-value")
+
+        result = resolve_audit_passphrase(settings)
+        # Must use the custom var, not the default
+        assert result == "custom-value"

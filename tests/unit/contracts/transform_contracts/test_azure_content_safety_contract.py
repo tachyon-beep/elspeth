@@ -76,16 +76,17 @@ class TestAzureContentSafetyBatchContract(BatchTransformContractTestBase):
     @pytest.fixture
     def batch_transform(self) -> BatchTransformMixin:
         """Provide unconfigured transform (no connect_output yet)."""
-        return AzureContentSafety(
+        t = AzureContentSafety(
             {
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
                 "schema": {"mode": "observed"},
-                "on_error": "quarantine_sink",
             }
         )
+        t.on_error = "quarantine_sink"
+        return t
 
     @pytest.fixture
     def valid_input(self) -> dict[str, Any]:

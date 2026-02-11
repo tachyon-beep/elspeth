@@ -12,11 +12,11 @@ STATUS: IMPLEMENTED
 
 from elspeth.contracts.config import RuntimeConcurrencyConfig
 from elspeth.contracts.types import NodeID
-from elspeth.core.config import ConcurrencySettings
+from elspeth.core.config import ConcurrencySettings, SourceSettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
 from elspeth.engine.orchestrator import Orchestrator
-from elspeth.engine.processor import RowProcessor
+from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
 
 
@@ -64,7 +64,7 @@ class TestConcurrencyConfigInTransformExecutor:
         span_factory = SpanFactory()
 
         try:
-            executor = TransformExecutor(recorder, span_factory, max_workers=8)
+            executor = TransformExecutor(recorder, span_factory, lambda node_id: 1, max_workers=8)
             assert executor._max_workers == 8
         finally:
             db.close()
@@ -76,7 +76,7 @@ class TestConcurrencyConfigInTransformExecutor:
         span_factory = SpanFactory()
 
         try:
-            executor = TransformExecutor(recorder, span_factory)
+            executor = TransformExecutor(recorder, span_factory, lambda node_id: 1)
             assert executor._max_workers is None
         finally:
             db.close()
@@ -97,6 +97,14 @@ class TestConcurrencyConfigInRowProcessor:
                 span_factory=span_factory,
                 run_id="test-run",
                 source_node_id=NodeID("source-1"),
+                source_on_success="default",
+                traversal=DAGTraversalContext(
+                    node_step_map={},
+                    node_to_plugin={},
+                    first_transform_node_id=None,
+                    node_to_next={},
+                    coalesce_node_map={},
+                ),
                 max_workers=4,
             )
             # Verify max_workers was passed to TransformExecutor
@@ -116,6 +124,14 @@ class TestConcurrencyConfigInRowProcessor:
                 span_factory=span_factory,
                 run_id="test-run",
                 source_node_id=NodeID("source-1"),
+                source_on_success="default",
+                traversal=DAGTraversalContext(
+                    node_step_map={},
+                    node_to_plugin={},
+                    first_transform_node_id=None,
+                    node_to_next={},
+                    coalesce_node_map={},
+                ),
             )
             # No max_workers means no cap
             assert processor._transform_executor._max_workers is None
@@ -202,6 +218,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
             def __init__(self) -> None:
                 super().__init__()
                 self._data = [{"id": 1}]
+                self.on_success = "output"
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 yield from self.wrap_rows(self._data)
@@ -225,11 +242,11 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="output", options={}),
             transforms=[],
             sinks={"output": as_sink(sink)},
             aggregations={},
             gates=[],
-            default_sink="output",
         )
 
         from elspeth.engine.orchestrator import PipelineConfig

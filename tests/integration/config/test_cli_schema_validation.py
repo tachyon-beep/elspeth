@@ -22,9 +22,12 @@ source:
       mode: fixed
       fields:
         - "field_a: str"
+    on_success: output
 
 transforms:
   - plugin: passthrough
+    options:
+      on_success: output
 
 sinks:
   output:
@@ -35,8 +38,6 @@ sinks:
         mode: fixed
         fields:
           - "field_b: int"
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -68,9 +69,12 @@ source:
       mode: fixed
       fields:
         - "field_a: str"
+    on_success: output
 
 transforms:
   - plugin: passthrough
+    options:
+      on_success: output
 
 sinks:
   output:
@@ -81,8 +85,6 @@ sinks:
         mode: fixed
         fields:
           - "field_b: int"
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

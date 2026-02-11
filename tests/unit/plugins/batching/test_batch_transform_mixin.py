@@ -63,7 +63,7 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
         # Simple passthrough - just add a marker
         output = row.to_dict()
         output["processed"] = True
-        return TransformResult.success(output, success_reason={"action": "test"})
+        return TransformResult.success(make_pipeline_row(output), success_reason={"action": "test"})
 
     def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         raise NotImplementedError("Use accept() for row-level pipelining")
@@ -332,7 +332,7 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
         self._block_event.wait()
         output = row.to_dict()
         output["processed"] = True
-        return TransformResult.success(output, success_reason={"action": "test"})
+        return TransformResult.success(make_pipeline_row(output), success_reason={"action": "test"})
 
     def release_processing(self) -> None:
         """Release all blocked workers."""

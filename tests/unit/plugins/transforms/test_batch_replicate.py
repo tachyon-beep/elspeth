@@ -177,6 +177,7 @@ class TestBatchReplicateTypeEnforcement:
 
         result = transform.process(rows, ctx)
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "all_rows_failed"
         assert "1 rows quarantined" in result.reason["error"]
         assert result.reason["row_errors"][0]["reason"] == "invalid_copies"
@@ -196,6 +197,7 @@ class TestBatchReplicateTypeEnforcement:
 
         result = transform.process(rows, ctx)
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "all_rows_failed"
         assert result.reason["row_errors"][0]["reason"] == "invalid_copies"
 
@@ -224,6 +226,7 @@ class TestBatchReplicateTypeEnforcement:
         assert result.rows[1]["id"] == 2
         assert result.rows[1]["copy_index"] == 1
         # Quarantine info in success_reason.metadata
+        assert result.success_reason is not None
         assert result.success_reason["metadata"]["quarantined_count"] == 1
         assert result.success_reason["metadata"]["quarantined"][0]["reason"] == "invalid_copies"
         assert result.success_reason["metadata"]["quarantined"][0]["row_data"]["id"] == 1
@@ -310,3 +313,48 @@ class TestBatchReplicateSchemaContract:
         output_row = {"original_field": "value", "copy_index": 2}
         # This should not raise
         transform.output_schema.model_validate(output_row)
+
+
+class TestBatchReplicateDeepCopy:
+    """Verify replicated rows don't share mutable nested references."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return PluginContext(run_id="test-run", config={})
+
+    def test_nested_list_mutation_does_not_cross_contaminate(self, ctx: PluginContext) -> None:
+        """Mutating a nested list in one copy must not affect other copies."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "copies_field": "copies", "include_copy_index": True})
+        row = make_pipeline_row({"id": 1, "tags": ["a", "b"], "copies": 3})
+
+        result = transform.process([row], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 3
+
+        # Mutate nested list in first copy
+        first = result.rows[0].to_dict()
+        first["tags"].append("MUTATED")
+
+        # Other copies must be unaffected
+        for copy_row in result.rows[1:]:
+            assert "MUTATED" not in copy_row["tags"]
+
+    def test_nested_dict_mutation_does_not_cross_contaminate(self, ctx: PluginContext) -> None:
+        """Mutating a nested dict in one copy must not affect other copies."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "copies_field": "copies", "include_copy_index": True})
+        row = make_pipeline_row({"id": 1, "meta": {"source": "csv"}, "copies": 2})
+
+        result = transform.process([row], ctx)
+
+        assert result.rows is not None
+        first = result.rows[0].to_dict()
+        first["meta"]["injected"] = True
+
+        second = result.rows[1].to_dict()
+        assert "injected" not in second["meta"]

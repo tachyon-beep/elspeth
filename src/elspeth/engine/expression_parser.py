@@ -91,6 +91,20 @@ _BOOL_OPS: MappingProxyType[type[ast.boolop], str] = MappingProxyType(
     }
 )
 
+# Safe built-in functions allowed in expressions (immutable to prevent runtime tampering).
+# All are pure functions with no side effects, no I/O, and no access to the runtime
+# environment. They cannot escape the expression sandbox.
+_SAFE_BUILTINS: MappingProxyType[str, Any] = MappingProxyType(
+    {
+        "len": len,
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "abs": abs,
+    }
+)
+
 
 class _ExpressionValidator(ast.NodeVisitor):
     """AST visitor that validates expressions for security.
@@ -127,8 +141,8 @@ class _ExpressionValidator(ast.NodeVisitor):
         )
 
     def visit_Name(self, node: ast.Name) -> None:
-        """Allow only 'row' as a name."""
-        if node.id not in ("row", "True", "False", "None"):
+        """Allow only 'row', boolean/None literals, and safe builtin names."""
+        if node.id not in ("row", "True", "False", "None") and node.id not in _SAFE_BUILTINS:
             self.errors.append(f"Forbidden name: {node.id!r}")
         self.generic_visit(node)
 
@@ -159,14 +173,14 @@ class _ExpressionValidator(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        """Allow only row.get() calls."""
+        """Allow row.get() calls and safe builtin calls."""
+        # Allow row.get() with 1 or 2 arguments
         if (
             isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id == "row"
             and node.func.attr == "get"
         ):
-            # row.get() is allowed with 1 or 2 arguments
             if len(node.args) < 1 or len(node.args) > 2:
                 self.errors.append(f"row.get() requires 1 or 2 arguments, got {len(node.args)}")
             if node.keywords:
@@ -179,6 +193,18 @@ class _ExpressionValidator(ast.NodeVisitor):
             for arg in node.args:
                 self.visit(arg)
             return
+
+        # Allow safe builtin calls: len(), str(), int(), float(), bool(), abs()
+        if isinstance(node.func, ast.Name) and node.func.id in _SAFE_BUILTINS:
+            if node.keywords:
+                self.errors.append(f"{node.func.id}() does not accept keyword arguments")
+            # Visit func name (validated by visit_Name)
+            self.visit(node.func)
+            # Visit arguments normally
+            for arg in node.args:
+                self.visit(arg)
+            return
+
         self.errors.append(f"Forbidden function call: {ast.dump(node.func)}")
         self.generic_visit(node)
 
@@ -298,6 +324,26 @@ class _ExpressionValidator(ast.NodeVisitor):
         """Starred expressions (*x) are forbidden."""
         self.errors.append("Starred expressions (*) are forbidden")
 
+    def visit(self, node: ast.AST) -> None:
+        """Dispatch with fail-closed default for unhandled expression nodes.
+
+        Overrides NodeVisitor.visit to reject any *expression* node type
+        without an explicit visit_* handler. This is defense-in-depth: if a
+        future Python version adds a new AST expression node type (e.g.,
+        ast.MatchValue), it will be rejected here rather than silently
+        passing validation.
+
+        Non-expression AST nodes (operator types like ast.Eq, context
+        markers like ast.Load, the wrapper ast.Expression) are allowed
+        through because they are structural metadata, not executable
+        constructs.
+        """
+        method_name = "visit_" + node.__class__.__name__
+        if not hasattr(self, method_name) and isinstance(node, ast.expr):
+            self.errors.append(f"Unsupported expression construct: {type(node).__name__}")
+            return
+        super().visit(node)
+
 
 class _ExpressionEvaluator(ast.NodeVisitor):
     """AST visitor that evaluates validated expressions."""
@@ -319,6 +365,8 @@ class _ExpressionEvaluator(ast.NodeVisitor):
             return False
         if node.id == "None":
             return None
+        if node.id in _SAFE_BUILTINS:
+            return _SAFE_BUILTINS[node.id]
         # Should not reach here if validation passed
         msg = f"Unknown name: {node.id}"
         raise ExpressionSecurityError(msg)
@@ -359,14 +407,25 @@ class _ExpressionEvaluator(ast.NodeVisitor):
         raise ExpressionSecurityError(msg)
 
     def visit_Call(self, node: ast.Call) -> Any:
-        """Evaluate function calls (only row.get allowed)."""
+        """Evaluate function calls (row.get and safe builtins)."""
         func = self.visit(node.func)
         args = [self.visit(arg) for arg in node.args]
+
+        # Determine function label for error messages from the AST node
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+            func_label = "row.get"
+        elif isinstance(node.func, ast.Name):
+            func_label = node.func.id
+        else:
+            func_label = "unknown"
+
         try:
             return func(*args)
         except TypeError as e:
-            # Handle unhashable key in row.get (e.g., row.get([]) or row.get({'a': 1}))
-            msg = f"invalid argument to row.get(): {e}"
+            msg = f"invalid argument to {func_label}(): {e}"
+            raise ExpressionEvaluationError(msg) from e
+        except (ValueError, OverflowError) as e:
+            msg = f"{func_label}() evaluation error: {e}"
             raise ExpressionEvaluationError(msg) from e
 
     def visit_Compare(self, node: ast.Compare) -> Any:
@@ -474,6 +533,7 @@ class ExpressionParser:
 
     Allowed operations:
     - Field access: row['field'], row.get('field'), row.get('field', default)
+    - Safe builtins: len(), str(), int(), float(), bool(), abs()
     - Comparisons: ==, !=, <, >, <=, >=
     - Boolean operators: and, or, not
     - Membership: in, not in
@@ -484,7 +544,7 @@ class ExpressionParser:
     - Basic arithmetic: +, -, *, /, //, %
 
     Forbidden operations:
-    - Function calls (except row.get())
+    - Function calls (except row.get() and safe builtins)
     - Lambda expressions
     - Comprehensions (list, dict, set, generator)
     - Assignment expressions (:=)

@@ -36,6 +36,7 @@ from elspeth.core.dag import (
     GraphValidationError,
     NodeConfig,
     NodeInfo,
+    WiredTransform,
 )
 from elspeth.core.events import (
     EventBus,
@@ -79,6 +80,7 @@ __all__ = [
     "SinkSettings",
     "SourceSettings",
     "TransformSettings",
+    "WiredTransform",
     "canonical_json",
     "configure_logging",
     "get_logger",

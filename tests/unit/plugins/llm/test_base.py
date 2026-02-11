@@ -18,7 +18,7 @@ from elspeth.plugins.clients.llm import (
 )
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.llm.base import BaseLLMTransform, LLMConfig
-from tests.fixtures.factories import make_row
+from elspeth.testing import make_row
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -155,7 +155,6 @@ class TestLLMConfig:
         assert config.max_tokens is None
         assert config.system_prompt is None
         assert config.response_field == "llm_response"
-        assert config.on_error is None
 
     def test_config_custom_values(self) -> None:
         """Config accepts custom values."""
@@ -169,7 +168,6 @@ class TestLLMConfig:
                 "max_tokens": 1000,
                 "system_prompt": "You are a helpful assistant.",
                 "response_field": "analysis_result",
-                "on_error": "quarantine_sink",
             }
         )
         assert config.model == "claude-3-opus"
@@ -177,7 +175,6 @@ class TestLLMConfig:
         assert config.max_tokens == 1000
         assert config.system_prompt == "You are a helpful assistant."
         assert config.response_field == "analysis_result"
-        assert config.on_error == "quarantine_sink"
 
     def test_temperature_bounds(self) -> None:
         """Temperature must be between 0.0 and 2.0."""
@@ -331,8 +328,8 @@ class TestBaseLLMTransformInit:
 
         assert transform.determinism == Determinism.NON_DETERMINISTIC
 
-    def test_on_error_set_from_config(self) -> None:
-        """on_error is set from config for error routing."""
+    def test_on_error_set_via_bridge(self) -> None:
+        """on_error is set via property injection (instantiation bridge), not config."""
         TestLLMTransform = create_test_transform_class()
 
         transform = TestLLMTransform(
@@ -341,10 +338,14 @@ class TestBaseLLMTransformInit:
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
                 "required_input_fields": [],  # Explicit opt-out for this test
-                "on_error": "error_sink",
             }
         )
 
+        # Defaults to None before bridge injection
+        assert transform.on_error is None
+
+        # Bridge injects routing post-construction
+        transform.on_error = "error_sink"
         assert transform.on_error == "error_sink"
 
 

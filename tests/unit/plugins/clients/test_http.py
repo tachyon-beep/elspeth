@@ -170,6 +170,27 @@ def test_post_fingerprints_auth_headers(http_client, mock_recorder):
 
 
 @respx.mock
+def test_post_fingerprints_compact_secret_headers(http_client, mock_recorder):
+    """Compact secret header names (apikey/authkey) should be fingerprinted."""
+    with patch.dict("os.environ", {"ELSPETH_FINGERPRINT_KEY": "test-key-12345", "ELSPETH_ALLOW_RAW_SECRETS": ""}):
+        respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
+
+        http_client.post(
+            "https://api.example.com/secure",
+            json={},
+            headers={"apikey": "api-secret", "authkey": "auth-secret"},
+        )
+
+        call_args = mock_recorder.record_call.call_args[1]
+        recorded_headers = call_args["request_data"]["headers"]
+
+        assert recorded_headers["apikey"].startswith("<fingerprint:")
+        assert recorded_headers["authkey"].startswith("<fingerprint:")
+        assert "api-secret" not in recorded_headers["apikey"]
+        assert "auth-secret" not in recorded_headers["authkey"]
+
+
+@respx.mock
 def test_post_telemetry_failure_doesnt_corrupt_audit(http_client, mock_recorder, mock_telemetry_emit):
     """Telemetry emission failure must not prevent Landscape recording."""
     # Make telemetry callback raise
@@ -326,68 +347,110 @@ def test_get_telemetry_failure_doesnt_corrupt_audit(http_client, mock_recorder, 
 
 
 @respx.mock
-def test_header_fingerprinting_with_missing_key(http_client, mock_recorder):
+def test_header_fingerprinting_with_missing_key(http_client, mock_recorder, monkeypatch):
     """Sensitive headers should be removed when fingerprint key is missing."""
-    # Ensure no fingerprint key
-    with patch.dict("os.environ", {}, clear=True):
-        # Ensure ELSPETH_ALLOW_RAW_SECRETS is not set
-        respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
+    # Remove fingerprint key and raw secrets flag without clearing entire env
+    monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+    monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
-        http_client.post(
-            "https://api.example.com/secure",
-            json={},
-            headers={"Authorization": "Bearer secret"},
-        )
+    respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
 
-        # Verify sensitive header was removed (not stored)
-        call_args = mock_recorder.record_call.call_args[1]
-        assert "Authorization" not in call_args["request_data"]["headers"]
+    http_client.post(
+        "https://api.example.com/secure",
+        json={},
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    # Verify sensitive header was removed (not stored)
+    call_args = mock_recorder.record_call.call_args[1]
+    assert "Authorization" not in call_args["request_data"]["headers"]
 
 
 @respx.mock
-def test_header_fingerprinting_in_dev_mode(http_client, mock_recorder):
+def test_header_fingerprinting_in_dev_mode(http_client, mock_recorder, monkeypatch):
     """Dev mode (ELSPETH_ALLOW_RAW_SECRETS=true) should remove sensitive headers."""
-    with patch.dict("os.environ", {"ELSPETH_ALLOW_RAW_SECRETS": "true"}):
-        respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
+    monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
 
-        http_client.post(
-            "https://api.example.com/secure",
-            json={},
-            headers={"Authorization": "Bearer dev-token", "X-Custom": "value"},
-        )
+    respx.post("https://api.example.com/secure").mock(return_value=httpx.Response(200, json={}))
 
-        # Verify sensitive header removed, non-sensitive kept
-        call_args = mock_recorder.record_call.call_args[1]
-        headers = call_args["request_data"]["headers"]
+    http_client.post(
+        "https://api.example.com/secure",
+        json={},
+        headers={"Authorization": "Bearer dev-token", "X-Custom": "value"},
+    )
 
-        assert "Authorization" not in headers
-        assert headers["X-Custom"] == "value"
+    # Verify sensitive header removed, non-sensitive kept
+    call_args = mock_recorder.record_call.call_args[1]
+    headers = call_args["request_data"]["headers"]
+
+    assert "Authorization" not in headers
+    assert headers["X-Custom"] == "value"
 
 
 def test_sensitive_header_detection(http_client):
-    """Verify sensitive header detection logic."""
-    # Test various sensitive header patterns
-    sensitive = [
+    """Verify sensitive header detection logic.
+
+    Uses word-boundary matching (dash-delimited segments) to avoid
+    false positives from substring matching.
+    """
+    # Well-known sensitive headers (exact match)
+    sensitive_exact = [
         "authorization",
         "Authorization",
+        "apikey",
+        "authkey",
         "X-API-Key",
         "api-key",
         "X-Auth-Token",
         "proxy-authorization",
-        "Custom-Auth-Header",  # Contains "auth"
-        "Secret-Key",  # Contains "secret"
-        "Bearer-Token",  # Contains "token"
+        "cookie",
+        "Cookie",
+        "set-cookie",
+        "www-authenticate",
+        "proxy-authenticate",
+        "x-access-token",
+        "x-csrf-token",
+        "x-xsrf-token",
+        "Ocp-Apim-Subscription-Key",
     ]
 
-    for header in sensitive:
-        assert http_client._is_sensitive_header(header), f"{header} should be sensitive"
+    for header in sensitive_exact:
+        assert http_client._is_sensitive_header(header), f"{header} should be sensitive (exact)"
 
-    # Non-sensitive headers
+    # Sensitive via word-segment matching (dash-delimited)
+    sensitive_word = [
+        "Custom-Auth-Header",  # segment "auth"
+        "Secret-Key",  # segments "secret" and "key"
+        "Bearer-Token",  # segment "token"
+        "X-Session-Token",  # segment "token"
+        "X-Authorization",  # segment "authorization"
+        "X-Secret-Value",  # segment "secret"
+        "X-Password-Hash",  # segment "password"
+        "X-Credential-Id",  # segment "credential"
+        "XAuthorization",  # compact x+authorization form
+        # Concatenated forms without delimiters (regression: P2 header filtering)
+        "X-AuthToken",  # "authtoken" compound word
+        "X-AccessToken",  # "accesstoken" compound word
+    ]
+
+    for header in sensitive_word:
+        assert http_client._is_sensitive_header(header), f"{header} should be sensitive (word)"
+
+    # Non-sensitive headers — must NOT be flagged
     non_sensitive = [
         "Content-Type",
         "User-Agent",
         "Accept",
         "X-Request-ID",
+        # Regression: these were false positives with substring matching
+        "X-Author",  # "author" ≠ "auth"
+        "X-Authored-By",  # "authored" ≠ "auth"
+        "X-Monkey-Patch",  # "monkey" ≠ "key"
+        "X-Turkey-Id",  # "turkey" ≠ "key"
+        "X-Keyboard-Layout",  # "keyboard" ≠ "key"
+        "X-Hotkey-Name",  # "hotkey" ≠ "key"
+        "X-Secretary-Id",  # "secretary" ≠ "secret"
+        "X-Tokenizer-Version",  # "tokenizer" ≠ "token"
     ]
 
     for header in non_sensitive:

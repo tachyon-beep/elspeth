@@ -1,9 +1,246 @@
 # tests/core/test_dag.py
 """Tests for DAG validation and operations."""
 
+from __future__ import annotations
+
+from typing import Any, TypedDict, cast
+
 import pytest
 
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.core.config import AggregationSettings, ElspethSettings, GateSettings, SourceSettings
+from elspeth.core.dag import ExecutionGraph, WiredTransform
+from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
+
+
+class _PluginInstances(TypedDict):
+    source: SourceProtocol
+    source_settings: SourceSettings
+    transforms: list[WiredTransform]
+    sinks: dict[str, SinkProtocol]
+    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]]
+
+
+_AUTO_SOURCE_ON_SUCCESS = "_auto_source_on_success"
+_AUTO_GATE_INPUT = "_auto_gate_input"
+_AUTO_AGG_INPUT = "_auto_agg_input"
+_AUTO_TRANSFORM_INPUT_PREFIX = "_auto_transform_input_"
+
+
+def _source_settings(cls: Any, /, **kwargs: Any) -> Any:
+    """Build SourceSettings with backward-compatible defaults for legacy tests."""
+    options = dict(kwargs.pop("options", {}) or {})
+    on_success = kwargs.pop("on_success", None)
+    if on_success is None:
+        on_success = options.pop("on_success", _AUTO_SOURCE_ON_SUCCESS)
+    return cls(on_success=on_success, options=options, **kwargs)
+
+
+def _transform_settings(cls: Any, /, **kwargs: Any) -> Any:
+    """Build TransformSettings with explicit on_success and on_error.
+
+    Callers MUST provide on_success explicitly — no defaults are inferred.
+    on_error defaults to "discard" (a concrete valid value, not a sentinel).
+    """
+    options = dict(kwargs.pop("options", {}) or {})
+    on_success = kwargs.pop("on_success", None)
+    if "on_success" in options:
+        on_success = options.pop("on_success")
+    on_error = kwargs.pop("on_error", "discard")
+    if "on_error" in options:
+        on_error = options.pop("on_error")
+    name = kwargs.pop("name", None)
+    plugin = kwargs.get("plugin", "transform")
+    if name is None:
+        name = f"{plugin}_{abs(hash((plugin, repr(sorted(options.items()))))) % 10_000}"
+    if on_success is None:
+        msg = f"_transform_settings: on_success is required for transform '{name}' — no defaults inferred"
+        raise ValueError(msg)
+    input_connection = kwargs.pop("input", None)
+    if input_connection is None:
+        input_connection = f"{_AUTO_TRANSFORM_INPUT_PREFIX}{name}"
+    return cls(
+        name=name,
+        input=input_connection,
+        on_success=on_success,
+        on_error=on_error,
+        options=options,
+        **kwargs,
+    )
+
+
+def _gate_settings(cls: Any, /, **kwargs: Any) -> Any:
+    """Build GateSettings with default input for legacy tests."""
+    input_connection = kwargs.pop("input", _AUTO_GATE_INPUT)
+    return cls(input=input_connection, **kwargs)
+
+
+def _aggregation_settings(cls: Any, /, **kwargs: Any) -> Any:
+    """Build AggregationSettings from legacy call sites."""
+    options = dict(kwargs.pop("options", {}) or {})
+    on_success = kwargs.pop("on_success", None)
+    if on_success is None and "on_success" in options:
+        on_success = options.pop("on_success")
+    input_connection = kwargs.pop("input", _AUTO_AGG_INPUT)
+    return cls(input=input_connection, on_success=on_success, options=options, **kwargs)
+
+
+def _apply_explicit_success_routing(settings: Any) -> Any:
+    """Inject explicit on_success routing for legacy test fixtures.
+
+    These tests historically relied on `default_sink`. This helper migrates
+    fixture settings to explicit sink routing before plugin instantiation.
+    The mutation is applied to a deep copy to avoid test-to-test bleed.
+    """
+    routed_settings = settings.model_copy(deep=True)
+
+    sinks = routed_settings.sinks
+    if not sinks:
+        return routed_settings
+    sink_name = next(iter(sinks.keys()))
+
+    transforms = list(routed_settings.transforms)
+    gates = list(routed_settings.gates)
+    aggregations = list(routed_settings.aggregations)
+
+    source_on_success = routed_settings.source.on_success
+    if source_on_success == _AUTO_SOURCE_ON_SUCCESS:
+        if transforms or gates or aggregations:
+            source_on_success = "source_out"
+        else:
+            source_on_success = sink_name
+
+    updated_transforms = []
+    previous_connection = source_on_success
+    for _index, transform in enumerate(transforms):
+        input_connection = transform.input
+        if input_connection.startswith(_AUTO_TRANSFORM_INPUT_PREFIX):
+            input_connection = previous_connection
+
+        # on_success is always explicit — no inference needed.
+        updated_transform = transform.model_copy(update={"input": input_connection})
+        updated_transforms.append(updated_transform)
+        previous_connection = transform.on_success
+
+    updated_aggregations: list[Any] = []
+    for index, aggregation in enumerate(aggregations):
+        input_connection = aggregation.input
+        if input_connection == _AUTO_AGG_INPUT:
+            if index == 0:
+                if updated_transforms:
+                    input_connection = updated_transforms[-1].on_success
+                else:
+                    input_connection = source_on_success
+            else:
+                input_connection = updated_aggregations[index - 1].name
+
+        on_success = aggregation.on_success
+        if on_success is None:
+            on_success = sink_name
+
+        updated_aggregations.append(
+            aggregation.model_copy(
+                update={
+                    "input": input_connection,
+                    "on_success": on_success,
+                }
+            )
+        )
+
+    upstream_for_gates = source_on_success
+    if updated_transforms:
+        upstream_for_gates = updated_transforms[-1].on_success
+    elif updated_aggregations:
+        upstream_for_gates = updated_aggregations[-1].on_success
+
+    updated_gates: list[Any] = []
+    for index, gate in enumerate(gates):
+        input_connection = gate.input
+        if input_connection == _AUTO_GATE_INPUT:
+            if index == 0:
+                input_connection = upstream_for_gates
+            else:
+                prev_gate = updated_gates[index - 1]
+                # Check if the previous gate has a named output connection
+                # (i.e., at least one route was renamed from "continue" to a
+                # connection name). If all routes are "continue", the DAG model
+                # resolves them at runtime; the next gate shares the same input.
+                prev_named_outputs = [
+                    d for d in prev_gate.routes.values() if d != "continue" and d not in {str(s) for s in sinks} and d != "fork"
+                ]
+                if prev_named_outputs:
+                    input_connection = prev_named_outputs[0]
+                else:
+                    input_connection = prev_gate.input
+
+        routes = dict(gate.routes)
+        if index < len(gates) - 1:
+            # Rename lone "continue" routes to named connections so the next gate
+            # can consume them. When multiple routes all say "continue", keep them
+            # as-is — the DAG resolves "continue" at runtime.
+            continue_count = sum(1 for d in routes.values() if d == "continue")
+            if continue_count <= 1:
+                routes = {
+                    label: (f"{gate.name}_out" if destination == "continue" else destination) for label, destination in routes.items()
+                }
+
+        updated_gates.append(
+            gate.model_copy(
+                update={
+                    "input": input_connection,
+                    "routes": routes,
+                }
+            )
+        )
+
+    updated_source = routed_settings.source.model_copy(update={"on_success": source_on_success})
+
+    routed_settings = routed_settings.model_copy(
+        update={
+            "source": updated_source,
+            "transforms": updated_transforms,
+            "aggregations": updated_aggregations,
+            "gates": updated_gates,
+        }
+    )
+
+    if routed_settings.coalesce and routed_settings.gates:
+        branch_to_gate_idx: dict[str, int] = {}
+        for gate_idx, gate in enumerate(routed_settings.gates):
+            if gate.fork_to:
+                for branch in gate.fork_to:
+                    branch_to_gate_idx[branch] = gate_idx
+
+        updated_coalesce = []
+        for coalesce_cfg in routed_settings.coalesce:
+            produced_idxs = [branch_to_gate_idx[b] for b in coalesce_cfg.branches if b in branch_to_gate_idx]
+            if produced_idxs and max(produced_idxs) == len(routed_settings.gates) - 1 and coalesce_cfg.on_success is None:
+                updated_coalesce.append(coalesce_cfg.model_copy(update={"on_success": sink_name}))
+            else:
+                updated_coalesce.append(coalesce_cfg)
+
+        routed_settings = routed_settings.model_copy(update={"coalesce": updated_coalesce})
+
+    return routed_settings
+
+
+def instantiate_plugins_from_config_raw(settings: Any) -> _PluginInstances:
+    """Instantiate plugins without any test-time routing injection."""
+    from elspeth.cli_helpers import instantiate_plugins_from_config as _real_instantiate
+
+    return cast(_PluginInstances, _real_instantiate(settings))
+
+
+def instantiate_plugins_from_config(settings: Any) -> _PluginInstances:
+    """Centralized test factory wrapper for plugin instantiation."""
+    routed_settings = _apply_explicit_success_routing(settings)
+    # Back-patch routed settings onto the original settings object so callers
+    # that pass settings.coalesce or settings.gates to from_plugin_instances()
+    # get the routed values (with auto-inputs resolved).
+    if routed_settings.coalesce != settings.coalesce:
+        object.__setattr__(settings, "coalesce", routed_settings.coalesce)
+    if list(routed_settings.gates) != list(settings.gates):
+        object.__setattr__(settings, "gates", routed_settings.gates)
+    return instantiate_plugins_from_config_raw(routed_settings)
 
 
 class TestDAGBuilder:
@@ -53,6 +290,30 @@ class TestDAGBuilder:
 
         assert graph.node_count == 4
         assert graph.edge_count == 3
+
+    def test_pipeline_sequence_includes_route_labeled_processing_targets(self) -> None:
+        """Fallback sequence discovery must include MOVE edges beyond 'continue'."""
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("router", node_type=NodeType.GATE, plugin_name="router")
+        graph.add_node("branch_t", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="json")
+
+        graph.add_edge("source", "router", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("router", "branch_t", label="high", mode=RoutingMode.MOVE)
+        graph.add_edge("branch_t", "sink", label="on_success", mode=RoutingMode.MOVE)
+
+        sequence = graph.get_pipeline_node_sequence()
+        assert sequence == [NodeID("router"), NodeID("branch_t")]
+
+        step_map = graph.build_step_map()
+        assert step_map[NodeID("source")] == 0
+        assert step_map[NodeID("router")] == 1
+        assert step_map[NodeID("branch_t")] == 2
 
 
 class TestDAGValidation:
@@ -632,7 +893,6 @@ class TestExecutionGraphFromConfig:
 
     def test_from_config_minimal(self, plugin_manager) -> None:
         """Build graph from minimal config (source -> sink only)."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -641,7 +901,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -650,17 +911,16 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
-            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         # Should have: source -> output_sink
@@ -671,7 +931,6 @@ class TestExecutionGraphFromConfig:
 
     def test_from_config_is_valid(self, plugin_manager) -> None:
         """Graph from valid config passes validation."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -680,7 +939,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -689,17 +949,16 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
-            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         # Should not raise
@@ -708,7 +967,6 @@ class TestExecutionGraphFromConfig:
 
     def test_from_config_with_transforms(self, plugin_manager) -> None:
         """Build graph with transform chain."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -718,7 +976,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -728,20 +987,31 @@ class TestExecutionGraphFromConfig:
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             transforms=[
-                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
-                TransformSettings(plugin="field_mapper", options={"schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    on_success="to_field_mapper",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
             ],
-            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         # Should have: source -> passthrough -> field_mapper -> output_sink
@@ -760,19 +1030,278 @@ class TestExecutionGraphFromConfig:
         field_mapper_idx = next(i for i, n in enumerate(order) if "field_mapper" in n)
         assert passthrough_idx < field_mapper_idx
 
+    def test_pydantic_rejects_missing_on_success_on_transform(self, plugin_manager) -> None:
+        """on_success is required on TransformSettings — omitting it is a Pydantic error."""
+        from pydantic import ValidationError
+
+        from elspeth.core.config import TransformSettings
+
+        with pytest.raises(ValidationError, match="on_success"):
+            TransformSettings(
+                name="passthrough_0",
+                plugin="passthrough",
+                input="source_out",
+                on_error="discard",
+                options={"schema": {"mode": "observed"}},
+            )
+
+    def test_non_terminal_transform_with_on_success_builds_when_properly_wired(self, plugin_manager) -> None:
+        """Non-terminal transforms with explicit wired connections build successfully.
+
+        In the new WiredTransform system, every transform declares input/on_success
+        connections. This is not an error - it's how connection matching works.
+        """
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    input="source_out",
+                    on_success="conn_0_1",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_1",
+                    plugin="passthrough",
+                    input="conn_0_1",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+    def test_terminal_transform_on_success_unknown_sink_raises(self, plugin_manager) -> None:
+        """Terminal transform on_success must reference a configured sink."""
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "source_out",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    plugin="passthrough",
+                    input="source_out",
+                    on_success="nowhere",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"on_success 'nowhere' is neither a sink nor a known connection"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_terminal_transform_with_valid_on_success_passes(self, plugin_manager) -> None:
+        """Terminal transform with valid on_success builds successfully."""
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "source_out",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    plugin="passthrough",
+                    input="source_out",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+    def test_non_terminal_without_on_success_and_terminal_with_on_success_passes(self, plugin_manager) -> None:
+        """Non-terminal transform omitted on_success, terminal declares it."""
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings, TransformSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "source_out",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    input="source_out",
+                    on_success="conn_pt_fm",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    input="conn_pt_fm",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+    def test_transform_before_aggregation_not_treated_as_terminal(self, plugin_manager) -> None:
+        """A transform before an aggregation is non-terminal and must not require on_success."""
+        from elspeth.core.config import (
+            AggregationSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+            TriggerConfig,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    plugin="passthrough",
+                    on_success="to_agg",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+            aggregations=[
+                _aggregation_settings(
+                    AggregationSettings,
+                    name="batch_stats",
+                    plugin="batch_stats",
+                    trigger=TriggerConfig(count=10),
+                    output_mode="transform",
+                    options={
+                        "value_field": "value",
+                        "schema": {"mode": "observed"},
+                        "on_success": "output",
+                    },
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        graph.validate()
+
     def test_from_config_with_gate_routes(self, plugin_manager) -> None:
         """Build graph with config-driven gate routing to multiple sinks."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -785,23 +1314,23 @@ class TestExecutionGraphFromConfig:
                 "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="safety_gate",
                     condition="row['suspicious'] == True",
-                    routes={"true": "flagged", "false": "continue"},
+                    routes={"true": "flagged", "false": "results"},
                 ),
             ],
-            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         # Should have:
@@ -813,17 +1342,16 @@ class TestExecutionGraphFromConfig:
 
     def test_from_config_validates_route_targets(self, plugin_manager) -> None:
         """Config gate routes must reference existing sinks."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -833,31 +1361,30 @@ class TestExecutionGraphFromConfig:
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="bad_gate",
                     condition="True",
-                    routes={"true": "nonexistent_sink", "false": "continue"},
+                    routes={"true": "nonexistent_sink", "false": "output"},
                 ),
             ],
-            default_sink="output",
         )
 
         with pytest.raises(GraphValidationError) as exc_info:
             plugins = instantiate_plugins_from_config(config)
             ExecutionGraph.from_plugin_instances(
                 source=plugins["source"],
+                source_settings=plugins["source_settings"],
                 transforms=plugins["transforms"],
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(config.gates),
-                default_sink=config.default_sink,
             )
 
         assert "nonexistent_sink" in str(exc_info.value)
 
     def test_get_sink_id_map(self, plugin_manager) -> None:
         """Get explicit sink_name -> node_id mapping."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import SinkName
         from elspeth.core.config import (
             ElspethSettings,
@@ -867,7 +1394,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -879,17 +1407,16 @@ class TestExecutionGraphFromConfig:
                 "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
                 "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
         sink_map = graph.get_sink_id_map()
 
@@ -900,7 +1427,6 @@ class TestExecutionGraphFromConfig:
 
     def test_get_transform_id_map(self, plugin_manager) -> None:
         """Get explicit sequence -> node_id mapping for transforms."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -910,7 +1436,8 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -920,20 +1447,31 @@ class TestExecutionGraphFromConfig:
             ),
             sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             transforms=[
-                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
-                TransformSettings(plugin="field_mapper", options={"schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    on_success="to_field_mapper",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
             ],
-            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
         transform_map = graph.get_transform_id_map()
 
@@ -942,18 +1480,19 @@ class TestExecutionGraphFromConfig:
         assert 1 in transform_map  # field_mapper
         assert transform_map[0] != transform_map[1]
 
-    def test_get_default_sink(self, plugin_manager) -> None:
-        """Get the output sink name."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
+    def test_pipeline_traversal_methods_linear(self, plugin_manager) -> None:
+        """Traversal helpers should follow continue edges over processing nodes."""
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
             SourceSettings,
+            TransformSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -961,24 +1500,447 @@ class TestExecutionGraphFromConfig:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
-            },
-            default_sink="results",
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    on_success="to_field_mapper",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
-        assert graph.get_default_sink() == "results"
+        sequence = graph.get_pipeline_node_sequence()
+        assert len(sequence) == 2
+        assert graph.get_first_transform_node() == sequence[0]
+        assert graph.get_next_node(sequence[0]) == sequence[1]
+        assert graph.get_next_node(sequence[1]) is None
+
+    def test_build_step_map_matches_schema_contract(self, plugin_manager) -> None:
+        """Step numbering must satisfy Landscape DB schema contract (UniqueConstraint on token_id, step_index, attempt)."""
+        from elspeth.contracts.types import GateName, SinkName
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_0",
+                    plugin="passthrough",
+                    on_success="pt0_out",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="passthrough_1",
+                    plugin="passthrough",
+                    on_success="pt1_out",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="field_mapper_0",
+                    plugin="field_mapper",
+                    on_success="to_gates",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+            gates=[
+                _gate_settings(GateSettings, name="g1", condition="True", routes={"true": "g2_in", "false": "flagged"}),
+                _gate_settings(GateSettings, name="g2", input="g2_in", condition="True", routes={"true": "output", "false": "output"}),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        step_map = graph.build_step_map()
+        source_id = graph.get_source()
+        assert source_id is not None
+        assert step_map[source_id] == 0
+
+        transform_map = graph.get_transform_id_map()
+        assert step_map[transform_map[0]] == 1
+        assert step_map[transform_map[1]] == 2
+        assert step_map[transform_map[2]] == 3
+
+        config_gate_map = graph.get_config_gate_id_map()
+        assert step_map[config_gate_map[GateName("g1")]] == 4
+        assert step_map[config_gate_map[GateName("g2")]] == 5
+
+        expected_step_map = {
+            source_id: 0,
+            transform_map[0]: 1,
+            transform_map[1]: 2,
+            transform_map[2]: 3,
+            config_gate_map[GateName("g1")]: 4,
+            config_gate_map[GateName("g2")]: 5,
+        }
+        assert step_map == expected_step_map
+
+        sink_id = graph.get_sink_id_map()[SinkName("output")]
+        assert graph.is_sink_node(sink_id) is True
+        assert graph.is_sink_node(transform_map[0]) is False
+        from elspeth.contracts.types import NodeID
+
+        with pytest.raises(KeyError, match="Node not found"):
+            graph.is_sink_node(NodeID("does_not_exist"))
+
+    def test_get_terminal_sink_map_for_source_only(self, plugin_manager) -> None:
+        """Source-only graph exposes terminal sink mapping (no test-time injection)."""
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "results",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        terminal_map = graph.get_terminal_sink_map()
+        source_node = graph.get_source()
+        assert source_node is not None
+        assert terminal_map[source_node] == "results"
+
+        bad_config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "on_success": "missing_sink",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+            },
+        )
+        bad_plugins = instantiate_plugins_from_config_raw(bad_config)
+        with pytest.raises(GraphValidationError, match=r"Source 'csv' on_success 'missing_sink' is neither a sink nor a known connection"):
+            ExecutionGraph.from_plugin_instances(
+                source=bad_plugins["source"],
+                source_settings=bad_plugins["source_settings"],
+                transforms=bad_plugins["transforms"],
+                sinks=bad_plugins["sinks"],
+                aggregations=bad_plugins["aggregations"],
+                gates=list(bad_config.gates),
+            )
+
+
+class TestGateConnectionRouteMaterialization:
+    """Gate routes to named connections should wire explicit labeled edges."""
+
+    def test_gate_connection_route_creates_labeled_edge(self, plugin_manager) -> None:
+        """A gate route targeting a named connection creates a labeled MOVE edge."""
+        from elspeth.contracts.types import GateName, NodeID
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.config import (
+            GateSettings as GateSettingsModel,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettingsModel(
+                    name="router",
+                    input="source_out",
+                    condition="True",
+                    routes={"true": "checker_in", "false": "flagged"},
+                ),
+                GateSettingsModel(
+                    name="checker",
+                    input="checker_in",
+                    condition="True",
+                    routes={"true": "output", "false": "flagged"},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        router_id = graph.get_config_gate_id_map()[GateName("router")]
+        checker_id = graph.get_config_gate_id_map()[GateName("checker")]
+
+        edges = graph.get_edges()
+        true_edges = [e for e in edges if NodeID(e.from_node) == router_id and e.to_node == checker_id and e.label == "true"]
+        assert len(true_edges) == 1, f"Expected 1 'true' edge from router to checker, got {len(true_edges)}"
+        continue_edges = [e for e in edges if NodeID(e.from_node) == router_id and e.to_node == checker_id and e.label == "continue"]
+        assert len(continue_edges) == 1, f"Expected 1 'continue' edge from router to checker, got {len(continue_edges)}"
+
+    def test_gate_converging_connection_routes_preserve_all_labels(self, plugin_manager) -> None:
+        """Converging gate labels to one connection should materialize all route edges."""
+        from elspeth.contracts import RouteDestinationKind
+        from elspeth.contracts.types import GateName
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.config import (
+            GateSettings as GateSettingsModel,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettingsModel(
+                    name="router",
+                    input="source_out",
+                    condition="True",
+                    routes={"true": "checker_in", "false": "checker_in"},
+                ),
+                GateSettingsModel(
+                    name="checker",
+                    input="checker_in",
+                    condition="True",
+                    routes={"true": "output", "false": "output"},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        gate_ids = graph.get_config_gate_id_map()
+        router_id = gate_ids[GateName("router")]
+        checker_id = gate_ids[GateName("checker")]
+
+        edges = [edge for edge in graph.get_edges() if edge.from_node == router_id and edge.to_node == checker_id]
+        assert len(edges) == 3
+        assert {edge.label for edge in edges} == {"true", "false", "continue"}
+
+        route_map = graph.get_route_resolution_map()
+        for route_label in ("true", "false"):
+            destination = route_map[(router_id, route_label)]
+            assert destination.kind == RouteDestinationKind.PROCESSING_NODE
+            assert destination.next_node_id == checker_id
+
+    def test_gate_connection_route_preserves_route_resolution(self, plugin_manager) -> None:
+        """Named-connection routes resolve to processing nodes; sink routes resolve to sinks."""
+        from elspeth.contracts import RouteDestination, RouteDestinationKind
+        from elspeth.contracts.types import GateName, SinkName
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.config import (
+            GateSettings as GateSettingsModel,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettingsModel(
+                    name="router",
+                    input="source_out",
+                    condition="True",
+                    routes={"true": "checker_in", "false": "flagged"},
+                ),
+                GateSettingsModel(
+                    name="checker",
+                    input="checker_in",
+                    condition="True",
+                    routes={"true": "output", "false": "flagged"},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        router_id = graph.get_config_gate_id_map()[GateName("router")]
+        resolution_map = graph.get_route_resolution_map()
+
+        # "false" -> sink
+        assert (router_id, "false") in resolution_map
+        assert resolution_map[(router_id, "false")] == RouteDestination.sink(SinkName("flagged"))
+
+        # "true" -> processing_node (the checker gate)
+        assert (router_id, "true") in resolution_map
+        assert resolution_map[(router_id, "true")].kind == RouteDestinationKind.PROCESSING_NODE
+
+    def test_terminal_gate_unconsumed_connection_rejected(self, plugin_manager) -> None:
+        """A terminal gate route to an unconsumed connection fails validation."""
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.config import (
+            GateSettings as GateSettingsModel,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="source_out",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            gates=[
+                GateSettingsModel(
+                    name="terminal_gate",
+                    input="source_out",
+                    condition="True",
+                    routes={"true": "output", "false": "orphan_conn"},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+            },
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"neither a sink nor a known connection name"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
 
 
 class TestExecutionGraphRouteMapping:
@@ -986,18 +1948,17 @@ class TestExecutionGraphRouteMapping:
 
     def test_get_route_label_for_sink(self, plugin_manager) -> None:
         """Get route label that leads to a sink from a config gate."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import GateName
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1010,23 +1971,23 @@ class TestExecutionGraphRouteMapping:
                 "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="classifier",
                     condition="row['suspicious'] == True",
-                    routes={"true": "flagged", "false": "continue"},
+                    routes={"true": "flagged", "false": "results"},
                 ),
             ],
-            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         # Get the config gate's node_id
@@ -1038,19 +1999,18 @@ class TestExecutionGraphRouteMapping:
         assert route_label == "true"
 
     def test_get_route_label_for_continue(self, plugin_manager) -> None:
-        """Continue routes return 'continue' as label."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
+        """Non-terminal continue routes return 'continue' as label."""
         from elspeth.contracts import GateName
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1058,29 +2018,39 @@ class TestExecutionGraphRouteMapping:
                     "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}})},
+            sinks={
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
             gates=[
-                GateSettings(
-                    name="gate",
+                _gate_settings(
+                    GateSettings,
+                    name="gate1",
                     condition="True",
-                    routes={"true": "continue", "false": "continue"},
+                    routes={"true": "gate1_pass", "false": "flagged"},
+                ),
+                _gate_settings(
+                    GateSettings,
+                    input="gate1_pass",
+                    name="gate2",
+                    condition="True",
+                    routes={"true": "results", "false": "results"},
                 ),
             ],
-            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
-        gate_node_id = graph.get_config_gate_id_map()[GateName("gate")]
+        gate_node_id = graph.get_config_gate_id_map()[GateName("gate1")]
 
-        # The edge to output sink uses "continue" label (both routes resolve to continue)
+        # gate1 reaches results via a continue edge to gate2
         route_label = graph.get_route_label(gate_node_id, "results")
         assert route_label == "continue"
 
@@ -1090,18 +2060,17 @@ class TestExecutionGraphRouteMapping:
         Regression test for gate-route-destination-name-validation-mismatch bug.
         Sink names don't need to match identifier pattern - they're just dict keys.
         """
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import GateName, SinkName
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1114,24 +2083,24 @@ class TestExecutionGraphRouteMapping:
                 "quarantine-bucket": SinkSettings(plugin="json", options={"path": "quarantine.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="quality_check",
                     condition="row['score'] >= 0.5",
                     routes={"true": "output-sink", "false": "quarantine-bucket"},
                 ),
             ],
-            default_sink="output-sink",
         )
 
         # DAG compilation should succeed with hyphenated sink names
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         # Verify both hyphenated sinks exist
@@ -1237,17 +2206,16 @@ class TestMultiEdgeScenarios:
         with target="fork" don't create edges to sinks - they create child tokens.
         The multi-edge bug is tested by test_gate_multiple_routes_same_sink.
         """
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1261,24 +2229,24 @@ class TestMultiEdgeScenarios:
                 "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
             },
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="fork_gate",
                     condition="True",  # Always forks
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],
                 ),
             ],
-            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         # Validate graph is still valid (DAG, has source and sink)
@@ -1325,19 +2293,18 @@ class TestCoalesceNodes:
 
     def test_from_config_creates_coalesce_node(self, plugin_manager) -> None:
         """Coalesce config should create a coalesce node in the graph."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import CoalesceName, NodeType
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1348,12 +2315,12 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],
                 ),
             ],
@@ -1370,11 +2337,11 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1390,19 +2357,18 @@ class TestCoalesceNodes:
 
     def test_from_config_coalesce_edges_from_fork_branches(self, plugin_manager) -> None:
         """Coalesce node should have edges from fork gate (via branches)."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import CoalesceName, GateName, RoutingMode
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1413,12 +2379,12 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],
                 ),
             ],
@@ -1435,11 +2401,11 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1459,12 +2425,12 @@ class TestCoalesceNodes:
 
     def test_duplicate_fork_branches_rejected_in_config_gate(self, plugin_manager) -> None:
         """Duplicate branch names in fork_to should be rejected for config gates."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
-        from elspeth.core.config import ElspethSettings, GateSettings, SinkSettings, SourceSettings
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1476,12 +2442,12 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
                 "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_a"],  # Duplicate branch name
                 ),
             ],
@@ -1492,109 +2458,12 @@ class TestCoalesceNodes:
         with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
             ExecutionGraph.from_plugin_instances(
                 source=plugins["source"],
+                source_settings=plugins["source_settings"],
                 transforms=plugins["transforms"],
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(settings.gates),
-                default_sink=settings.default_sink,
                 coalesce_settings=settings.coalesce,
-            )
-
-    def test_duplicate_fork_branches_rejected_in_plugin_gate(self) -> None:
-        """Duplicate branch names in fork_to should be rejected for plugin gates."""
-        from typing import Any
-
-        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
-        from elspeth.plugins.base import BaseGate
-        from elspeth.plugins.results import GateResult, RoutingAction
-
-        class DummySchema(PluginSchema):
-            pass
-
-        class DummySource:
-            name = "dummy_source"
-            output_schema = DummySchema
-            node_id: str | None = None
-            determinism = Determinism.DETERMINISTIC
-            plugin_version = "1.0.0"
-            _on_validation_failure = "discard"
-
-            def __init__(self) -> None:
-                self.config = {"schema": {"mode": "observed"}}
-
-            def load(self, ctx: PluginContext) -> Any:
-                yield SourceRow.valid({"value": 1})
-
-            def close(self) -> None:
-                pass
-
-            def on_start(self, ctx: PluginContext) -> None:
-                pass
-
-            def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-        class DummySink:
-            input_schema = DummySchema
-            idempotent = True
-            node_id: str | None = None
-            determinism = Determinism.DETERMINISTIC
-            plugin_version = "1.0.0"
-
-            def __init__(self, name: str) -> None:
-                self.name = name
-                self.config = {"schema": {"mode": "observed"}}
-
-            def write(self, rows: Any, ctx: PluginContext) -> ArtifactDescriptor:
-                return ArtifactDescriptor.for_file(path="memory", content_hash="", size_bytes=0)
-
-            def flush(self) -> None:
-                pass
-
-            def close(self) -> None:
-                pass
-
-            def on_start(self, ctx: PluginContext) -> None:
-                pass
-
-            def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-        class DummyGate(BaseGate):
-            name = "fork_gate"
-            input_schema = DummySchema
-            output_schema = DummySchema
-
-            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-                return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
-
-        source = DummySource()
-        sinks = {
-            "output": DummySink("output"),
-            "path_a": DummySink("path_a"),
-        }
-        # Plugin gates must NOT have "fork" as a route target - they use
-        # RoutingAction.fork_to_paths() in evaluate() instead.
-        # Routes here just define non-fork routing options.
-        gate = DummyGate(
-            {
-                "routes": {"default": "continue"},
-                "fork_to": ["path_a", "path_a"],  # Duplicate branch - should be rejected
-                "schema": {"mode": "observed"},
-            }
-        )
-
-        with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
-            ExecutionGraph.from_plugin_instances(
-                source=source,  # type: ignore[arg-type]
-                transforms=[gate],  # type: ignore[list-item]
-                sinks=sinks,  # type: ignore[arg-type]
-                aggregations={},
-                gates=[],
-                default_sink="output",
-                coalesce_settings=None,
             )
 
     def test_partial_branch_coverage_branches_not_in_coalesce_route_to_sink(
@@ -1602,19 +2471,18 @@ class TestCoalesceNodes:
         plugin_manager,
     ) -> None:
         """Fork branches not in any coalesce should still route to output sink."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import CoalesceName, GateName, SinkName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1626,12 +2494,12 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
                 "path_c": SinkSettings(plugin="json", options={"path": "path_c.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b", "path_c"],  # 3 branches
                 ),
             ],
@@ -1648,11 +2516,11 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1675,19 +2543,18 @@ class TestCoalesceNodes:
 
     def test_get_coalesce_id_map_returns_mapping(self, plugin_manager) -> None:
         """get_coalesce_id_map should return coalesce_name -> node_id."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import CoalesceName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1698,12 +2565,12 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b", "path_c", "path_d"],
                 ),
             ],
@@ -1726,11 +2593,11 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
         coalesce_map = graph.get_coalesce_id_map()
@@ -1748,19 +2615,18 @@ class TestCoalesceNodes:
 
     def test_get_branch_to_coalesce_map_returns_mapping(self, plugin_manager) -> None:
         """get_branch_to_coalesce_map should return branch_name -> coalesce_name."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import BranchName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1771,12 +2637,12 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],
                 ),
             ],
@@ -1793,42 +2659,41 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
         branch_map = graph.get_branch_to_coalesce_map()
 
-        # Should map branches to coalesce_name (not node_id) for processor step lookup
+        # Should map branches to coalesce_name (not node_id) for processor node-map lookup
         assert branch_map[BranchName("path_a")] == "merge_results"
         assert branch_map[BranchName("path_b")] == "merge_results"
 
-    def test_branch_to_coalesce_maps_to_coalesce_name_for_step_lookup(self, plugin_manager) -> None:
-        """branch_to_coalesce should map to coalesce_name (not node_id) for use with coalesce_step_map.
+    def test_branch_to_coalesce_maps_to_coalesce_name_for_node_lookup(self, plugin_manager) -> None:
+        """branch_to_coalesce should map to coalesce_name (not node_id) for coalesce node lookup.
 
-        BUG-LINEAGE-01: The processor needs to look up coalesce step position using:
+        BUG-LINEAGE-01: The processor needs to look up coalesce node position using:
             coalesce_name = branch_to_coalesce[branch_name]
-            step = coalesce_step_map[coalesce_name]
+            coalesce_node_id = coalesce_node_map[coalesce_name]
 
         But branch_to_coalesce was mapping branch_name -> node_id, causing KeyError
-        when trying to look up in coalesce_step_map which expects coalesce_name keys.
+        when trying to look up in coalesce_node_map which expects coalesce_name keys.
         """
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import BranchName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1839,12 +2704,12 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["analysis_path", "validation_path"],
                 ),
             ],
@@ -1861,19 +2726,19 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
         branch_map = graph.get_branch_to_coalesce_map()
 
-        # CRITICAL: Must map to coalesce_name (not node_id) for processor step lookup
-        # The processor does: coalesce_step_map[branch_to_coalesce[branch_name]]
-        # coalesce_step_map has keys like "join_point", NOT node_ids like "coalesce_join_point_abc123"
+        # CRITICAL: Must map to coalesce_name (not node_id) for processor node lookup
+        # The processor does: coalesce_node_map[branch_to_coalesce[branch_name]]
+        # coalesce_node_map has keys like "join_point", NOT node_ids like "coalesce_join_point_abc123"
         assert branch_map[BranchName("analysis_path")] == "join_point", (
             f"Expected coalesce_name 'join_point', got {branch_map[BranchName('analysis_path')]}"
         )
@@ -1883,18 +2748,17 @@ class TestCoalesceNodes:
 
     def test_duplicate_branch_names_across_coalesces_rejected(self, plugin_manager) -> None:
         """Duplicate branch names across coalesce settings should be rejected."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1905,12 +2769,12 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b", "path_x"],
                 ),
             ],
@@ -1935,11 +2799,11 @@ class TestCoalesceNodes:
         with pytest.raises(GraphValidationError, match="Duplicate branch name 'path_a'"):
             ExecutionGraph.from_plugin_instances(
                 source=plugins["source"],
+                source_settings=plugins["source_settings"],
                 transforms=plugins["transforms"],
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(settings.gates),
-                default_sink=settings.default_sink,
                 coalesce_settings=settings.coalesce,
             )
 
@@ -1957,7 +2821,8 @@ class TestCoalesceNodes:
         # Pydantic validates min_length=2 for branches field
         with pytest.raises(ValidationError, match="at least 2 items"):
             ElspethSettings(
-                source=SourceSettings(
+                source=_source_settings(
+                    SourceSettings,
                     plugin="csv",
                     options={
                         "path": "test.csv",
@@ -1968,7 +2833,6 @@ class TestCoalesceNodes:
                 sinks={
                     "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
                 },
-                default_sink="output",
                 coalesce=[
                     CoalesceSettings(
                         name="empty_merge",
@@ -1981,18 +2845,17 @@ class TestCoalesceNodes:
 
     def test_coalesce_branch_not_produced_by_any_gate_rejected(self, plugin_manager) -> None:
         """Coalesce referencing non-existent fork branches should be rejected."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2004,12 +2867,12 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
                 "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],  # path_b goes to sink, path_a goes to coalesce
                 ),
             ],
@@ -2028,26 +2891,24 @@ class TestCoalesceNodes:
         with pytest.raises(GraphValidationError, match=r"branch 'path_x'.*no gate produces"):
             ExecutionGraph.from_plugin_instances(
                 source=plugins["source"],
+                source_settings=plugins["source_settings"],
                 transforms=plugins["transforms"],
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(settings.gates),
-                default_sink=settings.default_sink,
                 coalesce_settings=settings.coalesce,
             )
 
-    def test_fork_coalesce_contract_branch_map_compatible_with_step_map(self, plugin_manager) -> None:
-        """Contract test: branch_to_coalesce values must be usable as coalesce_step_map keys.
+    def test_fork_coalesce_contract_branch_map_compatible_with_node_map(self, plugin_manager) -> None:
+        """Contract test: branch_to_coalesce values must be usable as coalesce_node_map keys.
 
         This is the CRITICAL contract between DAG builder and Processor.
-        The processor does: coalesce_step_map[branch_to_coalesce[branch_name]]
+        The processor does: coalesce_node_map[branch_to_coalesce[branch_name]]
         This test ensures the production path (`from_plugin_instances`) produces compatible mappings.
         """
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
             TransformSettings,
@@ -2055,7 +2916,8 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2066,15 +2928,17 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             transforms=[
-                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings, plugin="passthrough", on_success="to_gate", options={"schema": {"mode": "observed"}}
+                ),
             ],
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="analysis_fork",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b", "path_c", "path_d"],
                 ),
             ],
@@ -2099,37 +2963,23 @@ class TestCoalesceNodes:
         # Use production path
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
         # Get the mappings that processor would use
         branch_to_coalesce = graph.get_branch_to_coalesce_map()
+        coalesce_node_map = graph.get_coalesce_id_map()
 
-        # Simulate what orchestrator does (build coalesce_step_map)
-        coalesce_step_map: dict[str, int] = {}
-        branch_steps: dict[str, int] = {}
-        base_step = len(settings.transforms)
-        for gate_idx, gate in enumerate(settings.gates):
-            if gate.fork_to:
-                step = base_step + gate_idx + 1
-                for branch in gate.fork_to:
-                    existing = branch_steps.get(branch)
-                    if existing is None or step > existing:
-                        branch_steps[branch] = step
-        for cs in settings.coalesce:
-            coalesce_step_map[cs.name] = max(branch_steps[branch] for branch in cs.branches)
-
-        # CRITICAL CONTRACT: Every value in branch_to_coalesce must be a key in coalesce_step_map
-        # This is what processor relies on at lines 695-696
+        # CRITICAL CONTRACT: Every value in branch_to_coalesce must be a key in coalesce_node_map.
         for branch_name, coalesce_name in branch_to_coalesce.items():
-            assert coalesce_name in coalesce_step_map, (
+            assert coalesce_name in coalesce_node_map, (
                 f"Contract violation: branch_to_coalesce['{branch_name}'] = '{coalesce_name}', "
-                f"but '{coalesce_name}' not in coalesce_step_map keys: {list(coalesce_step_map.keys())}"
+                f"but '{coalesce_name}' not in coalesce_node_map keys: {list(coalesce_node_map.keys())}"
             )
 
             # Also verify it's the coalesce_name, not a node_id
@@ -2140,19 +2990,18 @@ class TestCoalesceNodes:
 
     def test_coalesce_node_has_edge_to_output_sink(self, plugin_manager) -> None:
         """Coalesce node should have an edge to the output sink."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import CoalesceName, RoutingMode, SinkName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2163,12 +3012,12 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],
                 ),
             ],
@@ -2185,11 +3034,11 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -2201,24 +3050,23 @@ class TestCoalesceNodes:
         coalesce_to_sink_edges = [e for e in edges if e.from_node == coalesce_id and e.to_node == output_sink_id]
 
         assert len(coalesce_to_sink_edges) == 1
-        assert coalesce_to_sink_edges[0].label == "continue"
+        assert coalesce_to_sink_edges[0].label == "on_success"
         assert coalesce_to_sink_edges[0].mode == RoutingMode.MOVE
 
     def test_coalesce_node_connects_to_next_gate(self, plugin_manager) -> None:
         """Coalesce node should continue to the next gate when one exists."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import CoalesceName, GateName, RoutingMode
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2229,18 +3077,21 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker1",
+                    input="source_out",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],
                 ),
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="gate2",
+                    input="merge_results",
                     condition="True",
-                    routes={"true": "continue", "false": "continue"},
+                    routes={"true": "output", "false": "output"},
                 ),
             ],
             coalesce=[
@@ -2256,11 +3107,11 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -2276,19 +3127,18 @@ class TestCoalesceNodes:
 
     def test_coalesce_node_stores_config(self, plugin_manager) -> None:
         """Coalesce node should store configuration for audit trail."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import CoalesceName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2299,12 +3149,12 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="output",
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="forker",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["path_a", "path_b"],
                 ),
             ],
@@ -2323,11 +3173,11 @@ class TestCoalesceNodes:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -2506,6 +3356,85 @@ class TestSchemaValidation:
         # Error should mention incompatible schemas
         error_msg = str(exc_info.value).lower()
         assert "schema" in error_msg or "incompatible" in error_msg
+
+    def test_gate_routes_to_multiple_processing_connections(self, plugin_manager) -> None:
+        """Gate route labels can fan out to different downstream processing nodes."""
+        from elspeth.contracts import GateName, RouteDestinationKind
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_router",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="router",
+                    input="to_router",
+                    condition="row['score'] > 0.5",
+                    routes={"true": "high_path", "false": "low_path"},
+                ),
+                _gate_settings(
+                    GateSettings,
+                    name="high_gate",
+                    input="high_path",
+                    condition="True",
+                    routes={"true": "output", "false": "output"},
+                ),
+                _gate_settings(
+                    GateSettings,
+                    name="low_gate",
+                    input="low_path",
+                    condition="True",
+                    routes={"true": "flagged", "false": "flagged"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+
+        gate_ids = graph.get_config_gate_id_map()
+        router_id = gate_ids[GateName("router")]
+        high_gate_id = gate_ids[GateName("high_gate")]
+        low_gate_id = gate_ids[GateName("low_gate")]
+
+        router_edges = [edge for edge in graph.get_edges() if edge.from_node == router_id]
+        router_targets = {(edge.label, edge.to_node) for edge in router_edges}
+        assert ("true", high_gate_id) in router_targets
+        assert ("false", low_gate_id) in router_targets
+
+        route_map = graph.get_route_resolution_map()
+        true_dest = route_map[(router_id, "true")]
+        false_dest = route_map[(router_id, "false")]
+
+        assert true_dest.kind == RouteDestinationKind.PROCESSING_NODE
+        assert true_dest.next_node_id == high_gate_id
+        assert false_dest.kind == RouteDestinationKind.PROCESSING_NODE
+        assert false_dest.next_node_id == low_gate_id
 
     def test_coalesce_accepts_structurally_identical_schemas(self) -> None:
         """Coalesce should accept branches with structurally identical schemas.
@@ -3017,7 +3946,6 @@ def test_from_plugin_instances_extracts_schemas():
     import tempfile
     from pathlib import Path
 
-    from elspeth.cli_helpers import instantiate_plugins_from_config
     from elspeth.contracts import NodeType
     from elspeth.core.config import load_settings
     from elspeth.core.dag import ExecutionGraph
@@ -3025,6 +3953,7 @@ def test_from_plugin_instances_extracts_schemas():
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: test.csv
     schema:
@@ -3034,7 +3963,11 @@ source:
     on_validation_failure: discard
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    plugin: passthrough
+    input: source_out
+    on_success: output
+    on_error: discard
     options:
       schema:
         mode: fixed
@@ -3050,8 +3983,6 @@ sinks:
         mode: fixed
         fields:
           - "value: float"
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -3064,11 +3995,11 @@ default_sink: output
 
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
 
@@ -3077,6 +4008,78 @@ default_sink: output
         source_info = graph.get_node_info(source_nodes[0])
         assert source_info.output_schema is not None
 
+    finally:
+        config_file.unlink()
+
+
+def test_from_plugin_instances_cycle_raises_graph_validation_error(monkeypatch: pytest.MonkeyPatch):
+    """NetworkXUnfeasible during topo sort in from_plugin_instances yields GraphValidationError.
+
+    Regression: nx.topological_sort at the pipeline-ordering step was unguarded,
+    so a cycle raised raw NetworkXUnfeasible instead of GraphValidationError.
+    The single-producer invariant prevents cycles through normal config, but
+    this wrapping is defense-in-depth for future edge-building changes.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import networkx as nx
+
+    from elspeth.core.config import load_settings
+    from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+    config_yaml = """
+source:
+  plugin: csv
+  on_success: step_a
+  options:
+    path: test.csv
+    schema:
+      mode: observed
+    on_validation_failure: discard
+
+transforms:
+  - name: passthrough_0
+    plugin: passthrough
+    input: step_a
+    on_success: output
+    on_error: discard
+    options:
+      schema:
+        mode: observed
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: observed
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        config = load_settings(config_file)
+        plugins = instantiate_plugins_from_config(config)
+
+        def raise_unfeasible(g):
+            raise nx.NetworkXUnfeasible("graph contains a cycle")
+
+        monkeypatch.setattr(nx, "topological_sort", raise_unfeasible)
+
+        with pytest.raises(GraphValidationError, match="cycle"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+                coalesce_settings=list(config.coalesce) if config.coalesce else None,
+            )
     finally:
         config_file.unlink()
 
@@ -3298,7 +4301,6 @@ class TestDeterministicNodeIDs:
 
     def test_node_ids_are_deterministic_for_same_config(self) -> None:
         """Node IDs must be deterministic for checkpoint/resume compatibility."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -3308,7 +4310,8 @@ class TestDeterministicNodeIDs:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3317,34 +4320,35 @@ class TestDeterministicNodeIDs:
                 },
             ),
             transforms=[
-                TransformSettings(
+                _transform_settings(
+                    TransformSettings,
                     plugin="passthrough",
+                    on_success="out",
                     options={"schema": {"mode": "observed"}},
                 )
             ],
             sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
-            default_sink="out",
         )
 
         # Build graph twice with same config
         plugins1 = instantiate_plugins_from_config(config)
         graph1 = ExecutionGraph.from_plugin_instances(
             source=plugins1["source"],
+            source_settings=plugins1["source_settings"],
             transforms=plugins1["transforms"],
             sinks=plugins1["sinks"],
             aggregations=plugins1["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         plugins2 = instantiate_plugins_from_config(config)
         graph2 = ExecutionGraph.from_plugin_instances(
             source=plugins2["source"],
+            source_settings=plugins2["source_settings"],
             transforms=plugins2["transforms"],
             sinks=plugins2["sinks"],
             aggregations=plugins2["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )
 
         # Node IDs must be identical
@@ -3355,7 +4359,6 @@ class TestDeterministicNodeIDs:
 
     def test_node_ids_change_when_config_changes(self) -> None:
         """Node IDs should change if plugin config changes."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -3364,7 +4367,8 @@ class TestDeterministicNodeIDs:
         from elspeth.core.dag import ExecutionGraph
 
         config1 = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3374,11 +4378,11 @@ class TestDeterministicNodeIDs:
             ),
             transforms=[],
             sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
-            default_sink="out",
         )
 
         config2 = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3388,27 +4392,26 @@ class TestDeterministicNodeIDs:
             ),
             transforms=[],
             sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
-            default_sink="out",
         )
 
         plugins1 = instantiate_plugins_from_config(config1)
         graph1 = ExecutionGraph.from_plugin_instances(
             source=plugins1["source"],
+            source_settings=plugins1["source_settings"],
             transforms=plugins1["transforms"],
             sinks=plugins1["sinks"],
             aggregations=plugins1["aggregations"],
             gates=list(config1.gates),
-            default_sink=config1.default_sink,
         )
 
         plugins2 = instantiate_plugins_from_config(config2)
         graph2 = ExecutionGraph.from_plugin_instances(
             source=plugins2["source"],
+            source_settings=plugins2["source_settings"],
             transforms=plugins2["transforms"],
             sinks=plugins2["sinks"],
             aggregations=plugins2["aggregations"],
             gates=list(config2.gates),
-            default_sink=config2.default_sink,
         )
 
         # Source node IDs should differ (different config)
@@ -3417,30 +4420,52 @@ class TestDeterministicNodeIDs:
 
         assert source_id_1 != source_id_2
 
+    def test_overlong_node_name_is_rejected_at_settings_level(self) -> None:
+        """Overlong transform names fail fast at settings validation.
+
+        The _MAX_NODE_NAME_LENGTH=38 constraint on TransformSettings ensures
+        generated node IDs stay within the 64-char landscape column limit.
+        This is the primary protection layer; the DAG-level node_id length
+        check is defense-in-depth that is unreachable with valid settings.
+        """
+        from pydantic import ValidationError
+
+        from elspeth.core.config import TransformSettings
+
+        long_name = "x" * 39  # Exceeds _MAX_NODE_NAME_LENGTH (38)
+        with pytest.raises(ValidationError, match=r"exceeds max length 38"):
+            TransformSettings(
+                name=long_name,
+                plugin="passthrough",
+                input="source_out",
+                on_success="out",
+                on_error="discard",
+                options={"schema": {"mode": "observed"}},
+            )
+
 
 class TestCoalesceGateIndex:
     """Test coalesce_gate_index exposure from ExecutionGraph."""
 
     def test_get_coalesce_gate_index_returns_copy(self) -> None:
         """Getter should return a copy to prevent external mutation."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts.types import CoalesceName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
-            GateSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(plugin="null"),
+            source=_source_settings(SourceSettings, plugin="null"),
             gates=[
-                GateSettings(
+                _gate_settings(
+                    GateSettings,
                     name="fork_gate",
                     condition="True",
-                    routes={"true": "fork", "false": "continue"},
+                    routes={"true": "fork", "false": "output"},
                     fork_to=["branch_a", "branch_b"],
                 ),
             ],
@@ -3453,18 +4478,17 @@ class TestCoalesceGateIndex:
                     merge="union",
                 ),
             ],
-            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
-            default_sink=settings.default_sink,
         )
 
         # Get the index
@@ -3483,25 +4507,23 @@ class TestCoalesceGateIndex:
 
     def test_get_coalesce_gate_index_empty_when_no_coalesce(self) -> None:
         """Getter returns empty dict when no coalesce configured."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            source=SourceSettings(plugin="null"),
+            source=_source_settings(SourceSettings, plugin="null"),
             sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"mode": "observed"}})},
-            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             coalesce_settings=settings.coalesce,
-            default_sink=settings.default_sink,
         )
 
         index = graph.get_coalesce_gate_index()
@@ -3516,19 +4538,18 @@ class TestDivertEdges:
     reachable in the graph without participating in normal DAG traversal.
     """
 
-    def _build_graph(self, settings):
+    def _build_graph(self, settings: ElspethSettings) -> ExecutionGraph:
         """Build ExecutionGraph via production factory path."""
-        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.dag import ExecutionGraph
 
         plugins = instantiate_plugins_from_config(settings)
         return ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
         )
 
     def test_source_quarantine_edge_created(self, plugin_manager) -> None:
@@ -3537,7 +4558,8 @@ class TestDivertEdges:
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3549,7 +4571,6 @@ class TestDivertEdges:
                 "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
                 "quarantine": SinkSettings(plugin="json", options={"path": "quar.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="default",
         )
         graph = self._build_graph(settings)
         graph.validate()
@@ -3565,7 +4586,8 @@ class TestDivertEdges:
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3574,7 +4596,6 @@ class TestDivertEdges:
                 },
             ),
             sinks={"default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
-            default_sink="default",
         )
         graph = self._build_graph(settings)
         graph.validate()
@@ -3594,7 +4615,8 @@ class TestDivertEdges:
         )
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3603,13 +4625,18 @@ class TestDivertEdges:
                 },
             ),
             transforms=[
-                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings,
+                    plugin="passthrough",
+                    on_success="default",
+                    on_error="errors",
+                    options={"schema": {"mode": "observed"}},
+                ),
             ],
             sinks={
                 "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
                 "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="default",
         )
         graph = self._build_graph(settings)
         graph.validate()
@@ -3617,7 +4644,7 @@ class TestDivertEdges:
         edges = graph.get_edges()
         divert_edges = [e for e in edges if e.mode == RoutingMode.DIVERT]
         assert len(divert_edges) == 1
-        assert divert_edges[0].label == "__error_0__"
+        assert divert_edges[0].label.startswith("__error_") and divert_edges[0].label.endswith("__")
 
     def test_quarantine_and_error_both_present(self, plugin_manager) -> None:
         """Both quarantine and error divert edges coexist."""
@@ -3630,7 +4657,8 @@ class TestDivertEdges:
         )
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3639,14 +4667,19 @@ class TestDivertEdges:
                 },
             ),
             transforms=[
-                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings,
+                    plugin="passthrough",
+                    on_success="default",
+                    on_error="errors",
+                    options={"schema": {"mode": "observed"}},
+                ),
             ],
             sinks={
                 "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
                 "quarantine": SinkSettings(plugin="json", options={"path": "quar.json", "schema": {"mode": "observed"}}),
                 "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="default",
         )
         graph = self._build_graph(settings)
         graph.validate()
@@ -3665,7 +4698,8 @@ class TestDivertEdges:
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3674,7 +4708,6 @@ class TestDivertEdges:
                 },
             ),
             sinks={"default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
-            default_sink="default",
         )
         graph = self._build_graph(settings)
         graph.validate()
@@ -3684,7 +4717,7 @@ class TestDivertEdges:
         assert len(divert_edges) == 1
         # Normal continue edge should also exist
         normal_edges = [e for e in edges if e.mode != RoutingMode.DIVERT]
-        assert any(e.label == "continue" for e in normal_edges)
+        assert any(e.label == "on_success" for e in normal_edges)
 
     def test_multiple_transforms_share_error_sink(self, plugin_manager) -> None:
         """Multiple transforms can route errors to the same sink."""
@@ -3697,7 +4730,8 @@ class TestDivertEdges:
         )
 
         settings = ElspethSettings(
-            source=SourceSettings(
+            source=_source_settings(
+                SourceSettings,
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -3706,14 +4740,27 @@ class TestDivertEdges:
                 },
             ),
             transforms=[
-                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
-                TransformSettings(plugin="passthrough", options={"on_error": "errors", "schema": {"mode": "observed"}}),
+                _transform_settings(
+                    TransformSettings,
+                    name="pt_a",
+                    plugin="passthrough",
+                    on_success="pt_a_out",
+                    on_error="errors",
+                    options={"schema": {"mode": "observed"}},
+                ),
+                _transform_settings(
+                    TransformSettings,
+                    name="pt_b",
+                    plugin="passthrough",
+                    on_success="default",
+                    on_error="errors",
+                    options={"schema": {"mode": "observed"}},
+                ),
             ],
             sinks={
                 "default": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
                 "errors": SinkSettings(plugin="json", options={"path": "err.json", "schema": {"mode": "observed"}}),
             },
-            default_sink="default",
         )
         graph = self._build_graph(settings)
         graph.validate()
@@ -3722,4 +4769,636 @@ class TestDivertEdges:
         divert_edges = [e for e in edges if e.mode == RoutingMode.DIVERT]
         error_edges = [e for e in divert_edges if e.label.startswith("__error_")]
         assert len(error_edges) == 2
-        assert {e.label for e in error_edges} == {"__error_0__", "__error_1__"}
+        # With auto-generated names, error labels include the transform name hash
+        assert len({e.label for e in error_edges}) == 2
+        assert all(e.label.startswith("__error_") and e.label.endswith("__") for e in error_edges)
+
+
+class TestTerminalGateRouteValidation:
+    """Terminal gates must not emit unconsumed connection outputs."""
+
+    def test_terminal_gate_with_unconsumed_connection_raises(self, plugin_manager) -> None:
+        """Terminal gate route to an orphan connection raises GraphValidationError."""
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_gate",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="threshold",
+                    input="to_gate",
+                    condition="row['score'] > 0.5",
+                    routes={"true": "output", "false": "orphan_conn"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"neither a sink nor a known connection name"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_non_terminal_gate_with_connection_route_passes(self, plugin_manager) -> None:
+        """Non-terminal gate with explicit connection route builds successfully.
+
+        Config gates are positioned AFTER transforms in the pipeline. A gate is
+        non-terminal when another config gate follows it. The first gate routes
+        to the second through a named connection.
+        """
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_gates",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+                "flagged": SinkSettings(
+                    plugin="json",
+                    options={"path": "flagged.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="first_gate",
+                    input="to_gates",
+                    condition="row['score'] > 0.5",
+                    routes={"true": "flagged", "false": "to_second"},
+                ),
+                _gate_settings(
+                    GateSettings,
+                    name="second_gate",
+                    input="to_second",
+                    condition="True",
+                    routes={"true": "output", "false": "output"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+    def test_gate_route_to_transform_connection_passes(self, plugin_manager) -> None:
+        """Gate routes can target downstream transforms via connection names."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.types import GateName
+        from elspeth.core.config import (
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_gate",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            transforms=[
+                _transform_settings(
+                    TransformSettings,
+                    name="after_gate_transform",
+                    plugin="passthrough",
+                    input="after_gate",
+                    on_success="output",
+                    options={"schema": {"mode": "observed"}},
+                ),
+            ],
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="router",
+                    input="to_gate",
+                    condition="row['score'] > 0.5",
+                    routes={"true": "output", "false": "after_gate"},
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+        gate_id = graph.get_config_gate_id_map()[GateName("router")]
+        transform_id = graph.get_transform_id_map()[0]
+        assert any(
+            edge.from_node == gate_id and edge.to_node == transform_id and edge.label == "false" and edge.mode == RoutingMode.MOVE
+            for edge in graph.get_edges()
+        )
+
+
+class TestAggregationOnSuccessValidation:
+    """wp68: Aggregation on_success routing validation (3 error paths).
+
+    Three error paths in _validate_aggregation_on_success_routing:
+    - dag.py:210: Terminal aggregation missing on_success
+    - dag.py:217: Aggregation on_success references unknown sink
+    - dag.py:228: Non-terminal aggregation with on_success set
+    """
+
+    def test_terminal_aggregation_missing_on_success_raises(self, plugin_manager) -> None:
+        """Terminal aggregation without on_success raises GraphValidationError."""
+        from elspeth.core.config import (
+            AggregationSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TriggerConfig,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_agg",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            aggregations=[
+                _aggregation_settings(
+                    AggregationSettings,
+                    name="batch_stats",
+                    plugin="batch_stats",
+                    input="to_agg",
+                    trigger=TriggerConfig(count=10),
+                    output_mode="transform",
+                    options={
+                        "value_field": "value",
+                        "schema": {"mode": "observed"},
+                        # No on_success — terminal aggregation must have it
+                    },
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"Dangling output connections"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_terminal_aggregation_unknown_sink_raises(self, plugin_manager) -> None:
+        """Terminal aggregation on_success referencing unknown sink raises GraphValidationError."""
+        from elspeth.core.config import (
+            AggregationSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TriggerConfig,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_agg",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            aggregations=[
+                _aggregation_settings(
+                    AggregationSettings,
+                    name="batch_stats",
+                    plugin="batch_stats",
+                    input="to_agg",
+                    trigger=TriggerConfig(count=10),
+                    output_mode="transform",
+                    options={
+                        "value_field": "value",
+                        "schema": {"mode": "observed"},
+                        "on_success": "nonexistent_sink",
+                    },
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"on_success 'nonexistent_sink' is neither a sink nor a known connection"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+            )
+
+    def test_non_terminal_aggregation_with_on_success_routes_to_sink(self, plugin_manager) -> None:
+        """Aggregation with on_success pointing to a sink routes correctly.
+
+        In the new WiredTransform system, aggregation on_success creates a terminal
+        edge to the sink. The gate separately consumes from its own input connection.
+        """
+        from elspeth.core.config import (
+            AggregationSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+            TriggerConfig,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_agg",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            aggregations=[
+                _aggregation_settings(
+                    AggregationSettings,
+                    name="batch_stats",
+                    plugin="batch_stats",
+                    input="to_agg",
+                    trigger=TriggerConfig(count=10),
+                    output_mode="transform",
+                    options={
+                        "value_field": "value",
+                        "schema": {"mode": "observed"},
+                        "on_success": "output",
+                    },
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+        )
+        graph.validate()
+
+
+class TestConnectionNamespaceValidation:
+    """Unit tests for _validate_connection_namespaces invariants."""
+
+    def test_sink_and_connection_name_collision_raises(self) -> None:
+        """Connection namespace must be disjoint from sink namespace."""
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        with pytest.raises(GraphValidationError, match="overlap with sink names"):
+            ExecutionGraph._validate_connection_namespaces(
+                producers={"shared_name": (NodeID("transform-1"), "continue")},
+                consumers={"shared_name": NodeID("transform-2")},
+                consumer_claims=[("shared_name", NodeID("transform-2"), "transform 'downstream'")],
+                sink_names={"shared_name"},
+                check_dangling=False,
+            )
+
+
+class TestCoalesceOnSuccessValidation:
+    """xe91: Coalesce on_success routing validation (3 error paths).
+
+    Three error paths in coalesce wiring (dag.py:1081-1103):
+    - dag.py:1091: Terminal coalesce missing on_success
+    - dag.py:1082: Non-terminal coalesce with on_success set
+    - dag.py:1099: Coalesce on_success references unknown sink
+    """
+
+    def test_terminal_coalesce_missing_on_success_raises(self, plugin_manager) -> None:
+        """Terminal coalesce without on_success raises GraphValidationError."""
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_gate",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="forker",
+                    input="to_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "output"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                    # No on_success — terminal coalesce must have it
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"Dangling output|no incoming branches"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+                coalesce_settings=config.coalesce,
+            )
+
+    def test_non_terminal_coalesce_with_on_success_to_sink_builds(self, plugin_manager) -> None:
+        """Coalesce with on_success pointing to a sink builds successfully.
+
+        In the new WiredTransform system, coalesce on_success creates a terminal
+        edge to the named sink. This is valid wiring.
+        """
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_gate",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="forker",
+                    input="to_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "output"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                    on_success="output",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        # Coalesce on_success to a valid sink should build successfully
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            coalesce_settings=config.coalesce,
+        )
+        assert graph is not None
+
+    def test_terminal_coalesce_unknown_sink_raises(self, plugin_manager) -> None:
+        """Coalesce on_success referencing unknown sink raises GraphValidationError."""
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                on_success="to_gate",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(
+                    plugin="json",
+                    options={"path": "output.json", "schema": {"mode": "observed"}},
+                ),
+            },
+            gates=[
+                _gate_settings(
+                    GateSettings,
+                    name="forker",
+                    input="to_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "output"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                    on_success="nonexistent_sink",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config_raw(config)
+        with pytest.raises(GraphValidationError, match=r"unknown sink 'nonexistent_sink'"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                source_settings=plugins["source_settings"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+                coalesce_settings=config.coalesce,
+            )
+
+
+class TestNodeInfoImmutability:
+    """Tests for NodeInfo config immutability after graph construction."""
+
+    def test_config_frozen_after_from_plugin_instances(self, plugin_manager) -> None:
+        """NodeInfo.config should be MappingProxyType after from_plugin_instances.
+
+        The DAG builder freezes all NodeInfo configs to MappingProxyType after
+        construction to prevent accidental mutation of node configs. Attempting
+        to set a key should raise TypeError.
+        """
+        from types import MappingProxyType
+
+        from elspeth.core.config import SinkSettings, SourceSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            source=_source_settings(
+                SourceSettings,
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
+            },
+        )
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            source_settings=plugins["source_settings"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            coalesce_settings=config.coalesce,
+        )
+        frozen_count = 0
+        for info in graph.get_nodes():
+            if info.config:
+                assert isinstance(info.config, MappingProxyType), (
+                    f"Node '{info.node_id}' config should be MappingProxyType after construction, got {type(info.config).__name__}"
+                )
+                with pytest.raises(TypeError):
+                    info.config["injected_key"] = "should_fail"  # type: ignore[index]
+                frozen_count += 1
+        assert frozen_count > 0, "Expected at least one node with non-empty config"

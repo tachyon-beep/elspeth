@@ -7,11 +7,12 @@ IMPORTANT: Sinks use allow_coercion=False to enforce that transforms
 output correct types. Wrong types = upstream bug = crash.
 """
 
+import hashlib
 import os
 import time
 from typing import TYPE_CHECKING, Any, Literal
 
-from sqlalchemy import Boolean, Column, Float, Integer, MetaData, String, Table, create_engine, insert
+from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, create_engine, insert
 
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
@@ -21,18 +22,21 @@ from sqlalchemy.types import TypeEngine
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.url import SanitizedDatabaseUrl
-from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.canonical import canonical_json
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
 
-# Map schema field types to SQLAlchemy column types
+# Map schema field types to SQLAlchemy column types.
+# Text (not String) is used for string columns because String() without a length
+# argument causes truncation or errors on MySQL/MSSQL — Text maps to TEXT on all
+# backends and accepts arbitrary-length values without portability issues.
 SCHEMA_TYPE_TO_SQLALCHEMY: dict[str, type[TypeEngine[Any]]] = {
-    "str": String,
+    "str": Text,
     "int": Integer,
     "float": Float,
     "bool": Boolean,
-    "any": String,  # Fallback to String for 'any' type
+    "any": Text,  # Fallback to Text for 'any' type
 }
 
 
@@ -251,12 +255,12 @@ class DatabaseSink(BaseSink):
 
         Column creation depends on schema mode:
         - fixed: Only declared fields with proper types
-        - flexible: Declared fields with proper types, then extras as String
-        - observed: All fields from first row as String (infer and lock)
+        - flexible: Declared fields with proper types, then extras as Text
+        - observed: All fields from first row as Text (infer and lock)
         """
         if self._schema_config.is_observed:
-            # Observed mode: infer from row keys (all as String)
-            return [Column(key, String) for key in row]
+            # Observed mode: infer from row keys (all as Text for portability)
+            return [Column(key, Text) for key in row]
 
         if self._schema_config.fields:
             # Explicit schema: start with declared fields and their types
@@ -271,15 +275,15 @@ class DatabaseSink(BaseSink):
                 declared_names.add(field_def.name)
 
             if self._schema_config.mode == "flexible":
-                # Flexible mode: add extra columns from row as String type
+                # Flexible mode: add extra columns from row as Text type
                 for key in row:
                     if key not in declared_names:
-                        columns.append(Column(key, String))
+                        columns.append(Column(key, Text))
 
             return columns
 
         # Fallback (shouldn't happen with valid config): use row keys
-        return [Column(key, String) for key in row]
+        return [Column(key, Text) for key in row]
 
     def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
         """Write a batch of rows to the database.
@@ -299,13 +303,14 @@ class DatabaseSink(BaseSink):
             ValidationError: If validate_input=True and a row fails validation.
                 This indicates a bug in an upstream transform.
         """
-        # Compute canonical JSON payload BEFORE any database operation
+        # Compute canonical JSON payload ONCE before any database operation.
         # Uses RFC 8785 canonical JSON for deterministic hashing:
         # - Normalizes pandas/numpy types to JSON primitives
         # - Rejects NaN/Infinity (invalid JSON per RFC 8785)
         # - Deterministic unicode escaping
-        content_hash = stable_hash(rows)
-        payload_size = len(canonical_json(rows).encode("utf-8"))
+        canonical_payload = canonical_json(rows).encode("utf-8")
+        content_hash = hashlib.sha256(canonical_payload).hexdigest()
+        payload_size = len(canonical_payload)
 
         if not rows:
             # Empty batch - return descriptor without DB operations
@@ -395,6 +400,7 @@ class DatabaseSink(BaseSink):
             self._engine = None
             self._table = None
             self._metadata = None
+            self._table_replaced = False
 
     # === Lifecycle Hooks ===
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -55,7 +56,7 @@ class TestSignRecordDeterminism:
 
     @given(key=signing_keys, record=record_dicts)
     @settings(max_examples=200)
-    def test_same_record_same_signature(self, key: bytes, record: dict) -> None:
+    def test_same_record_same_signature(self, key: bytes, record: dict[str, Any]) -> None:
         """Property: Signing the same record with the same key produces identical output."""
         exporter = _make_exporter(signing_key=key)
         sig1 = exporter._sign_record(record)
@@ -64,7 +65,7 @@ class TestSignRecordDeterminism:
 
     @given(key=signing_keys, record=record_dicts)
     @settings(max_examples=200)
-    def test_signature_is_64_char_hex(self, key: bytes, record: dict) -> None:
+    def test_signature_is_64_char_hex(self, key: bytes, record: dict[str, Any]) -> None:
         """Property: Signature is always a 64-character lowercase hex string (SHA-256)."""
         exporter = _make_exporter(signing_key=key)
         sig = exporter._sign_record(record)
@@ -73,7 +74,7 @@ class TestSignRecordDeterminism:
 
     @given(key=signing_keys, record=record_dicts)
     @settings(max_examples=100)
-    def test_signature_matches_manual_hmac(self, key: bytes, record: dict) -> None:
+    def test_signature_matches_manual_hmac(self, key: bytes, record: dict[str, Any]) -> None:
         """Property: Signature matches a manually computed HMAC-SHA256."""
         exporter = _make_exporter(signing_key=key)
         sig = exporter._sign_record(record)
@@ -88,7 +89,7 @@ class TestSignRecordDeterminism:
         record=record_dicts,
     )
     @settings(max_examples=100)
-    def test_different_keys_different_signatures(self, key1: bytes, key2: bytes, record: dict) -> None:
+    def test_different_keys_different_signatures(self, key1: bytes, key2: bytes, record: dict[str, Any]) -> None:
         """Property: Different signing keys produce different signatures."""
         if key1 == key2:
             return  # Skip when keys happen to be identical

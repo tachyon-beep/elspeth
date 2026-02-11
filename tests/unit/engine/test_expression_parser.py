@@ -271,7 +271,7 @@ class TestExpressionParserSecurityRejections:
 
     def test_reject_arbitrary_function_call(self) -> None:
         with pytest.raises(ExpressionSecurityError, match="Forbidden function call"):
-            ExpressionParser("len(row)")
+            ExpressionParser("sorted(row)")
 
     def test_reject_method_call_not_get(self) -> None:
         with pytest.raises(ExpressionSecurityError, match="Forbidden row attribute"):
@@ -428,6 +428,139 @@ class TestExpressionParserRealWorldExamples:
         assert parser.evaluate({"category": "urgent", "score": 0.8}) is False
         assert parser.evaluate({"category": "normal", "score": 0.75}) is True
         assert parser.evaluate({"category": "normal", "score": 0.5}) is False
+
+    def test_content_length_gate(self) -> None:
+        """Route based on content length — the chaosweb use case."""
+        parser = ExpressionParser("len(str(row.get('page_content', ''))) >= 50")
+        long_content = "x" * 100
+        short_content = "x" * 10
+        assert parser.evaluate({"page_content": long_content}) is True
+        assert parser.evaluate({"page_content": short_content}) is False
+        # Missing field uses default empty string → length 0
+        assert parser.evaluate({}) is False
+
+
+class TestExpressionParserSafeBuiltins:
+    """Test safe built-in function calls: len, str, int, float, bool, abs."""
+
+    # --- len() ---
+
+    def test_len_on_string(self) -> None:
+        parser = ExpressionParser("len(row['text']) > 10")
+        assert parser.evaluate({"text": "hello world!"}) is True
+        assert parser.evaluate({"text": "short"}) is False
+
+    def test_len_on_list(self) -> None:
+        parser = ExpressionParser("len(row['items']) >= 3")
+        assert parser.evaluate({"items": [1, 2, 3]}) is True
+        assert parser.evaluate({"items": [1]}) is False
+
+    def test_len_on_dict(self) -> None:
+        parser = ExpressionParser("len(row['data']) == 2")
+        assert parser.evaluate({"data": {"a": 1, "b": 2}}) is True
+
+    def test_len_with_row_get_default(self) -> None:
+        parser = ExpressionParser("len(row.get('items', [])) == 0")
+        assert parser.evaluate({}) is True
+        assert parser.evaluate({"items": [1]}) is False
+
+    # --- str() ---
+
+    def test_str_on_number(self) -> None:
+        parser = ExpressionParser("str(row['code']) == '42'")
+        assert parser.evaluate({"code": 42}) is True
+        assert parser.evaluate({"code": 43}) is False
+
+    def test_str_on_none(self) -> None:
+        parser = ExpressionParser("str(row.get('x')) == 'None'")
+        assert parser.evaluate({}) is True
+
+    def test_str_nested_in_len(self) -> None:
+        """len(str(...)) composition — the chaosweb pattern."""
+        parser = ExpressionParser("len(str(row.get('value', ''))) >= 5")
+        assert parser.evaluate({"value": "hello"}) is True
+        assert parser.evaluate({"value": "hi"}) is False
+
+    # --- int() ---
+
+    def test_int_on_string(self) -> None:
+        parser = ExpressionParser("int(row['amount']) > 100")
+        assert parser.evaluate({"amount": "200"}) is True
+        assert parser.evaluate({"amount": "50"}) is False
+
+    def test_int_on_float(self) -> None:
+        parser = ExpressionParser("int(row['ratio']) == 3")
+        assert parser.evaluate({"ratio": 3.7}) is True
+
+    def test_int_invalid_string_raises_evaluation_error(self) -> None:
+        parser = ExpressionParser("int(row['text'])")
+        with pytest.raises(ExpressionEvaluationError, match=r"int.*evaluation error"):
+            parser.evaluate({"text": "not_a_number"})
+
+    # --- float() ---
+
+    def test_float_on_string(self) -> None:
+        parser = ExpressionParser("float(row['score']) >= 0.5")
+        assert parser.evaluate({"score": "0.75"}) is True
+        assert parser.evaluate({"score": "0.25"}) is False
+
+    def test_float_on_int(self) -> None:
+        parser = ExpressionParser("float(row['count']) == 5.0")
+        assert parser.evaluate({"count": 5}) is True
+
+    def test_float_invalid_string_raises_evaluation_error(self) -> None:
+        parser = ExpressionParser("float(row['text'])")
+        with pytest.raises(ExpressionEvaluationError, match=r"float.*evaluation error"):
+            parser.evaluate({"text": "nope"})
+
+    # --- bool() ---
+
+    def test_bool_on_zero(self) -> None:
+        parser = ExpressionParser("bool(row['count']) == False")
+        assert parser.evaluate({"count": 0}) is True
+        assert parser.evaluate({"count": 1}) is False
+
+    def test_bool_on_empty_string(self) -> None:
+        parser = ExpressionParser("bool(row.get('text', ''))")
+        assert parser.evaluate({"text": "hello"}) is True
+        assert parser.evaluate({"text": ""}) is False
+        assert parser.evaluate({}) is False
+
+    # --- abs() ---
+
+    def test_abs_on_negative(self) -> None:
+        parser = ExpressionParser("abs(row['delta']) < 10")
+        assert parser.evaluate({"delta": -5}) is True
+        assert parser.evaluate({"delta": 5}) is True
+        assert parser.evaluate({"delta": -15}) is False
+
+    def test_abs_with_arithmetic(self) -> None:
+        parser = ExpressionParser("abs(row['a'] - row['b']) <= 1")
+        assert parser.evaluate({"a": 10, "b": 10}) is True
+        assert parser.evaluate({"a": 10, "b": 11}) is True
+        assert parser.evaluate({"a": 10, "b": 13}) is False
+
+    # --- Composition ---
+
+    def test_nested_builtin_calls(self) -> None:
+        """Multiple safe builtins can be composed."""
+        parser = ExpressionParser("len(str(int(row['value']))) <= 3")
+        assert parser.evaluate({"value": 42}) is True  # "42" → len 2
+        assert parser.evaluate({"value": 99999}) is False  # "99999" → len 5
+
+    # --- Rejection of kwargs ---
+
+    def test_safe_builtin_rejects_kwargs(self) -> None:
+        with pytest.raises(ExpressionSecurityError, match="keyword arguments"):
+            ExpressionParser("len(obj=row['items'])")
+
+    # --- Builtins NOT in whitelist are still rejected ---
+
+    def test_reject_non_whitelisted_builtins(self) -> None:
+        forbidden = ["sorted", "list", "dict", "tuple", "set", "type", "dir", "vars", "chr", "ord", "hex"]
+        for name in forbidden:
+            with pytest.raises(ExpressionSecurityError):
+                ExpressionParser(f"{name}(row['x'])")
 
 
 # =============================================================================
@@ -1348,3 +1481,51 @@ class TestExpressionEvaluationError:
         # Original KeyError should be chained
         assert exc_info.value.__cause__ is not None
         assert isinstance(exc_info.value.__cause__, KeyError)
+
+
+class TestExpressionValidatorFailClosed:
+    """Verify that the validator rejects unknown AST expression node types.
+
+    The _ExpressionValidator.visit() override (expression_parser.py:301-319)
+    provides defense-in-depth: any ast.expr subclass without an explicit
+    visit_* handler is rejected. This prevents future Python AST additions
+    from silently passing validation.
+    """
+
+    def test_unknown_ast_expr_node_rejected(self) -> None:
+        """Synthetic unknown AST expression node type is rejected."""
+        import ast as _ast
+
+        # Create a valid expression AST, then inject a synthetic node type
+        tree = _ast.parse("row['x']", mode="eval")
+
+        # Replace the body with an unknown expr subclass
+        class FakeExpr(_ast.expr):
+            _fields = ()
+
+        fake_node = FakeExpr()
+        fake_node.lineno = 1
+        fake_node.col_offset = 0
+        fake_node.end_lineno = 1
+        fake_node.end_col_offset = 1
+        tree.body = fake_node
+
+        # The validator should reject it via the fail-closed visit() override
+        from elspeth.engine.expression_parser import _ExpressionValidator
+
+        validator = _ExpressionValidator()
+        validator.visit(tree)
+        assert len(validator.errors) >= 1
+        assert "Unsupported expression construct" in validator.errors[0]
+        assert "FakeExpr" in validator.errors[0]
+
+    def test_structural_ast_nodes_not_blocked(self) -> None:
+        """Non-expression AST nodes (operators, contexts) pass through normally.
+
+        The fail-closed check only applies to ast.expr subclasses, not to
+        structural metadata like ast.Eq, ast.Load, ast.Expression, etc.
+        """
+        # This expression uses comparison ops, boolean ops, etc.
+        # If structural nodes were blocked, this would fail validation.
+        parser = ExpressionParser("row['a'] == 1 and row['b'] != 2")
+        assert parser.evaluate({"a": 1, "b": 3}) is True

@@ -8,7 +8,7 @@ from elspeth.contracts import SourceRow
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.base import BaseSource
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 class StubSource(BaseSource):

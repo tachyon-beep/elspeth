@@ -1,0 +1,11 @@
+id,url,label
+1,http://127.0.0.1:8200/articles/quarterly-earnings,finance
+2,http://127.0.0.1:8200/articles/product-launch,tech
+3,http://127.0.0.1:8200/articles/market-analysis,finance
+4,http://127.0.0.1:8200/articles/security-advisory,security
+5,http://127.0.0.1:8200/articles/compliance-update,legal
+6,http://127.0.0.1:8200/articles/board-minutes,governance
+7,http://127.0.0.1:8200/articles/policy-revision,legal
+8,http://127.0.0.1:8200/articles/annual-report,finance
+9,http://127.0.0.1:8200/articles/vendor-assessment,procurement
+10,http://127.0.0.1:8200/articles/incident-response,security

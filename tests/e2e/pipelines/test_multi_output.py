@@ -31,13 +31,14 @@ class TestMultiOutput:
         source_data = [{"id": i, "category": "A" if i % 2 == 0 else "B", "value": i * 10} for i in range(1, 11)]
         # Expected: ids 2,4,6,8,10 -> sink_a (category A), ids 1,3,5,7,9 -> sink_b (category B)
 
-        source = ListSource(source_data)
+        source = ListSource(source_data, on_success="sink_a")
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
         # Config-driven gate: route by category field
         category_gate = GateSettings(
             name="category_router",
+            input="source_out",
             condition="row['category'] == 'A'",
             routes={"true": "sink_a", "false": "sink_b"},
         )
@@ -48,7 +49,7 @@ class TestMultiOutput:
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[category_gate],
         )
-        graph = build_production_graph(config, default_sink="sink_a")
+        graph = build_production_graph(config)
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -82,12 +83,13 @@ class TestMultiOutput:
             {"id": 5, "category": "A", "value": 50},
         ]
 
-        source = ListSource(source_data)
+        source = ListSource(source_data, on_success="sink_a")
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
         category_gate = GateSettings(
             name="category_router",
+            input="source_out",
             condition="row['category'] == 'A'",
             routes={"true": "sink_a", "false": "sink_b"},
         )
@@ -98,7 +100,7 @@ class TestMultiOutput:
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[category_gate],
         )
-        graph = build_production_graph(config, default_sink="sink_a")
+        graph = build_production_graph(config)
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/audit.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")

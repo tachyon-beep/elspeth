@@ -34,7 +34,6 @@ class DatadogExporter:
     Each telemetry event is exported as a span with appropriate tags.
 
     Configuration options:
-        api_key: Datadog API key (optional if using local agent)
         service_name: Service name for Datadog APM (default: "elspeth")
         env: Environment tag (default: "production")
         agent_host: Datadog agent hostname (default: "localhost")
@@ -45,16 +44,15 @@ class DatadogExporter:
         telemetry:
           exporters:
             - name: datadog
-              api_key: ${DD_API_KEY}  # Optional if local agent
               service_name: "elspeth-pipeline"
               env: "production"
               agent_host: "localhost"
               agent_port: 8126
 
     Note:
-        Config values come pre-resolved by Dynaconf (${DD_API_KEY} -> actual value).
-        The api_key is optional when using a local Datadog agent, which handles
-        authentication itself.
+        Authentication is handled by the Datadog agent itself (via DD_API_KEY
+        environment variable read by ddtrace). This exporter communicates with
+        the local agent, not the Datadog API directly.
     """
 
     _name = "datadog"
@@ -77,7 +75,6 @@ class DatadogExporter:
 
         Args:
             config: Exporter-specific configuration dict containing:
-                - api_key (optional): Datadog API key (not needed with local agent)
                 - service_name (optional): Service name for APM (default: "elspeth")
                 - env (optional): Environment tag (default: "production")
                 - agent_host (optional): Agent hostname (default: "localhost")
@@ -282,22 +279,29 @@ class DatadogExporter:
             tag_key = f"elspeth.{key}"
             self._set_tag_value(span, tag_key, value)
 
-    def _set_tag_value(self, span: Any, key: str, value: Any) -> None:
+    _MAX_TAG_DEPTH = 5  # Maximum nesting depth for dict flattening
+
+    def _set_tag_value(self, span: Any, key: str, value: Any, *, _depth: int = 0) -> None:
         """Set a single tag value with appropriate type conversion.
 
         Args:
             span: The Datadog span
             key: Tag key
             value: Tag value to convert and set
+            _depth: Current recursion depth (internal, do not set)
         """
         if isinstance(value, datetime):
             span.set_tag(key, value.isoformat())
         elif isinstance(value, Enum):
             span.set_tag(key, value.value)
         elif isinstance(value, dict):
-            # Flatten dict to dotted keys for Datadog
-            for sub_key, sub_value in value.items():
-                self._set_tag_value(span, f"{key}.{sub_key}", sub_value)
+            if _depth >= self._MAX_TAG_DEPTH:
+                # Serialize remaining depth as string to prevent unbounded recursion
+                span.set_tag(key, str(value))
+            else:
+                # Flatten dict to dotted keys for Datadog
+                for sub_key, sub_value in value.items():
+                    self._set_tag_value(span, f"{key}.{sub_key}", sub_value, _depth=_depth + 1)
         elif isinstance(value, tuple):
             # Convert tuple to list for JSON compatibility
             span.set_tag(key, list(value))

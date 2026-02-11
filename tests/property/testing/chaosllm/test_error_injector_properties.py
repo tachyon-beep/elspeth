@@ -240,20 +240,20 @@ class TestBurstTiming:
         clock_time = 0.0
         injector = ErrorInjector(config, time_func=lambda: clock_time)
 
-        # Check at specific times
+        # Check burst timing via the composed engine's state machine.
         # t=0 → in burst (start of first interval)
         clock_time = 0.1
-        _ = injector._get_current_time()  # Initialize
-        assert injector._is_in_burst(0.1)
+        _ = injector._engine._get_elapsed()  # Initialize
+        assert injector._engine._check_burst(0.1)
 
         # t=effective_duration + 0.1 → out of burst
-        assert not injector._is_in_burst(effective_duration + 0.1)
+        assert not injector._engine._check_burst(effective_duration + 0.1)
 
         # t=interval → in burst (start of second interval)
-        assert injector._is_in_burst(float(interval))
+        assert injector._engine._check_burst(float(interval))
 
         # t=interval + effective_duration + 0.1 → out of burst
-        assert not injector._is_in_burst(float(interval) + effective_duration + 0.1)
+        assert not injector._engine._check_burst(float(interval) + effective_duration + 0.1)
 
     def test_burst_disabled_never_in_burst(self) -> None:
         """Property: Disabled burst means never in burst."""
@@ -263,7 +263,7 @@ class TestBurstTiming:
         injector = ErrorInjector(config)
 
         for t in [0.0, 5.0, 30.0, 100.0, 1000.0]:
-            assert not injector._is_in_burst(t)
+            assert not injector._engine._check_burst(t)
 
     @given(seed=st.integers(min_value=0, max_value=2**32 - 1))
     @settings(max_examples=30)

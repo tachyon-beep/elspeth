@@ -130,7 +130,7 @@ def _external_call() -> ExternalCallCompleted:
 
 @dataclass(frozen=True, slots=True)
 class _UnknownEvent(TelemetryEvent):
-    """Custom event subclass to test forward-compatibility pass-through."""
+    """Custom event subclass to test forward-compatible filtering."""
 
     custom_field: str = "unknown"
 
@@ -226,7 +226,7 @@ class TestExternalCallEventsFullOnly:
 
 
 # =============================================================================
-# Unknown Events: Pass Through for Forward Compatibility
+# Unknown Events: Pass Through (Fail-Open for Forward Compatibility)
 # =============================================================================
 
 

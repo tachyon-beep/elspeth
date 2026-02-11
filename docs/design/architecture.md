@@ -172,7 +172,7 @@ row_plugins:                         source
   - quality_gate                        │
   - privacy_gate          ───→          ▼
   - main_eval                        quality_gate ──→ quarantine
-default_sink: results                    │ (continue)
+    on_success: results                  │ (continue)
                                         ▼
                                      privacy_gate ──→ review
                                         │ (continue)
@@ -234,7 +234,8 @@ row_plugins:
   - plugin: enrich
   - plugin: classify
   - plugin: validate
-default_sink: results
+    options:
+      on_success: results
 ```
 
 This compiles to a DAG where every node has exactly one `continue` edge. Users never see DAG complexity unless they use routing or coalesce.
@@ -904,11 +905,10 @@ row_plugins:
           operator: ">="
           value: 150
           result: emergency
+      on_success: routine_log
     routes:
       emergency: emergency_broadcast
       normal: continue
-
-default_sink: routine_log
 
 landscape:
   enabled: true

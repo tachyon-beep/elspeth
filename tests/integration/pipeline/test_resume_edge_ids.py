@@ -13,48 +13,12 @@ import pytest
 from sqlalchemy import select
 
 from elspeth.contracts import Determinism, NodeType
-from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.results import GateResult
-from elspeth.contracts.routing import RoutingAction
-from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import edges_table
 from elspeth.core.payload_store import FilesystemPayloadStore
-from elspeth.plugins.base import BaseGate
-
-
-class SimpleGate(BaseGate):
-    """Test gate that routes based on row ID."""
-
-    name = "simple_gate"
-    plugin_version = "1.0.0"
-    determinism = Determinism.DETERMINISTIC
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        super().__init__(config)
-        # Set schema attributes (required by BaseGate)
-        from elspeth.plugins.schema_factory import _create_dynamic_schema
-
-        schema = _create_dynamic_schema("SimpleGateSchema")
-        self.input_schema = schema
-        self.output_schema = schema
-
-    def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-        """Route even IDs to sink_a, odd IDs to sink_b."""
-        row_id = row.get("id", 0)
-        if row_id % 2 == 0:
-            return GateResult(row=row.to_dict(), action=RoutingAction.route("route_to:sink_a"))
-        else:
-            return GateResult(row=row.to_dict(), action=RoutingAction.route("route_to:sink_b"))
-
-    def on_start(self, ctx: PluginContext) -> None:
-        pass
-
-    def on_complete(self, ctx: PluginContext) -> None:
-        pass
 
 
 class TestResumeEdgeIDs:

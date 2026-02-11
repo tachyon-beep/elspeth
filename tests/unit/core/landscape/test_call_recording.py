@@ -320,6 +320,84 @@ class TestCompleteOperation:
         with pytest.raises(FrameworkBugError):
             recorder.complete_operation(op_id, "completed", duration_ms=20)
 
+    def test_no_orphaned_payload_on_double_complete(self, tmp_path):
+        """Payload must not be stored when operation is already completed."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = LandscapeDB.in_memory()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        op = recorder.begin_operation("run-1", "source-0", "source_load")
+
+        # First completion succeeds
+        recorder.complete_operation(op.operation_id, "completed", duration_ms=10)
+
+        # Count payload files before the duplicate attempt
+        blobs_before = list(tmp_path.joinpath("payloads").rglob("*"))
+        blobs_before = [p for p in blobs_before if p.is_file()]
+
+        # Second completion with output_data must fail without storing a blob
+        with pytest.raises(FrameworkBugError):
+            recorder.complete_operation(op.operation_id, "completed", output_data={"leaked": True}, duration_ms=20)
+
+        blobs_after = list(tmp_path.joinpath("payloads").rglob("*"))
+        blobs_after = [p for p in blobs_after if p.is_file()]
+
+        assert len(blobs_after) == len(blobs_before), (
+            f"Orphaned payload blob created on duplicate completion: {len(blobs_after) - len(blobs_before)} new blob(s)"
+        )
+
+    def test_no_orphaned_payload_on_nonexistent_operation(self, tmp_path):
+        """Payload must not be stored when operation_id is invalid."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = LandscapeDB.in_memory()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+
+        with pytest.raises(FrameworkBugError):
+            recorder.complete_operation("nonexistent-op", "completed", output_data={"leaked": True})
+
+        blobs = list(tmp_path.joinpath("payloads").rglob("*"))
+        blobs = [p for p in blobs if p.is_file()]
+        assert len(blobs) == 0, f"Orphaned payload blob created for nonexistent operation: {len(blobs)} blob(s)"
+
+    def test_output_data_ref_set_with_payload_store(self, tmp_path):
+        """When payload store is configured, output_data_ref must be set on success."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = LandscapeDB.in_memory()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        op = recorder.begin_operation("run-1", "source-0", "source_load")
+
+        recorder.complete_operation(op.operation_id, "completed", output_data={"rows_loaded": 42}, duration_ms=100)
+
+        completed = recorder.get_operation(op.operation_id)
+        assert completed.status == "completed"
+        assert completed.output_data_ref is not None, "output_data_ref should be set when payload store is configured"
+
 
 class TestAllocateOperationCallIndex:
     """Tests for thread-safe operation call index allocation."""

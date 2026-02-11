@@ -4,6 +4,7 @@ NewType creates distinct types that mypy treats as incompatible,
 preventing accidental misuse of semantically different string values.
 """
 
+from collections.abc import Callable
 from typing import NewType
 
 # Node identifiers - deterministic hash-based IDs for graph nodes
@@ -25,3 +26,13 @@ GateName = NewType("GateName", str)
 
 AggregationName = NewType("AggregationName", str)
 """User-defined aggregation name (e.g., 'batch_processor')"""
+
+StepResolver = Callable[[NodeID], int]
+"""Resolves a NodeID to its 1-indexed audit step position in the DAG.
+
+Injected into executors, token managers, and coalesce executors at construction
+time so they can resolve step_in_pipeline internally instead of receiving it
+as a threaded parameter through every method call.
+
+The canonical implementation is RowProcessor._resolve_audit_step_for_node.
+"""

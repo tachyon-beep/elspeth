@@ -202,8 +202,6 @@ sinks:
     options:
       path: output/results.csv
 
-default_sink: output
-
 # Load secrets from Azure Key Vault
 secrets:
   source: keyvault

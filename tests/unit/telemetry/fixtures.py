@@ -162,6 +162,7 @@ class MockTelemetryConfig:
     granularity: TelemetryGranularity = TelemetryGranularity.FULL
     fail_on_total_exporter_failure: bool = False
     backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
+    max_consecutive_failures: int = 10
 
     @property
     def exporter_configs(self) -> tuple[()]:

@@ -16,12 +16,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from elspeth.core.landscape.journal import LandscapeJournal
+from elspeth.core.landscape.journal import JournalRecord, LandscapeJournal
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -132,14 +132,14 @@ class TestSerializeRecord:
     """Tests for _serialize_record — JSON serialization with datetime handling."""
 
     def test_produces_valid_json(self) -> None:
-        record = {"timestamp": "2026-01-15T12:00:00", "statement": "INSERT", "parameters": {}, "executemany": False}
+        record = cast(JournalRecord, {"timestamp": "2026-01-15T12:00:00", "statement": "INSERT", "parameters": {}, "executemany": False})
         result = LandscapeJournal._serialize_record(record)
         parsed = json.loads(result)
         assert parsed["statement"] == "INSERT"
 
     def test_datetime_values_serialized(self) -> None:
         dt = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
-        record = {"timestamp": dt, "statement": "INSERT", "parameters": {}, "executemany": False}
+        record = cast(JournalRecord, {"timestamp": dt, "statement": "INSERT", "parameters": {}, "executemany": False})
         result = LandscapeJournal._serialize_record(record)
         parsed = json.loads(result)
         assert parsed["timestamp"] == "2026-01-15T12:00:00+00:00"
@@ -402,7 +402,9 @@ class TestAppendRecordsFailureHandling:
         journal_path.mkdir()
 
         with pytest.raises(IsADirectoryError):
-            journal._append_records([{"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False}])
+            journal._append_records(
+                [cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})]
+            )
 
     def test_consecutive_failures_disable_journal(self, tmp_path: Path) -> None:
         journal = _make_journal(tmp_path)
@@ -410,7 +412,7 @@ class TestAppendRecordsFailureHandling:
         journal_path = tmp_path / "journal.jsonl"
         journal_path.mkdir()
 
-        record = {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False}
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
         for _ in range(5):
             journal._append_records([record])
 
@@ -423,7 +425,7 @@ class TestAppendRecordsFailureHandling:
         journal._consecutive_failures = 5
         journal._total_dropped = 99  # Next drop will be 100th
 
-        record = {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False}
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
         # This call should trigger recovery attempt (total_dropped hits 100)
         journal._append_records([record])
 
@@ -435,7 +437,7 @@ class TestAppendRecordsFailureHandling:
         journal = _make_journal(tmp_path)
         journal._consecutive_failures = 3
 
-        record = {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False}
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
         journal._append_records([record])
 
         assert journal._consecutive_failures == 0
@@ -507,6 +509,7 @@ class TestLoadPayload:
 
         content, error = journal._load_payload("some-ref")
         assert content is None
+        assert error is not None
         assert "payload_read_failed" in error
 
     def test_read_failure_with_fail_on_error_raises(self, tmp_path: Path) -> None:
@@ -533,6 +536,7 @@ class TestLoadPayload:
 
         content, error = journal._load_payload("some-ref")
         assert content is None
+        assert error is not None
         assert "payload_decode_failed" in error
 
 
@@ -545,7 +549,7 @@ class TestEnrichWithPayloads:
             include_payloads=True,
             payload_base_path=str(tmp_path / "payloads"),
         )
-        record: dict[str, Any] = {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False}
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
         journal._enrich_with_payloads(
             record,
             "INSERT INTO rows (id) VALUES (?)",
@@ -565,7 +569,7 @@ class TestEnrichWithPayloads:
         journal._payload_store = Mock()
         journal._payload_store.retrieve.return_value = b"payload content"
 
-        record: dict[str, Any] = {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False}
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": False})
         journal._enrich_with_payloads(
             record,
             "INSERT INTO calls (call_id, request_ref, response_ref) VALUES (?, ?, ?)",
@@ -586,7 +590,7 @@ class TestEnrichWithPayloads:
         journal._payload_store = Mock()
         journal._payload_store.retrieve.return_value = b"payload"
 
-        record: dict[str, Any] = {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": True}
+        record = cast(JournalRecord, {"timestamp": "t", "statement": "INSERT", "parameters": {}, "executemany": True})
         journal._enrich_with_payloads(
             record,
             "INSERT INTO calls (call_id, request_ref, response_ref) VALUES (?, ?, ?)",

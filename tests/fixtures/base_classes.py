@@ -8,7 +8,7 @@ and transforms. Migrated from tests/conftest.py with no behavioral changes.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 
@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.plugins.protocols import (
         BatchTransformProtocol,
-        GateProtocol,
         SinkProtocol,
         SourceProtocol,
         TransformProtocol,
@@ -39,14 +38,14 @@ class _TestSourceBase:
 
     name: str
     output_schema: type[PluginSchema]
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     node_id: str | None = None
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
     _on_validation_failure: str = "discard"
+    on_success: str = "default"
 
     def __init__(self) -> None:
-        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
         self._schema_contract: SchemaContract | None = None
 
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
@@ -100,11 +99,13 @@ class CallbackSource(_TestSourceBase):
         output_schema: type[PluginSchema] | None = None,
         after_yield_callback: Callable[[int], None] | None = None,
         source_name: str = "callback_source",
+        on_success: str = "default",
     ) -> None:
         super().__init__()
         self._rows = rows
         self._after_yield_callback = after_yield_callback
         self.name = source_name
+        self.on_success = on_success
         if output_schema is not None:
             self.output_schema = output_schema
 
@@ -132,7 +133,6 @@ class _TestSinkBase:
     """Base class for test sinks implementing SinkProtocol."""
 
     name: str
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     input_schema: type[PluginSchema] = _TestSchema
     idempotent: bool = True
     node_id: str | None = None
@@ -140,7 +140,7 @@ class _TestSinkBase:
     plugin_version = "1.0.0"
 
     def __init__(self) -> None:
-        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -159,7 +159,6 @@ class _TestTransformBase:
     """Base class for test transforms implementing TransformProtocol."""
 
     name: str
-    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     input_schema: type[PluginSchema] = _TestSchema
     output_schema: type[PluginSchema] = _TestSchema
     node_id: str | None = None
@@ -168,15 +167,11 @@ class _TestTransformBase:
     is_batch_aware: bool = False
     creates_tokens: bool = False
     transforms_adds_fields: bool = False
-    _on_error: str | None = None
-
-    @property
-    def on_error(self) -> str | None:
-        """Error routing destination for this transform."""
-        return self._on_error
+    on_error: str | None = None
+    on_success: str | None = None
 
     def __init__(self) -> None:
-        self.config = {"schema": {"mode": "observed"}}  # type: ignore[misc]
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -211,11 +206,6 @@ def as_batch_transform(transform: Any) -> BatchTransformProtocol:
 def as_sink(sink: Any) -> SinkProtocol:
     """Cast a test sink to SinkProtocol."""
     return cast("SinkProtocol", sink)
-
-
-def as_gate(gate: Any) -> GateProtocol:
-    """Cast a test gate to GateProtocol."""
-    return cast("GateProtocol", gate)
 
 
 def create_observed_contract(row: dict[str, Any]) -> SchemaContract:

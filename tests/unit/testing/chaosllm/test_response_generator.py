@@ -498,10 +498,8 @@ class TestTemplateMode:
 
         assert response.content == "Overridden: gpt-4"
 
-    def test_template_undefined_variable_raises(self) -> None:
-        """Template with undefined variable raises error."""
-        import jinja2
-
+    def test_template_undefined_variable_returns_error_content(self) -> None:
+        """Template with undefined variable returns error content and logs warning."""
         config = ResponseConfig(
             mode="template",
             template=TemplateResponseConfig(body="{{ undefined_var }}"),
@@ -510,8 +508,9 @@ class TestTemplateMode:
 
         request = {"model": "gpt-4", "messages": []}
 
-        with pytest.raises(jinja2.UndefinedError):
-            generator.generate(request)
+        response = generator.generate(request)
+        assert "Template rendering error" in response.content
+        assert "UndefinedError" in response.content
 
 
 class TestEchoMode:

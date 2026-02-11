@@ -21,7 +21,7 @@ from elspeth.contracts import (
     RoutingSpec,
 )
 from elspeth.contracts.errors import AuditIntegrityError, ExecutionError, TransformErrorReason
-from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.schema import (
     node_states_table,
@@ -57,6 +57,7 @@ class NodeStateRecordingMixin:
         state_id: str | None = None,
         attempt: int = 0,
         context_before: dict[str, Any] | None = None,
+        quarantined: bool = False,
     ) -> NodeStateOpen:
         """Begin recording a node state (token visiting a node).
 
@@ -69,12 +70,20 @@ class NodeStateRecordingMixin:
             state_id: Optional state ID (generated if not provided)
             attempt: Attempt number (0 for first attempt)
             context_before: Optional context snapshot before processing
+            quarantined: If True, input_data is Tier-3 external data that may
+                contain non-canonical values (NaN, Infinity). Uses repr_hash fallback.
 
         Returns:
             NodeStateOpen model with status=OPEN
         """
         state_id = state_id or generate_id()
-        input_hash = stable_hash(input_data)
+        if quarantined:
+            try:
+                input_hash = stable_hash(input_data)
+            except (ValueError, TypeError):
+                input_hash = repr_hash(input_data)
+        else:
+            input_hash = stable_hash(input_data)
         timestamp = now()
 
         context_json = canonical_json(context_before) if context_before is not None else None

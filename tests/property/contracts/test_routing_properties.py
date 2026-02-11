@@ -21,13 +21,14 @@ Properties tested:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
+from elspeth.contracts.errors import ConfigGateReason, RoutingReason
 from elspeth.contracts.routing import RoutingAction
 
 # =============================================================================
@@ -45,24 +46,13 @@ fork_paths = st.lists(
     unique=True,
 )
 
-# Routing reasons (nested dicts)
-routing_reasons = st.one_of(
+# Routing reasons (TypedDict instances matching RoutingReason union)
+routing_reasons: st.SearchStrategy[RoutingReason | None] = st.one_of(
     st.none(),
-    st.fixed_dictionaries(
-        {
-            "condition": st.text(max_size=50),
-            "result": st.text(max_size=20),
-        }
-    ),
-    st.fixed_dictionaries(
-        {
-            "action": st.text(max_size=20),
-            "details": st.dictionaries(
-                st.text(min_size=1, max_size=10),
-                st.text(max_size=20),
-                max_size=3,
-            ),
-        }
+    st.builds(
+        lambda condition, result: cast(RoutingReason, {"condition": condition, "result": result}),
+        condition=st.text(max_size=50),
+        result=st.text(max_size=20),
     ),
 )
 
@@ -77,21 +67,21 @@ class TestContinueFactoryProperties:
 
     @given(reason=routing_reasons)
     @settings(max_examples=100)
-    def test_continue_has_correct_kind(self, reason: dict[str, Any] | None) -> None:
+    def test_continue_has_correct_kind(self, reason: RoutingReason | None) -> None:
         """Property: continue_() always produces CONTINUE kind."""
         action = RoutingAction.continue_(reason=reason)
         assert action.kind == RoutingKind.CONTINUE
 
     @given(reason=routing_reasons)
     @settings(max_examples=100)
-    def test_continue_has_empty_destinations(self, reason: dict[str, Any] | None) -> None:
+    def test_continue_has_empty_destinations(self, reason: RoutingReason | None) -> None:
         """Property: continue_() always has empty destinations."""
         action = RoutingAction.continue_(reason=reason)
         assert action.destinations == ()
 
     @given(reason=routing_reasons)
     @settings(max_examples=100)
-    def test_continue_has_move_mode(self, reason: dict[str, Any] | None) -> None:
+    def test_continue_has_move_mode(self, reason: RoutingReason | None) -> None:
         """Property: continue_() always uses MOVE mode."""
         action = RoutingAction.continue_(reason=reason)
         assert action.mode == RoutingMode.MOVE
@@ -102,7 +92,7 @@ class TestRouteFactoryProperties:
 
     @given(label=route_labels, reason=routing_reasons)
     @settings(max_examples=100)
-    def test_route_has_correct_kind(self, label: str, reason: dict[str, Any] | None) -> None:
+    def test_route_has_correct_kind(self, label: str, reason: RoutingReason | None) -> None:
         """Property: route() always produces ROUTE kind."""
         action = RoutingAction.route(label, reason=reason)
         assert action.kind == RoutingKind.ROUTE
@@ -135,7 +125,7 @@ class TestForkFactoryProperties:
 
     @given(paths=fork_paths, reason=routing_reasons)
     @settings(max_examples=100)
-    def test_fork_has_correct_kind(self, paths: list[str], reason: dict[str, Any] | None) -> None:
+    def test_fork_has_correct_kind(self, paths: list[str], reason: RoutingReason | None) -> None:
         """Property: fork_to_paths() always produces FORK_TO_PATHS kind."""
         action = RoutingAction.fork_to_paths(paths, reason=reason)
         assert action.kind == RoutingKind.FORK_TO_PATHS
@@ -240,27 +230,30 @@ class TestReasonDeepCopyProperties:
 
     def test_continue_reason_is_isolated(self) -> None:
         """Property: Mutating original reason dict does not affect action."""
-        reason = {"condition": "x > 10", "result": "high"}
+        reason: ConfigGateReason = {"condition": "x > 10", "result": "high"}
         action = RoutingAction.continue_(reason=reason)
 
         reason["condition"] = "MUTATED"
-        assert action.reason["condition"] == "x > 10"
+        assert action.reason is not None
+        assert cast(ConfigGateReason, action.reason)["condition"] == "x > 10"
 
     def test_route_reason_is_isolated(self) -> None:
         """Property: Mutating original reason dict does not affect action."""
-        reason = {"action": "route", "details": {"score": "high"}}
+        reason: ConfigGateReason = {"condition": "score > 0.8", "result": "high"}
         action = RoutingAction.route("above", reason=reason)
 
-        reason["details"]["score"] = "MUTATED"
-        assert action.reason["details"]["score"] == "high"
+        reason["result"] = "MUTATED"
+        assert action.reason is not None
+        assert cast(ConfigGateReason, action.reason)["result"] == "high"
 
     def test_fork_reason_is_isolated(self) -> None:
         """Property: Mutating original reason dict does not affect action."""
-        reason = {"action": "fork", "details": {"branches": "3"}}
+        reason: ConfigGateReason = {"condition": "fork_condition", "result": "3"}
         action = RoutingAction.fork_to_paths(["a", "b"], reason=reason)
 
-        reason["details"]["branches"] = "MUTATED"
-        assert action.reason["details"]["branches"] == "3"
+        reason["result"] = "MUTATED"
+        assert action.reason is not None
+        assert cast(ConfigGateReason, action.reason)["result"] == "3"
 
     def test_none_reason_is_preserved(self) -> None:
         """Property: None reason stays None."""

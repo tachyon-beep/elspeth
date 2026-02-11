@@ -7,14 +7,10 @@ They're used for type checking, not runtime enforcement (that's pluggy's job).
 Plugin Types:
 - Source: Loads data into the system (one per run)
 - Transform: Processes rows (stateless)
-- Gate: Routes rows to destinations (stateless)
-- Aggregation: Accumulates rows, flushes batches (stateful)
-- Coalesce: Merges parallel paths (stateful)
 - Sink: Outputs data (one or more per run)
 """
 
 from collections.abc import Iterator
-from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from elspeth.contracts import Determinism
@@ -24,20 +20,13 @@ if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
-    from elspeth.plugins.results import GateResult, TransformResult
+    from elspeth.plugins.results import TransformResult
 
 
-@runtime_checkable
-class PluginProtocol(Protocol):
-    """Base protocol for all plugins.
-
-    Defines the common metadata attributes that all plugins must have.
-    Used by PluginManager.from_plugin() for type-safe metadata extraction.
-    """
-
-    name: str
-    plugin_version: str
-    determinism: Determinism
+# NOTE: PluginProtocol was DELETED. It was a speculative base protocol
+# that was never imported or used anywhere in the codebase. The concrete
+# protocols (SourceProtocol, TransformProtocol, SinkProtocol) each declare
+# their own metadata attributes directly.
 
 
 @runtime_checkable
@@ -76,6 +65,10 @@ class SourceProtocol(Protocol):
     # Sink name for quarantined rows, or "discard" to drop invalid rows
     # All sources must set this - config-based sources get it from SourceDataConfig
     _on_validation_failure: str
+
+    # Success routing: sink name for rows that pass source validation
+    # All sources must set this - config-based sources get it from SourceDataConfig
+    on_success: str
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
@@ -155,9 +148,8 @@ class TransformProtocol(Protocol):
         - close(): Called at pipeline completion for cleanup
 
     Error Routing (WP-11.99b):
-        Transforms that can return TransformResult.error() must set _on_error
-        to specify where errored rows go. If _on_error is None and the transform
-        returns an error, the executor raises RuntimeError.
+        All transforms must have on_error set (required by TransformSettings).
+        on_error specifies where errored rows go: a sink name or "discard".
 
     Example:
         class EnrichTransform:
@@ -201,10 +193,16 @@ class TransformProtocol(Protocol):
     transforms_adds_fields: bool
 
     # Error routing configuration (WP-11.99b)
-    # Transforms extending TransformDataConfig set this from config.
-    # None means: transform doesn't return errors, OR errors are bugs.
-    @property
-    def on_error(self) -> str | None: ...
+    # Injected by cli_helpers.py bridge from TransformSettings.on_error.
+    # Always non-None at runtime (TransformSettings requires on_error).
+    # Protocol retains str | None because injection happens post-construction.
+    on_error: str | None
+
+    # Success routing configuration (Phase 3: lifted from options to settings)
+    # Injected by cli_helpers.py bridge from TransformSettings.on_success.
+    # Always non-None at runtime (TransformSettings requires on_success).
+    # Protocol retains str | None because injection happens post-construction.
+    on_success: str | None
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
@@ -262,7 +260,7 @@ class BatchTransformProtocol(Protocol):
         - close(): Called at pipeline completion for cleanup
 
     Error Routing (WP-11.99b):
-        Batch transforms that can return TransformResult.error() must set _on_error
+        Batch transforms that can return TransformResult.error() must set on_error
         to specify where errored batches go.
 
     Example:
@@ -303,8 +301,12 @@ class BatchTransformProtocol(Protocol):
     creates_tokens: bool
 
     # Error routing configuration (WP-11.99b)
-    @property
-    def on_error(self) -> str | None: ...
+    # Injected by cli_helpers.py bridge from AggregationSettings/TransformSettings.
+    on_error: str | None
+
+    # Success routing configuration (Phase 3: lifted from options to settings)
+    # Injected by cli_helpers.py bridge from AggregationSettings.on_success.
+    on_success: str | None
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
@@ -341,103 +343,8 @@ class BatchTransformProtocol(Protocol):
         ...
 
 
-@runtime_checkable
-class GateProtocol(Protocol):
-    """Protocol for gate transforms (routing decisions).
-
-    Gates evaluate rows and decide routing. They can:
-    - Continue to next transform
-    - Route to a named sink
-    - Fork to multiple parallel paths
-
-    Lifecycle:
-        - __init__(config): Called once at pipeline construction
-        - evaluate(row, ctx): Called for each row
-        - close(): Called at pipeline completion for cleanup
-
-    Example:
-        class SafetyGate:
-            name = "safety"
-            input_schema = InputSchema
-            output_schema = OutputSchema
-
-            def __init__(self, config: dict) -> None:
-                # Routes come from GateSettings - required for any gate that routes
-                self.routes = config["routes"]  # Crash if missing - config error
-                self.fork_to = config.get("fork_to")  # None is valid (most gates don't fork)
-                self.node_id = None
-
-            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-                # Direct field access - schema guarantees field exists
-                if row["suspicious"]:
-                    return GateResult(
-                        row=row.to_dict(),
-                        action=RoutingAction.route("review"),  # Resolved via routes config
-                    )
-                return GateResult(row=row.to_dict(), action=RoutingAction.route("normal"))
-    """
-
-    name: str
-    input_schema: type["PluginSchema"]
-    output_schema: type["PluginSchema"]
-    node_id: str | None  # Set by orchestrator after registration
-    config: dict[str, Any]  # Configuration dict stored by all plugins
-
-    # Routing configuration (set from GateSettings during instantiation)
-    routes: dict[str, str]  # Maps route names to destinations
-    fork_to: list[str] | None  # Branch names for fork operations
-
-    # Metadata for Phase 3 audit/reproducibility
-    determinism: Determinism
-    plugin_version: str
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
-        ...
-
-    def evaluate(
-        self,
-        row: "PipelineRow",
-        ctx: "PluginContext",
-    ) -> "GateResult":
-        """Evaluate a row and decide routing.
-
-        Args:
-            row: Input row as PipelineRow (immutable, supports dual-name access)
-            ctx: Plugin context
-
-        Returns:
-            GateResult with (possibly modified) row dict and routing action
-        """
-        ...
-
-    def close(self) -> None:
-        """Clean up resources after pipeline completion.
-
-        Called once after all rows have been processed. Use for closing
-        connections, flushing buffers, or releasing external resources.
-        """
-        ...
-
-    # === Optional Lifecycle Hooks ===
-
-    def on_start(self, ctx: "PluginContext") -> None:
-        """Called at start of run."""
-        ...
-
-    def on_complete(self, ctx: "PluginContext") -> None:
-        """Called at end of run."""
-        ...
-
-
-class CoalescePolicy(Enum):
-    """How coalesce handles partial arrivals."""
-
-    REQUIRE_ALL = "require_all"  # Wait for all branches; any failure fails
-    QUORUM = "quorum"  # Merge if >= n branches succeed
-    BEST_EFFORT = "best_effort"  # Merge whatever arrives by timeout
-    FIRST = "first"  # Take first arrival, don't wait for others
-
+# NOTE: CoalescePolicy enum was DELETED. The engine uses
+# Literal["require_all", "quorum", "best_effort", "first"] via CoalesceSettings.
 
 # NOTE: AggregationProtocol was DELETED in aggregation structural cleanup.
 # Aggregation is now fully structural:
@@ -446,78 +353,11 @@ class CoalescePolicy(Enum):
 # - Engine calls batch-aware Transform.process(rows: list[dict])
 # Use is_batch_aware=True on BaseTransform for batch processing.
 
-
-@runtime_checkable
-class CoalesceProtocol(Protocol):
-    """Protocol for coalesce transforms (merge parallel paths).
-
-    Coalesce merges results from parallel branches back into a single path.
-
-    Configuration:
-    - policy: How to handle partial arrivals
-    - quorum_threshold: Minimum branches for QUORUM policy (None otherwise)
-    - inputs: Which branches to expect
-    - key: How to correlate branch outputs (Phase 3 engine concern)
-
-    Example:
-        class SimpleCoalesce:
-            name = "merge"
-            policy = CoalescePolicy.REQUIRE_ALL
-            quorum_threshold = None  # Only used for QUORUM policy
-
-            def merge(self, branch_outputs, ctx) -> dict:
-                merged = {}
-                for branch_name, output in branch_outputs.items():
-                    merged.update(output)
-                return merged
-
-        class QuorumCoalesce:
-            name = "quorum_merge"
-            policy = CoalescePolicy.QUORUM
-            quorum_threshold = 2  # Proceed if >= 2 branches arrive
-    """
-
-    name: str
-    policy: CoalescePolicy
-    quorum_threshold: int | None  # Required if policy == QUORUM
-    expected_branches: list[str]
-    output_schema: type["PluginSchema"]
-    node_id: str | None  # Set by orchestrator after registration
-    config: dict[str, Any]  # Configuration dict stored by all plugins
-
-    # Metadata for Phase 3 audit/reproducibility
-    determinism: Determinism
-    plugin_version: str
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
-        ...
-
-    def merge(
-        self,
-        branch_outputs: dict[str, dict[str, Any]],
-        ctx: "PluginContext",
-    ) -> dict[str, Any]:
-        """Merge outputs from multiple branches.
-
-        Args:
-            branch_outputs: Map of branch_name -> output_row
-            ctx: Plugin context
-
-        Returns:
-            Merged output row
-        """
-        ...
-
-    # === Optional Lifecycle Hooks ===
-
-    def on_start(self, ctx: "PluginContext") -> None:
-        """Called at start of run."""
-        ...
-
-    def on_complete(self, ctx: "PluginContext") -> None:
-        """Called at end of run."""
-        ...
+# NOTE: CoalesceProtocol was DELETED. Coalesce is fully structural:
+# - Engine holds tokens via CoalesceExecutor (engine/coalesce_executor.py)
+# - Engine evaluates merge conditions based on CoalesceSettings policy
+# - Engine merges data according to CoalesceSettings merge strategy (union/nested/select)
+# - No plugin-level coalesce interface. Configure via YAML coalesce: section.
 
 
 @runtime_checkable

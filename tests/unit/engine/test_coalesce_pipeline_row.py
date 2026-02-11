@@ -1,6 +1,7 @@
 # tests/unit/engine/test_coalesce_pipeline_row.py
 """Tests for CoalesceExecutor with PipelineRow support (Task 6)."""
 
+from typing import Any
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -8,11 +9,12 @@ import pytest
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID
 from elspeth.core.config import CoalesceSettings
-from tests.fixtures.factories import make_field, make_row
+from elspeth.testing import make_field, make_row
 
 
-def _make_contract(fields=None):
+def _make_contract(fields: list[Any] | None = None) -> SchemaContract:
     """Create a schema contract for testing."""
     if fields is None:
         fields = [
@@ -50,7 +52,7 @@ def _make_mock_token_manager(recorder: MagicMock) -> MagicMock:
     """Create a mock TokenManager."""
     token_manager = MagicMock()
 
-    def coalesce_tokens_impl(parents, merged_data, step_in_pipeline):
+    def coalesce_tokens_impl(parents, merged_data, node_id):
         return TokenInfo(
             row_id=parents[0].row_id,
             token_id="merged_001",
@@ -116,6 +118,7 @@ class TestCoalesceExecutorPipelineRow:
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
+            step_resolver=lambda node_id: 3,
         )
 
         # Register coalesce point
@@ -125,7 +128,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         # Create tokens with PipelineRow for each branch
         token_a = TokenInfo(
@@ -144,10 +147,10 @@ class TestCoalesceExecutorPipelineRow:
         )
 
         # Accept both tokens
-        outcome_a = executor.accept(token_a, "merge_point", step_in_pipeline=3)
+        outcome_a = executor.accept(token_a, "merge_point")
         assert outcome_a.held is True  # Waiting for branch_b
 
-        outcome_b = executor.accept(token_b, "merge_point", step_in_pipeline=3)
+        outcome_b = executor.accept(token_b, "merge_point")
         assert outcome_b.held is False  # Merge triggered
 
         # Should have called coalesce_tokens with PipelineRow containing merged contract
@@ -182,6 +185,7 @@ class TestCoalesceExecutorPipelineRow:
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
+            step_resolver=lambda node_id: 3,
         )
 
         settings = CoalesceSettings(
@@ -190,7 +194,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         # Token A has contract, Token B has None contract (bug scenario)
         token_a = TokenInfo(
@@ -216,11 +220,11 @@ class TestCoalesceExecutorPipelineRow:
         )
 
         # Accept first token
-        executor.accept(token_a, "merge_point", step_in_pipeline=3)
+        executor.accept(token_a, "merge_point")
 
         # Accept second token should crash
         with pytest.raises(ValueError, match="has no contract"):
-            executor.accept(token_b, "merge_point", step_in_pipeline=3)
+            executor.accept(token_b, "merge_point")
 
     def test_coalesce_merge_failure_raises_orchestration_error(self) -> None:
         """Contract merge failure should raise OrchestrationInvariantError.
@@ -263,6 +267,7 @@ class TestCoalesceExecutorPipelineRow:
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
+            step_resolver=lambda node_id: 3,
         )
 
         settings = CoalesceSettings(
@@ -271,7 +276,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="require_all",
             merge="union",
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         token_a = TokenInfo(
             row_id="row_001",
@@ -288,10 +293,10 @@ class TestCoalesceExecutorPipelineRow:
             fork_group_id="fork_001",
         )
 
-        executor.accept(token_a, "merge_point", step_in_pipeline=3)
+        executor.accept(token_a, "merge_point")
 
         with pytest.raises(OrchestrationInvariantError, match="Contract merge failed"):
-            executor.accept(token_b, "merge_point", step_in_pipeline=3)
+            executor.accept(token_b, "merge_point")
 
     def test_first_policy_merges_immediately(self) -> None:
         """Coalesce with "first" policy should merge on first arrival.
@@ -312,6 +317,7 @@ class TestCoalesceExecutorPipelineRow:
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
+            step_resolver=lambda node_id: 3,
         )
 
         # Two branches with "first" policy - merge on first arrival
@@ -321,7 +327,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="first",
             merge="union",
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         token_a = TokenInfo(
             row_id="row_001",
@@ -332,7 +338,7 @@ class TestCoalesceExecutorPipelineRow:
         )
 
         # Accept first token - should merge immediately with "first" policy
-        outcome = executor.accept(token_a, "merge_point", step_in_pipeline=3)
+        outcome = executor.accept(token_a, "merge_point")
 
         assert outcome.held is False
         assert outcome.merged_token is not None
@@ -355,6 +361,7 @@ class TestCoalesceExecutorPipelineRow:
             span_factory=span_factory,
             token_manager=token_manager,
             run_id="run_001",
+            step_resolver=lambda node_id: 3,
         )
 
         settings = CoalesceSettings(
@@ -363,7 +370,7 @@ class TestCoalesceExecutorPipelineRow:
             policy="require_all",
             merge="union",  # Union merge combines all fields
         )
-        executor.register_coalesce(settings, "node_coalesce_001")
+        executor.register_coalesce(settings, NodeID("node_coalesce_001"))
 
         token_a = TokenInfo(
             row_id="row_001",
@@ -380,8 +387,8 @@ class TestCoalesceExecutorPipelineRow:
             fork_group_id="fork_001",
         )
 
-        executor.accept(token_a, "merge_point", step_in_pipeline=3)
-        executor.accept(token_b, "merge_point", step_in_pipeline=3)
+        executor.accept(token_a, "merge_point")
+        executor.accept(token_b, "merge_point")
 
         # Union merge: later branches override, all fields present
         call_kwargs = token_manager.coalesce_tokens.call_args.kwargs

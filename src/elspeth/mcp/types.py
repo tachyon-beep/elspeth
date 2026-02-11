@@ -200,6 +200,7 @@ class DAGStructureReport(TypedDict):
     edges: list[DAGEdge]
     node_count: int
     edge_count: int
+    terminal_sink_map: dict[str, str]
     mermaid: str
 
 

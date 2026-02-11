@@ -13,7 +13,8 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from elspeth.plugins.transforms.passthrough import PassThrough
-from tests.fixtures.factories import make_context, make_pipeline_row
+from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 from .test_transform_protocol import (
     TransformContractPropertyTestBase,

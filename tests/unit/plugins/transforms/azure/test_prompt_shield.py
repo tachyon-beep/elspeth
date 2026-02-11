@@ -12,8 +12,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.testing import make_pipeline_row
-from tests.fixtures.factories import make_row
+from elspeth.testing import make_pipeline_row, make_row
 
 if TYPE_CHECKING:
     pass
@@ -223,82 +222,6 @@ class TestAzurePromptShieldTransform:
             transform.process(make_pipeline_row({"prompt": "test"}), ctx)
 
 
-class TestPromptShieldPoolConfig:
-    """Tests for Prompt Shield pool configuration."""
-
-    def test_pool_size_default_is_one(self) -> None:
-        """Default pool_size is 1 (sequential)."""
-        from elspeth.plugins.transforms.azure.prompt_shield import (
-            AzurePromptShieldConfig,
-        )
-
-        cfg = AzurePromptShieldConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["prompt"],
-                "schema": {"mode": "observed"},
-            }
-        )
-
-        assert cfg.pool_size == 1
-
-    def test_pool_size_configurable(self) -> None:
-        """pool_size can be configured."""
-        from elspeth.plugins.transforms.azure.prompt_shield import (
-            AzurePromptShieldConfig,
-        )
-
-        cfg = AzurePromptShieldConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["prompt"],
-                "schema": {"mode": "observed"},
-                "pool_size": 5,
-            }
-        )
-
-        assert cfg.pool_size == 5
-
-    def test_pool_config_property_returns_none_when_sequential(self) -> None:
-        """pool_config returns None when pool_size=1."""
-        from elspeth.plugins.transforms.azure.prompt_shield import (
-            AzurePromptShieldConfig,
-        )
-
-        cfg = AzurePromptShieldConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["prompt"],
-                "schema": {"mode": "observed"},
-                "pool_size": 1,
-            }
-        )
-
-        assert cfg.pool_config is None
-
-    def test_pool_config_property_returns_config_when_pooled(self) -> None:
-        """pool_config returns PoolConfig when pool_size>1."""
-        from elspeth.plugins.transforms.azure.prompt_shield import (
-            AzurePromptShieldConfig,
-        )
-
-        cfg = AzurePromptShieldConfig.from_dict(
-            {
-                "endpoint": "https://test.cognitiveservices.azure.com",
-                "api_key": "test-key",
-                "fields": ["prompt"],
-                "schema": {"mode": "observed"},
-                "pool_size": 3,
-            }
-        )
-
-        assert cfg.pool_config is not None
-        assert cfg.pool_config.pool_size == 3
-
-
 class TestPromptShieldBatchProcessing:
     """Tests for Prompt Shield with BatchTransformMixin."""
 
@@ -388,6 +311,7 @@ class TestPromptShieldBatchProcessing:
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
             assert result.status == "success"
+            assert result.row is not None
             assert result.row.to_dict() == row_data
         finally:
             transform.close()
@@ -558,8 +482,12 @@ class TestPromptShieldBatchProcessing:
         finally:
             transform.close()
 
-    def test_skips_non_string_fields(self, mock_httpx_client: MagicMock) -> None:
-        """Transform skips non-string field values."""
+    def test_non_string_configured_field_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Non-string value in explicitly-configured field fails CLOSED.
+
+        Security transform cannot analyze non-string content. Silently skipping
+        would be a fail-OPEN vulnerability — the field goes unscanned.
+        """
         from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 
         mock_response = _create_mock_http_response(
@@ -585,7 +513,7 @@ class TestPromptShieldBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            # count is an int, should be skipped
+            # count is an int — configured field with non-string value
             row_data = {"prompt": "safe prompt", "count": 42, "id": 1}
             row = make_pipeline_row(row_data)
             transform.accept(row, ctx)
@@ -594,8 +522,58 @@ class TestPromptShieldBatchProcessing:
             assert len(collector.results) == 1
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "non_string_field"
+            assert result.reason["field"] == "count"
+            assert result.reason["actual_type"] == "int"
+            assert result.retryable is False
+        finally:
+            transform.close()
+
+    def test_all_mode_ignores_non_string_fields(self, mock_httpx_client: MagicMock) -> None:
+        """When fields='all', non-string fields are correctly ignored (not scanned).
+
+        In 'all' mode, _get_fields_to_scan pre-filters to string-valued fields,
+        so non-string fields never reach the type check. This is by design —
+        'all' means 'scan whatever strings you find', not 'error on non-strings'.
+        """
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                "documentsAnalysis": [{"attackDetected": False}],
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": "all",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        collector = CollectorOutputPort()
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            # Mix of string and non-string fields
+            row_data = {"prompt": "safe", "count": 42, "flag": True, "id": 1}
+            row = make_pipeline_row(row_data)
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert isinstance(result, TransformResult)
             assert result.status == "success"
-            # Only one API call should be made (for "prompt" field)
+            # Only "prompt" is a string — one API call
             assert mock_httpx_client.post.call_count == 1
         finally:
             transform.close()
@@ -1018,7 +996,6 @@ class TestPromptShieldBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["prompt"],
                 "schema": {"mode": "observed"},
-                "pool_size": 3,
             }
         )
 
@@ -1216,7 +1193,6 @@ class TestResourceCleanup:
                     "api_key": "test-key",
                     "fields": ["prompt"],
                     "schema": {"mode": "observed"},
-                    "pool_size": 3,
                 }
             )
 

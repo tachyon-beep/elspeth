@@ -59,6 +59,7 @@ class TestDeaggregationPipeline:
         config = {
             "source": {
                 "plugin": "json",
+                "on_success": "explode_input",
                 "options": {
                     "path": str(input_data),
                     "schema": {
@@ -70,7 +71,11 @@ class TestDeaggregationPipeline:
             },
             "transforms": [
                 {
+                    "name": "explode_items",
                     "plugin": "json_explode",
+                    "input": "explode_input",
+                    "on_success": "output",
+                    "on_error": "discard",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",
@@ -88,7 +93,6 @@ class TestDeaggregationPipeline:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
         config_file = tmp_path / "settings.yaml"
@@ -187,6 +191,7 @@ class TestDeaggregationAuditTrail:
         config_dict = {
             "source": {
                 "plugin": "json",
+                "on_success": "explode_input",
                 "options": {
                     "path": str(input_data),
                     "schema": {
@@ -198,7 +203,11 @@ class TestDeaggregationAuditTrail:
             },
             "transforms": [
                 {
+                    "name": "explode_items",
                     "plugin": "json_explode",
+                    "input": "explode_input",
+                    "on_success": "output",
+                    "on_error": "discard",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",
@@ -216,7 +225,6 @@ class TestDeaggregationAuditTrail:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
 
@@ -235,18 +243,18 @@ class TestDeaggregationAuditTrail:
         plugins = instantiate_plugins_from_config(settings)
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            default_sink=settings.default_sink,
         )
 
         # Build pipeline config using the SAME plugin instances as the graph
         # This ensures the test exercises the production code path
         pipeline_config = PipelineConfig(
             source=plugins["source"],
-            transforms=plugins["transforms"],
+            transforms=[wired.plugin for wired in plugins["transforms"]],
             sinks=plugins["sinks"],
             config=resolve_config(settings),
         )
@@ -351,6 +359,7 @@ class TestSourceSchemaValidation:
         config = {
             "source": {
                 "plugin": "json",
+                "on_success": "explode_input",
                 "options": {
                     "path": str(valid_and_invalid_input),
                     "schema": {
@@ -363,7 +372,11 @@ class TestSourceSchemaValidation:
             },
             "transforms": [
                 {
+                    "name": "explode_items",
                     "plugin": "json_explode",
+                    "input": "explode_input",
+                    "on_success": "output",
+                    "on_error": "discard",
                     "options": {
                         "array_field": "items",
                         "output_field": "item",
@@ -381,7 +394,6 @@ class TestSourceSchemaValidation:
                     },
                 },
             },
-            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
 

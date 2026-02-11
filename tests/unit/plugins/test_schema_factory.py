@@ -481,6 +481,28 @@ class TestNonFiniteFloatRejection:
         assert Schema(value=0.0).value == 0.0
         assert Schema(value="3.14").value == 3.14  # Coercion still works
 
+    def test_observed_schema_rejects_nan(self) -> None:
+        """Observed schemas reject NaN values before contract inference."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        config = SchemaConfig.from_dict({"mode": "observed"})
+        Schema = create_schema_from_config(config, "ObservedSchema")
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"value": float("nan")})
+
+    def test_observed_schema_rejects_nested_infinity(self) -> None:
+        """Observed schemas reject nested Infinity values."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        config = SchemaConfig.from_dict({"mode": "observed"})
+        Schema = create_schema_from_config(config, "ObservedSchema")
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"outer": {"inner": [1.0, float("inf")]}})
+
 
 class TestSchemaPluginSchemaCompliance:
     """Tests for PluginSchema compliance and conversion methods."""

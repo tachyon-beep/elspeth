@@ -3,7 +3,7 @@
 import pytest
 
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 def _make_contract() -> SchemaContract:
@@ -76,9 +76,9 @@ class TestTokenInfo:
 
         token = TokenInfo(row_id="r", token_id="t", row_data=pipeline_row)
         with pytest.raises(FrozenInstanceError):
-            token.branch_name = "sentiment"
+            token.branch_name = "sentiment"  # type: ignore[misc]  # testing frozen enforcement
         with pytest.raises(FrozenInstanceError):
-            token.row_id = "new_row_id"
+            token.row_id = "new_row_id"  # type: ignore[misc]  # testing frozen enforcement
 
     def test_with_updated_data_preserves_lineage(self) -> None:
         """with_updated_data() preserves all lineage fields."""

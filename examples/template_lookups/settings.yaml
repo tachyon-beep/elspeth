@@ -1,23 +1,19 @@
-# Template Lookups Example
-# Demonstrates external template files and two-dimensional lookups
-
 landscape:
   url: sqlite:///examples/template_lookups/runs/audit.db
-
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/template_lookups/input.csv
     on_validation_failure: discard
     schema:
       mode: fixed
       fields:
-        - "ticket_id: str"
-        - "category_id: str"
-        - "priority_id: str"
-        - "subject: str"
-        - "body: str"
-
+      - 'ticket_id: str'
+      - 'category_id: str'
+      - 'priority_id: str'
+      - 'subject: str'
+      - 'body: str'
 sinks:
   output:
     plugin: json
@@ -26,35 +22,38 @@ sinks:
       schema:
         mode: observed
       format: jsonl
-
-default_sink: output
-
-transforms:
-  - plugin: openrouter_llm
+  quarantine:
+    plugin: json
     options:
-      model: "anthropic/claude-3-haiku"
-      api_key: "${OPENROUTER_API_KEY}"
-
-      # External template file - loaded at config time
-      # The template uses {{ row.* }} for input data and {{ lookup.* }} for lookup data
-      template_file: prompts/classify.j2
-
-      # External lookup file - YAML parsed and available as lookup.* in template
-      # Enables two-dimensional lookups like: lookup.categories[row.category_id].name
-      lookup_file: prompts/categories.yaml
-
-      # System prompt for consistent behavior
-      system_prompt: |
-        You are a precise customer support ticket classifier.
-        Always respond with valid JSON matching the requested format.
-        Be concise but accurate in your analysis.
-
-      temperature: 0.1  # Low temperature for consistent classification
-      max_tokens: 500
-      response_field: classification
-
-      # Declare fields used by template for DAG validation
-      required_input_fields: [ticket_id, category_id, priority_id, subject, body]
-
+      path: examples/template_lookups/output/quarantine.json
       schema:
         mode: observed
+transforms:
+- name: openrouter_llm_0
+  plugin: openrouter_llm
+  input: source_out
+  on_success: output
+  on_error: quarantine
+  options:
+    model: anthropic/claude-3-haiku
+    api_key: ${OPENROUTER_API_KEY}
+    template_file: prompts/classify.j2
+    lookup_file: prompts/categories.yaml
+    system_prompt: 'You are a precise customer support ticket classifier.
+
+      Always respond with valid JSON matching the requested format.
+
+      Be concise but accurate in your analysis.
+
+      '
+    temperature: 0.1
+    max_tokens: 500
+    response_field: classification
+    required_input_fields:
+    - ticket_id
+    - category_id
+    - priority_id
+    - subject
+    - body
+    schema:
+      mode: observed

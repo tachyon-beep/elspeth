@@ -342,27 +342,55 @@ class TestAzureBlobSourceJSON:
         assert len(rows) == 1
         assert rows[0].row == {"id": 1, "name": "alice"}
 
-    def test_json_not_array_raises_error(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
-        """JSON that is not an array raises ValueError."""
+    def test_json_not_array_quarantined_not_crash(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """JSON that is not an array is quarantined, not raised."""
         json_data = b'{"id": 1, "name": "alice"}'
         mock_client = MagicMock()
         mock_client.download_blob.return_value.readall.return_value = json_data
         mock_blob_client.return_value = mock_client
 
         source = AzureBlobSource(make_config(format="json"))
-        with pytest.raises(ValueError, match="Expected JSON array"):
-            list(source.load(ctx))
+        results = list(source.load(ctx))
 
-    def test_json_invalid_raises_error(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
-        """Invalid JSON raises ValueError."""
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None
+        assert "Expected JSON array" in results[0].quarantine_error
+
+    def test_json_invalid_quarantined_not_crash(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """Invalid JSON is quarantined, not raised."""
         json_data = b'[{"id": 1, "name": "alice"'  # Missing closing brackets
         mock_client = MagicMock()
         mock_client.download_blob.return_value.readall.return_value = json_data
         mock_blob_client.return_value = mock_client
 
         source = AzureBlobSource(make_config(format="json"))
-        with pytest.raises(ValueError, match="Invalid JSON"):
-            list(source.load(ctx))
+        results = list(source.load(ctx))
+
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None
+        assert "Invalid JSON" in results[0].quarantine_error
+
+    def test_json_data_key_missing_quarantined_not_crash(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """Missing data_key is quarantined as structure error."""
+        json_data = b'{"results": [{"id": 1, "name": "alice"}]}'
+        mock_client = MagicMock()
+        mock_client.download_blob.return_value.readall.return_value = json_data
+        mock_blob_client.return_value = mock_client
+
+        source = AzureBlobSource(
+            make_config(
+                format="json",
+                json_options={"data_key": "items"},
+            )
+        )
+        results = list(source.load(ctx))
+
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None
+        assert "data_key 'items' not found" in results[0].quarantine_error
 
 
 class TestAzureBlobSourceJSONL:
@@ -454,6 +482,28 @@ class TestAzureBlobSourceJSONL:
         assert len(results) == 2
         assert results[0].row == {"id": 1}
         assert results[1].row == {"id": 3}
+
+    def test_jsonl_non_finite_constant_quarantined_not_crash(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """JSONL NaN/Infinity constants are quarantined at parse boundary."""
+        jsonl_data = b'{"id": 1, "value": 42}\n{"id": 2, "value": NaN}\n{"id": 3, "value": Infinity}\n'
+        mock_client = MagicMock()
+        mock_client.download_blob.return_value.readall.return_value = jsonl_data
+        mock_blob_client.return_value = mock_client
+
+        source = AzureBlobSource(
+            make_config(
+                format="jsonl",
+                on_validation_failure="quarantine",
+            )
+        )
+        results = list(source.load(ctx))
+
+        assert len(results) == 3
+        assert results[0].is_quarantined is False
+        assert results[1].is_quarantined is True
+        assert results[2].is_quarantined is True
+        assert results[1].quarantine_error is not None
+        assert "NaN" in results[1].quarantine_error or "non-standard" in results[1].quarantine_error.lower()
 
 
 class TestAzureBlobSourceValidation:
@@ -586,6 +636,21 @@ class TestAzureBlobSourceErrors:
         # The row should be quarantined because schema validation fails
         assert rows[0].is_quarantined
         assert rows[0].quarantine_destination == QUARANTINE_SINK
+
+    def test_csv_malformed_line_not_silently_dropped(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """Malformed CSV line causes parse quarantine instead of silent drop."""
+        bad_csv = b'id,name\n1,"alice\n2,bob\n'
+        mock_client = MagicMock()
+        mock_client.download_blob.return_value.readall.return_value = bad_csv
+        mock_blob_client.return_value = mock_client
+
+        source = AzureBlobSource(make_config(format="csv", on_validation_failure="quarantine"))
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 1
+        assert rows[0].is_quarantined is True
+        assert rows[0].quarantine_error is not None
+        assert "CSV parse error" in rows[0].quarantine_error
 
     def test_csv_structural_failure_quarantines_blob(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
         """BUG-BLOB-01: Catastrophic CSV structure failure quarantines blob, doesn't crash."""

@@ -1,19 +1,21 @@
 # src/elspeth/testing/chaosllm/error_injector.py
-"""Error injection logic and burst state machine for ChaosLLM.
+"""Error injection logic for ChaosLLM.
 
 The ErrorInjector decides per-request whether to inject an error based on
 configured percentages. It supports HTTP-level errors, connection-level
-failures, and malformed responses. A burst state machine elevates error
-rates periodically to simulate real-world LLM provider stress.
+failures, and malformed responses. A burst state machine (delegated to
+InjectionEngine) elevates error rates periodically to simulate real-world
+LLM provider stress.
 """
 
 import random as random_module
-import threading
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
+from elspeth.testing.chaosengine.injection_engine import InjectionEngine
+from elspeth.testing.chaosengine.types import BurstConfig as EngineBurstConfig
+from elspeth.testing.chaosengine.types import ErrorSpec
 from elspeth.testing.chaosllm.config import ErrorInjectionConfig
 
 
@@ -46,6 +48,44 @@ class ErrorDecision:
     start_delay_sec: float | None = None
     category: ErrorCategory | None = None
     malformed_type: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate invariants between fields."""
+        if self.error_type is None:
+            # Success case: no other fields should be set
+            if self.category is not None:
+                raise ValueError("Success decision must not have a category")
+            return
+
+        if self.category is None:
+            raise ValueError(f"Error decision '{self.error_type}' must have a category")
+
+        if self.category == ErrorCategory.HTTP:
+            if self.status_code is None:
+                raise ValueError(f"HTTP error '{self.error_type}' must have a status_code")
+            if not (100 <= self.status_code <= 599):
+                raise ValueError(f"HTTP status_code must be 100-599, got {self.status_code}")
+            if self.malformed_type is not None:
+                raise ValueError("HTTP error must not have malformed_type")
+
+        elif self.category == ErrorCategory.CONNECTION:
+            if self.retry_after_sec is not None:
+                raise ValueError("Connection error must not have retry_after_sec")
+            if self.malformed_type is not None:
+                raise ValueError("Connection error must not have malformed_type")
+
+        elif self.category == ErrorCategory.MALFORMED:
+            if self.malformed_type is None:
+                raise ValueError("Malformed error must have malformed_type")
+            if self.status_code is not None and self.status_code != 200:
+                raise ValueError(f"Malformed error must have status_code 200, got {self.status_code}")
+
+        if self.retry_after_sec is not None and self.retry_after_sec < 0:
+            raise ValueError(f"retry_after_sec must be non-negative, got {self.retry_after_sec}")
+        if self.delay_sec is not None and self.delay_sec < 0:
+            raise ValueError(f"delay_sec must be non-negative, got {self.delay_sec}")
+        if self.start_delay_sec is not None and self.start_delay_sec < 0:
+            raise ValueError(f"start_delay_sec must be non-negative, got {self.start_delay_sec}")
 
     @classmethod
     def success(cls) -> "ErrorDecision":
@@ -147,8 +187,8 @@ MALFORMED_TYPES: set[str] = {
 class ErrorInjector:
     """Decides per-request whether to inject an error.
 
-    Thread-safe implementation with burst state machine that elevates
-    error rates periodically to simulate LLM provider stress.
+    Composes an InjectionEngine for burst state machine and selection
+    algorithms, while retaining LLM-specific error types and decisions.
 
     Usage:
         config = ErrorInjectionConfig(rate_limit_pct=5.0)
@@ -175,51 +215,22 @@ class ErrorInjector:
                  Inject a seeded random.Random() for deterministic testing.
         """
         self._config = config
-        self._time_func = time_func if time_func is not None else time.monotonic
         self._rng = rng if rng is not None else random_module.Random()
+        self._engine = InjectionEngine(
+            selection_mode=config.selection_mode,
+            burst_config=EngineBurstConfig(
+                enabled=config.burst.enabled,
+                interval_sec=config.burst.interval_sec,
+                duration_sec=config.burst.duration_sec,
+            ),
+            time_func=time_func,
+            rng=self._rng,
+        )
 
-        # Burst state machine
-        self._lock = threading.Lock()
-        self._start_time: float | None = None
-
-    def _get_current_time(self) -> float:
-        """Get current time, initializing start time if needed."""
-        with self._lock:
-            current = self._time_func()
-            if self._start_time is None:
-                self._start_time = current
-            return current - self._start_time
-
-    def _is_in_burst(self, elapsed: float) -> bool:
-        """Determine if we're currently in a burst period.
-
-        Bursts occur periodically:
-        - Every burst.interval_sec seconds, a burst starts
-        - Each burst lasts for burst.duration_sec seconds
-        """
-        if not self._config.burst.enabled:
-            return False
-
-        interval = self._config.burst.interval_sec
-        duration = self._config.burst.duration_sec
-
-        # Calculate position within the current interval
-        position_in_interval = elapsed % interval
-
-        # We're in burst if we're within the first `duration` seconds of each interval
-        return position_in_interval < duration
-
-    def _get_burst_rate_limit_pct(self, elapsed: float) -> float:
-        """Get rate limit percentage, using burst rate if in burst mode."""
-        if self._is_in_burst(elapsed):
-            return self._config.burst.rate_limit_pct
-        return self._config.rate_limit_pct
-
-    def _get_burst_capacity_pct(self, elapsed: float) -> float:
-        """Get capacity (529) percentage, using burst rate if in burst mode."""
-        if self._is_in_burst(elapsed):
-            return self._config.burst.capacity_pct
-        return self._config.capacity_529_pct
+    @property
+    def config(self) -> ErrorInjectionConfig:
+        """Current error injection configuration (frozen/immutable)."""
+        return self._config
 
     def _pick_retry_after(self) -> int:
         """Pick a random Retry-After value from the configured range."""
@@ -235,7 +246,7 @@ class ErrorInjector:
         """Build a timeout decision with a mix of disconnects and 504 responses."""
         delay = self._pick_timeout_delay()
         # 50/50 mix: some timeouts respond with 504, others drop the connection.
-        return_504 = self._should_trigger(50.0)
+        return_504 = self._engine.should_trigger(50.0)
         status_code = 504 if return_504 else None
         return ErrorDecision.connection_error("timeout", delay_sec=delay, status_code=status_code)
 
@@ -259,18 +270,80 @@ class ErrorInjector:
         min_sec, max_sec = self._config.slow_response_sec
         return self._rng.uniform(min_sec, max_sec)
 
-    def _should_trigger(self, percentage: float) -> bool:
-        """Determine if an error should trigger based on percentage.
+    def _build_specs(self) -> list[ErrorSpec]:
+        """Build the error spec list with burst-adjusted weights.
 
-        Args:
-            percentage: Error percentage (0-100)
-
-        Returns:
-            True if the error should trigger
+        Order matters for priority mode — connection errors first,
+        then HTTP errors, then malformed responses.
         """
-        if percentage <= 0:
-            return False
-        return self._rng.random() * 100 < percentage
+        in_burst = self._engine.is_in_burst()
+        rl_pct = self._config.burst.rate_limit_pct if in_burst else self._config.rate_limit_pct
+        cap_pct = self._config.burst.capacity_pct if in_burst else self._config.capacity_529_pct
+
+        return [
+            # Connection-level (highest priority)
+            ErrorSpec("connection_failed", self._config.connection_failed_pct),
+            ErrorSpec("connection_stall", self._config.connection_stall_pct),
+            ErrorSpec("timeout", self._config.timeout_pct),
+            ErrorSpec("connection_reset", self._config.connection_reset_pct),
+            ErrorSpec("slow_response", self._config.slow_response_pct),
+            # HTTP-level (burst-adjusted for rate_limit and capacity)
+            ErrorSpec("rate_limit", rl_pct),
+            ErrorSpec("capacity_529", cap_pct),
+            ErrorSpec("service_unavailable", self._config.service_unavailable_pct),
+            ErrorSpec("bad_gateway", self._config.bad_gateway_pct),
+            ErrorSpec("gateway_timeout", self._config.gateway_timeout_pct),
+            ErrorSpec("internal_error", self._config.internal_error_pct),
+            ErrorSpec("forbidden", self._config.forbidden_pct),
+            ErrorSpec("not_found", self._config.not_found_pct),
+            # Malformed responses
+            ErrorSpec("invalid_json", self._config.invalid_json_pct),
+            ErrorSpec("truncated", self._config.truncated_pct),
+            ErrorSpec("empty_body", self._config.empty_body_pct),
+            ErrorSpec("missing_fields", self._config.missing_fields_pct),
+            ErrorSpec("wrong_content_type", self._config.wrong_content_type_pct),
+        ]
+
+    def _build_decision(self, tag: str) -> ErrorDecision:
+        """Map a selected error tag to a domain-specific ErrorDecision."""
+        # Connection-level errors
+        if tag == "connection_failed":
+            return ErrorDecision.connection_error(
+                "connection_failed",
+                start_delay_sec=self._pick_connection_failed_lead(),
+            )
+        if tag == "connection_stall":
+            return ErrorDecision.connection_error(
+                "connection_stall",
+                delay_sec=self._pick_connection_stall_delay(),
+                start_delay_sec=self._pick_connection_stall_start(),
+            )
+        if tag == "timeout":
+            return self._build_timeout_decision()
+        if tag == "connection_reset":
+            return ErrorDecision.connection_error("connection_reset")
+        if tag == "slow_response":
+            return ErrorDecision.connection_error(
+                "slow_response",
+                delay_sec=self._pick_slow_response_delay(),
+            )
+
+        # HTTP errors with special handling
+        if tag == "rate_limit":
+            return ErrorDecision.http_error("rate_limit", 429, retry_after_sec=self._pick_retry_after())
+        if tag == "capacity_529":
+            return ErrorDecision.http_error("capacity_529", 529, retry_after_sec=self._pick_retry_after())
+
+        # Generic HTTP errors
+        if tag in HTTP_ERRORS:
+            return ErrorDecision.http_error(tag, HTTP_ERRORS[tag])
+
+        # Malformed responses
+        if tag in MALFORMED_TYPES:
+            return ErrorDecision.malformed_response(tag)
+
+        msg = f"Unknown error tag: {tag}"
+        raise ValueError(msg)
 
     def decide(self) -> ErrorDecision:
         """Decide whether to inject an error for this request.
@@ -287,201 +360,16 @@ class ErrorInjector:
         Returns:
             ErrorDecision indicating what error (if any) to inject
         """
-        elapsed = self._get_current_time()
-        if self._config.selection_mode == "weighted":
-            return self._decide_weighted(elapsed)
-        return self._decide_priority(elapsed)
-
-    def _decide_priority(self, elapsed: float) -> ErrorDecision:
-        """Priority-based decision (first matching error wins)."""
-
-        # === Connection-level errors (highest priority) ===
-
-        # Connection failed: accept then disconnect after a lead time
-        if self._should_trigger(self._config.connection_failed_pct):
-            return ErrorDecision.connection_error(
-                "connection_failed",
-                start_delay_sec=self._pick_connection_failed_lead(),
-            )
-
-        # Connection stall: accept, delay, stall, then disconnect
-        if self._should_trigger(self._config.connection_stall_pct):
-            return ErrorDecision.connection_error(
-                "connection_stall",
-                delay_sec=self._pick_connection_stall_delay(),
-                start_delay_sec=self._pick_connection_stall_start(),
-            )
-
-        # Timeout: Sometimes respond with 504, sometimes drop the connection
-        if self._should_trigger(self._config.timeout_pct):
-            return self._build_timeout_decision()
-
-        # Connection reset: RST the TCP connection
-        if self._should_trigger(self._config.connection_reset_pct):
-            return ErrorDecision.connection_error("connection_reset")
-
-        # Slow response: Respond but with artificial delay
-        if self._should_trigger(self._config.slow_response_pct):
-            return ErrorDecision.connection_error(
-                "slow_response",
-                delay_sec=self._pick_slow_response_delay(),
-            )
-
-        # === HTTP-level errors ===
-
-        # Rate limit (429) - uses burst rate if in burst
-        if self._should_trigger(self._get_burst_rate_limit_pct(elapsed)):
-            return ErrorDecision.http_error(
-                "rate_limit",
-                429,
-                retry_after_sec=self._pick_retry_after(),
-            )
-
-        # Capacity/Model overloaded (529) - uses burst rate if in burst
-        if self._should_trigger(self._get_burst_capacity_pct(elapsed)):
-            return ErrorDecision.http_error(
-                "capacity_529",
-                529,
-                retry_after_sec=self._pick_retry_after(),
-            )
-
-        # Service unavailable (503)
-        if self._should_trigger(self._config.service_unavailable_pct):
-            return ErrorDecision.http_error("service_unavailable", 503)
-
-        # Bad gateway (502)
-        if self._should_trigger(self._config.bad_gateway_pct):
-            return ErrorDecision.http_error("bad_gateway", 502)
-
-        # Gateway timeout (504)
-        if self._should_trigger(self._config.gateway_timeout_pct):
-            return ErrorDecision.http_error("gateway_timeout", 504)
-
-        # Internal error (500)
-        if self._should_trigger(self._config.internal_error_pct):
-            return ErrorDecision.http_error("internal_error", 500)
-
-        # Forbidden (403)
-        if self._should_trigger(self._config.forbidden_pct):
-            return ErrorDecision.http_error("forbidden", 403)
-
-        # Not found (404)
-        if self._should_trigger(self._config.not_found_pct):
-            return ErrorDecision.http_error("not_found", 404)
-
-        # === Malformed responses (return 200 but with bad content) ===
-
-        # Invalid JSON
-        if self._should_trigger(self._config.invalid_json_pct):
-            return ErrorDecision.malformed_response("invalid_json")
-
-        # Truncated response
-        if self._should_trigger(self._config.truncated_pct):
-            return ErrorDecision.malformed_response("truncated")
-
-        # Empty body
-        if self._should_trigger(self._config.empty_body_pct):
-            return ErrorDecision.malformed_response("empty_body")
-
-        # Missing fields
-        if self._should_trigger(self._config.missing_fields_pct):
-            return ErrorDecision.malformed_response("missing_fields")
-
-        # Wrong content type
-        if self._should_trigger(self._config.wrong_content_type_pct):
-            return ErrorDecision.malformed_response("wrong_content_type")
-
-        # No error - success!
-        return ErrorDecision.success()
-
-    def _decide_weighted(self, elapsed: float) -> ErrorDecision:
-        """Weighted mix decision (errors chosen by configured weights)."""
-        choices: list[tuple[float, Callable[[], ErrorDecision]]] = []
-
-        def _add(weight: float, builder: Callable[[], ErrorDecision]) -> None:
-            if weight > 0:
-                choices.append((weight, builder))
-
-        # Connection-level
-        _add(
-            self._config.connection_failed_pct,
-            lambda: ErrorDecision.connection_error(
-                "connection_failed",
-                start_delay_sec=self._pick_connection_failed_lead(),
-            ),
-        )
-        _add(
-            self._config.connection_stall_pct,
-            lambda: ErrorDecision.connection_error(
-                "connection_stall",
-                delay_sec=self._pick_connection_stall_delay(),
-                start_delay_sec=self._pick_connection_stall_start(),
-            ),
-        )
-        _add(self._config.timeout_pct, self._build_timeout_decision)
-        _add(
-            self._config.connection_reset_pct,
-            lambda: ErrorDecision.connection_error("connection_reset"),
-        )
-        _add(
-            self._config.slow_response_pct,
-            lambda: ErrorDecision.connection_error("slow_response", delay_sec=self._pick_slow_response_delay()),
-        )
-
-        # HTTP-level (burst-adjusted for rate limit and capacity)
-        _add(
-            self._get_burst_rate_limit_pct(elapsed),
-            lambda: ErrorDecision.http_error(
-                "rate_limit",
-                429,
-                retry_after_sec=self._pick_retry_after(),
-            ),
-        )
-        _add(
-            self._get_burst_capacity_pct(elapsed),
-            lambda: ErrorDecision.http_error(
-                "capacity_529",
-                529,
-                retry_after_sec=self._pick_retry_after(),
-            ),
-        )
-        _add(self._config.service_unavailable_pct, lambda: ErrorDecision.http_error("service_unavailable", 503))
-        _add(self._config.bad_gateway_pct, lambda: ErrorDecision.http_error("bad_gateway", 502))
-        _add(self._config.gateway_timeout_pct, lambda: ErrorDecision.http_error("gateway_timeout", 504))
-        _add(self._config.internal_error_pct, lambda: ErrorDecision.http_error("internal_error", 500))
-        _add(self._config.forbidden_pct, lambda: ErrorDecision.http_error("forbidden", 403))
-        _add(self._config.not_found_pct, lambda: ErrorDecision.http_error("not_found", 404))
-
-        # Malformed responses
-        _add(self._config.invalid_json_pct, lambda: ErrorDecision.malformed_response("invalid_json"))
-        _add(self._config.truncated_pct, lambda: ErrorDecision.malformed_response("truncated"))
-        _add(self._config.empty_body_pct, lambda: ErrorDecision.malformed_response("empty_body"))
-        _add(self._config.missing_fields_pct, lambda: ErrorDecision.malformed_response("missing_fields"))
-        _add(self._config.wrong_content_type_pct, lambda: ErrorDecision.malformed_response("wrong_content_type"))
-
-        total_weight = sum(weight for weight, _ in choices)
-        if total_weight <= 0:
+        specs = self._build_specs()
+        selected = self._engine.select(specs)
+        if selected is None:
             return ErrorDecision.success()
-
-        success_weight = max(0.0, 100.0 - total_weight)
-        roll = self._rng.random() * (total_weight + success_weight)
-        if roll >= total_weight:
-            return ErrorDecision.success()
-
-        threshold = 0.0
-        for weight, builder in choices:
-            threshold += weight
-            if roll < threshold:
-                return builder()
-
-        return ErrorDecision.success()
+        return self._build_decision(selected.tag)
 
     def reset(self) -> None:
         """Reset the injector state (clears burst timing)."""
-        with self._lock:
-            self._start_time = None
+        self._engine.reset()
 
     def is_in_burst(self) -> bool:
         """Check if currently in burst mode (for observability)."""
-        elapsed = self._get_current_time()
-        return self._is_in_burst(elapsed)
+        return self._engine.is_in_burst()

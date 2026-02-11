@@ -68,10 +68,10 @@ class TestAzureMultiQueryLLMSpecific:
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"mode": "observed"},
-                "on_error": "quarantine_sink",
                 "required_input_fields": [],
             }
         )
+        transform.on_error = "quarantine_sink"
 
         assert len(transform._query_specs) == 6
 
@@ -97,10 +97,10 @@ class TestAzureMultiQueryLLMSpecific:
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"mode": "observed"},
-                "on_error": "quarantine_sink",
                 "required_input_fields": [],
             }
         )
+        transform.on_error = "quarantine_sink"
 
         assert transform.creates_tokens is False
 
@@ -122,10 +122,10 @@ class TestAzureMultiQueryLLMAuditTrail:
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"mode": "observed"},
-                "on_error": "quarantine_sink",
                 "required_input_fields": [],
             }
         )
+        transform.on_error = "quarantine_sink"
 
         assert transform.on_error is not None
 
@@ -136,7 +136,7 @@ class TestAzureMultiQueryBatchContract(BatchTransformContractTestBase):
     @pytest.fixture
     def batch_transform(self) -> BatchTransformMixin:
         """Provide unconfigured transform (no connect_output yet)."""
-        return AzureMultiQueryLLMTransform(
+        t = AzureMultiQueryLLMTransform(
             {
                 "deployment_name": "gpt-4o",
                 "endpoint": "https://test.openai.azure.com",
@@ -154,10 +154,11 @@ class TestAzureMultiQueryBatchContract(BatchTransformContractTestBase):
                     "rationale": {"suffix": "rationale", "type": "string"},
                 },
                 "schema": {"mode": "observed"},
-                "on_error": "quarantine_sink",
                 "required_input_fields": [],
             }
         )
+        t.on_error = "quarantine_sink"
+        return t
 
     @pytest.fixture
     def valid_input(self) -> dict[str, Any]:

@@ -70,7 +70,7 @@ DYNAMIC_SCHEMA_LOCATIONS: tuple[WhitelistEntry, ...] = (
 
 PLUGIN_CONFIG_LOCATIONS: tuple[WhitelistEntry, ...] = (
     WhitelistEntry(
-        location="core/dag.py:NodeConfig",
+        location="core/dag/models.py:NodeConfig",
         type_used="dict[str, Any] (TypeAlias)",
         justification=(
             "Node config varies by node type: source configs have path/delimiter, "
@@ -149,16 +149,6 @@ FRAMEWORK_INTEROP_LOCATIONS: tuple[WhitelistEntry, ...] = (
             "SQLAlchemy Connection/Session objects have complex generic types that "
             "change between sync/async and between SA 1.x/2.x. Using Any avoids "
             "coupling the repository layer to a specific SA session type."
-        ),
-    ),
-    WhitelistEntry(
-        location="engine/executors.py (batch protocol attrs)",
-        type_used="type: ignore[attr-defined]",
-        justification=(
-            "BatchTransformProtocol methods (accept, connect_output, evict_submission) "
-            "and dynamic attrs (_executor_batch_adapter, _batch_initialized) are accessed "
-            "on TransformProtocol references after isinstance/hasattr checks. The type "
-            "system cannot express 'TransformProtocol that is also BatchTransformProtocol'."
         ),
     ),
     WhitelistEntry(

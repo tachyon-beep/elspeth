@@ -2,23 +2,29 @@
 """Tests for type-safe plugin detection in processor.
 
 These tests verify that isinstance-based plugin detection works correctly
-with the base class hierarchy (BaseTransform, BaseGate).
-
-NOTE: BaseAggregation tests were DELETED in aggregation structural cleanup.
-Aggregation is now handled by batch-aware transforms (is_batch_aware=True).
+with the base class hierarchy (BaseTransform).
 """
 
 from typing import Any
 
 from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.plugins.base import BaseGate, BaseTransform
-from elspeth.plugins.results import (
-    GateResult,
-    RoutingAction,
-    TransformResult,
-)
+from elspeth.contracts.types import NodeID
+from elspeth.engine.processor import DAGTraversalContext
+from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.results import TransformResult
 from tests.fixtures.base_classes import create_observed_contract
+
+
+def _single_node_traversal(node_id: NodeID, plugin: Any) -> DAGTraversalContext:
+    """Build explicit traversal context for a one-node pipeline."""
+    return DAGTraversalContext(
+        node_step_map={node_id: 1},
+        node_to_plugin={node_id: plugin},
+        first_transform_node_id=node_id,
+        node_to_next={node_id: None},
+        coalesce_node_map={},
+    )
 
 
 class TestPluginTypeDetection:
@@ -41,7 +47,6 @@ class TestPluginTypeDetection:
 
         unknown = UnknownPlugin()
         assert not isinstance(unknown, BaseTransform)
-        assert not isinstance(unknown, BaseGate)
 
     def test_duck_typed_transform_not_recognized(self) -> None:
         """Duck-typed transforms without inheritance should NOT be recognized.
@@ -62,38 +67,6 @@ class TestPluginTypeDetection:
         # Has the method but NOT an instance of BaseTransform
         assert hasattr(duck, "process")
         assert not isinstance(duck, BaseTransform)  # type: ignore[unreachable]
-
-    def test_duck_typed_gate_not_recognized(self) -> None:
-        """Duck-typed gates without inheritance should NOT be recognized.
-
-        This is the key behavior change - hasattr checks would have accepted
-        this class, but isinstance checks correctly reject it.
-        """
-
-        class DuckTypedGate:
-            """Looks like a gate but doesn't inherit from BaseGate."""
-
-            name = "duck"
-
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                return GateResult(row=row, action=RoutingAction.continue_())
-
-        duck = DuckTypedGate()
-        # Has the method but NOT an instance of BaseGate
-        assert hasattr(duck, "evaluate")
-        assert not isinstance(duck, BaseGate)  # type: ignore[unreachable]
-
-
-class TestPluginInheritanceHierarchy:
-    """Tests verifying proper inheritance hierarchy."""
-
-    def test_transform_not_gate(self) -> None:
-        """Transforms should NOT be instances of BaseGate."""
-        from elspeth.plugins.transforms.passthrough import PassThrough
-
-        transform = PassThrough({"schema": {"mode": "observed"}})
-        # mypy knows these are incompatible hierarchies - that's what we're verifying
-        assert not isinstance(transform, BaseGate)  # type: ignore[unreachable]
 
 
 class TestProcessorRejectsDuckTypedPlugins:
@@ -141,79 +114,23 @@ class TestProcessorRejectsDuckTypedPlugins:
             schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
-        processor = RowProcessor(
-            recorder=recorder,
-            span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source.node_id),
-        )
-
-        ctx = PluginContext(run_id=run.run_id, config={})
-
         # The duck-typed object has the method, but processor should reject it
         duck = DuckTypedTransform()
         assert hasattr(duck, "process"), "Duck type has process method"
         # Runtime check that duck is not a BaseTransform - mypy knows these are incompatible
         assert not isinstance(duck, BaseTransform), "But is not a BaseTransform"  # type: ignore[unreachable]
-
-        with pytest.raises(TypeError, match="Unknown transform type"):
-            processor.process_row(
-                row_index=0,
-                source_row=SourceRow.valid({"value": 1}, contract=create_observed_contract({"value": 1})),
-                transforms=[duck],
-                ctx=ctx,
-            )
-
-    def test_processor_rejects_duck_typed_gate(self) -> None:
-        """RowProcessor should raise TypeError for duck-typed gates.
-
-        Duck-typed gates have the right methods (evaluate, name, node_id)
-        but don't inherit from BaseGate. The processor must reject them.
-        """
-        import pytest
-
-        from elspeth.contracts.schema import SchemaConfig
-        from elspeth.contracts.types import NodeID
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.spans import SpanFactory
-
-        class DuckTypedGate:
-            """Looks like a gate but doesn't inherit from BaseGate."""
-
-            name = "duck_gate"
-            node_id = "fake_gate_id"
-
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                return GateResult(row=row, action=RoutingAction.continue_())
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
-        )
+        duck_node_id = NodeID(duck.node_id)
 
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
+            source_on_success="default",
+            traversal=_single_node_traversal(duck_node_id, duck),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
-
-        # The duck-typed object has the method, but processor should reject it
-        duck = DuckTypedGate()
-        assert hasattr(duck, "evaluate"), "Duck type has evaluate method"
-        # Runtime check that duck is not a BaseGate - mypy knows these are incompatible
-        assert not isinstance(duck, BaseGate), "But is not a BaseGate"  # type: ignore[unreachable]
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(

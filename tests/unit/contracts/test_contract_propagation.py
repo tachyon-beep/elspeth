@@ -9,7 +9,7 @@ from elspeth.contracts.contract_propagation import (
     propagate_contract,
 )
 from elspeth.contracts.schema_contract import SchemaContract
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 class TestPropagateContract:

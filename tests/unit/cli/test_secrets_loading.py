@@ -34,12 +34,13 @@ secrets:
 
 source:
   plugin: null
+  options:
+    on_success: output
 
 sinks:
   output:
     plugin: null
 
-default_sink: output
 """)
 
         with patch("elspeth.core.security.secret_loader.KeyVaultSecretLoader") as MockLoader:
@@ -71,12 +72,13 @@ secrets:
 
 source:
   plugin: null
+  options:
+    on_success: output
 
 sinks:
   output:
     plugin: null
 
-default_sink: output
 """)
 
         with patch("elspeth.core.security.secret_loader.KeyVaultSecretLoader") as MockLoader:
@@ -100,12 +102,13 @@ secrets:
 
 source:
   plugin: null
+  options:
+    on_success: output
 
 sinks:
   output:
     plugin: null
 
-default_sink: output
 """)
 
         with patch("elspeth.core.security.secret_loader.KeyVaultSecretLoader") as MockLoader:
@@ -128,12 +131,13 @@ secrets:
 
 source:
   plugin: null
+  options:
+    on_success: output
 
 sinks:
   output:
     plugin: null
 
-default_sink: output
 """)
 
         result = runner.invoke(app, ["--no-dotenv", "run", "--settings", str(settings_file), "--dry-run"])
@@ -154,12 +158,13 @@ secrets:
 
 source:
   plugin: null
+  options:
+    on_success: output
 
 sinks:
   output:
     plugin: null
 
-default_sink: output
 """)
 
         result = runner.invoke(app, ["--no-dotenv", "run", "--settings", str(settings_file), "--dry-run"])
@@ -176,12 +181,13 @@ default_sink: output
         settings_file.write_text("""
 source:
   plugin: null
+  options:
+    on_success: output
 
 sinks:
   output:
     plugin: null
 
-default_sink: output
 """)
 
         with patch("elspeth.core.security.secret_loader.KeyVaultSecretLoader") as MockLoader:
@@ -206,12 +212,13 @@ secrets:
 
 source:
   plugin: null
+  options:
+    on_success: output
 
 sinks:
   output:
     plugin: null
 
-default_sink: output
 """)
 
         result = runner.invoke(app, ["--no-dotenv", "run", "--settings", str(settings_file), "--dry-run"])

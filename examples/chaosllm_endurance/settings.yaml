@@ -1,122 +1,128 @@
-# ELSPETH ChaosLLM Endurance Test
-#
-# Stress tests ELSPETH's retry, backoff, and error handling at scale:
-# 10,000 rows × 2 case studies × 5 criteria = 100,000 LLM calls
-# against a ChaosLLM server injecting ~11% errors (8% retryable, 3% quarantine).
-# Adjust input.csv row count with: scripts/generate_test_data.py multi --rows N
-#
-# Run with:
-#   ./examples/chaosllm_endurance/run.sh
-
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/chaosllm_endurance/input.csv
     schema:
       mode: flexible
       fields:
-        - "user_id: str"
-        - "cs1_background: str"
-        - "cs1_symptoms: str"
-        - "cs1_history: str"
-        - "cs2_background: str"
-        - "cs2_symptoms: str"
-        - "cs2_history: str"
+      - 'user_id: str'
+      - 'cs1_background: str'
+      - 'cs1_symptoms: str'
+      - 'cs1_history: str'
+      - 'cs2_background: str'
+      - 'cs2_symptoms: str'
+      - 'cs2_history: str'
     on_validation_failure: discard
-
 transforms:
-  - plugin: openrouter_multi_query_llm
-    options:
-      api_key: "fake-key-chaosllm-does-not-check"
-      base_url: "http://127.0.0.1:8199/v1"
-      model: "chaosllm/fake-gpt-4"
-      timeout_seconds: 10
+- name: openrouter_multi_query_llm_0
+  plugin: openrouter_multi_query_llm
+  input: source_out
+  on_success: output
+  on_error: quarantine
+  options:
+    api_key: fake-key-chaosllm-does-not-check
+    base_url: http://127.0.0.1:8199/v1
+    model: chaosllm/fake-gpt-4
+    timeout_seconds: 10
+    system_prompt: 'You are a medical assessment AI. For each case study and criterion,
 
-      system_prompt: |
-        You are a medical assessment AI. For each case study and criterion,
-        provide a score (0-100) and rationale. Respond ONLY in JSON format:
-        {"score": <number>, "rationale": "<explanation>"}
+      provide a score (0-100) and rationale. Respond ONLY in JSON format:
 
-      template: |
-        ## Case Study
-        **Background:** {{ row.input_1 }}
-        **Symptoms:** {{ row.input_2 }}
-        **History:** {{ row.input_3 }}
+      {"score": <number>, "rationale": "<explanation>"}
 
-        ## Evaluation Criterion: {{ row.criterion.name }}
-        {{ row.criterion.description }}
+      '
+    template: '## Case Study
 
-        {% if row.criterion.subcriteria %}
-        Consider these subcriteria:
-        {% for sub in row.criterion.subcriteria %}
-        - {{ sub }}
-        {% endfor %}
-        {% endif %}
+      **Background:** {{ row.input_1 }}
 
-        Provide your assessment.
+      **Symptoms:** {{ row.input_2 }}
 
-      required_input_fields: []
+      **History:** {{ row.input_3 }}
 
-      case_studies:
-        - name: cs1
-          input_fields: [cs1_background, cs1_symptoms, cs1_history]
-        - name: cs2
-          input_fields: [cs2_background, cs2_symptoms, cs2_history]
 
-      criteria:
-        - name: diagnosis
-          code: DIAG
-          description: "Assess the accuracy and completeness of the diagnosis"
-          subcriteria:
-            - Correct primary diagnosis
-            - Appropriate differential diagnoses considered
-            - Evidence-based reasoning
-        - name: treatment
-          code: TREAT
-          description: "Assess the appropriateness of the treatment plan"
-          subcriteria:
-            - Guideline-concordant treatment
-            - Patient-specific considerations
-            - Risk-benefit analysis
-        - name: prognosis
-          code: PROG
-          description: "Assess the accuracy of prognostic assessment"
-          subcriteria:
-            - Realistic timeline
-            - Key prognostic factors identified
-            - Clear communication
-        - name: risk
-          code: RISK
-          description: "Assess identification of risks and complications"
-          subcriteria:
-            - Comprehensive risk identification
-            - Appropriate severity assessment
-            - Mitigation strategies
-        - name: followup
-          code: FOLLOW
-          description: "Assess the follow-up and monitoring plan"
-          subcriteria:
-            - Appropriate follow-up timeline
-            - Clear monitoring parameters
-            - Escalation criteria defined
+      ## Evaluation Criterion: {{ row.criterion.name }}
 
-      response_format: standard
-      output_mapping:
-        score:
-          suffix: score
-          type: integer
-        rationale:
-          suffix: rationale
-          type: string
+      {{ row.criterion.description }}
 
-      pool_size: 30
-      temperature: 0.0
-      max_tokens: 300
-      on_error: quarantine
 
-      schema:
-        mode: observed
+      {% if row.criterion.subcriteria %}
 
+      Consider these subcriteria:
+
+      {% for sub in row.criterion.subcriteria %}
+
+      - {{ sub }}
+
+      {% endfor %}
+
+      {% endif %}
+
+
+      Provide your assessment.
+
+      '
+    required_input_fields: []
+    case_studies:
+    - name: cs1
+      input_fields:
+      - cs1_background
+      - cs1_symptoms
+      - cs1_history
+    - name: cs2
+      input_fields:
+      - cs2_background
+      - cs2_symptoms
+      - cs2_history
+    criteria:
+    - name: diagnosis
+      code: DIAG
+      description: Assess the accuracy and completeness of the diagnosis
+      subcriteria:
+      - Correct primary diagnosis
+      - Appropriate differential diagnoses considered
+      - Evidence-based reasoning
+    - name: treatment
+      code: TREAT
+      description: Assess the appropriateness of the treatment plan
+      subcriteria:
+      - Guideline-concordant treatment
+      - Patient-specific considerations
+      - Risk-benefit analysis
+    - name: prognosis
+      code: PROG
+      description: Assess the accuracy of prognostic assessment
+      subcriteria:
+      - Realistic timeline
+      - Key prognostic factors identified
+      - Clear communication
+    - name: risk
+      code: RISK
+      description: Assess identification of risks and complications
+      subcriteria:
+      - Comprehensive risk identification
+      - Appropriate severity assessment
+      - Mitigation strategies
+    - name: followup
+      code: FOLLOW
+      description: Assess the follow-up and monitoring plan
+      subcriteria:
+      - Appropriate follow-up timeline
+      - Clear monitoring parameters
+      - Escalation criteria defined
+    response_format: standard
+    output_mapping:
+      score:
+        suffix: score
+        type: integer
+      rationale:
+        suffix: rationale
+        type: string
+    pool_size: 30
+    temperature: 0.0
+    max_tokens: 300
+    schema:
+      mode: observed
 sinks:
   output:
     plugin: csv
@@ -124,7 +130,6 @@ sinks:
       path: examples/chaosllm_endurance/output/results.csv
       schema:
         mode: observed
-
   quarantine:
     plugin: json
     options:
@@ -132,12 +137,8 @@ sinks:
       schema:
         mode: observed
       format: jsonl
-
-default_sink: output
-
 landscape:
   url: sqlite:///examples/chaosllm_endurance/runs/audit.db
-
 retry:
   max_attempts: 5
   initial_delay_seconds: 0.5

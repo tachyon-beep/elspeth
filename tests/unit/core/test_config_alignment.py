@@ -218,6 +218,7 @@ class TestLandscapeSettingsAlignment:
         "dump_to_jsonl_fail_on_error",  # Used in LandscapeDB.from_url() via cli.py
         "dump_to_jsonl_include_payloads",  # Used in LandscapeDB.from_url() via cli.py
         "dump_to_jsonl_payload_base_path",  # Used in LandscapeDB.from_url() via cli.py
+        "encryption_key_env",  # Used by resolve_audit_passphrase() in cli_helpers.py
     }
 
     # Nested settings object - checked separately
@@ -228,7 +229,7 @@ class TestLandscapeSettingsAlignment:
     # Fields that exist but aren't checked at runtime
     PENDING_FIELDS: ClassVar[set[str]] = {
         "enabled",  # Always assumed True
-        "backend",  # Not validated beyond schema
+        "backend",  # Used by resolve_audit_passphrase() to select SQLCipher backend
     }
 
     def test_field_categorization_complete(self) -> None:
@@ -340,7 +341,6 @@ class TestElspethSettingsAlignment:
         "source",  # Required - source plugin config
         "transforms",  # Optional - transform chain
         "sinks",  # Required - named sink configs
-        "default_sink",  # Required - default output sink name
         "gates",  # Optional - config-driven routing
         "coalesce",  # Optional - fork path merging
         "aggregations",  # Optional - config-driven batching

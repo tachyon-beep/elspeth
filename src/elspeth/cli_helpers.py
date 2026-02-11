@@ -1,10 +1,11 @@
 """CLI helper functions for plugin instantiation and database resolution."""
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from elspeth.core.config import ElspethSettings
+    from elspeth.core.config import ElspethSettings, LandscapeSettings
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
@@ -20,7 +21,8 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
     Returns:
         Dict with keys:
             - source: SourceProtocol instance
-            - transforms: list[TransformProtocol] (row_plugins only)
+            - source_settings: SourceSettings
+            - transforms: list[WiredTransform] (row_plugins only)
             - sinks: dict[str, SinkProtocol]
             - aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]]
 
@@ -28,18 +30,25 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
         ValueError: If config references unknown plugins (raised by PluginManager)
     """
     from elspeth.cli import _get_plugin_manager
+    from elspeth.core.dag import WiredTransform
 
     manager = _get_plugin_manager()
 
     # Instantiate source (raises on unknown plugin)
     source_cls = manager.get_source_by_name(config.source.plugin)
     source = source_cls(dict(config.source.options))
+    # Bridge: inject on_success from settings level (lifted from options)
+    source.on_success = config.source.on_success
 
     # Instantiate transforms
-    transforms = []
+    transforms: list[WiredTransform] = []
     for plugin_config in config.transforms:
         transform_cls = manager.get_transform_by_name(plugin_config.plugin)
-        transforms.append(transform_cls(dict(plugin_config.options)))
+        transform = transform_cls(dict(plugin_config.options))
+        # Bridge: inject routing from settings level (lifted from options)
+        transform.on_success = plugin_config.on_success
+        transform.on_error = plugin_config.on_error
+        transforms.append(WiredTransform(plugin=transform, settings=plugin_config))
 
     # Instantiate aggregations
     # Aggregations REQUIRE batch-aware transforms (is_batch_aware=True).
@@ -49,9 +58,11 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
     for agg_config in config.aggregations:
         transform_cls = manager.get_transform_by_name(agg_config.plugin)
         transform = transform_cls(dict(agg_config.options))
+        # Bridge: inject routing from settings level (lifted from options)
+        transform.on_success = agg_config.on_success
 
         # Validate batch-aware requirement (fail-fast before graph construction)
-        if not getattr(transform, "is_batch_aware", False):
+        if not transform.is_batch_aware:
             raise ValueError(
                 f"Aggregation '{agg_config.name}' uses transform '{agg_config.plugin}' "
                 f"which has is_batch_aware=False. Aggregations require batch-aware "
@@ -70,6 +81,7 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
 
     return {
         "source": source,
+        "source_settings": config.source,
         "transforms": transforms,
         "sinks": sinks,
         "aggregations": aggregations,
@@ -157,3 +169,43 @@ def resolve_run_id(run_id: str, recorder: "LandscapeRecorder") -> str | None:
     if run_id.lower() == "latest":
         return resolve_latest_run_id(recorder)
     return run_id
+
+
+def resolve_audit_passphrase(
+    settings: "LandscapeSettings | None",
+) -> str | None:
+    """Resolve the SQLCipher passphrase from the environment.
+
+    The passphrase is always read from an environment variable (never from config
+    files or URLs) to prevent it from appearing in logs, tracebacks, or the audit
+    trail itself.
+
+    When settings is None (e.g. ad-hoc CLI access via ``--database``), returns
+    None — encryption requires explicit ``backend: sqlcipher`` configuration.
+    This prevents ELSPETH_AUDIT_KEY from accidentally opening plain SQLite
+    databases through SQLCipher.
+
+    Args:
+        settings: LandscapeSettings determining which env var to read.
+            If None, returns None (no encryption without explicit config).
+
+    Returns:
+        Passphrase string if backend is sqlcipher, None otherwise.
+
+    Raises:
+        RuntimeError: If backend is sqlcipher but the env var is not set.
+    """
+    if settings is not None and settings.backend == "sqlcipher":
+        env_var = settings.encryption_key_env
+        passphrase = os.environ.get(env_var)
+        if passphrase is None or not passphrase.strip():
+            raise RuntimeError(
+                f'SQLCipher backend requires a non-empty encryption passphrase.\nSet the environment variable: export {env_var}="your-passphrase"'
+            )
+        return passphrase
+
+    # No settings, or settings.backend is not sqlcipher → no encryption.
+    # We intentionally do NOT fall back to ELSPETH_AUDIT_KEY when settings
+    # is None — that env var may be set for a different pipeline, and passing
+    # a passphrase to a plain SQLite database causes "file is not a database".
+    return None

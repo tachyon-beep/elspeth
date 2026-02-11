@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 import pytest
 
@@ -21,7 +22,7 @@ def _setup(*, run_id: str = "run-1") -> tuple[LandscapeDB, LandscapeRecorder]:
 
 def _make_contract(
     *,
-    mode: str = "OBSERVED",
+    mode: Literal["FIXED", "FLEXIBLE", "OBSERVED"] = "OBSERVED",
     fields: tuple[FieldContract, ...] = (),
     locked: bool = False,
 ) -> SchemaContract:
@@ -33,7 +34,7 @@ def _make_field(
     python_type: type = str,
     *,
     required: bool = True,
-    source: str = "inferred",
+    source: Literal["declared", "inferred"] = "inferred",
 ) -> FieldContract:
     return FieldContract(
         normalized_name=name,

@@ -15,14 +15,14 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
-from elspeth.contracts.types import CoalesceName
+from elspeth.contracts.types import CoalesceName, NodeID
 from elspeth.engine.orchestrator.outcomes import (
     accumulate_row_outcomes,
     flush_coalesce_pending,
     handle_coalesce_timeouts,
 )
 from elspeth.engine.orchestrator.types import ExecutionCounters
-from tests.fixtures.factories import make_row, make_token_info
+from elspeth.testing import make_row, make_token_info
 
 # =============================================================================
 # Helpers
@@ -62,42 +62,44 @@ class TestAccumulateRowOutcomesCompleted:
     def test_completed_increments_succeeded(self) -> None:
         counters = _make_counters()
         pending = _make_pending()
-        results = [_make_result(RowOutcome.COMPLETED)]
+        results = [_make_result(RowOutcome.COMPLETED, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_succeeded == 1
 
-    def test_completed_appends_to_default_sink(self) -> None:
+    def test_completed_appends_to_sink(self) -> None:
         counters = _make_counters()
         pending = _make_pending()
-        results = [_make_result(RowOutcome.COMPLETED)]
+        results = [_make_result(RowOutcome.COMPLETED, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert len(pending["output"]) == 1
-        assert pending["output"][0][1].outcome == RowOutcome.COMPLETED
+        pending_outcome = pending["output"][0][1]
+        assert pending_outcome is not None
+        assert pending_outcome.outcome == RowOutcome.COMPLETED
 
-    def test_completed_routes_to_branch_sink_when_exists(self) -> None:
-        """COMPLETED tokens with branch_name route to that sink if it exists."""
+    def test_completed_ignores_branch_name_and_uses_result_sink(self) -> None:
+        """COMPLETED routing uses result.sink_name, not token.branch_name."""
         counters = _make_counters()
-        pending = {"output": [], "branch_a": []}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "branch_a": []}
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="branch_a")
-        results = [_make_result(RowOutcome.COMPLETED, token=token)]
+        results = [_make_result(RowOutcome.COMPLETED, token=token, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock(), "branch_a": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock(), "branch_a": Mock()}, pending)
 
-        assert len(pending["branch_a"]) == 1
-        assert len(pending["output"]) == 0
+        assert len(pending["branch_a"]) == 0
+        assert len(pending["output"]) == 1
 
-    def test_completed_falls_back_to_default_when_branch_not_in_sinks(self) -> None:
-        """COMPLETED token with branch_name not in sinks falls back to default."""
+    def test_completed_falls_back_to_sink_name_when_branch_not_in_sinks(self) -> None:
+        """COMPLETED token with branch_name not in sinks uses result.sink_name."""
         counters = _make_counters()
         pending = _make_pending()
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="nonexistent")
-        results = [_make_result(RowOutcome.COMPLETED, token=token)]
+        results = [_make_result(RowOutcome.COMPLETED, token=token, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert len(pending["output"]) == 1
 
@@ -107,40 +109,44 @@ class TestAccumulateRowOutcomesRouted:
 
     def test_routed_increments_counter(self) -> None:
         counters = _make_counters()
-        pending = {"output": [], "risk_sink": []}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
         results = [_make_result(RowOutcome.ROUTED, sink_name="risk_sink")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_routed == 1
 
     def test_routed_tracks_destination(self) -> None:
         counters = _make_counters()
-        pending = {"output": [], "risk_sink": []}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
         results = [_make_result(RowOutcome.ROUTED, sink_name="risk_sink")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.routed_destinations["risk_sink"] == 1
 
     def test_routed_appends_to_named_sink(self) -> None:
         counters = _make_counters()
-        pending = {"output": [], "risk_sink": []}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
         results = [_make_result(RowOutcome.ROUTED, sink_name="risk_sink")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert len(pending["risk_sink"]) == 1
-        assert pending["risk_sink"][0][1].outcome == RowOutcome.ROUTED
+        pending_outcome = pending["risk_sink"][0][1]
+        assert pending_outcome is not None
+        assert pending_outcome.outcome == RowOutcome.ROUTED
 
     def test_routed_without_sink_name_crashes(self) -> None:
         """ROUTED outcome without sink_name is a contract violation."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
         counters = _make_counters()
         pending = _make_pending()
         results = [_make_result(RowOutcome.ROUTED, sink_name=None)]
 
-        with pytest.raises(RuntimeError, match="ROUTED outcome requires sink_name"):
-            accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        with pytest.raises(OrchestrationInvariantError, match="missing sink_name"):
+            accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
 
 class TestAccumulateRowOutcomesTerminal:
@@ -151,7 +157,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.FAILED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_failed == 1
         assert len(pending["output"]) == 0
@@ -161,7 +167,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.QUARANTINED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_quarantined == 1
 
@@ -170,7 +176,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.FORKED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_forked == 1
 
@@ -179,7 +185,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.EXPANDED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_expanded == 1
 
@@ -188,7 +194,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.BUFFERED)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_buffered == 1
 
@@ -198,7 +204,7 @@ class TestAccumulateRowOutcomesTerminal:
         pending = _make_pending()
         results = [_make_result(RowOutcome.CONSUMED_IN_BATCH)]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_succeeded == 0
         assert counters.rows_failed == 0
@@ -211,22 +217,24 @@ class TestAccumulateRowOutcomesCoalesced:
         """COALESCED increments both rows_coalesced AND rows_succeeded."""
         counters = _make_counters()
         pending = _make_pending()
-        results = [_make_result(RowOutcome.COALESCED)]
+        results = [_make_result(RowOutcome.COALESCED, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
 
-    def test_coalesced_routes_to_default_sink(self) -> None:
+    def test_coalesced_routes_to_sink(self) -> None:
         counters = _make_counters()
         pending = _make_pending()
-        results = [_make_result(RowOutcome.COALESCED)]
+        results = [_make_result(RowOutcome.COALESCED, sink_name="output")]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert len(pending["output"]) == 1
-        assert pending["output"][0][1].outcome == RowOutcome.COMPLETED
+        pending_outcome = pending["output"][0][1]
+        assert pending_outcome is not None
+        assert pending_outcome.outcome == RowOutcome.COMPLETED
 
 
 class TestAccumulateRowOutcomesMixed:
@@ -237,13 +245,13 @@ class TestAccumulateRowOutcomesMixed:
         counters = _make_counters()
         pending = _make_pending()
         results = [
-            _make_result(RowOutcome.COMPLETED),
-            _make_result(RowOutcome.COMPLETED),
+            _make_result(RowOutcome.COMPLETED, sink_name="output"),
+            _make_result(RowOutcome.COMPLETED, sink_name="output"),
             _make_result(RowOutcome.FAILED),
             _make_result(RowOutcome.QUARANTINED),
         ]
 
-        accumulate_row_outcomes(results, counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes(results, counters, {"output": Mock()}, pending)
 
         assert counters.rows_succeeded == 2
         assert counters.rows_failed == 1
@@ -255,7 +263,7 @@ class TestAccumulateRowOutcomesMixed:
         counters = _make_counters()
         pending = _make_pending()
 
-        accumulate_row_outcomes([], counters, {"output": Mock()}, "output", pending)
+        accumulate_row_outcomes([], counters, {"output": Mock()}, pending)
 
         assert counters.rows_succeeded == 0
         assert counters.rows_failed == 0
@@ -275,35 +283,33 @@ class TestHandleCoalesceTimeouts:
         timed_out_outcomes: list[Mock] | None = None,
         total_transforms: int = 2,
         coalesce_step: int = 1,
-    ) -> tuple[Mock, Mock, ExecutionCounters, dict, dict]:
+    ) -> tuple[Mock, Mock, ExecutionCounters, dict[str, list[tuple[TokenInfo, PendingOutcome | None]]], dict[CoalesceName, NodeID]]:
         coalesce_executor = Mock()
         coalesce_executor.get_registered_names.return_value = ["merge_1"]
         coalesce_executor.check_timeouts.return_value = timed_out_outcomes or []
 
         processor = Mock()
         processor.process_token.return_value = []
+        processor.resolve_node_step.return_value = coalesce_step
 
         counters = _make_counters()
         pending = _make_pending()
-        coalesce_step_map = {CoalesceName("merge_1"): coalesce_step}
+        coalesce_node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
-        return coalesce_executor, processor, counters, pending, coalesce_step_map
+        return coalesce_executor, processor, counters, pending, coalesce_node_map
 
     def test_no_timeouts_is_noop(self) -> None:
         """No timed-out coalesces means nothing happens."""
-        executor, processor, counters, pending, step_map = self._setup()
+        executor, processor, counters, pending, node_map = self._setup()
 
         handle_coalesce_timeouts(
             coalesce_executor=executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock(), Mock()],
-            config_gates=[],
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert counters.rows_coalesced == 0
@@ -316,63 +322,72 @@ class TestHandleCoalesceTimeouts:
         outcome.merged_token = merged_token
         outcome.failure_reason = None
 
-        executor, processor, counters, pending, step_map = self._setup(
+        executor, processor, counters, pending, node_map = self._setup(
             timed_out_outcomes=[outcome],
             total_transforms=3,
             coalesce_step=1,
         )
         # Simulate downstream producing a COMPLETED result
         processor.process_token.return_value = [
-            _make_result(RowOutcome.COMPLETED, token=merged_token),
+            _make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output"),
         ]
 
+        ctx = Mock()
         handle_coalesce_timeouts(
             coalesce_executor=executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock(), Mock(), Mock()],
-            config_gates=[],
             config_sinks={"output": Mock()},
-            ctx=Mock(),
+            ctx=ctx,
             counters=counters,
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
-        processor.process_token.assert_called_once()
+        processor.process_token.assert_called_once_with(
+            token=merged_token,
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge_1"),
+            coalesce_node_id=NodeID("coalesce::merge_1"),
+            coalesce_name=CoalesceName("merge_1"),
+        )
 
-    def test_merged_token_terminal_goes_to_sink_directly(self) -> None:
-        """Merged token at last step goes directly to sink (no downstream)."""
+    def test_merged_token_terminal_processed_for_explicit_sink_routing(self) -> None:
+        """Terminal merged token is processed to resolve explicit on_success sink."""
         merged_token = make_token_info()
         outcome = Mock()
         outcome.merged_token = merged_token
         outcome.failure_reason = None
 
-        executor, processor, counters, pending, step_map = self._setup(
+        executor, processor, counters, pending, node_map = self._setup(
             timed_out_outcomes=[outcome],
             total_transforms=1,
             coalesce_step=1,  # step == total_steps
         )
+        processor.process_token.return_value = [_make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output")]
 
+        ctx = Mock()
         handle_coalesce_timeouts(
             coalesce_executor=executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock()],
-            config_gates=[],
             config_sinks={"output": Mock()},
-            ctx=Mock(),
+            ctx=ctx,
             counters=counters,
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
         assert len(pending["output"]) == 1
-        processor.process_token.assert_not_called()
+        processor.process_token.assert_called_once_with(
+            token=merged_token,
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge_1"),
+            coalesce_node_id=NodeID("coalesce::merge_1"),
+            coalesce_name=CoalesceName("merge_1"),
+        )
 
     def test_failure_increments_coalesce_failed(self) -> None:
         """Failed coalesce (missing branches) increments coalesce_failed."""
@@ -380,21 +395,18 @@ class TestHandleCoalesceTimeouts:
         outcome.merged_token = None
         outcome.failure_reason = "quorum_not_met"
 
-        executor, processor, counters, pending, step_map = self._setup(
+        executor, processor, counters, pending, node_map = self._setup(
             timed_out_outcomes=[outcome],
         )
 
         handle_coalesce_timeouts(
             coalesce_executor=executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock(), Mock()],
-            config_gates=[],
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert counters.rows_coalesce_failed == 1
@@ -422,31 +434,37 @@ class TestFlushCoalescePending:
 
         processor = Mock()
         processor.process_token.return_value = [
-            _make_result(RowOutcome.COMPLETED, token=merged_token),
+            _make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output"),
         ]
+        processor.resolve_node_step.return_value = 0
 
         counters = _make_counters()
         pending = _make_pending()
-        step_map = {CoalesceName("merge_1"): 0}
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
+        ctx = Mock()
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock(), Mock()],
-            config_gates=[],
             config_sinks={"output": Mock()},
-            ctx=Mock(),
+            ctx=ctx,
             counters=counters,
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
+        processor.process_token.assert_called_once_with(
+            token=merged_token,
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge_1"),
+            coalesce_node_id=NodeID("coalesce::merge_1"),
+            coalesce_name=CoalesceName("merge_1"),
+        )
 
     def test_merged_token_terminal(self) -> None:
-        """Terminal merged token goes directly to sink."""
+        """Terminal merged token is processed to resolve explicit on_success sink."""
         merged_token = make_token_info()
         outcome = Mock()
         outcome.merged_token = merged_token
@@ -457,27 +475,33 @@ class TestFlushCoalescePending:
         coalesce_executor.flush_pending.return_value = [outcome]
 
         processor = Mock()
+        processor.resolve_node_step.return_value = 1
+        processor.process_token.return_value = [_make_result(RowOutcome.COMPLETED, token=merged_token, sink_name="output")]
         counters = _make_counters()
         pending = _make_pending()
-        step_map = {CoalesceName("merge_1"): 1}
+        node_map = {CoalesceName("merge_1"): NodeID("coalesce::merge_1")}
 
+        ctx = Mock()
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
-            coalesce_step_map=step_map,
+            coalesce_node_map=node_map,
             processor=processor,
-            config_transforms=[Mock()],
-            config_gates=[],
             config_sinks={"output": Mock()},
-            ctx=Mock(),
+            ctx=ctx,
             counters=counters,
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert counters.rows_coalesced == 1
         assert counters.rows_succeeded == 1
         assert len(pending["output"]) == 1
-        processor.process_token.assert_not_called()
+        processor.process_token.assert_called_once_with(
+            token=merged_token,
+            ctx=ctx,
+            current_node_id=NodeID("coalesce::merge_1"),
+            coalesce_node_id=NodeID("coalesce::merge_1"),
+            coalesce_name=CoalesceName("merge_1"),
+        )
 
     def test_failure_increments_coalesce_failed(self) -> None:
         """Failed flush outcomes increment coalesce_failed counter."""
@@ -494,15 +518,12 @@ class TestFlushCoalescePending:
 
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
-            coalesce_step_map={},
+            coalesce_node_map={},
             processor=Mock(),
-            config_transforms=[],
-            config_gates=[],
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert counters.rows_coalesce_failed == 1
@@ -517,15 +538,12 @@ class TestFlushCoalescePending:
 
         flush_coalesce_pending(
             coalesce_executor=coalesce_executor,
-            coalesce_step_map={},
+            coalesce_node_map={},
             processor=Mock(),
-            config_transforms=[],
-            config_gates=[],
             config_sinks={"output": Mock()},
             ctx=Mock(),
             counters=counters,
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert counters.rows_coalesced == 0

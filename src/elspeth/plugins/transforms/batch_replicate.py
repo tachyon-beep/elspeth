@@ -11,6 +11,7 @@ For output_mode: transform, the engine creates NEW tokens for each output
 row, with parent linkage to track deaggregation lineage.
 """
 
+import copy
 from typing import Any
 
 from pydantic import Field
@@ -88,7 +89,6 @@ class BatchReplicate(BaseTransform):
         self._copies_field = cfg.copies_field
         self._default_copies = cfg.default_copies
         self._include_copy_index = cfg.include_copy_index
-        self._on_error = cfg.on_error
 
         self._schema_config = cfg.schema_config
 
@@ -175,8 +175,9 @@ class BatchReplicate(BaseTransform):
 
             # Create copies of this row
             for copy_idx in range(copies):
-                # Use explicit to_dict() conversion (PipelineRow guaranteed by engine)
-                output = row.to_dict()  # Shallow copy preserves original data
+                # Deep copy ensures each replica is fully independent —
+                # shallow copy would share nested mutable values across copies
+                output = copy.deepcopy(row.to_dict())
                 if self._include_copy_index:
                     output["copy_index"] = copy_idx
                 valid_rows.append(output)

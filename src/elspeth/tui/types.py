@@ -18,6 +18,7 @@ class NodeInfo(TypedDict):
 
     name: str
     node_id: str | None
+    node_type: str
 
 
 class SourceInfo(TypedDict):

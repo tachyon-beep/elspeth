@@ -16,14 +16,14 @@ Key invariants:
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import fields
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
+from elspeth.contracts import PendingOutcome, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.results import RowResult
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.engine.orchestrator.outcomes import accumulate_row_outcomes
@@ -108,6 +108,8 @@ def _make_row_result(
     branch_name: str | None = None,
 ) -> RowResult:
     """Create a RowResult for outcome accumulation tests."""
+    if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) and sink_name is None:
+        sink_name = "default"
     token = _make_token(branch_name=branch_name)
     return RowResult(
         token=token,
@@ -494,13 +496,13 @@ class TestAccumulateRowOutcomesProperties:
         self,
         outcomes: list[RowResult],
         sink_names: dict[str, object] | None = None,
-    ) -> tuple[ExecutionCounters, dict[str, list]]:
+    ) -> tuple[ExecutionCounters, dict[str, list[tuple[TokenInfo, PendingOutcome | None]]]]:
         """Helper: run accumulate_row_outcomes and return counters + pending_tokens."""
         counters = ExecutionCounters()
         if sink_names is None:
             sink_names = {"default": object(), "alerts": object()}
-        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = defaultdict(list)
-        accumulate_row_outcomes(outcomes, counters, sink_names, "default", pending_tokens)
+        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in sink_names}
+        accumulate_row_outcomes(outcomes, counters, sink_names, pending_tokens)
         return counters, pending_tokens
 
     def test_completed_increments_succeeded(self) -> None:
@@ -513,22 +515,23 @@ class TestAccumulateRowOutcomesProperties:
         assert counters.rows_routed == 0
         assert len(pending["default"]) == 1
 
-    def test_completed_routes_to_branch_sink(self) -> None:
-        """Property: COMPLETED with branch_name routes to branch sink if it exists."""
-        result = _make_row_result(RowOutcome.COMPLETED, branch_name="alerts")
+    def test_completed_uses_explicit_sink_name(self) -> None:
+        """Property: COMPLETED routing uses result.sink_name, not branch_name."""
+        result = _make_row_result(RowOutcome.COMPLETED, sink_name="alerts", branch_name="ignored_branch")
         counters, pending = self._run_accumulation([result])
 
         assert counters.rows_succeeded == 1
         assert len(pending["alerts"]) == 1
         assert len(pending["default"]) == 0
 
-    def test_completed_falls_back_to_default(self) -> None:
-        """Property: COMPLETED with unknown branch_name falls back to default sink."""
-        result = _make_row_result(RowOutcome.COMPLETED, branch_name="nonexistent")
+    def test_completed_ignores_branch_name_when_sink_explicit(self) -> None:
+        """Property: branch_name never determines COMPLETED sink routing."""
+        result = _make_row_result(RowOutcome.COMPLETED, sink_name="default", branch_name="alerts")
         counters, pending = self._run_accumulation([result])
 
         assert counters.rows_succeeded == 1
         assert len(pending["default"]) == 1
+        assert len(pending["alerts"]) == 0
 
     def test_routed_increments_routed(self) -> None:
         """Property: ROUTED outcome increments rows_routed."""
@@ -540,10 +543,16 @@ class TestAccumulateRowOutcomesProperties:
         assert len(pending["alerts"]) == 1
 
     def test_routed_without_sink_name_raises(self) -> None:
-        """Property: ROUTED without sink_name raises RuntimeError."""
-        result = _make_row_result(RowOutcome.ROUTED, sink_name=None)
-        with pytest.raises(RuntimeError, match="ROUTED outcome requires sink_name"):
-            self._run_accumulation([result])
+        """Property: ROUTED without sink_name raises at construction time."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        with pytest.raises(OrchestrationInvariantError, match="ROUTED outcome requires sink_name"):
+            RowResult(
+                token=_make_token(),
+                final_data={"field": "value"},
+                outcome=RowOutcome.ROUTED,
+                sink_name=None,
+            )
 
     def test_failed_increments_failed(self) -> None:
         """Property: FAILED outcome increments rows_failed."""
@@ -656,7 +665,7 @@ class TestRunResultFieldProperties:
         """Property: Optional counter fields default to zero."""
         result = RunResult(
             run_id="run-1",
-            status="running",
+            status=RunStatus.RUNNING,
             rows_processed=10,
             rows_succeeded=8,
             rows_failed=1,

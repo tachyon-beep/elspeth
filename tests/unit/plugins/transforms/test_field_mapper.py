@@ -39,6 +39,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"new_name": "value", "other": 123}
         assert "old_name" not in result.row
 
@@ -60,6 +61,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"firstName": "Alice", "lastName": "Smith", "id": 1}
 
     def test_select_fields_only(self, ctx: PluginContext) -> None:
@@ -78,6 +80,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"id": 1, "name": "alice"}
         assert "secret" not in result.row
         assert "extra" not in result.row
@@ -116,6 +119,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"other_field": "value"}
         assert "output" not in result.row
 
@@ -169,6 +173,7 @@ class TestFieldMapper:
         result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == row
 
     def test_requires_schema_config(self) -> None:

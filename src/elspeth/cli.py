@@ -7,6 +7,8 @@ Entry point for the elspeth CLI tool.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -19,7 +21,7 @@ from pydantic import ValidationError
 
 from elspeth import __version__
 from elspeth.contracts import ExecutionResult
-from elspeth.core.config import ElspethSettings, load_settings, resolve_config
+from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
 from elspeth.testing.chaosllm.cli import app as chaosllm_app
@@ -27,8 +29,8 @@ from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
-    from elspeth.core.config import SecretsConfig
     from elspeth.core.landscape import LandscapeDB
+    from elspeth.engine import Orchestrator, PipelineConfig
     from elspeth.engine.orchestrator import RowPlugin
     from elspeth.plugins.manager import PluginManager
     from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
@@ -296,20 +298,6 @@ def _load_settings_with_secrets(
     return config, secret_resolutions
 
 
-def _extract_secrets_config(raw_config: dict[str, Any]) -> SecretsConfig:
-    """Extract and validate secrets config from raw YAML.
-
-    Returns SecretsConfig with defaults if not specified.
-
-    Raises:
-        ValidationError: If secrets config is invalid
-    """
-    from elspeth.core.config import SecretsConfig
-
-    secrets_dict = raw_config.get("secrets", {})
-    return SecretsConfig(**secrets_dict)
-
-
 @app.command()
 def run(
     settings: str = typer.Option(
@@ -352,48 +340,26 @@ def run(
 
     settings_path = Path(settings).expanduser()
 
-    # Load and validate config via Pydantic
-    # Two-phase loading: extract secrets config first, then full resolution
+    # Load and validate config with Key Vault secrets (same flow as other commands)
     try:
-        # Phase 1: Parse YAML to extract secrets config (no ${VAR} resolution yet)
-        # NOTE: vault_url must be literal per design - ${VAR} not supported
-        raw_config = _load_raw_yaml(settings_path)
+        config, secret_resolutions = _load_settings_with_secrets(settings_path)
     except FileNotFoundError:
         typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
-    except yaml.YAMLError as e:
-        typer.echo(f"YAML syntax error in {settings}: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    # Extract and validate secrets config
-    try:
-        secrets_config = _extract_secrets_config(raw_config)
-    except ValidationError as e:
-        typer.echo("Secrets configuration errors:", err=True)
-        for error in e.errors():
-            loc = ".".join(str(x) for x in error["loc"])
-            typer.echo(f"  - secrets.{loc}: {error['msg']}", err=True)
-        raise typer.Exit(1) from None
-
-    # Phase 2: Load secrets from Key Vault if configured
-    # Returns resolution records for later audit recording
-    try:
-        secret_resolutions = load_secrets_from_config(secrets_config)
-    except SecretLoadError as e:
-        typer.echo(f"Error loading secrets: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    # Phase 3: Full config loading with Dynaconf (resolves ${VAR})
-    try:
-        config = load_settings(settings_path)
     except (YamlParserError, YamlScannerError) as e:
         typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
+        raise typer.Exit(1) from None
+    except yaml.YAMLError as e:
+        typer.echo(f"YAML syntax error in {settings}: {e}", err=True)
         raise typer.Exit(1) from None
     except ValidationError as e:
         typer.echo("Configuration errors:", err=True)
         for error in e.errors():
             loc = ".".join(str(x) for x in error["loc"])
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
+        raise typer.Exit(1) from None
+    except SecretLoadError as e:
+        typer.echo(f"Error loading secrets: {e}", err=True)
         raise typer.Exit(1) from None
 
     # NEW: Instantiate plugins BEFORE graph construction
@@ -414,21 +380,20 @@ def run(
     try:
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=execution_sinks,
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
-    except ValueError as e:
-        # Schema compatibility errors raised during graph construction (PHASE 2)
-        # Updated for Task 4: Schema validation moved to construction time
-        typer.echo(f"Schema validation error: {e}", err=True)
-        raise typer.Exit(1) from None
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        # Schema compatibility errors raised during graph construction (PHASE 2)
+        typer.echo(f"Schema validation error: {e}", err=True)
         raise typer.Exit(1) from None
 
     # Console-only messages (don't emit in JSON mode to keep stream clean)
@@ -466,15 +431,25 @@ def run(
             typer.echo(f"\n{dir_error}", err=True)
         raise typer.Exit(1)
 
+    # Resolve SQLCipher passphrase (if backend=sqlcipher)
+    from elspeth.cli_helpers import resolve_audit_passphrase
+
+    try:
+        passphrase = resolve_audit_passphrase(config.landscape)
+    except RuntimeError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
     # Execute pipeline with pre-instantiated plugins
     try:
-        _execute_pipeline_with_instances(
+        execution_result = _execute_pipeline_with_instances(
             config,
             graph,
             plugins,
             verbose=verbose,
             output_format=output_format,
             secret_resolutions=secret_resolutions,
+            passphrase=passphrase,
         )
     except Exception as e:
         # Emit structured error for JSON mode, human-readable for console
@@ -494,6 +469,12 @@ def run(
         else:
             typer.echo(f"Error during pipeline execution: {e}", err=True)
         raise typer.Exit(1) from None
+
+    # Emit final execution summary in JSON mode for machine consumption
+    if output_format == "json":
+        import json
+
+        typer.echo(json.dumps({"event": "execution_result", **execution_result}))
 
 
 @app.command()
@@ -581,8 +562,34 @@ def explain(
     # Resolve database URL
     settings_path = Path(settings) if settings else None
     try:
-        db_url, _ = resolve_database_url(database, settings_path)
+        db_url, config = resolve_database_url(database, settings_path)
     except ValueError as e:
+        if json_output:
+            typer.echo(json_module.dumps({"error": str(e)}))
+        else:
+            typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Resolve SQLCipher passphrase.
+    # When --database is provided, resolve_database_url returns config=None
+    # (the CLI path overrides settings-based URL). But we still need the
+    # settings for passphrase resolution (custom encryption_key_env).
+    # Load settings separately if --settings was provided but config is None.
+    from elspeth.cli_helpers import resolve_audit_passphrase
+
+    landscape_settings = config.landscape if config else None
+    if landscape_settings is None and settings_path is not None and settings_path.exists():
+        try:
+            from elspeth.core.config import load_settings
+
+            settings_for_passphrase = load_settings(settings_path)
+            landscape_settings = settings_for_passphrase.landscape
+        except Exception:
+            pass  # No settings available — passphrase will be None
+
+    try:
+        passphrase = resolve_audit_passphrase(landscape_settings)
+    except RuntimeError as e:
         if json_output:
             typer.echo(json_module.dumps({"error": str(e)}))
         else:
@@ -593,7 +600,7 @@ def explain(
     # Initialize db = None for proper cleanup in finally block
     db: LandscapeDB | None = None
     try:
-        db = LandscapeDB.from_url(db_url, create_tables=False)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase, create_tables=False)
     except Exception as e:
         if json_output:
             typer.echo(json_module.dumps({"error": f"Database connection failed: {e}"}))
@@ -672,6 +679,133 @@ def explain(
             db.close()
 
 
+@dataclass(frozen=True, slots=True)
+class _OrchestratorContext:
+    """Shared context yielded by _orchestrator_context()."""
+
+    pipeline_config: PipelineConfig
+    orchestrator: Orchestrator
+
+
+@contextmanager
+def _orchestrator_context(
+    config: ElspethSettings,
+    graph: ExecutionGraph,
+    plugins: dict[str, Any],
+    *,
+    db: LandscapeDB,
+    formatter_prefix: str = "Run",
+    output_format: Literal["console", "json"] = "console",
+    checkpoint_always: bool = False,
+) -> Iterator[_OrchestratorContext]:
+    """Shared orchestrator setup and teardown for run/resume CLI paths.
+
+    Handles:
+    - Plugin unpacking and aggregation wiring
+    - PipelineConfig construction
+    - EventBus + formatter subscription
+    - Runtime*Config creation (rate_limit, concurrency, checkpoint, telemetry)
+    - RateLimitRegistry, CheckpointManager, TelemetryManager lifecycle
+    - Orchestrator construction
+
+    Teardown (always runs): closes rate_limit_registry and telemetry_manager.
+
+    Args:
+        config: Validated ElspethSettings
+        graph: Validated ExecutionGraph (schemas populated)
+        plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
+        db: LandscapeDB connection (caller owns close lifecycle)
+        formatter_prefix: Prefix for console formatters ("Run" or "Resume")
+        output_format: 'console' or 'json'
+        checkpoint_always: If True, always create CheckpointManager (resume needs it).
+            If False, only create when checkpoint config is enabled (normal run).
+
+    Yields:
+        _OrchestratorContext with pipeline_config and orchestrator
+    """
+    from elspeth.cli_formatters import create_console_formatters, create_json_formatters, subscribe_formatters
+    from elspeth.contracts.config.runtime import (
+        RuntimeCheckpointConfig,
+        RuntimeConcurrencyConfig,
+        RuntimeRateLimitConfig,
+        RuntimeTelemetryConfig,
+    )
+    from elspeth.core import EventBus
+    from elspeth.core.checkpoint import CheckpointManager
+    from elspeth.core.config import AggregationSettings
+    from elspeth.core.rate_limit import RateLimitRegistry
+    from elspeth.engine import Orchestrator as _Orchestrator
+    from elspeth.engine import PipelineConfig as _PipelineConfig
+    from elspeth.telemetry import create_telemetry_manager
+
+    # Unpack pre-instantiated plugins
+    source: SourceProtocol = plugins["source"]
+    sinks: dict[str, SinkProtocol] = plugins["sinks"]
+
+    # Build transforms list: row_plugins + aggregations (with node_id)
+    transforms: list[RowPlugin] = [wired.plugin for wired in plugins["transforms"]]
+
+    agg_id_map = graph.get_aggregation_id_map()
+    aggregation_settings: dict[str, AggregationSettings] = {}
+
+    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
+        node_id = agg_id_map[agg_name]
+        aggregation_settings[node_id] = agg_config
+        transform.node_id = node_id
+        transforms.append(transform)
+
+    # Build PipelineConfig
+    pipeline_config = _PipelineConfig(
+        source=source,
+        transforms=transforms,
+        sinks=sinks,
+        config=resolve_config(config),
+        gates=list(config.gates),
+        aggregation_settings=aggregation_settings,
+    )
+
+    # EventBus + formatters
+    event_bus = EventBus()
+    formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix=formatter_prefix)
+    subscribe_formatters(event_bus, formatters)
+
+    # Runtime configs
+    rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+    concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+    checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+    telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+
+    rate_limit_registry: RateLimitRegistry | None = None
+    telemetry_manager = None
+
+    try:
+        rate_limit_registry = RateLimitRegistry(rate_limit_config)
+        telemetry_manager = create_telemetry_manager(telemetry_config)
+
+        # Checkpoint manager: always for resume, conditional for run
+        checkpoint_manager = CheckpointManager(db) if checkpoint_always or checkpoint_config.enabled else None
+
+        orchestrator = _Orchestrator(
+            db,
+            event_bus=event_bus,
+            rate_limit_registry=rate_limit_registry,
+            concurrency_config=concurrency_config,
+            checkpoint_manager=checkpoint_manager,
+            checkpoint_config=checkpoint_config,
+            telemetry_manager=telemetry_manager,
+        )
+
+        yield _OrchestratorContext(
+            pipeline_config=pipeline_config,
+            orchestrator=orchestrator,
+        )
+    finally:
+        if rate_limit_registry is not None:
+            rate_limit_registry.close()
+        if telemetry_manager is not None:
+            telemetry_manager.close()
+
+
 def _execute_pipeline_with_instances(
     config: ElspethSettings,
     graph: ExecutionGraph,
@@ -679,11 +813,9 @@ def _execute_pipeline_with_instances(
     verbose: bool = False,
     output_format: Literal["console", "json"] = "console",
     secret_resolutions: list[dict[str, Any]] | None = None,
+    passphrase: str | None = None,
 ) -> ExecutionResult:
     """Execute pipeline using pre-instantiated plugin instances.
-
-    NEW execution path that reuses plugins instantiated during graph construction.
-    Eliminates double instantiation.
 
     Args:
         config: Validated ElspethSettings
@@ -693,37 +825,25 @@ def _execute_pipeline_with_instances(
         output_format: 'console' or 'json'
         secret_resolutions: Optional list of secret resolution records from
             load_secrets_from_config(). Passed to orchestrator for audit recording.
+        passphrase: Optional SQLCipher passphrase for encrypted audit DB
 
     Returns:
         ExecutionResult with run_id, status, rows_processed
     """
-    from elspeth.core.config import AggregationSettings
     from elspeth.core.landscape import LandscapeDB
-    from elspeth.engine import Orchestrator, PipelineConfig
 
-    # Use pre-instantiated plugins with explicit protocol types
-    source: SourceProtocol = plugins["source"]
-    sinks: dict[str, SinkProtocol] = plugins["sinks"]
+    # Warn if JSONL journal is enabled alongside SQLCipher — journal is plaintext
+    if passphrase is not None and config.landscape.dump_to_jsonl:
+        import structlog
 
-    # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[RowPlugin] = list(plugins["transforms"])
+        structlog.get_logger().warning(
+            "JSONL journal is not encrypted",
+            hint="The JSONL change journal is written in plaintext even when the audit database is encrypted with SQLCipher.",
+        )
 
-    # Add aggregation transforms with node_id attached
-    agg_id_map = graph.get_aggregation_id_map()
-    aggregation_settings: dict[str, AggregationSettings] = {}
-
-    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
-        node_id = agg_id_map[agg_name]
-        aggregation_settings[node_id] = agg_config
-
-        # Set node_id so processor can identify as aggregation
-        transform.node_id = node_id
-        transforms.append(transform)
-
-    # Get database
-    db_url = config.landscape.url
     db = LandscapeDB.from_url(
-        db_url,
+        config.landscape.url,
+        passphrase=passphrase,
         dump_to_jsonl=config.landscape.dump_to_jsonl,
         dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
         dump_to_jsonl_fail_on_error=config.landscape.dump_to_jsonl_fail_on_error,
@@ -736,7 +856,6 @@ def _execute_pipeline_with_instances(
     )
 
     # Create payload store for audit compliance
-    # (CLAUDE.md: "Source entry - Raw data stored before any processing")
     from elspeth.core.payload_store import FilesystemPayloadStore
 
     if config.payload_store.backend != "filesystem":
@@ -747,81 +866,32 @@ def _execute_pipeline_with_instances(
         raise typer.Exit(1)
     payload_store = FilesystemPayloadStore(config.payload_store.base_path)
 
-    # Initialize rate_limit_registry to None so it's defined in finally block
-    rate_limit_registry = None
-    telemetry_manager = None
-
     try:
-        # Build PipelineConfig with pre-instantiated plugins
-        pipeline_config = PipelineConfig(
-            source=source,
-            transforms=transforms,
-            sinks=sinks,
-            config=resolve_config(config),
-            gates=list(config.gates),
-            aggregation_settings=aggregation_settings,
-        )
-
         if verbose:
             typer.echo("Starting pipeline execution...")
 
-        # Create event bus and subscribe formatters
-        from elspeth.cli_formatters import create_console_formatters, create_json_formatters, subscribe_formatters
-        from elspeth.core import EventBus
+        with _orchestrator_context(
+            config,
+            graph,
+            plugins,
+            db=db,
+            formatter_prefix="Run",
+            output_format=output_format,
+        ) as ctx:
+            result = ctx.orchestrator.run(
+                ctx.pipeline_config,
+                graph=graph,
+                settings=config,
+                payload_store=payload_store,
+                secret_resolutions=secret_resolutions,
+            )
 
-        event_bus = EventBus()
-        formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix="Run")
-        subscribe_formatters(event_bus, formatters)
-
-        # Create runtime configs for external calls and checkpointing
-        from elspeth.contracts.config.runtime import (
-            RuntimeCheckpointConfig,
-            RuntimeConcurrencyConfig,
-            RuntimeRateLimitConfig,
-            RuntimeTelemetryConfig,
-        )
-        from elspeth.core.checkpoint import CheckpointManager
-        from elspeth.core.rate_limit import RateLimitRegistry
-        from elspeth.telemetry import create_telemetry_manager
-
-        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
-        rate_limit_registry = RateLimitRegistry(rate_limit_config)
-        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
-        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
-        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
-        telemetry_manager = create_telemetry_manager(telemetry_config)
-
-        # Create checkpoint manager if checkpointing is enabled
-        checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
-
-        # Execute via Orchestrator (creates full audit trail)
-        orchestrator = Orchestrator(
-            db,
-            event_bus=event_bus,
-            rate_limit_registry=rate_limit_registry,
-            concurrency_config=concurrency_config,
-            checkpoint_manager=checkpoint_manager,
-            checkpoint_config=checkpoint_config,
-            telemetry_manager=telemetry_manager,
-        )
-        result = orchestrator.run(
-            pipeline_config,
-            graph=graph,
-            settings=config,
-            payload_store=payload_store,
-            secret_resolutions=secret_resolutions,
-        )
-
-        return {
-            "run_id": result.run_id,
-            "status": result.status,  # RunStatus enum (str subclass)
-            "rows_processed": result.rows_processed,
-        }
+            return {
+                "run_id": result.run_id,
+                "status": result.status,  # RunStatus enum (str subclass)
+                "rows_processed": result.rows_processed,
+            }
     finally:
-        if rate_limit_registry is not None:
-            rate_limit_registry.close()
-        if telemetry_manager is not None:
-            telemetry_manager.close()
         db.close()
 
 
@@ -973,27 +1043,27 @@ def validate(
     try:
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
+    except GraphValidationError as e:
+        _format_validation_error(
+            title="Pipeline Graph Error",
+            message=str(e),
+            hint="Check for cycles, missing sinks, or invalid routing.",
+        )
+        raise typer.Exit(1) from None
     except ValueError as e:
         # Schema compatibility errors raised during graph construction
         _format_validation_error(
             title="Schema Validation Error",
             message=str(e),
             hint="Ensure upstream nodes provide fields required by downstream nodes.",
-        )
-        raise typer.Exit(1) from None
-    except GraphValidationError as e:
-        _format_validation_error(
-            title="Pipeline Graph Error",
-            message=str(e),
-            hint="Check for cycles, missing sinks, or invalid routing.",
         )
         raise typer.Exit(1) from None
 
@@ -1214,10 +1284,19 @@ def purge(
         typer.echo(f"Using retention_days from config: {effective_retention_days}")
     # else: use the fallback default of 90
 
+    # Resolve SQLCipher passphrase
+    from elspeth.cli_helpers import resolve_audit_passphrase
+
+    try:
+        passphrase = resolve_audit_passphrase(config.landscape if config else None)
+    except RuntimeError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
     # Initialize database and payload store
     # Note: purge is read-only for audit data, no JSONL journaling needed
     try:
-        db = LandscapeDB.from_url(db_url)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase)
     except Exception as e:
         typer.echo(f"Error connecting to database: {e}", err=True)
         raise typer.Exit(1) from None
@@ -1271,10 +1350,9 @@ def _execute_resume_with_instances(
     resume_point: Any,
     payload_store: PayloadStore | None,
     db: LandscapeDB,
+    output_format: Literal["console", "json"] = "console",
 ) -> Any:  # Returns RunResult from orchestrator.resume()
     """Execute resume using pre-instantiated plugins.
-
-    Similar to _execute_pipeline_with_instances but for resume operations.
 
     Args:
         config: Validated ElspethSettings
@@ -1282,103 +1360,31 @@ def _execute_resume_with_instances(
         plugins: Pre-instantiated plugins (with NullSource)
         resume_point: Resume point information
         payload_store: Payload store for retrieving row data
-        db: LandscapeDB connection
+        db: LandscapeDB connection (caller owns close lifecycle)
+        output_format: 'console' or 'json'
 
     Returns:
         RunResult from orchestrator.resume()
     """
-    from elspeth.core.checkpoint import CheckpointManager
-    from elspeth.core.config import AggregationSettings
-    from elspeth.engine import Orchestrator, PipelineConfig
+    if payload_store is None:
+        raise ValueError("payload_store is required for resume operations")
 
-    # Use pre-instantiated plugins with explicit protocol types
-    source: SourceProtocol = plugins["source"]
-    sinks: dict[str, SinkProtocol] = plugins["sinks"]
-
-    # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[RowPlugin] = list(plugins["transforms"])
-
-    # Add aggregation transforms with node_id attached
-    agg_id_map = graph.get_aggregation_id_map()
-    aggregation_settings: dict[str, AggregationSettings] = {}
-
-    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
-        node_id = agg_id_map[agg_name]
-        aggregation_settings[node_id] = agg_config
-
-        # Set node_id so processor can identify as aggregation
-        transform.node_id = node_id
-        transforms.append(transform)
-
-    # Build PipelineConfig with pre-instantiated plugins
-    pipeline_config = PipelineConfig(
-        source=source,
-        transforms=transforms,
-        sinks=sinks,
-        config=resolve_config(config),
-        gates=list(config.gates),
-        aggregation_settings=aggregation_settings,
-    )
-
-    # Create event bus and subscribe formatters
-    from elspeth.cli_formatters import create_console_formatters, subscribe_formatters
-    from elspeth.core import EventBus
-
-    event_bus = EventBus()
-    subscribe_formatters(event_bus, create_console_formatters(prefix="Resume"))
-
-    # Create runtime configs for external calls and checkpointing
-    from elspeth.contracts.config.runtime import (
-        RuntimeCheckpointConfig,
-        RuntimeConcurrencyConfig,
-        RuntimeRateLimitConfig,
-        RuntimeTelemetryConfig,
-    )
-    from elspeth.core.rate_limit import RateLimitRegistry
-    from elspeth.telemetry import create_telemetry_manager
-
-    # Initialize to None so they're defined in finally block even if creation fails
-    rate_limit_registry = None
-    telemetry_manager = None
-
-    try:
-        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
-        rate_limit_registry = RateLimitRegistry(rate_limit_config)
-        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
-        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
-        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
-        telemetry_manager = create_telemetry_manager(telemetry_config)
-
-        # Create checkpoint manager and orchestrator for resume
-        checkpoint_manager = CheckpointManager(db)
-        orchestrator = Orchestrator(
-            db,
-            event_bus=event_bus,
-            checkpoint_manager=checkpoint_manager,
-            checkpoint_config=checkpoint_config,
-            rate_limit_registry=rate_limit_registry,
-            concurrency_config=concurrency_config,
-            telemetry_manager=telemetry_manager,
-        )
-
-        # Execute resume (payload_store is required for resume)
-        if payload_store is None:
-            raise ValueError("payload_store is required for resume operations")
-        result = orchestrator.resume(
+    with _orchestrator_context(
+        config,
+        graph,
+        plugins,
+        db=db,
+        formatter_prefix="Resume",
+        output_format=output_format,
+        checkpoint_always=True,
+    ) as ctx:
+        return ctx.orchestrator.resume(
             resume_point=resume_point,
-            config=pipeline_config,
+            config=ctx.pipeline_config,
             graph=graph,
             payload_store=payload_store,
             settings=config,
         )
-
-        return result
-    finally:
-        # Clean up rate limit registry and telemetry (always, even on failure)
-        if rate_limit_registry is not None:
-            rate_limit_registry.close()
-        if telemetry_manager is not None:
-            telemetry_manager.close()
 
 
 def _build_resume_graphs(
@@ -1401,23 +1407,29 @@ def _build_resume_graphs(
     # computed during the original run
     validation_graph = ExecutionGraph.from_plugin_instances(
         source=plugins["source"],
+        source_settings=plugins["source_settings"],
         transforms=plugins["transforms"],
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
         gates=gate_settings,
-        default_sink=settings_config.default_sink,
         coalesce_settings=coalesce_settings,
     )
     validation_graph.validate()
 
-    # Execution graph uses NullSource — resume data comes from stored payloads
+    # Execution graph uses NullSource — resume data comes from stored payloads.
+    # NullSource inherits the original source's on_success (which may be a connection
+    # name or sink name — the DAG builder validates it during graph construction).
+    null_source_on_success = plugins["source"].on_success
+    null_source = NullSource({})
+    null_source.on_success = null_source_on_success
+    null_source_settings = SourceSettings(plugin="null", on_success=null_source_on_success)
     execution_graph = ExecutionGraph.from_plugin_instances(
-        source=NullSource({}),
+        source=null_source,
+        source_settings=null_source_settings,
         transforms=plugins["transforms"],
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
         gates=gate_settings,
-        default_sink=settings_config.default_sink,
         coalesce_settings=coalesce_settings,
     )
     execution_graph.validate()
@@ -1445,6 +1457,12 @@ def resume(
         "--execute",
         "-x",
         help="Actually execute the resume (default is dry-run).",
+    ),
+    output_format: Literal["console", "json"] = typer.Option(
+        "console",
+        "--format",
+        "-f",
+        help="Output format: 'console' (human-readable) or 'json' (structured JSON).",
     ),
 ) -> None:
     """Resume a failed run from its last checkpoint.
@@ -1510,9 +1528,18 @@ def resume(
         db_url = settings_config.landscape.url
         typer.echo(f"Using database from settings.yaml: {db_url}")
 
+    # Resolve SQLCipher passphrase
+    from elspeth.cli_helpers import resolve_audit_passphrase
+
+    try:
+        passphrase = resolve_audit_passphrase(settings_config.landscape)
+    except RuntimeError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
     # Initialize database and recovery manager
     try:
-        db = LandscapeDB.from_url(db_url)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase)
     except Exception as e:
         typer.echo(f"Error connecting to database: {e}", err=True)
         raise typer.Exit(1) from None
@@ -1554,24 +1581,46 @@ def resume(
         unprocessed_row_ids = recovery_manager.get_unprocessed_rows(run_id)
 
         # Display resume point information
-        typer.echo(f"Run {run_id} can be resumed.")
-        typer.echo("\nResume point:")
-        typer.echo(f"  Token ID: {resume_point.token_id}")
-        typer.echo(f"  Node ID: {resume_point.node_id}")
-        typer.echo(f"  Sequence number: {resume_point.sequence_number}")
-        if resume_point.aggregation_state:
-            typer.echo("  Has aggregation state: Yes")
-        else:
-            typer.echo("  Has aggregation state: No")
-        typer.echo(f"  Unprocessed rows: {len(unprocessed_row_ids)}")
+        resume_info = {
+            "run_id": run_id,
+            "can_resume": True,
+            "resume_point": {
+                "token_id": resume_point.token_id,
+                "node_id": resume_point.node_id,
+                "sequence_number": resume_point.sequence_number,
+                "has_aggregation_state": bool(resume_point.aggregation_state),
+            },
+            "unprocessed_rows": len(unprocessed_row_ids),
+        }
+
+        if output_format == "json" and not execute:
+            import json as json_module
+
+            resume_info["dry_run"] = True
+            typer.echo(json_module.dumps(resume_info, indent=2))
+            return
+
+        if output_format != "json":
+            typer.echo(f"Run {run_id} can be resumed.")
+            typer.echo("\nResume point:")
+            typer.echo(f"  Token ID: {resume_point.token_id}")
+            typer.echo(f"  Node ID: {resume_point.node_id}")
+            typer.echo(f"  Sequence number: {resume_point.sequence_number}")
+            if resume_point.aggregation_state:
+                typer.echo("  Has aggregation state: Yes")
+            else:
+                typer.echo("  Has aggregation state: No")
+            typer.echo(f"  Unprocessed rows: {len(unprocessed_row_ids)}")
 
         if not execute:
-            typer.echo("\nDry run - use --execute to actually resume processing.")
-            typer.echo("Topology validation passed - checkpoint is compatible with current config.")
+            if output_format != "json":
+                typer.echo("\nDry run - use --execute to actually resume processing.")
+                typer.echo("Topology validation passed - checkpoint is compatible with current config.")
             return
 
         # Execute resume (graph already built above for validation)
-        typer.echo(f"\nResuming run {run_id}...")
+        if output_format != "json":
+            typer.echo(f"\nResuming run {run_id}...")
 
         # Get payload store from settings
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -1652,7 +1701,9 @@ def resume(
             resume_sinks[sink_name] = sink
 
         # Override source with NullSource for resume (data comes from payloads)
+        null_source_on_success = plugins["source"].on_success
         null_source = NullSource({})
+        null_source.on_success = null_source_on_success
         resume_plugins = {
             **plugins,
             "source": null_source,
@@ -1668,16 +1719,35 @@ def resume(
                 resume_point=resume_point,
                 payload_store=payload_store,
                 db=db,
+                output_format=output_format,
             )
         except Exception as e:
             typer.echo(f"Error during resume: {e}", err=True)
             raise typer.Exit(1) from None
 
-        typer.echo("\nResume complete:")
-        typer.echo(f"  Rows processed: {result.rows_processed}")
-        typer.echo(f"  Rows succeeded: {result.rows_succeeded}")
-        typer.echo(f"  Rows failed: {result.rows_failed}")
-        typer.echo(f"  Status: {result.status.value}")
+        if output_format == "json":
+            import json as json_module
+
+            typer.echo(
+                json_module.dumps(
+                    {
+                        **resume_info,
+                        "result": {
+                            "rows_processed": result.rows_processed,
+                            "rows_succeeded": result.rows_succeeded,
+                            "rows_failed": result.rows_failed,
+                            "status": result.status.value,
+                        },
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            typer.echo("\nResume complete:")
+            typer.echo(f"  Rows processed: {result.rows_processed}")
+            typer.echo(f"  Rows succeeded: {result.rows_succeeded}")
+            typer.echo(f"  Rows failed: {result.rows_failed}")
+            typer.echo(f"  Status: {result.status.value}")
 
     finally:
         db.close()

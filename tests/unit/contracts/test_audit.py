@@ -39,6 +39,7 @@ from elspeth.contracts import (
     TokenOutcome,
     TokenParent,
     TransformErrorRecord,
+    TriggerType,
     ValidationErrorRecord,
 )
 
@@ -585,6 +586,35 @@ class TestBatch:
         assert batch.status == BatchStatus.COMPLETED
         assert batch.aggregation_state_id == "state-789"
         assert batch.trigger_reason == "count_threshold"
+
+    def test_batch_trigger_type_must_be_enum(self) -> None:
+        """Batch.trigger_type must be TriggerType enum, not string."""
+        batch = Batch(
+            batch_id="batch-123",
+            run_id="run-456",
+            aggregation_node_id="node-1",
+            attempt=1,
+            status=BatchStatus.EXECUTING,
+            created_at=datetime.now(UTC),
+            trigger_type=TriggerType.COUNT,
+        )
+
+        assert batch.trigger_type == TriggerType.COUNT
+        assert isinstance(batch.trigger_type, TriggerType)
+        assert batch.trigger_type.value == "count"
+
+    def test_batch_invalid_trigger_type_raises_type_error(self) -> None:
+        """Invalid trigger_type type must crash immediately (Tier 1)."""
+        with pytest.raises(TypeError, match="trigger_type must be TriggerType"):
+            Batch(
+                batch_id="batch-123",
+                run_id="run-456",
+                aggregation_node_id="node-1",
+                attempt=1,
+                status=BatchStatus.EXECUTING,
+                created_at=datetime.now(UTC),
+                trigger_type="count",  # type: ignore[arg-type]
+            )
 
 
 class TestBatchMember:

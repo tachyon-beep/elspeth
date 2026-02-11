@@ -18,8 +18,7 @@ from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
-from elspeth.testing import make_pipeline_row
-from tests.fixtures.factories import make_row
+from elspeth.testing import make_pipeline_row, make_row
 
 from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_httpx_response
 
@@ -239,7 +238,7 @@ class TestOpenRouterLLMTransformInit:
         )
 
         assert transform._model == "anthropic/claude-3-opus"
-        assert transform._api_key == "sk-test-key"
+        assert transform._request_headers["Authorization"] == "Bearer sk-test-key"
         assert transform._base_url == "https://custom.example.com/api/v1"
         assert transform._timeout == 90.0
 

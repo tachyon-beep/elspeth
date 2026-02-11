@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 from hypothesis import assume, given, settings
@@ -70,7 +71,14 @@ checkpoint_leaf_values = json_primitives | aware_datetimes
 
 checkpoint_values = st.recursive(
     checkpoint_leaf_values,
-    lambda children: st.lists(children, max_size=5) | st.dictionaries(st.text(max_size=15), children, max_size=5),
+    lambda children: (
+        st.lists(children, max_size=5)
+        | st.dictionaries(
+            st.text(max_size=15).filter(lambda k: k != "__datetime__"),
+            children,
+            max_size=5,
+        )
+    ),
     max_leaves=30,
 )
 
@@ -105,7 +113,7 @@ class TestRoundTripFidelity:
 
     @given(state=aggregation_states)
     @settings(max_examples=300)
-    def test_aggregation_state_roundtrip(self, state: dict) -> None:
+    def test_aggregation_state_roundtrip(self, state: dict[str, Any]) -> None:
         """Property: Aggregation state survives serialization round-trip."""
         serialized = checkpoint_dumps(state)
         restored = checkpoint_loads(serialized)
@@ -148,7 +156,7 @@ class TestRoundTripFidelity:
 
     @given(values=st.lists(checkpoint_leaf_values, min_size=0, max_size=10))
     @settings(max_examples=200)
-    def test_list_roundtrip(self, values: list) -> None:
+    def test_list_roundtrip(self, values: list[Any]) -> None:
         """Property: Lists of mixed types (including datetimes) round-trip."""
         data = {"items": values}
         restored = checkpoint_loads(checkpoint_dumps(data))
@@ -224,7 +232,7 @@ class TestNaNInfinityRejection:
 
     @given(
         good_keys=st.lists(
-            st.text(min_size=1, max_size=10, alphabet=st.characters(whitelist_categories=("L",))),
+            st.text(min_size=1, max_size=10, alphabet=st.characters(whitelist_categories=("L",))),  # type: ignore[arg-type]  # hypothesis stubs accept tuple
             min_size=1,
             max_size=3,
             unique=True,
@@ -277,7 +285,7 @@ class TestTypeTagIsolation:
         data = {"__datetime__": "2024-06-15T12:30:00+00:00", extra_key: extra_val}
         restored = _restore_types(data)
         assert isinstance(restored, dict)
-        assert not isinstance(restored, datetime)
+        assert not isinstance(restored, datetime)  # type: ignore[unreachable]  # mypy thinks dict & datetime disjoint, but test validates decoder
 
     @given(value=st.text(min_size=1, max_size=50))
     @settings(max_examples=100)
@@ -328,7 +336,7 @@ class TestSerializationDeterminism:
 
     @given(state=aggregation_states)
     @settings(max_examples=200)
-    def test_dumps_is_deterministic(self, state: dict) -> None:
+    def test_dumps_is_deterministic(self, state: dict[str, Any]) -> None:
         """Property: checkpoint_dumps produces identical output for identical input."""
         s1 = checkpoint_dumps(state)
         s2 = checkpoint_dumps(state)

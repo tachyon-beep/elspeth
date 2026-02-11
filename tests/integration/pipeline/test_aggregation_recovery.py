@@ -525,7 +525,7 @@ class TestAggregationRecoveryIntegration:
             "contract": contract.to_checkpoint_format(),  # v2.0: contract required for PipelineRow restoration
         }
         agg_state: dict[str, Any] = {
-            "_version": "2.1",  # Required checkpoint version
+            "_version": "3.0",  # Required checkpoint version
             "sum_aggregator": sum_agg_state,
         }
 
@@ -558,6 +558,7 @@ class TestAggregationRecoveryIntegration:
             NodeID("sum_aggregator"): AggregationSettings(
                 name="sum_aggregator",
                 plugin="test_aggregation",
+                input="source_out",
                 trigger=trigger_config,
                 output_mode="transform",
                 options={},
@@ -567,6 +568,7 @@ class TestAggregationRecoveryIntegration:
         executor = AggregationExecutor(
             recorder=recorder,
             span_factory=span_factory,
+            step_resolver=lambda node_id: 1,
             run_id=run.run_id,
             aggregation_settings=agg_settings,
         )

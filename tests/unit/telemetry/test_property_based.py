@@ -58,6 +58,7 @@ class MockConfig:
     enabled: bool = True
     granularity: TelemetryGranularity = TelemetryGranularity.FULL
     fail_on_total_exporter_failure: bool = False
+    max_consecutive_failures: int = 10
 
     @property
     def backpressure_mode(self) -> Any:

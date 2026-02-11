@@ -23,12 +23,11 @@ from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from elspeth.engine.processor import RowProcessor
+from elspeth.engine.processor import DAGTraversalContext, RowProcessor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
-from elspeth.testing import make_pipeline_row
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field, make_pipeline_row
 from tests.unit.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 # ---------------------------------------------------------------------------
@@ -81,6 +80,16 @@ def _assert_output_token_distinct_from_inputs(
     )
 
 
+def _single_node_traversal(node_id: NodeID, plugin: BaseTransform) -> DAGTraversalContext:
+    return DAGTraversalContext(
+        node_step_map={node_id: 1},
+        node_to_plugin={node_id: plugin},
+        first_transform_node_id=node_id,
+        node_to_next={node_id: None},
+        coalesce_node_map={},
+    )
+
+
 class SumTransform(BaseTransform):
     """Sums values in a batch, outputs single aggregated row."""
 
@@ -95,6 +104,7 @@ class SumTransform(BaseTransform):
     def __init__(self, node_id: str) -> None:
         super().__init__({"schema": {"mode": "observed"}})
         self.node_id = node_id
+        self.on_success = "output"
 
     def process(self, rows: list[dict[str, Any]] | PipelineRow, ctx: PluginContext) -> TransformResult:
         if isinstance(rows, list):
@@ -104,7 +114,7 @@ class SumTransform(BaseTransform):
             fields = tuple(make_field(key) for key in output_row)
             contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
             return TransformResult.success(PipelineRow(output_row, contract), success_reason={"action": "sum"})
-        return TransformResult.success(rows.to_dict(), success_reason={"action": "passthrough"})
+        return TransformResult.success(rows, success_reason={"action": "passthrough"})
 
 
 class TestBatchTokenIdentity:
@@ -142,20 +152,22 @@ class TestBatchTokenIdentity:
             NodeID(agg_node.node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
+                input="default",
                 trigger=TriggerConfig(count=3),  # Batch of 3
                 output_mode="transform",
             ),
         }
 
+        transform = SumTransform(agg_node.node_id)
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            source_on_success="default",
+            traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-
-        transform = SumTransform(agg_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process 3 rows to trigger batch flush
@@ -233,20 +245,22 @@ class TestBatchTokenIdentity:
             NodeID(agg_node.node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
+                input="default",
                 trigger=TriggerConfig(count=2),  # Batch of 2
                 output_mode="transform",
             ),
         }
 
+        transform = SumTransform(agg_node.node_id)
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            source_on_success="default",
+            traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-
-        transform = SumTransform(agg_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process row 0 - buffered, returns CONSUMED_IN_BATCH
@@ -326,20 +340,22 @@ class TestBatchTokenIdentity:
             NodeID(agg_node.node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="summer",
+                input="default",
                 trigger=TriggerConfig(count=3),  # Batch of 3
                 output_mode="transform",
             ),
         }
 
+        transform = SumTransform(agg_node.node_id)
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source_node.node_id),
+            source_on_success="default",
+            traversal=_single_node_traversal(NodeID(agg_node.node_id), transform),
             aggregation_settings=aggregation_settings,
         )
-
-        transform = SumTransform(agg_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process 3 rows to trigger batch flush

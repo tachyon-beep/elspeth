@@ -246,35 +246,39 @@ class CallRecordingMixin:
         Raises:
             FrameworkBugError: If operation doesn't exist or is already completed
         """
-        # Validate operation exists and is open (prevent double-complete)
-        query = select(operations_table.c.status).where(operations_table.c.operation_id == operation_id)
-        current = self._ops.execute_fetchone(query)
-
-        if current is None:
-            raise FrameworkBugError(f"Completing non-existent operation: {operation_id}")
-
-        if current.status != "open":
-            raise FrameworkBugError(
-                f"Completing already-completed operation {operation_id}: current status={current.status}, new status={status}"
-            )
-
-        output_ref = None
-        if output_data and self._payload_store is not None:
-            output_bytes = canonical_json(output_data).encode("utf-8")
-            output_ref = self._payload_store.store(output_bytes)
-
+        # Atomic check-and-update: WHERE constrains both identity and status
+        # to eliminate the TOCTOU race between separate SELECT and UPDATE.
+        # Payload storage is deferred until AFTER the status check succeeds
+        # to avoid orphaned blobs on duplicate-completion races or invalid IDs.
         timestamp = now()
-        self._ops.execute_update(
+        stmt = (
             operations_table.update()
-            .where(operations_table.c.operation_id == operation_id)
+            .where((operations_table.c.operation_id == operation_id) & (operations_table.c.status == "open"))
             .values(
                 completed_at=timestamp,
                 status=status,
-                output_data_ref=output_ref,
                 error_message=error,
                 duration_ms=duration_ms,
             )
         )
+        with self._ops._db.connection() as conn:
+            result = conn.execute(stmt)
+            if result.rowcount == 0:
+                # Distinguish "doesn't exist" from "already completed" for diagnostics
+                check = conn.execute(select(operations_table.c.status).where(operations_table.c.operation_id == operation_id)).fetchone()
+                if check is None:
+                    raise FrameworkBugError(f"Completing non-existent operation: {operation_id}")
+                raise FrameworkBugError(
+                    f"Completing already-completed operation {operation_id}: current status={check.status}, new status={status}"
+                )
+
+            # Store payload only after confirming the operation row was updated
+            if output_data and self._payload_store is not None:
+                output_bytes = canonical_json(output_data).encode("utf-8")
+                output_ref = self._payload_store.store(output_bytes)
+                conn.execute(
+                    operations_table.update().where(operations_table.c.operation_id == operation_id).values(output_data_ref=output_ref)
+                )
 
     def allocate_operation_call_index(self, operation_id: str) -> int:
         """Allocate next call index for an operation_id (thread-safe).

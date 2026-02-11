@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.plugins.transforms.truncate import Truncate
-from tests.fixtures.factories import make_context, make_pipeline_row
+from elspeth.testing import make_pipeline_row
+from tests.fixtures.factories import make_context
 
 from .test_transform_protocol import (
     TransformContractPropertyTestBase,
@@ -98,3 +99,66 @@ class TestTruncateStrictContract(TransformErrorContractTestBase):
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "missing_field"
+
+    def test_strict_wrong_type_returns_error(
+        self,
+        transform: TransformProtocol,
+        ctx: Any,
+    ) -> None:
+        """Contract: Strict mode MUST return error when field is not a string."""
+        ctx = make_context(run_id="test")
+        pipeline_row = make_pipeline_row({"required_field": 42, "id": 3})
+        result = transform.process(pipeline_row, ctx)
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "type_mismatch"
+        assert result.reason["field"] == "required_field"
+        assert result.reason["expected"] == "str"
+        assert result.reason["actual"] == "int"
+
+    def test_strict_none_value_returns_error(
+        self,
+        transform: TransformProtocol,
+        ctx: Any,
+    ) -> None:
+        """Contract: Strict mode MUST return error when field value is None."""
+        ctx = make_context(run_id="test")
+        pipeline_row = make_pipeline_row({"required_field": None, "id": 4})
+        result = transform.process(pipeline_row, ctx)
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "type_mismatch"
+        assert result.reason["actual"] == "NoneType"
+
+
+class TestTruncateLenientNonStringContract(TransformContractPropertyTestBase):
+    """Contract tests: lenient mode passes non-strings through unchanged."""
+
+    @pytest.fixture
+    def transform(self) -> TransformProtocol:
+        """Return a configured transform in lenient (non-strict) mode."""
+        return Truncate(
+            {
+                "fields": {"value": 10},
+                "strict": False,
+                "schema": {"mode": "observed"},
+            }
+        )
+
+    @pytest.fixture
+    def valid_input(self) -> dict[str, Any]:
+        """Return input with non-string field — should pass through in lenient mode."""
+        return {"value": 42, "id": 1}
+
+    def test_lenient_non_string_passes_through(
+        self,
+        transform: TransformProtocol,
+        valid_input: dict[str, Any],
+        ctx: Any,
+    ) -> None:
+        """Contract: Lenient mode MUST pass non-string fields through unchanged."""
+        ctx = make_context(run_id="test")
+        pipeline_row = make_pipeline_row(valid_input)
+        result = transform.process(pipeline_row, ctx)
+        assert result.status == "success"
+        assert result.row["value"] == 42

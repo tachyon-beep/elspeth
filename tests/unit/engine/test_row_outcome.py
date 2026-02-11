@@ -18,6 +18,7 @@ class TestRowResultOutcome:
             token=token,
             final_data={},
             outcome=RowOutcome.COMPLETED,
+            sink_name="output",
         )
         assert isinstance(result.outcome, RowOutcome)
 
@@ -27,10 +28,12 @@ class TestRowResultOutcome:
 
         # Iterate over ALL enum members - not a hardcoded subset
         for outcome in RowOutcome:
+            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
             result = RowResult(
                 token=token,
                 final_data={},
                 outcome=outcome,
+                sink_name=sink_name,
             )
             assert result.outcome == outcome
             assert result.outcome is outcome
@@ -40,7 +43,8 @@ class TestRowResultOutcome:
         token = TokenInfo(row_id="r1", token_id="t1", row_data=make_pipeline_row({}), branch_name=None)
 
         for outcome in RowOutcome:
-            result = RowResult(token=token, final_data={}, outcome=outcome)
+            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
+            result = RowResult(token=token, final_data={}, outcome=outcome, sink_name=sink_name)
             # Use 'is' to verify identity, not just value equality
             assert result.outcome is outcome
 
@@ -51,6 +55,7 @@ class TestRowResultOutcome:
             token=token,
             final_data={},
             outcome=RowOutcome.COMPLETED,
+            sink_name="output",
         )
         # AUD-001: RowOutcome is now (str, Enum) for token_outcomes table storage.
         # The enum instance IS equal to the raw string for database serialization.
@@ -86,7 +91,8 @@ class TestRowResultOutcome:
         ]
 
         for outcome in terminal_outcomes:
-            result = RowResult(token=token, final_data={}, outcome=outcome)
+            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
+            result = RowResult(token=token, final_data={}, outcome=outcome, sink_name=sink_name)
             assert result.outcome.is_terminal is True
 
     def test_buffered_outcome_is_not_terminal(self) -> None:

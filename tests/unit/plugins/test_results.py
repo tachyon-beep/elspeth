@@ -89,6 +89,7 @@ class TestTransformResult:
 
         result = TransformResult.success(make_pipeline_row({"value": 42}), success_reason={"action": "test"})
         assert result.status == "success"
+        assert result.row is not None
         assert result.row.to_dict() == {"value": 42}
         assert result.retryable is False
 
@@ -318,38 +319,30 @@ class TestPluginsPublicAPI:
 
     def test_protocols_importable(self) -> None:
         from elspeth.plugins import (
-            CoalescePolicy,
-            CoalesceProtocol,
-            GateProtocol,
             SinkProtocol,
             SourceProtocol,
             TransformProtocol,
         )
 
-        # NOTE: AggregationProtocol deleted in aggregation structural cleanup
-        assert CoalescePolicy is not None
-        assert CoalesceProtocol is not None
-        assert GateProtocol is not None
         assert SinkProtocol is not None
         assert SourceProtocol is not None
         assert TransformProtocol is not None
 
-    def test_aggregation_protocol_not_exported(self) -> None:
-        """AggregationProtocol should NOT be exported (aggregation is structural)."""
+    def test_deleted_protocols_not_exported(self) -> None:
+        """Deleted protocols should NOT be exported."""
         import elspeth.plugins as plugins
 
         assert not hasattr(plugins, "AggregationProtocol"), "AggregationProtocol should be deleted"
+        assert not hasattr(plugins, "CoalesceProtocol"), "CoalesceProtocol should be deleted"
+        assert not hasattr(plugins, "CoalescePolicy"), "CoalescePolicy should be deleted"
 
     def test_base_classes_importable(self) -> None:
         from elspeth.plugins import (
-            BaseGate,
             BaseSink,
             BaseSource,
             BaseTransform,
         )
 
-        # NOTE: BaseAggregation deleted in aggregation structural cleanup
-        assert BaseGate is not None
         assert BaseSink is not None
         assert BaseSource is not None
         assert BaseTransform is not None

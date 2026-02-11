@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 from elspeth.cli import app
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.core.config import ElspethSettings
-from elspeth.core.dag import ExecutionGraph
+from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
 
 def test_compatible_pipeline_passes_validation():
@@ -27,6 +27,7 @@ def test_compatible_pipeline_passes_validation():
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: test_input.csv
     schema:
@@ -36,7 +37,11 @@ source:
     on_validation_failure: discard
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    plugin: passthrough
+    input: source_out
+    on_success: output
+    on_error: discard
     options:
       schema:
         mode: fixed
@@ -52,8 +57,6 @@ sinks:
         mode: fixed
         fields:
           - "value: float"
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -76,6 +79,7 @@ def test_transform_chain_incompatibility_detected():
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: test_input.csv
     schema:
@@ -85,13 +89,21 @@ source:
     on_validation_failure: discard
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    plugin: passthrough
+    input: source_out
+    on_success: t0_out
+    on_error: discard
     options:
       schema:
         mode: fixed
         fields:
           - "field_a: str"
-  - plugin: passthrough
+  - name: passthrough_1
+    plugin: passthrough
+    input: t0_out
+    on_success: output
+    on_error: discard
     options:
       schema:
         mode: fixed
@@ -105,8 +117,6 @@ sinks:
       path: test_output.json
       schema: {mode: observed}
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -136,6 +146,7 @@ def test_aggregation_output_incompatibility_detected():
     config_yaml = """
 source:
   plugin: csv
+  on_success: stats_input
   options:
     path: test_input.csv
     schema:
@@ -147,6 +158,8 @@ source:
 aggregations:
   - name: stats
     plugin: batch_stats
+    input: stats_input
+    on_success: output
     trigger:
       count: 10
     options:
@@ -165,8 +178,6 @@ sinks:
         mode: fixed
         fields:
           - "total_records: int"  # Would be incompatible, but validation is skipped
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -190,13 +201,18 @@ def test_dynamic_schemas_skip_validation():
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: test_input.csv
     schema: {mode: observed}  # Dynamic schema
     on_validation_failure: discard
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    plugin: passthrough
+    input: source_out
+    on_success: output
+    on_error: discard
     options:
       schema: {mode: observed}
 
@@ -207,8 +223,6 @@ sinks:
       path: test_output.json
       schema: {mode: observed}
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -231,6 +245,7 @@ def test_aggregation_incoming_edge_uses_input_schema():
     config_yaml = """
 source:
   plugin: csv
+  on_success: stats_input
   options:
     path: test.csv
     schema:
@@ -242,6 +257,8 @@ source:
 aggregations:
   - name: stats
     plugin: batch_stats
+    input: stats_input
+    on_success: output
     trigger:
       count: 10
     options:
@@ -258,8 +275,6 @@ sinks:
       path: out.json
       schema: {mode: observed}
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -290,6 +305,7 @@ def test_aggregation_outgoing_edge_uses_output_schema():
     config_yaml = """
 source:
   plugin: csv
+  on_success: stats_input
   options:
     path: test.csv
     schema:
@@ -301,6 +317,8 @@ source:
 aggregations:
   - name: stats
     plugin: batch_stats
+    input: stats_input
+    on_success: output
     trigger:
       count: 10
     options:
@@ -320,8 +338,6 @@ sinks:
         mode: fixed
         fields:
           - "nonexistent_field: str"  # Would be incompatible, but validation is skipped
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -352,6 +368,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
         "path": "test.csv",
         "schema": {"mode": "fixed", "fields": ["invalid syntax!!!"]},
         "on_validation_failure": "discard",
+        "on_success": "out",
     }
 
     with pytest.raises(PluginConfigError, match="Invalid field spec"):
@@ -363,6 +380,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     good_self_bad_compat_config = {
         "source": {
             "plugin": "csv",
+            "on_success": "source_out",
             "options": {
                 "path": "test.csv",
                 "schema": {"mode": "fixed", "fields": ["id: int"]},  # Only has 'id'
@@ -371,7 +389,11 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
         },
         "transforms": [
             {
+                "name": "passthrough_0",
                 "plugin": "passthrough",
+                "input": "source_out",
+                "on_success": "out",
+                "on_error": "discard",
                 "options": {
                     "schema": {"mode": "fixed", "fields": ["id: int", "email: str"]},  # Requires 'email'!
                 },
@@ -383,7 +405,6 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
                 "options": {"path": "out.json", "schema": {"mode": "observed"}, "format": "jsonl"},
             }
         },
-        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -393,12 +414,12 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     plugins = instantiate_plugins_from_config(config)
 
     # Graph construction should fail (PHASE 2 - schemas incompatible)
-    with pytest.raises(ValueError, match=r"Missing fields.*email"):
+    with pytest.raises(GraphValidationError, match=r"Missing fields.*email"):
         ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
+            source_settings=plugins["source_settings"],
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            default_sink=config.default_sink,
         )

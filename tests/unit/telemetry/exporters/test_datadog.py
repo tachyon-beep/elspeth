@@ -513,6 +513,50 @@ class TestDatadogExporterTagSerialization:
         mock_span.set_tag.assert_any_call("elspeth.token_usage.prompt_tokens", 100)
         mock_span.set_tag.assert_any_call("elspeth.token_usage.completion_tokens", 50)
 
+    def test_deeply_nested_dict_bounded_at_max_depth(self) -> None:
+        """Deeply nested dicts are serialized as string beyond max depth.
+
+        Regression test for bead ipfu: _set_tag_value recursed into dicts without
+        any depth limit, meaning adversarial or malformed event data with deeply
+        nested structures could cause a RecursionError (stack overflow).
+        """
+        exporter, _mock_tracer, mock_span = self._create_configured_exporter()
+
+        # Build a dict nested deeper than _MAX_TAG_DEPTH (5)
+        deep = {"leaf": "value"}
+        for i in range(8):
+            deep = {f"level_{i}": deep}
+
+        # Call _set_tag_value directly to test the depth bounding
+        exporter._set_tag_value(mock_span, "elspeth.deep", deep)
+
+        # Collect all tag keys that were set
+        tag_calls = {call[0][0]: call[0][1] for call in mock_span.set_tag.call_args_list}
+
+        # At depth 5, the remaining dict should be serialized as string
+        # rather than continuing to recurse
+        deep_keys = [k for k in tag_calls if k.startswith("elspeth.deep")]
+        assert len(deep_keys) > 0
+
+        # Verify that no key goes deeper than _MAX_TAG_DEPTH levels of nesting
+        max_dots = max(k.count(".") for k in deep_keys)
+        # "elspeth.deep" = 1 dot, plus up to _MAX_TAG_DEPTH levels = 6 dots max
+        assert max_dots <= 1 + exporter._MAX_TAG_DEPTH
+
+        # The deepest tag should be a string (serialized remaining dict)
+        deepest_key = max(deep_keys, key=lambda k: k.count("."))
+        deepest_value = tag_calls[deepest_key]
+        assert isinstance(deepest_value, str), f"At max depth, remaining dict should be serialized as str, got {type(deepest_value)}"
+
+    def test_shallow_dict_still_flattened(self) -> None:
+        """Shallow dicts (under max depth) are still flattened normally."""
+        exporter, _mock_tracer, mock_span = self._create_configured_exporter()
+
+        shallow = {"a": {"b": "value"}}
+        exporter._set_tag_value(mock_span, "elspeth.test", shallow)
+
+        mock_span.set_tag.assert_any_call("elspeth.test.a.b", "value")
+
     def test_int_field_set_directly(self) -> None:
         """Integer fields are set directly as tags."""
         exporter, _mock_tracer, mock_span = self._create_configured_exporter()

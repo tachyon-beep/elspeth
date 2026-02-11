@@ -94,7 +94,6 @@ def _build_graph(config: PipelineConfig) -> ExecutionGraph:
     graph._transform_id_map = {i: NodeID(f"transform_{i}") for i in range(len(config.transforms))}
     graph._config_gate_id_map = {}
     graph._route_resolution_map = {}
-    graph._default_sink = "default"
 
     return graph
 
@@ -135,6 +134,8 @@ class TestCompletedOutcomeTimingContract:
             name = "passthrough"
             input_schema = RowSchema
             output_schema = RowSchema
+            on_error = "discard"
+            on_success = "default"
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
@@ -227,6 +228,8 @@ class TestCompletedOutcomeTimingContract:
             name = "passthrough"
             input_schema = RowSchema
             output_schema = RowSchema
+            on_error = "discard"
+            on_success = "default"
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
@@ -304,6 +307,8 @@ class TestCompletedOutcomeTimingContract:
             name = "passthrough"
             input_schema = RowSchema
             output_schema = RowSchema
+            on_error = "discard"
+            on_success = "default"
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})

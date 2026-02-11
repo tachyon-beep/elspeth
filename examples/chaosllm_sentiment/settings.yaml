@@ -1,47 +1,42 @@
-# ELSPETH ChaosLLM Sentiment Analysis Example
-#
-# Demonstrates ELSPETH's resilience against a noisy LLM backend.
-# Uses ChaosLLM (a local fake LLM server) with ~20% error injection,
-# periodic rate-limit bursts, and malformed responses.
-#
-# The openrouter_llm plugin is pointed at the local ChaosLLM server
-# instead of the real OpenRouter API.
-#
-# Run with:
-#   ./examples/chaosllm_sentiment/run.sh
-
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/chaosllm_sentiment/input.csv
     schema:
       mode: fixed
       fields:
-        - "id: int"
-        - "text: str"
+      - 'id: int'
+      - 'text: str'
     on_validation_failure: discard
-
 transforms:
-  - plugin: openrouter_llm
-    options:
-      api_key: "fake-key-chaosllm-does-not-check"
-      base_url: "http://127.0.0.1:8199/v1"
-      model: "chaosllm/fake-gpt-4"
-      timeout_seconds: 10
-      template: |
-        Analyze the sentiment of the following text and respond with ONLY a JSON object.
+- name: openrouter_llm_0
+  plugin: openrouter_llm
+  input: source_out
+  on_success: output
+  on_error: quarantine
+  options:
+    api_key: fake-key-chaosllm-does-not-check
+    base_url: http://127.0.0.1:8199/v1
+    model: chaosllm/fake-gpt-4
+    timeout_seconds: 10
+    template: 'Analyze the sentiment of the following text and respond with ONLY a JSON object.
 
-        Text: {{ row.text }}
 
-        Respond with exactly this format (no other text):
-        {"sentiment": "positive" or "negative" or "neutral", "confidence": 0.0-1.0, "summary": "brief explanation"}
-      temperature: 0.0
-      response_field: sentiment_analysis
-      required_input_fields: [text]
-      on_error: quarantine
-      schema:
-        mode: observed
+      Text: {{ row.text }}
 
+
+      Respond with exactly this format (no other text):
+
+      {"sentiment": "positive" or "negative" or "neutral", "confidence": 0.0-1.0, "summary": "brief explanation"}
+
+      '
+    temperature: 0.0
+    response_field: sentiment_analysis
+    required_input_fields:
+    - text
+    schema:
+      mode: observed
 sinks:
   output:
     plugin: json
@@ -50,7 +45,6 @@ sinks:
       schema:
         mode: observed
       format: jsonl
-
   quarantine:
     plugin: json
     options:
@@ -58,12 +52,8 @@ sinks:
       schema:
         mode: observed
       format: jsonl
-
-default_sink: output
-
 landscape:
   url: sqlite:///examples/chaosllm_sentiment/runs/audit.db
-
 retry:
   max_attempts: 5
   initial_delay_seconds: 0.5

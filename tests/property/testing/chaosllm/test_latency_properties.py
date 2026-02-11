@@ -15,8 +15,8 @@ import random
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.testing.chaosllm.config import LatencyConfig
-from elspeth.testing.chaosllm.latency_simulator import LatencySimulator
+from elspeth.testing.chaosengine.latency import LatencySimulator
+from elspeth.testing.chaosengine.types import LatencyConfig
 
 # =============================================================================
 # Non-Negativity

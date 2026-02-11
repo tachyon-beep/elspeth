@@ -188,6 +188,7 @@ class _FakeTelemetryConfig:
     granularity: TelemetryGranularity = TelemetryGranularity.FULL
     backpressure_mode: BackpressureMode = BackpressureMode.DROP
     fail_on_total_exporter_failure: bool = False
+    max_consecutive_failures: int = 10
     exporter_configs: tuple[Any, ...] = ()
 
 

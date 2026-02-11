@@ -12,7 +12,7 @@ The dataclass is frozen (immutable) and uses __slots__ for memory efficiency.
 
 import pytest
 
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 class TestFieldContractCreation:

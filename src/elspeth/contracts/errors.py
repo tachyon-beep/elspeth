@@ -52,30 +52,6 @@ class ConfigGateReason(TypedDict):
     result: str
 
 
-class PluginGateReason(TypedDict):
-    """Reason from plugin-based gate.
-
-    Used by custom gate plugins implementing GateProtocol.
-    Enforces minimum auditability: every routing decision MUST have
-    a rule description and the value that triggered it.
-
-    Required fields:
-        rule: Human-readable description of what logic fired
-        matched_value: The value that triggered the routing decision
-
-    Optional fields (for threshold-style gates):
-        threshold: The threshold value compared against
-        field: The field name that was compared
-        comparison: The comparison operator used (">", "<", ">=", etc.)
-    """
-
-    rule: str
-    matched_value: Any
-    threshold: NotRequired[float]
-    field: NotRequired[str]
-    comparison: NotRequired[str]
-
-
 # RoutingReason union is defined after TransformErrorReason (below line ~410)
 
 
@@ -255,6 +231,7 @@ TransformErrorCategory = Literal[
     "content_safety_violation",
     "prompt_injection_detected",
     "unknown_category",  # Unknown category from external API (fail-closed)
+    "non_string_field",  # Explicitly-configured field is non-string (security fail-closed)
     # Contract violations (schema validation)
     "contract_violation",
     "multiple_contract_violations",
@@ -388,6 +365,7 @@ class TransformErrorReason(TypedDict):
     # Type validation context
     expected: NotRequired[str]
     actual: NotRequired[str]
+    actual_type: NotRequired[str]
     value: NotRequired[str]
 
     # Rate limiting/timeout context
@@ -433,10 +411,9 @@ class SourceQuarantineReason(TypedDict):
 
 # Discriminated union - field presence distinguishes variants:
 # - ConfigGateReason has "condition" and "result"
-# - PluginGateReason has "rule" and "matched_value"
 # - TransformErrorReason has "reason" (error category string)
 # - SourceQuarantineReason has "quarantine_error"
-RoutingReason = ConfigGateReason | PluginGateReason | TransformErrorReason | SourceQuarantineReason
+RoutingReason = ConfigGateReason | TransformErrorReason | SourceQuarantineReason
 
 
 # =============================================================================

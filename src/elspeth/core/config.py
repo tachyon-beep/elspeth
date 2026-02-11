@@ -16,11 +16,77 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts.enums import OutputMode, RunMode
 
-# Reserved edge labels that cannot be used as route labels or fork branch names.
-# "continue" is used by the DAG builder for edges between sequential nodes.
+# Reserved edge labels that cannot be used as user-defined routing names.
+# "continue" is used for sequential edges, "fork" is a gate-only routing action,
+# and "on_success" is used for terminal routing edges in the DAG builder.
 # Using these as user-defined labels would cause edge_map collisions in the orchestrator,
 # leading to routing events recorded against wrong edges (audit corruption).
-_RESERVED_EDGE_LABELS = frozenset({"continue"})
+_RESERVED_EDGE_LABELS = frozenset({"continue", "fork", "on_success"})
+
+# Names used in node_id generation must stay short enough to fit
+# landscape.schema nodes_table.c.node_id (String(64)).
+# Worst-case generated format overhead is ~25 chars:
+#   "{prefix}_{name}_{hash12}"
+# so keep {name} <= 38.
+_MAX_NODE_NAME_LENGTH = 38
+
+# Connection labels and route labels are engine-owned identifiers.
+# Keep them bounded to avoid unbounded memory/key growth.
+_MAX_CONNECTION_NAME_LENGTH = 64
+_MAX_ROUTE_LABEL_LENGTH = 64
+
+
+def _validate_max_length(value: str, *, field_label: str, max_length: int) -> str:
+    """Enforce bounded identifier length for routing/node names."""
+    if len(value) > max_length:
+        raise ValueError(f"{field_label} exceeds max length {max_length} (got {len(value)})")
+    return value
+
+
+# Node names become identifiers in the DAG and must start with a letter.
+_VALID_NODE_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+# Connection/sink names are routing labels — they can start with a digit
+# or single underscore (e.g., "123_sink", "_private_sink") but not double
+# underscore (checked separately).
+_VALID_CONNECTION_NAME_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_-]*$")
+
+
+def _validate_node_name_chars(value: str, *, field_label: str) -> None:
+    """Enforce character-class restriction on processing node names.
+
+    Node names must start with a letter and contain only letters, digits,
+    underscores, and hyphens. This prevents NUL injection, whitespace
+    smuggling, unicode confusables, and SQL/shell metacharacters.
+    """
+    if not _VALID_NODE_NAME_RE.match(value):
+        raise ValueError(
+            f"{field_label} '{value}' contains invalid characters. "
+            "Node names must start with a letter and contain only letters, digits, underscores, and hyphens."
+        )
+
+
+def _validate_connection_name_chars(value: str, *, field_label: str) -> None:
+    """Enforce character-class restriction on connection/sink names.
+
+    Connection names can start with a letter or digit and contain only
+    letters, digits, underscores, and hyphens.
+    """
+    if not _VALID_CONNECTION_NAME_RE.match(value):
+        raise ValueError(
+            f"{field_label} '{value}' contains invalid characters. "
+            "Names must start with a letter or digit and contain only letters, digits, underscores, and hyphens."
+        )
+
+
+def _validate_connection_or_sink_name(value: str, *, field_label: str) -> str:
+    """Validate user-supplied connection/sink identifiers used for routing."""
+    _validate_max_length(value, field_label=field_label, max_length=_MAX_CONNECTION_NAME_LENGTH)
+    _validate_connection_name_chars(value, field_label=field_label)
+    if value in _RESERVED_EDGE_LABELS:
+        raise ValueError(f"{field_label} '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+    if value.startswith("__"):
+        raise ValueError(f"{field_label} '{value}' starts with '__', which is reserved for system edges")
+    return value
 
 
 class SecretsConfig(BaseModel):
@@ -262,6 +328,11 @@ class AggregationSettings(BaseModel):
 
     name: str = Field(description="Aggregation identifier (unique within pipeline)")
     plugin: str = Field(description="Plugin name to instantiate")
+    input: str = Field(description="Named input connection (must match an upstream on_success value)")
+    on_success: str | None = Field(
+        default=None,
+        description="Connection name or sink name for aggregation output",
+    )
     trigger: TriggerConfig = Field(description="When to flush the batch")
     output_mode: OutputMode = Field(
         default=OutputMode.TRANSFORM,
@@ -275,6 +346,41 @@ class AggregationSettings(BaseModel):
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate aggregation name is not empty or reserved."""
+        if not v or not v.strip():
+            raise ValueError("Aggregation name must not be empty")
+        v = v.strip()
+        _validate_max_length(v, field_label="Aggregation name", max_length=_MAX_NODE_NAME_LENGTH)
+        _validate_node_name_chars(v, field_label="Aggregation name")
+        if v in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Aggregation name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        if v.startswith("__"):
+            raise ValueError(f"Aggregation name '{v}' starts with '__', which is reserved for system edges")
+        return v
+
+    @field_validator("input")
+    @classmethod
+    def validate_input(cls, v: str) -> str:
+        """Validate input connection name is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Aggregation input connection must not be empty")
+        value = v.strip()
+        return _validate_connection_or_sink_name(value, field_label="Aggregation input connection name")
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str | None) -> str | None:
+        """Ensure on_success is not empty string."""
+        if v is not None and not v.strip():
+            raise ValueError("on_success must be a connection name, sink name, or omitted entirely")
+        if v is None:
+            return None
+        value = v.strip()
+        return _validate_connection_or_sink_name(value, field_label="Aggregation on_success connection name")
 
     @field_validator("output_mode", mode="before")
     @classmethod
@@ -300,7 +406,7 @@ class GateSettings(BaseModel):
           - name: quality_check
             condition: "row['confidence'] >= 0.85"
             routes:
-              high: continue
+              high: quality_ok
               low: review_sink
           - name: parallel_analysis
             condition: "True"
@@ -314,12 +420,41 @@ class GateSettings(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Gate identifier (unique within pipeline)")
+    input: str = Field(description="Named input connection (must match an upstream on_success value)")
     condition: str = Field(description="Expression to evaluate (validated by ExpressionParser)")
-    routes: dict[str, str] = Field(description="Maps route labels to destinations ('continue' or sink name)")
+    routes: dict[str, str] = Field(
+        max_length=32,
+        description="Maps route labels to destinations (connection name, sink name, or 'fork')",
+    )
     fork_to: list[str] | None = Field(
         default=None,
+        max_length=32,
         description="List of paths for fork operations",
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate gate name is not empty or reserved."""
+        if not v or not v.strip():
+            raise ValueError("Gate name must not be empty")
+        v = v.strip()
+        _validate_max_length(v, field_label="Gate name", max_length=_MAX_NODE_NAME_LENGTH)
+        _validate_node_name_chars(v, field_label="Gate name")
+        if v in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Gate name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        if v.startswith("__"):
+            raise ValueError(f"Gate name '{v}' starts with '__', which is reserved for system edges")
+        return v
+
+    @field_validator("input")
+    @classmethod
+    def validate_input(cls, v: str) -> str:
+        """Validate input connection name is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Gate input connection must not be empty")
+        value = v.strip()
+        return _validate_connection_or_sink_name(value, field_label="Gate input connection name")
 
     @field_validator("condition")
     @classmethod
@@ -357,23 +492,21 @@ class GateSettings(BaseModel):
             raise ValueError("routes must have at least one entry")
 
         for label, destination in v.items():
-            # Check route label is not reserved
-            if label in _RESERVED_EDGE_LABELS:
-                raise ValueError(f"Route label '{label}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
+            if not label:
+                raise ValueError("Route labels must not be empty")
+            _validate_connection_or_sink_name(label, field_label="Route label")
 
-            # Labels starting with __ are reserved for system edges
-            # (__quarantine__, __error_N__) added by the DAG builder
-            if label.startswith("__"):
-                raise ValueError(
-                    f"Route label '{label}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
-                )
-
-            # Destinations must be "continue", "fork", or a sink name.
-            # Sink name validation is deferred to DAG compilation where we have
-            # access to the actual sink definitions.
-            if destination in ("continue", "fork"):
+            # "fork" is a special routing action consumed by fork_to branch wiring.
+            if destination == "fork":
                 continue
-            # Any other string is assumed to be a sink name - validated later
+            if destination == "continue":
+                raise ValueError("Route destination 'continue' has been removed. Use an explicit connection name or sink name.")
+            # Sink/connection-name validation is structural. Resolution to an
+            # actual sink or producer happens during DAG compilation.
+            _validate_connection_or_sink_name(
+                destination,
+                field_label=f"Route destination for label '{label}'",
+            )
         return v
 
     @field_validator("fork_to")
@@ -387,14 +520,14 @@ class GateSettings(BaseModel):
         if v is None:
             return v
 
+        stripped = []
         for branch in v:
-            if branch in _RESERVED_EDGE_LABELS:
-                raise ValueError(f"Fork branch '{branch}' is reserved and cannot be used. Reserved labels: {sorted(_RESERVED_EDGE_LABELS)}")
-            if branch.startswith("__"):
-                raise ValueError(
-                    f"Fork branch '{branch}' starts with '__', which is reserved for system edges (__quarantine__, __error_N__)"
-                )
-        return v
+            if not branch or not branch.strip():
+                raise ValueError("Fork branch names must not be empty")
+            value = branch.strip()
+            _validate_connection_or_sink_name(value, field_label="Fork branch name")
+            stripped.append(value)
+        return stripped
 
     @model_validator(mode="after")
     def validate_fork_consistency(self) -> "GateSettings":
@@ -439,6 +572,12 @@ class GateSettings(BaseModel):
                 raise ValueError(" ".join(msg_parts))
 
         return self
+
+    # NOTE: routes dict and fork_to list are mutable containers on a frozen model.
+    # Pydantic frozen=True prevents attribute reassignment but not container mutation.
+    # Runtime immutability is enforced at the DAG builder level (dag.py line ~1320-1323)
+    # where NodeInfo.config is wrapped in MappingProxyType. Freezing here would break
+    # copy.deepcopy() used in the config loading pipeline (MappingProxyType is not picklable).
 
 
 class CoalesceSettings(BaseModel):
@@ -507,6 +646,38 @@ class CoalesceSettings(BaseModel):
         default=None,
         description="Which branch to take for 'select' merge strategy",
     )
+    on_success: str | None = Field(
+        default=None,
+        description="Sink name for coalesce output. Required when coalesce is terminal (no downstream transforms).",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate coalesce name is not empty or reserved."""
+        if not v or not v.strip():
+            raise ValueError("Coalesce name must not be empty")
+        value = v.strip()
+        _validate_max_length(value, field_label="Coalesce name", max_length=_MAX_NODE_NAME_LENGTH)
+        _validate_node_name_chars(value, field_label="Coalesce name")
+        if value in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Coalesce name '{value}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        if value.startswith("__"):
+            raise ValueError(f"Coalesce name '{value}' starts with '__', which is reserved for system edges")
+        return value
+
+    @field_validator("branches")
+    @classmethod
+    def validate_branch_names(cls, v: list[str]) -> list[str]:
+        """Ensure coalesce branch names are bounded and non-reserved."""
+        stripped = []
+        for branch in v:
+            if not branch or not branch.strip():
+                raise ValueError("Coalesce branch names must not be empty")
+            value = branch.strip()
+            _validate_connection_or_sink_name(value, field_label="Coalesce branch name")
+            stripped.append(value)
+        return stripped
 
     @model_validator(mode="after")
     def validate_policy_requirements(self) -> "CoalesceSettings":
@@ -532,17 +703,45 @@ class CoalesceSettings(BaseModel):
             )
         return self
 
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str | None) -> str | None:
+        """Ensure on_success sink name is not empty or system-reserved."""
+        if v is not None and not v.strip():
+            raise ValueError("on_success must be a sink name or omitted entirely")
+        if v is None:
+            return None
+        value = v.strip()
+        return _validate_connection_or_sink_name(value, field_label="Coalesce on_success sink name")
+
 
 class SourceSettings(BaseModel):
-    """Source plugin configuration per architecture."""
+    """Source plugin configuration per architecture.
+
+    Phase 3 addition: on_success lifted from SourceDataConfig (options layer)
+    to settings level (3a3f-A). Source must declare where valid rows go.
+    """
 
     model_config = {"frozen": True, "extra": "forbid"}
 
     plugin: str = Field(description="Plugin name (csv_local, json, http_poll, etc.)")
+    on_success: str = Field(
+        ...,  # Required - no default
+        description="Connection name or sink name for rows that pass source validation",
+    )
     options: dict[str, Any] = Field(
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str) -> str:
+        """Ensure on_success is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Source on_success must be a connection name or sink name")
+        value = v.strip()
+        return _validate_connection_or_sink_name(value, field_label="Source on_success connection name")
 
 
 class TransformSettings(BaseModel):
@@ -550,15 +749,78 @@ class TransformSettings(BaseModel):
 
     Note: Gate routing is now config-driven only (see GateSettings).
     Plugin-based gates were removed - use the gates: section instead.
+
+    Phase 3 additions (declarative DAG wiring):
+        name: User-facing wiring label. Drives node IDs in the DAG and
+            appears in Landscape audit records. Must be unique across all
+            processing nodes (transforms, gates, aggregations, coalesce).
+        input: Named input connection. Declares which upstream node's
+            on_success output feeds this transform. Matched by the DAG
+            builder to create explicit edges (no positional inference).
+        on_success: Lifted from options layer (3a3f-A). Sink name or
+            connection name for successfully processed rows.
+        on_error: Lifted from options layer alongside on_success.
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
 
+    name: str = Field(description="Unique identifier for this transform (drives node IDs and audit records)")
     plugin: str = Field(description="Plugin name")
+    input: str = Field(description="Named input connection (must match an upstream on_success value)")
+    on_success: str = Field(
+        description="Connection name or sink name for successfully processed rows",
+    )
+    on_error: str = Field(
+        description="Sink name for rows that cannot be processed, or 'discard'",
+    )
     options: dict[str, Any] = Field(
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate transform name is not empty or reserved."""
+        if not v or not v.strip():
+            raise ValueError("Transform name must not be empty")
+        v = v.strip()
+        _validate_max_length(v, field_label="Transform name", max_length=_MAX_NODE_NAME_LENGTH)
+        _validate_node_name_chars(v, field_label="Transform name")
+        if v in _RESERVED_EDGE_LABELS:
+            raise ValueError(f"Transform name '{v}' is reserved. Reserved: {sorted(_RESERVED_EDGE_LABELS)}")
+        if v.startswith("__"):
+            raise ValueError(f"Transform name '{v}' starts with '__', which is reserved for system edges")
+        return v
+
+    @field_validator("input")
+    @classmethod
+    def validate_input(cls, v: str) -> str:
+        """Validate input connection name is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Transform input connection must not be empty")
+        value = v.strip()
+        return _validate_connection_or_sink_name(value, field_label="Transform input connection name")
+
+    @field_validator("on_success")
+    @classmethod
+    def validate_on_success(cls, v: str) -> str:
+        """Ensure on_success is a valid connection or sink name."""
+        if not v.strip():
+            raise ValueError("on_success must be a connection name or sink name")
+        value = v.strip()
+        return _validate_connection_or_sink_name(value, field_label="Transform on_success connection name")
+
+    @field_validator("on_error")
+    @classmethod
+    def validate_on_error(cls, v: str) -> str:
+        """Ensure on_error is a valid sink name or 'discard'."""
+        if not v.strip():
+            raise ValueError("on_error must be a sink name or 'discard'")
+        value = v.strip()
+        if value == "discard":
+            return value
+        return _validate_connection_or_sink_name(value, field_label="Transform on_error sink name")
 
 
 class SinkSettings(BaseModel):
@@ -606,15 +868,19 @@ class LandscapeSettings(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     enabled: bool = Field(default=True, description="Enable audit trail recording")
-    backend: Literal["sqlite", "postgresql"] = Field(
+    backend: Literal["sqlite", "sqlcipher", "postgresql"] = Field(
         default="sqlite",
-        description="Database backend type",
+        description="Database backend type (sqlcipher requires the 'security' extra)",
     )
     # NOTE: Using str instead of Path - Path mangles PostgreSQL DSNs like
     # "postgresql://user:pass@host/db" (pathlib interprets // as UNC path)
     url: str = Field(
         default="sqlite:///./state/audit.db",
         description="Full SQLAlchemy database URL",
+    )
+    encryption_key_env: str = Field(
+        default="ELSPETH_AUDIT_KEY",
+        description="Environment variable holding the SQLCipher passphrase (backend=sqlcipher only)",
     )
     export: LandscapeExportSettings = Field(
         default_factory=LandscapeExportSettings,
@@ -660,6 +926,13 @@ class LandscapeSettings(BaseModel):
         except ArgumentError as e:
             raise ValueError(f"Invalid database URL format: {e}") from e
         return v
+
+    @model_validator(mode="after")
+    def validate_sqlcipher_backend(self) -> "LandscapeSettings":
+        """Validate that sqlcipher backend uses a SQLite-compatible URL."""
+        if self.backend == "sqlcipher" and not self.url.startswith("sqlite"):
+            raise ValueError("backend='sqlcipher' requires a SQLite URL (sqlcipher is wire-compatible with SQLite)")
+        return self
 
 
 class ConcurrencySettings(BaseModel):
@@ -850,6 +1123,11 @@ class TelemetrySettings(BaseModel):
         default=True,
         description="Fail the run if all exporters fail (when enabled)",
     )
+    max_consecutive_failures: int = Field(
+        default=10,
+        gt=0,
+        description="Number of consecutive total exporter failures before disabling telemetry or raising an error",
+    )
     exporters: list[ExporterSettings] = Field(
         default_factory=list,
         description="List of telemetry exporters to send events to",
@@ -878,10 +1156,8 @@ class ElspethSettings(BaseModel):
         description="Source plugin configuration (exactly one per run)",
     )
     sinks: dict[str, SinkSettings] = Field(
+        max_length=50,
         description="Named sink configurations (one or more required)",
-    )
-    default_sink: str = Field(
-        description="Default sink for rows that complete the pipeline",
     )
 
     # Run mode configuration
@@ -897,24 +1173,28 @@ class ElspethSettings(BaseModel):
     # Optional - transform chain
     transforms: list[TransformSettings] = Field(
         default_factory=list,
+        max_length=500,
         description="Ordered list of transforms/gates to apply",
     )
 
     # Optional - engine-level gates (config-driven routing)
     gates: list[GateSettings] = Field(
         default_factory=list,
+        max_length=100,
         description="Engine-level gates for config-driven routing (evaluated by ExpressionParser)",
     )
 
     # Optional - coalesce configuration (for merging fork paths)
     coalesce: list[CoalesceSettings] = Field(
         default_factory=list,
+        max_length=100,
         description="Coalesce configurations for merging forked paths",
     )
 
     # Optional - aggregations (config-driven batching)
     aggregations: list[AggregationSettings] = Field(
         default_factory=list,
+        max_length=100,
         description="Aggregation configurations for batching rows",
     )
 
@@ -949,13 +1229,6 @@ class ElspethSettings(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_default_sink_exists(self) -> "ElspethSettings":
-        """Ensure default_sink references a defined sink."""
-        if self.default_sink not in self.sinks:
-            raise ValueError(f"default_sink '{self.default_sink}' not found in sinks. Available sinks: {list(self.sinks.keys())}")
-        return self
-
-    @model_validator(mode="after")
     def validate_export_sink_exists(self) -> "ElspethSettings":
         """Ensure export.sink references a defined sink when enabled."""
         if self.landscape.export.enabled:
@@ -968,30 +1241,34 @@ class ElspethSettings(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_unique_aggregation_names(self) -> "ElspethSettings":
-        """Ensure aggregation names are unique."""
-        names = [agg.name for agg in self.aggregations]
-        duplicates = [name for name in names if names.count(name) > 1]
-        if duplicates:
-            raise ValueError(f"Duplicate aggregation name(s): {set(duplicates)}")
-        return self
+    def validate_globally_unique_node_names(self) -> "ElspethSettings":
+        """Ensure all processing node names are unique across types.
 
-    @model_validator(mode="after")
-    def validate_unique_gate_names(self) -> "ElspethSettings":
-        """Ensure gate names are unique."""
-        names = [gate.name for gate in self.gates]
-        duplicates = [name for name in names if names.count(name) > 1]
-        if duplicates:
-            raise ValueError(f"Duplicate gate name(s): {set(duplicates)}")
-        return self
+        Node names become node IDs in the DAG and appear in audit records.
+        A name collision between a transform and a gate (for example) would
+        create ambiguous audit entries and routing errors.
+        """
+        all_names: list[tuple[str, str]] = []
+        for t in self.transforms:
+            all_names.append((t.name, "transform"))
+        for g in self.gates:
+            all_names.append((g.name, "gate"))
+        for a in self.aggregations:
+            all_names.append((a.name, "aggregation"))
+        for c in self.coalesce:
+            all_names.append((c.name, "coalesce"))
+        for sink_name in self.sinks:
+            all_names.append((sink_name, "sink"))
 
-    @model_validator(mode="after")
-    def validate_unique_coalesce_names(self) -> "ElspethSettings":
-        """Ensure coalesce names are unique."""
-        names = [coal.name for coal in self.coalesce]
-        duplicates = [name for name in names if names.count(name) > 1]
-        if duplicates:
-            raise ValueError(f"Duplicate coalesce name(s): {set(duplicates)}")
+        seen: dict[str, str] = {}
+        for name, node_type in all_names:
+            if name in seen:
+                raise ValueError(
+                    f"Node name '{name}' is used by both {seen[name]} and {node_type}. "
+                    f"All node names must be unique across transforms, gates, "
+                    f"aggregations, coalesce nodes, and sinks."
+                )
+            seen[name] = node_type
         return self
 
     @model_validator(mode="after")
@@ -1028,11 +1305,19 @@ class ElspethSettings(BaseModel):
             # Provide helpful suggestions
             suggestions = [f"'{name}' -> '{name.lower()}'" for name in non_lowercase]
             raise ValueError(f"Sink names must be lowercase. Found: {non_lowercase}. Suggested fixes: {', '.join(suggestions)}")
+
+        for sink_name in v:
+            _validate_max_length(sink_name, field_label="Sink name", max_length=_MAX_NODE_NAME_LENGTH)
+            _validate_connection_name_chars(sink_name, field_label="Sink name")
+            if sink_name in _RESERVED_EDGE_LABELS:
+                raise ValueError(f"Sink name '{sink_name}' is reserved. Reserved sink/edge labels: {sorted(_RESERVED_EDGE_LABELS)}")
+            if sink_name.startswith("__"):
+                raise ValueError(f"Sink name '{sink_name}' starts with '__', which is reserved for system edges")
         return v
 
 
 # Regex pattern for ${VAR} or ${VAR:-default} syntax
-_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}")
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 
 def _expand_env_vars(config: dict[str, Any]) -> dict[str, Any]:
@@ -1512,7 +1797,7 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
     'routes' dicts must be preserved exactly as written - these contain
     case-sensitive keys that must match runtime values:
     - options: {"Score": "score"} where "Score" must match the LLM's JSON field name
-    - routes: {"High": "continue"} where "High" must match the gate condition result
+    - routes: {"High": "quality_ok"} where "High" must match the gate condition result
 
     Sink name handling:
     - FULLY UPPERCASE names (e.g., 'OUTPUT') are lowercased - these come from
@@ -1610,6 +1895,17 @@ def load_settings(config_path: Path) -> ElspethSettings:
     # Dynaconf returns uppercase keys; convert to lowercase for Pydantic
     raw_dict = dynaconf_settings.as_dict()
     raw_config = _lowercase_schema_keys(raw_dict)
+
+    # Explicitly reject removed default_sink in YAML before allowlist filtering.
+    # This MUST happen before the allowlist (which would silently strip it).
+    if "default_sink" in raw_config:
+        raise ValueError(
+            "'default_sink' has been removed. Use explicit 'on_success' routing instead.\n"
+            "Migration: Set top-level 'source.on_success: <sink_or_connection_name>' and "
+            "top-level 'transforms[].on_success: <sink_or_connection_name>' (not inside "
+            "plugin options). Ensure each terminal path routes to a sink.\n"
+            "Then remove the 'default_sink' line from your pipeline YAML."
+        )
 
     # Positive allowlist: only pass keys that ElspethSettings knows about.
     # Dynaconf injects internal settings (LOAD_DOTENV, ENVIRONMENTS, SETTINGS_FILES,

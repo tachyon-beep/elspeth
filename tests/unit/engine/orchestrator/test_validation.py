@@ -13,26 +13,19 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts.types import GateName, NodeID
+from elspeth.contracts import RouteDestination
+from elspeth.contracts.types import GateName, NodeID, SinkName
 from elspeth.engine.orchestrator.types import RouteValidationError
 from elspeth.engine.orchestrator.validation import (
     validate_route_destinations,
     validate_source_quarantine_destination,
     validate_transform_error_sinks,
 )
-from elspeth.plugins.protocols import GateProtocol, TransformProtocol
+from elspeth.plugins.protocols import TransformProtocol
 
 # =============================================================================
 # Helpers
 # =============================================================================
-
-
-def _make_gate_transform(*, node_id: str, name: str) -> GateProtocol:
-    """Create a mock gate that satisfies isinstance(t, GateProtocol)."""
-    gate = Mock(spec=GateProtocol)
-    gate.node_id = node_id
-    gate.name = name
-    return gate
 
 
 def _make_transform(*, node_id: str, name: str, on_error: str | None = None) -> TransformProtocol:
@@ -60,82 +53,12 @@ def _make_source(*, name: str = "csv-source", on_validation_failure: str = "disc
 class TestValidateRouteDestinations:
     """Tests for validate_route_destinations()."""
 
-    def test_valid_routes_pass(self) -> None:
-        """Routes to existing sinks pass without error."""
-        gate = _make_gate_transform(node_id="gate-1", name="risk_gate")
-        route_map = {("gate-1", "high"): "high_risk_sink", ("gate-1", "low"): "low_risk_sink"}
-        sinks = {"high_risk_sink", "low_risk_sink"}
-        transform_id_map = {0: NodeID("gate-1")}
-
-        validate_route_destinations(
-            route_resolution_map=route_map,
-            available_sinks=sinks,
-            transform_id_map=transform_id_map,
-            transforms=[gate],
-        )
-
-    def test_continue_routes_always_pass(self) -> None:
-        """'continue' is a special value, not a sink name."""
-        route_map = {("gate-1", "default"): "continue"}
-        gate = _make_gate_transform(node_id="gate-1", name="pass_gate")
-        transform_id_map = {0: NodeID("gate-1")}
-
-        validate_route_destinations(
-            route_resolution_map=route_map,
-            available_sinks=set(),
-            transform_id_map=transform_id_map,
-            transforms=[gate],
-        )
-
-    def test_fork_routes_always_pass(self) -> None:
-        """'fork' is a special value, not a sink name."""
-        route_map = {("gate-1", "split"): "fork"}
-        gate = _make_gate_transform(node_id="gate-1", name="fork_gate")
-        transform_id_map = {0: NodeID("gate-1")}
-
-        validate_route_destinations(
-            route_resolution_map=route_map,
-            available_sinks=set(),
-            transform_id_map=transform_id_map,
-            transforms=[gate],
-        )
-
-    def test_invalid_route_raises_with_gate_name(self) -> None:
-        """Route to non-existent sink raises with gate name in message."""
-        gate = _make_gate_transform(node_id="gate-1", name="risk_gate")
-        route_map = {("gate-1", "high"): "nonexistent_sink"}
-        sinks = {"output"}
-        transform_id_map = {0: NodeID("gate-1")}
-
-        with pytest.raises(RouteValidationError, match=r"risk_gate.*nonexistent_sink"):
-            validate_route_destinations(
-                route_resolution_map=route_map,
-                available_sinks=sinks,
-                transform_id_map=transform_id_map,
-                transforms=[gate],
-            )
-
-    def test_error_lists_available_sinks(self) -> None:
-        """Error message includes available sinks for user debugging."""
-        gate = _make_gate_transform(node_id="gate-1", name="g")
-        route_map = {("gate-1", "x"): "bad"}
-        sinks = {"alpha", "beta"}
-        transform_id_map = {0: NodeID("gate-1")}
-
-        with pytest.raises(RouteValidationError, match=r"alpha.*beta"):
-            validate_route_destinations(
-                route_resolution_map=route_map,
-                available_sinks=sinks,
-                transform_id_map=transform_id_map,
-                transforms=[gate],
-            )
-
     def test_config_gates_validated(self) -> None:
         """Config-driven gates are also validated via config_gate_id_map."""
         config_gate = Mock()
         config_gate.name = "config_gate"
         gate_id_map = {GateName("config_gate"): NodeID("cfg-gate-1")}
-        route_map = {("cfg-gate-1", "route_a"): "missing_sink"}
+        route_map = {(NodeID("cfg-gate-1"), "route_a"): RouteDestination.sink(SinkName("missing_sink"))}
         sinks = {"output"}
 
         with pytest.raises(RouteValidationError, match=r"config_gate.*missing_sink"):
@@ -157,21 +80,6 @@ class TestValidateRouteDestinations:
             transforms=[],
         )
 
-    def test_non_gate_transforms_skipped_in_lookup(self) -> None:
-        """Non-gate transforms in the transforms list don't interfere."""
-        transform = _make_transform(node_id="t-1", name="mapper")
-        gate = _make_gate_transform(node_id="gate-1", name="g")
-        route_map = {("gate-1", "x"): "output"}
-        sinks = {"output"}
-        transform_id_map = {0: NodeID("t-1"), 1: NodeID("gate-1")}
-
-        validate_route_destinations(
-            route_resolution_map=route_map,
-            available_sinks=sinks,
-            transform_id_map=transform_id_map,
-            transforms=[transform, gate],
-        )
-
 
 # =============================================================================
 # validate_transform_error_sinks
@@ -181,10 +89,15 @@ class TestValidateRouteDestinations:
 class TestValidateTransformErrorSinks:
     """Tests for validate_transform_error_sinks()."""
 
-    def test_no_on_error_passes(self) -> None:
-        """Transform with on_error=None is fine (no error routing)."""
-        transform = _make_transform(node_id="t-1", name="mapper", on_error=None)
-        validate_transform_error_sinks([transform], {"output"})
+    def test_discard_on_error_passes_with_no_sinks(self) -> None:
+        """Transform with on_error='discard' passes even with no sinks defined.
+
+        on_error is now required at config time (TransformSettings), so None
+        never reaches the validator. This test verifies 'discard' (the minimum
+        valid value) works regardless of available sinks.
+        """
+        transform = _make_transform(node_id="t-1", name="mapper", on_error="discard")
+        validate_transform_error_sinks([transform], set())
 
     def test_discard_passes(self) -> None:
         """on_error='discard' is a special value, not a sink."""
@@ -207,11 +120,6 @@ class TestValidateTransformErrorSinks:
         transform = _make_transform(node_id="t-1", name="t", on_error="bad")
         with pytest.raises(RouteValidationError, match="output"):
             validate_transform_error_sinks([transform], {"output"})
-
-    def test_gate_transforms_skipped(self) -> None:
-        """Gates use routing, not on_error — should be skipped."""
-        gate = _make_gate_transform(node_id="g-1", name="risk_gate")
-        validate_transform_error_sinks([gate], set())
 
     def test_multiple_transforms_all_validated(self) -> None:
         """All transforms are checked, not just the first."""

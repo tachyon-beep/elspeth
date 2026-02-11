@@ -9,7 +9,7 @@ Unlike Content Safety, Prompt Shield is binary detection - no thresholds.
 Either an attack is detected or it isn't.
 
 Uses BatchTransformMixin for row-level pipelining (multiple rows in flight
-with FIFO output ordering) and PooledExecutor for internal concurrency.
+with FIFO output ordering).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, is_capacity_error
+from elspeth.plugins.pooling import CapacityError, is_capacity_error
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.azure.errors import MalformedResponseError
@@ -46,11 +46,10 @@ class AzurePromptShieldConfig(TransformDataConfig):
         schema: Schema configuration
 
     Optional:
-        pool_size: Number of concurrent API calls (1=sequential, >1=pooled)
-        min_dispatch_delay_ms: Minimum AIMD backoff delay (default 0)
-        max_dispatch_delay_ms: Maximum AIMD backoff delay (default 5000)
-        backoff_multiplier: Multiply delay on capacity error (default 2.0)
-        recovery_step_ms: Subtract from delay on success (default 50)
+        analysis_type: Which analysis to run (default "both")
+            - "both": Analyze as both user prompt and document (double cost)
+            - "user_prompt": Only check for user prompt attacks (jailbreak)
+            - "document": Only check for document attacks (prompt injection)
         max_capacity_retry_seconds: Timeout for capacity error retries (default 3600)
 
     Example YAML:
@@ -60,6 +59,7 @@ class AzurePromptShieldConfig(TransformDataConfig):
               endpoint: https://my-resource.cognitiveservices.azure.com
               api_key: ${AZURE_CONTENT_SAFETY_KEY}
               fields: [prompt, user_message]
+              analysis_type: user_prompt
               on_error: quarantine_sink
               schema:
                 mode: observed
@@ -72,30 +72,15 @@ class AzurePromptShieldConfig(TransformDataConfig):
         description="Field name(s) to analyze, or 'all' for all string fields",
     )
 
-    # Pool configuration fields
-    pool_size: int = Field(1, ge=1, description="Number of concurrent API calls (1=sequential)")
-    min_dispatch_delay_ms: int = Field(0, ge=0, description="Minimum dispatch delay in milliseconds")
-    max_dispatch_delay_ms: int = Field(5000, ge=0, description="Maximum dispatch delay in milliseconds")
-    backoff_multiplier: float = Field(2.0, gt=1.0, description="Backoff multiplier on capacity error")
-    recovery_step_ms: int = Field(50, ge=0, description="Recovery step in milliseconds")
+    # Analysis type control — avoids double API cost when only one analysis is needed
+    analysis_type: str = Field(
+        "both",
+        pattern=r"^(both|user_prompt|document)$",
+        description="Which analysis to run: 'both', 'user_prompt', or 'document'",
+    )
+
+    # Batch processing timeout
     max_capacity_retry_seconds: int = Field(3600, gt=0, description="Max seconds to retry capacity errors")
-
-    @property
-    def pool_config(self) -> PoolConfig | None:
-        """Get pool configuration if pooling is enabled.
-
-        Returns None if pool_size <= 1 (sequential mode).
-        """
-        if self.pool_size <= 1:
-            return None
-        return PoolConfig(
-            pool_size=self.pool_size,
-            min_dispatch_delay_ms=self.min_dispatch_delay_ms,
-            max_dispatch_delay_ms=self.max_dispatch_delay_ms,
-            backoff_multiplier=self.backoff_multiplier,
-            recovery_step_ms=self.recovery_step_ms,
-            max_capacity_retry_seconds=self.max_capacity_retry_seconds,
-        )
 
 
 class AzurePromptShield(BaseTransform, BatchTransformMixin):
@@ -145,8 +130,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self._endpoint = cfg.endpoint.rstrip("/")
         self._api_key = cfg.api_key
         self._fields = cfg.fields
-        self._on_error = cfg.on_error
-        self._pool_size = cfg.pool_size
+        self._analysis_type = cfg.analysis_type
         self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
 
         schema = create_schema_from_config(
@@ -169,12 +153,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = lambda event: None
         self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
-
-        # Create pooled executor if pool_size > 1 (for internal concurrency)
-        if cfg.pool_config is not None:
-            self._executor: PooledExecutor | None = PooledExecutor(cfg.pool_config)
-        else:
-            self._executor = None
 
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
@@ -293,10 +271,10 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
     ) -> TransformResult:
         """Process a single row with explicit state_id.
 
-        This is used by the pooled executor where each row has its own state.
+        Called by _process_row() in the BatchTransformMixin worker pool.
 
         Raises:
-            CapacityError: On rate limit errors (for pooled retry)
+            CapacityError: On rate limit errors (for worker pool retry)
         """
         # Get dict representation for field scanning
         row_dict = row.to_dict()
@@ -308,7 +286,18 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
             value = row_dict[field_name]
             if not isinstance(value, str):
-                continue
+                # Explicitly-configured field is non-string — fail CLOSED.
+                # Security transform cannot analyze non-string content for prompt injection.
+                # ("all" mode pre-filters to string fields in _get_fields_to_scan,
+                # so this branch only fires for explicitly-configured fields.)
+                return TransformResult.error(
+                    {
+                        "reason": "non_string_field",
+                        "field": field_name,
+                        "actual_type": type(value).__name__,
+                    },
+                    retryable=False,
+                )
 
             # Call Azure API with state_id for audit trail
             try:
@@ -378,7 +367,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
         Clients are cached to preserve call_index across retries.
         This ensures uniqueness of (state_id, call_index) even when
-        the pooled executor retries after CapacityError.
+        the worker pool retries after CapacityError.
 
         Args:
             state_id: State ID for audit trail recording
@@ -422,17 +411,27 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
             document_attack: True if prompt injection detected in any document
 
         Uses AuditedHTTPClient for automatic audit recording and telemetry emission.
+        Respects self._analysis_type to avoid double API cost when only one
+        analysis path is needed.
         """
         # Use AuditedHTTPClient - handles recording and telemetry automatically
         http_client = self._get_http_client(state_id)
 
         url = f"{self._endpoint}/contentsafety/text:shieldPrompt?api-version={self.API_VERSION}"
 
+        # Build request body based on analysis_type to avoid double cost.
+        # "both" (default): text analyzed as both user prompt and document
+        # "user_prompt": only user prompt analysis (empty documents list)
+        # "document": only document analysis (empty user prompt)
+        if self._analysis_type == "user_prompt":
+            request_body = {"userPrompt": text, "documents": []}
+        elif self._analysis_type == "document":
+            request_body = {"userPrompt": "", "documents": [text]}
+        else:
+            request_body = {"userPrompt": text, "documents": [text]}
+
         # Make HTTP call - AuditedHTTPClient records to Landscape and emits telemetry
-        response = http_client.post(
-            url,
-            json={"userPrompt": text, "documents": [text]},
-        )
+        response = http_client.post(url, json=request_body)
         response.raise_for_status()
 
         # Parse response - Azure API responses are external data (Tier 3: Zero Trust)
@@ -447,30 +446,36 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         except Exception as e:
             raise MalformedResponseError(f"Invalid JSON in response: {e}") from e
 
-        # Validate userPromptAnalysis structure
-        user_prompt_analysis = data.get("userPromptAnalysis") if isinstance(data, dict) else None
-        if not isinstance(user_prompt_analysis, dict):
-            raise MalformedResponseError(f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}")
-
-        user_attack = user_prompt_analysis.get("attackDetected")
-        if not isinstance(user_attack, bool):
-            raise MalformedResponseError(f"userPromptAnalysis.attackDetected must be bool, got {type(user_attack).__name__}")
-
-        # Validate documentsAnalysis structure
-        documents_analysis = data.get("documentsAnalysis")
-        if not isinstance(documents_analysis, list):
-            raise MalformedResponseError(f"documentsAnalysis must be list, got {type(documents_analysis).__name__}")
-
-        # Validate each document entry and check for attacks
+        user_attack = False
         doc_attack = False
-        for i, doc in enumerate(documents_analysis):
-            if not isinstance(doc, dict):
-                raise MalformedResponseError(f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}")
-            attack_detected = doc.get("attackDetected")
-            if not isinstance(attack_detected, bool):
-                raise MalformedResponseError(f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}")
-            if attack_detected:
-                doc_attack = True
+
+        # Validate and extract user prompt analysis (skip if analysis_type="document")
+        if self._analysis_type != "document":
+            user_prompt_analysis = data.get("userPromptAnalysis") if isinstance(data, dict) else None
+            if not isinstance(user_prompt_analysis, dict):
+                raise MalformedResponseError(f"userPromptAnalysis must be dict, got {type(user_prompt_analysis).__name__}")
+
+            detected = user_prompt_analysis.get("attackDetected")
+            if not isinstance(detected, bool):
+                raise MalformedResponseError(f"userPromptAnalysis.attackDetected must be bool, got {type(detected).__name__}")
+            user_attack = detected
+
+        # Validate and extract document analysis (skip if analysis_type="user_prompt")
+        if self._analysis_type != "user_prompt":
+            documents_analysis = data.get("documentsAnalysis") if isinstance(data, dict) else None
+            if not isinstance(documents_analysis, list):
+                raise MalformedResponseError(f"documentsAnalysis must be list, got {type(documents_analysis).__name__}")
+
+            for i, doc in enumerate(documents_analysis):
+                if not isinstance(doc, dict):
+                    raise MalformedResponseError(f"documentsAnalysis[{i}] must be dict, got {type(doc).__name__}")
+                attack_detected = doc.get("attackDetected")
+                if not isinstance(attack_detected, bool):
+                    raise MalformedResponseError(
+                        f"documentsAnalysis[{i}].attackDetected must be bool, got {type(attack_detected).__name__}"
+                    )
+                if attack_detected:
+                    doc_attack = True
 
         return {
             "user_prompt_attack": user_attack,
@@ -482,10 +487,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         # Shutdown batch processing infrastructure first
         if self._batch_initialized:
             self.shutdown_batch_processing()
-
-        # Then shutdown query-level executor (if used for internal concurrency)
-        if self._executor is not None:
-            self._executor.shutdown(wait=True)
 
         # Close all cached HTTP clients
         with self._http_clients_lock:

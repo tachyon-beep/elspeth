@@ -28,6 +28,7 @@ def test_schema_validation_actually_works() -> None:
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: input.csv
     schema:
@@ -38,7 +39,11 @@ source:
     on_validation_failure: discard
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    input: source_out
+    on_success: output
+    on_error: discard
+    plugin: passthrough
     options:
       schema:
         mode: fixed
@@ -55,8 +60,6 @@ sinks:
         mode: fixed
         fields:
           - "field_c: float"  # INCOMPATIBLE: requires field_c, gets field_a/field_b
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -89,6 +92,7 @@ def test_compatible_schemas_still_pass() -> None:
     config_yaml = """
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: input.csv
     schema:
@@ -99,7 +103,11 @@ source:
     on_validation_failure: discard
 
 transforms:
-  - plugin: passthrough
+  - name: passthrough_0
+    input: source_out
+    on_success: output
+    on_error: discard
+    plugin: passthrough
     options:
       schema:
         mode: fixed
@@ -117,8 +125,6 @@ sinks:
         fields:
           - "field_a: str"  # Compatible: subset of producer schema
       format: jsonl
-
-default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

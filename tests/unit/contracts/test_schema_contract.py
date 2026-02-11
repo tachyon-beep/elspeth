@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 # --- Fixtures ---
 

@@ -162,31 +162,35 @@ class TriggerEvaluator:
         if self._count_fire_time is not None:
             candidates.append((self._count_fire_time, "count"))
 
-        # Condition: Re-evaluate since time-dependent conditions (batch_age_seconds)
-        # may have become true after time passed, not just when rows were accepted.
+        # Condition: Once fired (latched), always honor the fire time.
+        # Re-evaluate only when not yet fired, since time-dependent conditions
+        # (batch_age_seconds) may have become true after time passed.
+        # P1-2026-02-05: Window-based conditions (e.g., batch_age_seconds < 0.5)
+        # could "unfire" if re-evaluated after the window closed. Latching fixes this.
         if self._condition_parser is not None and self._first_accept_time is not None:
-            batch_age = current_time - self._first_accept_time
-            context = {
-                "batch_count": self._batch_count,
-                "batch_age_seconds": batch_age,
-            }
-            result = self._condition_parser.evaluate(context)
-            # P2-2026-01-31: Defense-in-depth - reject non-boolean at runtime
-            # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
-            if not isinstance(result, bool):
-                raise TypeError(
-                    f"Trigger condition must return bool, got {type(result).__name__}: {result!r}. "
-                    f"Expression: {self._condition_parser.expression!r}"
-                )
-            if result:
-                # Condition is true now
-                if self._condition_fire_time is None:
+            if self._condition_fire_time is not None:
+                # Already latched — honor the recorded fire time unconditionally
+                candidates.append((self._condition_fire_time, "condition"))
+            else:
+                batch_age = current_time - self._first_accept_time
+                context = {
+                    "batch_count": self._batch_count,
+                    "batch_age_seconds": batch_age,
+                }
+                result = self._condition_parser.evaluate(context)
+                # P2-2026-01-31: Defense-in-depth - reject non-boolean at runtime
+                # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
+                if not isinstance(result, bool):
+                    raise TypeError(
+                        f"Trigger condition must return bool, got {type(result).__name__}: {result!r}. "
+                        f"Expression: {self._condition_parser.expression!r}"
+                    )
+                if result:
                     # First time detecting condition is true - set fire time now.
                     # For conditions that became true due to time passing (not row accepts),
-                    # we use current_time as a conservative estimate. We can't know exactly
-                    # when it became true without parsing the expression.
+                    # we use current_time as a conservative estimate.
                     self._condition_fire_time = current_time
-                candidates.append((self._condition_fire_time, "condition"))
+                    candidates.append((self._condition_fire_time, "condition"))
 
         if not candidates:
             return False

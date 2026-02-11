@@ -530,6 +530,7 @@ class RuntimeTelemetryConfig:
         - granularity: TelemetrySettings.granularity (parsed from str to enum)
         - backpressure_mode: TelemetrySettings.backpressure_mode (parsed from str to enum)
         - fail_on_total_exporter_failure: TelemetrySettings.fail_on_total_exporter_failure (direct)
+        - max_consecutive_failures: TelemetrySettings.max_consecutive_failures (direct)
         - exporter_configs: TelemetrySettings.exporters (converted to tuple of ExporterConfig)
 
     Protocol Coverage:
@@ -545,6 +546,7 @@ class RuntimeTelemetryConfig:
     granularity: TelemetryGranularity
     backpressure_mode: BackpressureMode
     fail_on_total_exporter_failure: bool
+    max_consecutive_failures: int
     exporter_configs: tuple[ExporterConfig, ...]
 
     @classmethod
@@ -559,6 +561,7 @@ class RuntimeTelemetryConfig:
             granularity=TelemetryGranularity.LIFECYCLE,
             backpressure_mode=BackpressureMode.BLOCK,
             fail_on_total_exporter_failure=True,
+            max_consecutive_failures=10,
             exporter_configs=(),
         )
 
@@ -600,5 +603,6 @@ class RuntimeTelemetryConfig:
             granularity=granularity,
             backpressure_mode=backpressure_mode,
             fail_on_total_exporter_failure=settings.fail_on_total_exporter_failure,
+            max_consecutive_failures=settings.max_consecutive_failures,
             exporter_configs=exporter_configs,
         )

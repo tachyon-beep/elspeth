@@ -129,7 +129,7 @@ class TestCoreConfigSettings:
 
         from elspeth.core.config import SourceSettings
 
-        settings = SourceSettings(plugin="csv_local")
+        settings = SourceSettings(plugin="csv_local", on_success="output")
 
         with pytest.raises(ValidationError):
             settings.plugin = "other"  # type: ignore[misc]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import sys
+from collections.abc import Mapping
 from types import ModuleType
 from unittest.mock import MagicMock
 
@@ -69,7 +70,13 @@ def test_get_keyvault_client_raises_helpful_import_error(monkeypatch: pytest.Mon
     """Missing Azure packages should raise the custom dependency message."""
     original_import = builtins.__import__
 
-    def _patched_import(name: str, globals: object = None, locals: object = None, fromlist: tuple[str, ...] = (), level: int = 0) -> object:
+    def _patched_import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
         if name == "azure.identity":
             raise ImportError("azure.identity missing")
         return original_import(name, globals, locals, fromlist, level)
@@ -151,7 +158,11 @@ class TestKeyVaultSecretLoader:
         original_import = builtins.__import__
 
         def _patched_import(
-            name: str, globals: object = None, locals: object = None, fromlist: tuple[str, ...] = (), level: int = 0
+            name: str,
+            globals: Mapping[str, object] | None = None,
+            locals: Mapping[str, object] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
         ) -> object:
             if name == "azure.core.exceptions":
                 raise ImportError("azure.core missing")

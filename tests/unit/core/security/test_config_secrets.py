@@ -699,6 +699,7 @@ class TestCLILoadSettingsWithSecrets:
         settings_file.write_text("""
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
     schema:
@@ -710,7 +711,7 @@ sinks:
       path: output.csv
       schema:
         mode: observed
-default_sink: output
+
 landscape:
   enabled: false
 """)
@@ -720,7 +721,6 @@ landscape:
         config, resolutions = _load_settings_with_secrets(settings_file)
 
         assert config.source.plugin == "csv"
-        assert config.default_sink == "output"
         assert resolutions == []  # No secrets to load
 
     def test_load_settings_with_secrets_keyvault_injects_env_vars(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -747,6 +747,7 @@ secrets:
 
 source:
   plugin: csv
+  on_success: output
   options:
     path: input.csv
     schema:
@@ -758,7 +759,7 @@ sinks:
       path: output.csv
       schema:
         mode: observed
-default_sink: output
+
 
 # Use the secret in some config value
 landscape:
@@ -817,7 +818,7 @@ sinks:
       path: output.csv
       schema:
         mode: observed
-default_sink: output
+
 landscape:
   enabled: false
 """)

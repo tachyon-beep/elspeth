@@ -14,7 +14,7 @@ from elspeth.contracts import (
     Token,
     TokenOutcome,
 )
-from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.schema import (
     rows_table,
@@ -54,6 +54,7 @@ class TokenRecordingMixin:
         *,
         row_id: str | None = None,
         payload_ref: str | None = None,
+        quarantined: bool = False,
     ) -> Row:
         """Create a source row record.
 
@@ -64,6 +65,8 @@ class TokenRecordingMixin:
             data: Row data for hashing and optional storage
             row_id: Optional row ID (generated if not provided)
             payload_ref: DEPRECATED - payload persistence now handled internally
+            quarantined: If True, data is Tier-3 external data that may contain
+                non-canonical values (NaN, Infinity). Uses repr_hash fallback.
 
         Returns:
             Row model
@@ -80,14 +83,32 @@ class TokenRecordingMixin:
         from elspeth.core.canonical import canonical_json
 
         row_id = row_id or generate_id()
-        data_hash = stable_hash(data)
+
+        # Quarantined rows are Tier-3 external data that may contain non-canonical
+        # values (NaN, Infinity). Use repr_hash as a fallback per canonical.py docs.
+        if quarantined:
+            try:
+                data_hash = stable_hash(data)
+            except (ValueError, TypeError):
+                data_hash = repr_hash(data)
+        else:
+            data_hash = stable_hash(data)
+
         timestamp = now()
 
         # Landscape owns payload persistence - serialize and store if configured
         final_payload_ref = payload_ref  # Legacy path (will be removed)
         if self._payload_store is not None and payload_ref is None:
-            # Canonical JSON handles pandas/numpy/Decimal/datetime types
-            payload_bytes = canonical_json(data).encode("utf-8")
+            # Canonical JSON handles pandas/numpy/Decimal/datetime types.
+            # For quarantined data, fall back to json.dumps(repr()) if
+            # canonical serialization fails on non-canonical values.
+            if quarantined:
+                try:
+                    payload_bytes = canonical_json(data).encode("utf-8")
+                except (ValueError, TypeError):
+                    payload_bytes = json.dumps({"_repr": repr(data)}).encode("utf-8")
+            else:
+                payload_bytes = canonical_json(data).encode("utf-8")
             final_payload_ref = self._payload_store.store(payload_bytes)
 
         row = Row(

@@ -174,12 +174,14 @@ class TestUpdateRunStatus:
         _db, recorder = _setup()
         recorder.update_run_status("run-1", RunStatus.FAILED)
         run = recorder.get_run("run-1")
+        assert run is not None
         assert run.status == RunStatus.FAILED
 
     def test_does_not_set_completed_at(self) -> None:
         _db, recorder = _setup()
         recorder.update_run_status("run-1", RunStatus.FAILED)
         run = recorder.get_run("run-1")
+        assert run is not None
         assert run.completed_at is None
 
 
@@ -241,6 +243,7 @@ class TestSetExportStatus:
         _db, recorder = _setup()
         recorder.set_export_status("run-1", ExportStatus.COMPLETED, export_format="json")
         run = recorder.get_run("run-1")
+        assert run is not None
         assert run.export_status == ExportStatus.COMPLETED
         assert run.exported_at is not None
         assert run.export_format == "json"
@@ -249,6 +252,7 @@ class TestSetExportStatus:
         _db, recorder = _setup()
         recorder.set_export_status("run-1", ExportStatus.FAILED, error="disk full")
         run = recorder.get_run("run-1")
+        assert run is not None
         assert run.export_status == ExportStatus.FAILED
         assert run.export_error == "disk full"
 
@@ -257,6 +261,7 @@ class TestSetExportStatus:
         recorder.set_export_status("run-1", ExportStatus.FAILED, error="first attempt failed")
         recorder.set_export_status("run-1", ExportStatus.COMPLETED)
         run = recorder.get_run("run-1")
+        assert run is not None
         assert run.export_status == ExportStatus.COMPLETED
         assert run.export_error is None
 
@@ -265,6 +270,7 @@ class TestSetExportStatus:
         recorder.set_export_status("run-1", ExportStatus.FAILED, error="old error")
         recorder.set_export_status("run-1", ExportStatus.PENDING)
         run = recorder.get_run("run-1")
+        assert run is not None
         assert run.export_error is None
 
 

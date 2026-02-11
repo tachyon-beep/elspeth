@@ -64,7 +64,7 @@ class TestClockProtocol:
 
         # Protocol without @runtime_checkable raises TypeError on isinstance
         with pytest.raises(TypeError):
-            isinstance(object(), Clock)
+            isinstance(object(), Clock)  # type: ignore[misc]  # deliberate: testing non-runtime-checkable protocol
 
 
 class TestSystemClock:

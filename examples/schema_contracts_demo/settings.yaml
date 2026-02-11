@@ -1,55 +1,28 @@
-# ELSPETH Schema Contracts Demo
-#
-# This pipeline demonstrates the Unified Schema Contracts feature with
-# automatic header normalization. The input CSV has intentionally "crazy"
-# headers that get normalized to Python identifiers while preserving
-# the original names in the audit trail.
-#
-# Original headers:
-#   Customer ID!!              -> customer_id
-#   "  Amount (USD)  "         -> amount_usd
-#   Transaction Date/Time      -> transaction_date_time
-#   Product Name               -> product_name
-#   Status [Active/Inactive]   -> status_active_inactive
-#   NOTES & Comments           -> notes_comments
-#
-# Run with:
-#   uv run elspeth run -s examples/schema_contracts_demo/settings.yaml --execute
-#
-# After running, inspect the audit trail:
-#   uv run elspeth-mcp --database sqlite:///examples/schema_contracts_demo/runs/audit.db
-#
-# Then use MCP tools:
-#   > get_run_contract("<run_id>")    # See field mappings
-#   > explain_field("<run_id>", "customer_id")  # Trace field provenance
-
 source:
   plugin: csv
+  on_success: source_out
   options:
     path: examples/schema_contracts_demo/input.csv
     schema:
-      # Use free mode with type declarations for numeric comparison
-      # The contract captures both original names AND types
       mode: flexible
       fields:
-        - "customer_id: str"          # Original: Customer ID!!
-        - "amount_usd: float"         # Original:   Amount (USD)
-        - "transaction_date_time: str"  # Original: Transaction Date/Time
-        - "product_name: str"         # Original: Product Name
-        - "status_active_inactive: str" # Original: Status [Active/Inactive]
-        - "notes_comments: str"       # Original: NOTES & Comments
-    # Normalize crazy headers to Python identifiers
+      - 'customer_id: str'
+      - 'amount_usd: float'
+      - 'transaction_date_time: str'
+      - 'product_name: str'
+      - 'status_active_inactive: str'
+      - 'notes_comments: str'
     normalize_fields: true
     on_validation_failure: discard
-
 transforms:
-  # Simple passthrough - data flows through unchanged
-  # The contract tracks field names as they propagate
-  - plugin: passthrough
-    options:
-      schema:
-        mode: observed
-
+- name: passthrough_0
+  plugin: passthrough
+  input: source_out
+  on_success: passthrough_0
+  on_error: discard
+  options:
+    schema:
+      mode: observed
 sinks:
   output:
     plugin: csv
@@ -58,14 +31,12 @@ sinks:
       schema:
         mode: fixed
         fields:
-          - "customer_id: str"
-          - "amount_usd: float"
-          - "transaction_date_time: str"
-          - "product_name: str"
-          - "status_active_inactive: str"
-          - "notes_comments: str"
-
-  # High-value transactions sink
+        - 'customer_id: str'
+        - 'amount_usd: float'
+        - 'transaction_date_time: str'
+        - 'product_name: str'
+        - 'status_active_inactive: str'
+        - 'notes_comments: str'
   high_value:
     plugin: csv
     options:
@@ -73,23 +44,18 @@ sinks:
       schema:
         mode: fixed
         fields:
-          - "customer_id: str"
-          - "amount_usd: float"
-          - "transaction_date_time: str"
-          - "product_name: str"
-          - "status_active_inactive: str"
-          - "notes_comments: str"
-
+        - 'customer_id: str'
+        - 'amount_usd: float'
+        - 'transaction_date_time: str'
+        - 'product_name: str'
+        - 'status_active_inactive: str'
+        - 'notes_comments: str'
 gates:
-  # Route high-value transactions to separate sink
-  # Note: Use NORMALIZED field names in expressions
-  - name: high_value_gate
-    condition: "row['amount_usd'] >= 500"  # Uses normalized name (coerced to float by schema)
-    routes:
-      "true": high_value   # condition true -> high_value sink
-      "false": continue    # condition false -> continue to default sink
-
-default_sink: output
-
+- name: high_value_gate
+  input: passthrough_0
+  condition: row['amount_usd'] >= 500
+  routes:
+    'true': high_value
+    'false': output
 landscape:
   url: sqlite:///examples/schema_contracts_demo/runs/audit.db

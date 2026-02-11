@@ -933,22 +933,11 @@ The following are **engine-level operations** that coordinate token flow through
 
 **Key property:** Gates make routing decisions. They may optionally modify row data (e.g., adding routing metadata).
 
-**Two approaches are supported:**
+Gates are **config-driven operations** defined in YAML. They are NOT plugins.
 
-| Approach | Use When | Implementation |
-|----------|----------|----------------|
-| **Config Expression** | Simple field comparisons (`score > 0.8`) | YAML `condition` string |
-| **Plugin Gate** | Complex logic (ML models, multi-field analysis, external lookups) | `BaseGate` subclass |
+#### Config Expression Gates
 
-Choose config expressions for simple, readable routing. Choose plugin gates when you need:
-- Stateful evaluation (counters, caches)
-- External service calls
-- Complex business logic that doesn't fit in an expression
-- Reusable routing logic across pipelines
-
-#### Approach 1: Config Expression Gates
-
-Config expressions are ideal for simple, declarative routing.
+Config expressions provide declarative routing.
 
 **Configuration:**
 
@@ -1018,69 +1007,14 @@ Gate conditions are evaluated using a **restricted expression parser**, NOT Pyth
 
 This prevents code injection. An expression like `"__import__('os').system('rm -rf /')"` will be rejected at config validation time.
 
-#### Approach 2: Plugin Gates
+#### GateResult Contract
 
-Plugin gates are system code for complex routing logic that doesn't fit in config expressions.
-
-**Required Attributes:**
-
-```python
-name: str                          # Plugin identifier (e.g., "safety_check", "ml_router")
-input_schema: type[PluginSchema]   # Schema of incoming rows
-output_schema: type[PluginSchema]  # Schema of outgoing rows (usually same as input)
-node_id: str | None                # Set by orchestrator after registration
-determinism: Determinism           # See Determinism Declaration section for all 6 levels_CALL
-plugin_version: str                # Semantic version for reproducibility
-```
-
-**Required Methods:**
-
-```python
-def __init__(self, config: dict[str, Any]) -> None:
-    """Initialize with configuration.
-
-    Called once at pipeline construction.
-    Validate config here - fail fast if misconfigured.
-    """
-
-def evaluate(
-    self,
-    row: PipelineRow,
-    ctx: PluginContext,
-) -> GateResult:
-    """Evaluate a row and decide routing.
-
-    Args:
-        row: Input row as PipelineRow (immutable, supports dual-name access)
-        ctx: Plugin context
-
-    Returns:
-        GateResult with routing decision
-    """
-
-def close(self) -> None:
-    """Release resources.
-
-    Called after on_complete() or on error.
-    """
-```
-
-**Required Lifecycle Hooks:**
-
-```python
-def on_start(self, ctx: PluginContext) -> None:
-    """Called before any rows are processed."""
-
-def on_complete(self, ctx: PluginContext) -> None:
-    """Called after all rows are processed."""
-```
-
-**GateResult Contract:**
+The engine evaluates gate conditions and produces `GateResult` objects internally.
 
 ```python
 @dataclass
 class GateResult:
-    row: dict[str, Any]        # Row data (may be modified)
+    row: dict[str, Any]        # Row data (passed through)
     action: RoutingAction      # Where the token goes
 
     # Schema contract for output (optional)
@@ -1102,81 +1036,12 @@ RoutingAction.route("label")           # Route to labeled destination (resolved 
 RoutingAction.fork_to_paths(["path1", "path2"]) # Fork to multiple parallel paths
 ```
 
-**Example Plugin Gate:**
-
-```python
-class SafetyGate(BaseGate):
-    """Route suspicious content to review queue.
-
-    Uses ML model for complex content analysis that
-    can't be expressed as a simple field comparison.
-    """
-
-    name = "safety_check"
-    input_schema = ContentSchema
-    output_schema = ContentSchema
-    determinism = Determinism.EXTERNAL_CALL  # ML model is external
-    plugin_version = "1.2.0"
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        self._threshold = config.get("threshold", 0.7)
-        self._model = None  # Lazy load
-
-    def on_start(self, ctx: PluginContext) -> None:
-        from mycompany.ml import SafetyClassifier
-        self._model = SafetyClassifier.load()
-
-    def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-        # Complex analysis that can't be a config expression
-        score = self._model.predict(row["content"])
-
-        if score > self._threshold:
-            # Add audit metadata before routing
-            modified_row = {**row.to_dict(), "safety_score": score, "flagged": True}
-            return GateResult(row=modified_row, action=RoutingAction.route("review_queue"))
-
-        return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
-
-    def close(self) -> None:
-        if self._model:
-            self._model.unload()
-```
-
-**Configuration (using plugin gate):**
-
-```yaml
-pipeline:
-  - source: content_feed
-
-  - gate: safety_check           # References plugin by name
-    threshold: 0.8               # Plugin-specific config
-    routes:                      # Route labels must match RoutingAction.route() calls
-      review_queue: review_sink
-
-  - transform: enrich
-
-  - sink: output
-```
-
-**When to Use Plugin Gates vs Config Expressions:**
-
-| Scenario | Use |
-|----------|-----|
-| `row['score'] > threshold` | Config expression |
-| Multi-field weighted scoring | Plugin gate |
-| External API call for validation | Plugin gate |
-| ML model inference | Plugin gate |
-| Stateful routing (rate limiting, quotas) | Plugin gate |
-| Simple field existence check | Config expression |
-| Complex business rules | Plugin gate |
-
 #### Gate Audit Trail
 
-Both approaches record:
-- Condition evaluated: expression text OR plugin name + version
+Gates record:
+- Condition evaluated: expression text
 - Route chosen: label + destination
 - Timing: evaluation duration
-- For plugin gates: any row modifications
 
 ---
 
@@ -1259,7 +1124,7 @@ Parent Token (T1)
 
 **Key property:** Waits for tokens from specified branches, combines based on policy.
 
-> **Note:** A `CoalesceProtocol` exists in `plugins/protocols.py` defining a plugin-level merge interface (`merge(branch_outputs, ctx)`). However, the current engine implementation uses config-driven merge strategies (union/nested/select) via the `CoalesceExecutor`. The protocol exists for future extensibility but is not currently exercised by the engine's merge path.
+> **Note:** Coalesce is fully structural — there is no plugin-level coalesce protocol. The engine uses config-driven merge strategies (union/nested/select) via the `CoalesceExecutor` in `engine/coalesce_executor.py`. Configure coalesce behavior via the `coalesce:` section in pipeline YAML.
 
 #### Configuration
 
@@ -1577,7 +1442,7 @@ Plugins make calls; the engine throttles them.
 | 1.9 | 2026-02-08 | Second accuracy pass — Fixed `Determinism` comment (all 6 levels, not 3), `Enum` → `StrEnum`, `list[dict]` → `list[PipelineRow]` in aggregation section, `invalid_data` → `invalid_input` error category, `RoutingAction.route()` parameter clarification, `BatchTransformProtocol` attribute precision |
 | 1.8 | 2026-02-08 | Accuracy pass — Fixed `RoutingAction.fork()` → `fork_to_paths()`, documented `SanitizedDatabaseUrl`/`SanitizedWebhookUrl` for ArtifactDescriptor factories, documented `BatchTransformProtocol` as separate protocol, added `transforms_adds_fields` attribute, expanded expression language reference, fixed `ctx.run_started_at` reference, documented sink resume capability, noted `CoalesceProtocol` existence |
 | 1.7 | 2026-02-05 | **CRITICAL UPDATES**: (1) `TransformResult.success()` requires `success_reason` parameter (keyword-only, crashes if missing), (2) Row type changed from `dict[str, Any]` to `PipelineRow` in Transform/Gate signatures, (3) Added `context_after` field for operational metadata, (4) Added `contract` field and `to_pipeline_row()` methods on all result types, (5) Enhanced `flush()` documentation with durability guarantees, (6) Updated `SourceRow` to document `contract` parameter and `to_pipeline_row()` method, (7) Fixed `load()` return type to `Iterator[SourceRow]` |
-| 1.6 | 2026-01-20 | Gate documentation: clarified two approaches (config expressions AND plugin gates via `BaseGate`), added `GateResult` contract, plugin gate lifecycle, when-to-use guidance |
+| 1.6 | 2026-01-20 | Gate documentation: config expression gates, `GateResult` contract, routing actions |
 | 1.5 | 2026-01-19 | Multi-row output: `creates_tokens` attribute, `TransformResult.success_multi()`, `rows` field, aggregation `output_mode` (passthrough/transform), `BUFFERED` and `EXPANDED` outcomes |
 | 1.4 | 2026-01-19 | Batch-aware transforms (`is_batch_aware`), structural aggregation (engine owns buffers), crash recovery for batches |
 | 1.3 | 2026-01-17 | Source `on_validation_failure` (required), Transform `on_error` (optional), QuarantineEvent, TransformErrorEvent |

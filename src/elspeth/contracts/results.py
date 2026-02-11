@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts.enums import RowOutcome
 from elspeth.contracts.errors import (
+    OrchestrationInvariantError,
     PluginContractViolation,
     TransformErrorReason,
     TransformSuccessReason,
@@ -313,12 +314,15 @@ class GateResult:
 # The engine buffers rows and decides when to flush via TriggerEvaluator.
 
 
-@dataclass
+@dataclass(frozen=True)
 class RowResult:
     """Final result of processing a row through the pipeline.
 
     Uses RowOutcome enum, which is explicitly recorded in the token_outcomes
     table (AUD-001) at determination time for complete audit traceability.
+
+    Frozen to prevent post-construction mutation of outcome/sink_name,
+    which would bypass __post_init__ invariant checks.
 
     Fields:
         token: Token identity for this row instance
@@ -333,6 +337,14 @@ class RowResult:
     outcome: RowOutcome
     sink_name: str | None = None
     error: FailureInfo | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome == RowOutcome.COMPLETED and self.sink_name is None:
+            raise OrchestrationInvariantError("COMPLETED outcome requires sink_name to be set")
+        if self.outcome == RowOutcome.ROUTED and self.sink_name is None:
+            raise OrchestrationInvariantError("ROUTED outcome requires sink_name to be set")
+        if self.outcome == RowOutcome.COALESCED and self.sink_name is None:
+            raise OrchestrationInvariantError("COALESCED outcome requires sink_name to be set")
 
 
 @dataclass(frozen=True)

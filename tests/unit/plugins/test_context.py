@@ -252,6 +252,75 @@ class TestValidationErrorRecording:
         assert token.error_id == "verr_abc123"
         assert token.destination == "quarantine_sink"
 
+    def test_record_validation_error_passes_contract_violation_to_landscape(self) -> None:
+        """contract_violation parameter is forwarded to landscape recorder.
+
+        Regression test for bead c5cz: PluginContext accepted contract_violation
+        in its signature but silently dropped it, never passing it to the
+        landscape's record_validation_error. This broke structured auditing of
+        schema contract violations.
+        """
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.errors import TypeMismatchViolation
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_validation_error.return_value = "verr_cv001"
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_node",
+            landscape=mock_landscape,
+        )
+
+        violation = TypeMismatchViolation(
+            normalized_name="amount",
+            original_name="Amount",
+            expected_type=int,
+            actual_type=str,
+            actual_value="not_a_number",
+        )
+
+        token = ctx.record_validation_error(
+            row={"id": 99, "amount": "not_a_number"},
+            error="Type mismatch: expected int, got str",
+            schema_mode="fixed",
+            destination="quarantine_sink",
+            contract_violation=violation,
+        )
+
+        call_kwargs = mock_landscape.record_validation_error.call_args[1]
+        assert call_kwargs["contract_violation"] is violation
+        assert token.error_id == "verr_cv001"
+
+    def test_record_validation_error_passes_none_violation_by_default(self) -> None:
+        """contract_violation defaults to None when not provided."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.plugin_context import PluginContext
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_validation_error.return_value = "verr_no_cv"
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_node",
+            landscape=mock_landscape,
+        )
+
+        ctx.record_validation_error(
+            row={"id": 1, "bad": "data"},
+            error="validation failed",
+            schema_mode="fixed",
+            destination="discard",
+        )
+
+        call_kwargs = mock_landscape.record_validation_error.call_args[1]
+        assert call_kwargs["contract_violation"] is None
+
 
 class TestValidationErrorDestination:
     """Tests for validation error destination tracking."""
@@ -431,7 +500,7 @@ class TestTokenField:
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema_contract import SchemaContract
-        from tests.fixtures.factories import make_field, make_row
+        from elspeth.testing import make_field, make_row
 
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
@@ -455,7 +524,7 @@ class TestTokenField:
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema_contract import SchemaContract
-        from tests.fixtures.factories import make_field, make_row
+        from elspeth.testing import make_field, make_row
 
         # Create PipelineRow for TokenInfo
         contract = SchemaContract(
@@ -479,7 +548,7 @@ class TestTokenField:
         from elspeth.contracts.identity import TokenInfo
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.contracts.schema_contract import SchemaContract
-        from tests.fixtures.factories import make_field, make_row
+        from elspeth.testing import make_field, make_row
 
         ctx = PluginContext(run_id="test-run", config={})
         assert ctx.token is None

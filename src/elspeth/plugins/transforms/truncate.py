@@ -36,7 +36,7 @@ class TruncateConfig(TransformDataConfig):
     )
     strict: bool = Field(
         default=False,
-        description="If True, error when a specified field is missing (default: False)",
+        description="If True, error when a specified field is missing or not a string (default: False)",
     )
 
 
@@ -52,7 +52,7 @@ class Truncate(BaseTransform):
         schema: Required. Schema for input/output (use {mode: observed} for any fields)
         fields: Dict of field_name -> max_length (e.g., {"title": 100, "description": 500})
         suffix: String to append when truncating (e.g., "..."). Included in max length.
-        strict: If True, error on missing fields (default: False, skip missing fields)
+        strict: If True, error on missing or non-string fields (default: False, skip them)
         on_error: Sink to route errors to (default: None, will quarantine)
 
     Example config:
@@ -76,7 +76,6 @@ class Truncate(BaseTransform):
         self._fields = cfg.fields
         self._suffix = cfg.suffix
         self._strict = cfg.strict
-        self._on_error: str | None = cfg.on_error
 
         # Validate suffix length doesn't exceed any max length
         suffix_len = len(self._suffix)
@@ -122,10 +121,17 @@ class Truncate(BaseTransform):
 
             value = output[field_name]
 
-            # Only truncate strings
+            # Only truncate strings — non-strings skip in lenient mode, error in strict
             if not isinstance(value, str):
-                # Non-string values pass through unchanged
-                # (This is their data - if it's wrong type, source should have caught it)
+                if self._strict:
+                    return TransformResult.error(
+                        {
+                            "reason": "type_mismatch",
+                            "field": field_name,
+                            "expected": "str",
+                            "actual": type(value).__name__,
+                        }
+                    )
                 continue
 
             # Truncate if needed

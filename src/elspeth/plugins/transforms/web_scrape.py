@@ -18,7 +18,7 @@ Audit Trail:
 from typing import Any
 
 import httpx
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from elspeth.contracts import Determinism
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
@@ -51,6 +51,30 @@ from elspeth.plugins.transforms.web_scrape_extraction import extract_content
 from elspeth.plugins.transforms.web_scrape_fingerprint import compute_fingerprint
 
 
+class WebScrapeHTTPConfig(BaseModel):
+    """HTTP client configuration for web scrape transform.
+
+    Controls responsible scraping behavior: abuse contact for transparency,
+    scraping reason for audit trail, and timeout for resource management.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    abuse_contact: str = Field(
+        ...,
+        description="Email for abuse reports (required for responsible scraping)",
+    )
+    scraping_reason: str = Field(
+        ...,
+        description="Why we're scraping (recorded in audit trail)",
+    )
+    timeout: int = Field(
+        default=30,
+        gt=0,
+        description="Request timeout in seconds",
+    )
+
+
 class WebScrapeConfig(TransformDataConfig):
     """Configuration for web scrape transform."""
 
@@ -60,7 +84,7 @@ class WebScrapeConfig(TransformDataConfig):
     format: str = "markdown"
     fingerprint_mode: str = "content"
     strip_elements: list[str] = Field(default_factory=lambda: ["script", "style"])
-    http: dict[str, Any]
+    http: WebScrapeHTTPConfig
 
 
 class WebScrapeTransform(BaseTransform):
@@ -121,11 +145,10 @@ class WebScrapeTransform(BaseTransform):
         self._format = cfg.format
         self._fingerprint_mode = cfg.fingerprint_mode
 
-        # HTTP config
-        http_config = cfg.http
-        self._abuse_contact = http_config["abuse_contact"]
-        self._scraping_reason = http_config["scraping_reason"]
-        self._timeout = http_config.get("timeout", 30)
+        # HTTP config — validated by WebScrapeHTTPConfig sub-model
+        self._abuse_contact = cfg.http.abuse_contact
+        self._scraping_reason = cfg.http.scraping_reason
+        self._timeout = cfg.http.timeout
 
         # Element stripping
         self._strip_elements = cfg.strip_elements

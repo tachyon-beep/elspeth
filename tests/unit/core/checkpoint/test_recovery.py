@@ -10,6 +10,7 @@ from pydantic import ConfigDict
 from sqlalchemy import Connection
 
 from elspeth.contracts import (
+    Checkpoint,
     Determinism,
     NodeType,
     PayloadStore,
@@ -585,7 +586,7 @@ def test_get_resume_point_reads_latest_checkpoint_after_can_resume(
                 created_at=datetime.now(UTC),
                 upstream_topology_hash="x" * 64,
                 checkpoint_node_config_hash="y" * 64,
-                format_version=2,
+                format_version=Checkpoint.CURRENT_FORMAT_VERSION,
             )
         )
 

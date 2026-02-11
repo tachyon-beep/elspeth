@@ -2,7 +2,7 @@
 
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.schema_contract import SchemaContract
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 def test_narrow_contract_field_removal():

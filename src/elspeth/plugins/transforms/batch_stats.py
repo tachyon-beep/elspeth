@@ -77,7 +77,6 @@ class BatchStats(BaseTransform):
         self._value_field = cfg.value_field
         self._group_by = cfg.group_by
         self._compute_mean = cfg.compute_mean
-        self._on_error = cfg.on_error
 
         self._schema_config = cfg.schema_config
 
@@ -142,7 +141,7 @@ class BatchStats(BaseTransform):
 
         # Extract numeric values - enforce type contract
         # Tier 2 pipeline data should already be validated; wrong types = upstream bug
-        values: list[float] = []
+        values: list[int | float] = []
         skipped_non_finite = 0
         for i, row in enumerate(rows):
             # Direct access - field must exist (KeyError = upstream bug)
@@ -157,22 +156,23 @@ class BatchStats(BaseTransform):
                     f"This indicates an upstream validation bug - check source schema or prior transforms."
                 )
 
-            float_value = float(raw_value)
-
             # NaN/Inf are type-valid floats but operation-unsafe — they produce
             # garbage in arithmetic and crash downstream canonical JSON (RFC 8785).
-            # Skip from computation and track for audit metadata.
-            if not math.isfinite(float_value):
+            # Integers are always finite — only check floats.
+            if isinstance(raw_value, float) and not math.isfinite(raw_value):
                 skipped_non_finite += 1
                 continue
 
-            values.append(float_value)
+            # Preserve original type: int stays int (arbitrary precision),
+            # float stays float. Avoids precision loss for ints > 2^53.
+            values.append(raw_value)
 
         count = len(values)
-        total = sum(values) if values else 0.0
+        total = sum(values) if values else 0
 
-        # Guard against overflow: summing many large-but-valid floats can produce inf
-        if count > 0 and not math.isfinite(total):
+        # Guard against overflow: summing many large-but-valid floats can produce inf.
+        # Integer sums use arbitrary precision and cannot overflow.
+        if count > 0 and isinstance(total, float) and not math.isfinite(total):
             return TransformResult.error(
                 {"reason": "float_overflow", "batch_size": len(rows), "valid_count": count},
                 retryable=False,

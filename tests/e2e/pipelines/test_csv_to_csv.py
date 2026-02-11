@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 
 from elspeth.contracts import RunStatus
+from elspeth.core.config import SourceSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import rows_table, token_outcomes_table
@@ -21,6 +22,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.plugins.sources.csv_source import CSVSource
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import PassTransform
 
 
@@ -66,7 +68,10 @@ class TestCSVToCSV:
                 "on_validation_failure": "discard",
             }
         )
+        source.on_success = "csv_out"
+        source_settings = SourceSettings(plugin=source.name, on_success="csv_out", options={})
         transform = PassTransform()
+        wired = wire_transforms([transform], source_connection="csv_out", final_sink="default")
         sink = CSVSink(
             {
                 "path": str(output_csv),
@@ -77,11 +82,11 @@ class TestCSVToCSV:
         # Build graph via production path (BUG-LINEAGE-01)
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=source_settings,
+            transforms=wired,
             sinks={"default": sink},
             aggregations={},
             gates=[],
-            default_sink="default",
         )
 
         # -- Act: run pipeline --
@@ -134,7 +139,10 @@ class TestCSVToCSV:
                 "on_validation_failure": "discard",
             }
         )
+        source.on_success = "csv_out"
+        source_settings = SourceSettings(plugin=source.name, on_success="csv_out", options={})
         transform = PassTransform()
+        wired = wire_transforms([transform], source_connection="csv_out", final_sink="default")
         sink = CSVSink(
             {
                 "path": str(output_csv),
@@ -144,11 +152,11 @@ class TestCSVToCSV:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=source_settings,
+            transforms=wired,
             sinks={"default": sink},
             aggregations={},
             gates=[],
-            default_sink="default",
         )
 
         db_path = tmp_path / "audit.db"

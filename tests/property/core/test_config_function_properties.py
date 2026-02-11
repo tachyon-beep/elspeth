@@ -19,6 +19,7 @@ Properties tested:
 from __future__ import annotations
 
 import os
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -96,7 +97,7 @@ class TestExpandEnvVarsStructurePreservation:
         values=st.lists(non_string_values, min_size=1, max_size=5),
     )
     @settings(max_examples=200)
-    def test_non_string_values_pass_through(self, keys: list[str], values: list) -> None:
+    def test_non_string_values_pass_through(self, keys: list[str], values: list[Any]) -> None:
         """Property: Non-string values (int, float, bool, None) are never modified."""
         # Pad values to match keys length
         padded = (values * ((len(keys) // len(values)) + 1))[: len(keys)]
@@ -122,7 +123,7 @@ class TestExpandEnvVarsStructurePreservation:
         inner_values=st.lists(non_string_values, min_size=1, max_size=3),
     )
     @settings(max_examples=100)
-    def test_nested_dicts_preserved(self, key: str, inner_keys: list[str], inner_values: list) -> None:
+    def test_nested_dicts_preserved(self, key: str, inner_keys: list[str], inner_values: list[Any]) -> None:
         """Property: Nested dict structure is preserved during expansion."""
         padded = (inner_values * ((len(inner_keys) // len(inner_values)) + 1))[: len(inner_keys)]
         config = {key: dict(zip(inner_keys, padded, strict=False))}
@@ -134,7 +135,7 @@ class TestExpandEnvVarsStructurePreservation:
         values=st.lists(non_string_values, min_size=0, max_size=5),
     )
     @settings(max_examples=100)
-    def test_lists_preserved(self, key: str, values: list) -> None:
+    def test_lists_preserved(self, key: str, values: list[Any]) -> None:
         """Property: Lists are preserved during expansion."""
         config = {key: values}
         result = _expand_env_vars(config)
@@ -142,7 +143,7 @@ class TestExpandEnvVarsStructurePreservation:
 
     @given(config=st.dictionaries(config_keys, non_string_values, max_size=5))
     @settings(max_examples=100)
-    def test_keys_never_modified(self, config: dict) -> None:
+    def test_keys_never_modified(self, config: dict[str, Any]) -> None:
         """Property: Dict keys are NEVER modified by expansion."""
         result = _expand_env_vars(config)
         assert set(result.keys()) == set(config.keys())
@@ -349,7 +350,7 @@ class TestSanitizeDsnProperties:
 
     @given(
         password=st.text(
-            min_size=8,
+            min_size=11,
             max_size=50,
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),
@@ -360,9 +361,10 @@ class TestSanitizeDsnProperties:
     def test_password_never_in_sanitized_url(self, password: str) -> None:
         """Property: For ANY password string, sanitized URL does not contain it.
 
-        Uses min_size=8 because very short passwords (1-2 chars) may coincidentally
-        appear in the URL structure (e.g., 'o' in 'postgresql'). Real passwords
-        are always longer, so this is not a meaningful security gap.
+        Uses min_size=11 because shorter passwords may coincidentally appear in
+        the URL structure (e.g., 'postgres' in 'postgresql://', 'localhost' in
+        the host). Real passwords are always longer, so this is not a meaningful
+        security gap.
         """
         url = f"postgresql://user:{password}@localhost/db"
         sanitized, _, had_password = _sanitize_dsn_dev_mode(url)

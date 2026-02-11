@@ -131,6 +131,7 @@ class TestTelemetryBackpressure:
             granularity=TelemetryGranularity.LIFECYCLE,
             backpressure_mode=BackpressureMode.BLOCK,
             fail_on_total_exporter_failure=False,
+            max_consecutive_failures=10,
             exporter_configs=(),
         )
 
@@ -177,6 +178,7 @@ class TestTelemetryBackpressure:
             granularity=TelemetryGranularity.LIFECYCLE,
             backpressure_mode=BackpressureMode.DROP,
             fail_on_total_exporter_failure=False,
+            max_consecutive_failures=10,
             exporter_configs=(),
         )
 

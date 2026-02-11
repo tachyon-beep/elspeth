@@ -143,6 +143,10 @@ class SourceDataConfig(PathConfig):
 
     Extends PathConfig to add required on_validation_failure field.
     All sources must specify where non-conformant rows go.
+
+    Note: on_success routing is defined at the settings level
+    (SourceSettings in core/config.py), not here. The bridge in
+    cli_helpers.py injects on_success after plugin construction.
     """
 
     on_validation_failure: str = Field(
@@ -210,36 +214,11 @@ class SinkPathConfig(PathConfig):
             - "normalized": Use Python identifier names (default)
             - "original": Restore original source header names
             - dict: Custom mapping from normalized to output names
-
-    Legacy Options (for backwards compatibility):
-        display_headers: Explicit mapping from normalized field names to
-            display names. Superseded by headers: {mapping}.
-        restore_source_headers: Flag to restore original source headers.
-            Superseded by headers: original.
-
-    Priority Order (highest to lowest):
-        1. headers (if specified)
-        2. restore_source_headers (legacy, maps to ORIGINAL)
-        3. display_headers (legacy, maps to CUSTOM)
-        4. Default: NORMALIZED
-
-    When 'headers' is set, it takes precedence and legacy options are ignored.
-    Legacy options remain mutually exclusive when 'headers' is not set.
     """
 
     headers: str | dict[str, str] | None = Field(
         default=None,
         description=("Header output mode: 'normalized', 'original', or {field: header} mapping"),
-    )
-
-    display_headers: dict[str, str] | None = Field(
-        default=None,
-        description=("LEGACY: Explicit mapping from normalized field names to display names. Prefer 'headers: {mapping}' instead."),
-    )
-
-    restore_source_headers: bool = Field(
-        default=False,
-        description=("LEGACY: Automatically restore original source headers. Prefer 'headers: original' instead."),
     )
 
     @field_validator("headers")
@@ -262,46 +241,14 @@ class SinkPathConfig(PathConfig):
 
         raise ValueError(f"headers must be 'normalized', 'original', or a dict mapping, got {type(v).__name__}")
 
-    @model_validator(mode="after")
-    def _validate_display_options(self) -> Self:
-        """Validate display header option interactions.
-
-        When 'headers' is set, it takes full precedence and legacy options
-        are ignored (no validation needed). When 'headers' is not set,
-        legacy options remain mutually exclusive.
-        """
-        # New 'headers' takes precedence - skip legacy validation
-        if self.headers is not None:
-            return self
-
-        # Legacy validation: mutual exclusion when headers not set
-        if self.display_headers is not None and self.restore_source_headers:
-            raise ValueError(
-                "Cannot use both display_headers and restore_source_headers. "
-                "Use display_headers for explicit control, or restore_source_headers "
-                "to automatically restore source field names."
-            )
-        return self
-
     @property
     def headers_mode(self) -> HeaderMode:
         """Get resolved header mode.
 
-        Priority:
-        1. 'headers' setting (if specified)
-        2. 'restore_source_headers' (legacy, maps to ORIGINAL)
-        3. 'display_headers' (legacy, maps to CUSTOM)
-        4. Default: NORMALIZED
+        Returns NORMALIZED when headers is not set.
         """
         if self.headers is not None:
             return parse_header_mode(self.headers)
-
-        if self.restore_source_headers:
-            return HeaderMode.ORIGINAL
-
-        if self.display_headers is not None:
-            return HeaderMode.CUSTOM
-
         return HeaderMode.NORMALIZED
 
     @property
@@ -313,20 +260,15 @@ class SinkPathConfig(PathConfig):
         """
         if isinstance(self.headers, dict):
             return self.headers
-
-        # Only use display_headers if headers is not set
-        if self.headers is None and self.display_headers is not None:
-            return self.display_headers
-
         return None
 
 
 class TransformDataConfig(DataPluginConfig):
-    """Base config for transform plugins with error routing.
+    """Base config for transform plugins.
 
-    Extends DataPluginConfig to add optional on_error field.
-    Transforms that can return TransformResult.error() should configure
-    where those rows go.
+    Routing fields (on_success, on_error) are defined at the settings level
+    (TransformSettings in core/config.py), not here. This class provides
+    plugin-specific configuration like schema and required_input_fields.
 
     Input Field Requirements:
         Transforms can declare which fields they require in their input using
@@ -338,11 +280,6 @@ class TransformDataConfig(DataPluginConfig):
         fields your template references, then declare them explicitly.
     """
 
-    on_error: str | None = Field(
-        default=None,
-        description="Sink name for rows that cannot be processed, or 'discard'. Required if transform can return errors.",
-    )
-
     required_input_fields: list[str] | None = Field(
         default=None,
         description=(
@@ -351,14 +288,6 @@ class TransformDataConfig(DataPluginConfig):
             "elspeth.core.templates.extract_jinja2_fields() to discover fields."
         ),
     )
-
-    @field_validator("on_error")
-    @classmethod
-    def validate_on_error(cls, v: str | None) -> str | None:
-        """Ensure on_error is not empty string."""
-        if v is not None and not v.strip():
-            raise ValueError("on_error must be a sink name, 'discard', or omitted entirely")
-        return v.strip() if v else None
 
     @field_validator("required_input_fields")
     @classmethod

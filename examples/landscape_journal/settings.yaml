@@ -1,16 +1,10 @@
-# Landscape journal example
-# Demonstrates optional JSONL change journal for emergency audit backups.
-#
-# Run with:
-#   uv run elspeth run -s examples/landscape_journal/settings.yaml --execute
-
 landscape:
   url: sqlite:///examples/landscape_journal/runs/audit.db
   dump_to_jsonl: true
   dump_to_jsonl_path: examples/landscape_journal/runs/audit.journal.jsonl
-
 source:
   plugin: json
+  on_success: source_out
   options:
     path: examples/landscape_journal/input.jsonl
     format: jsonl
@@ -18,15 +12,17 @@ source:
     schema:
       mode: fixed
       fields:
-        - "id: int"
-        - "message: str"
-
+      - 'id: int'
+      - 'message: str'
 transforms:
-  - plugin: passthrough
-    options:
-      schema:
-        mode: observed
-
+- name: passthrough_0
+  plugin: passthrough
+  input: source_out
+  on_success: output
+  on_error: discard
+  options:
+    schema:
+      mode: observed
 sinks:
   output:
     plugin: json
@@ -35,5 +31,3 @@ sinks:
       format: jsonl
       schema:
         mode: observed
-
-default_sink: output

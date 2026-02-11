@@ -10,7 +10,7 @@ import pytest
 
 from elspeth.contracts.errors import TypeMismatchViolation
 from elspeth.contracts.schema_contract import SchemaContract
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 class TestContractBuilderInference:

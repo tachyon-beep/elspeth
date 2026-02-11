@@ -274,14 +274,13 @@ class OutputMode(StrEnum):
     TRANSFORM = "transform"
 
 
-def error_edge_label(transform_seq: int) -> str:
+def error_edge_label(transform_id: str) -> str:
     """Canonical label for a transform error DIVERT edge.
 
     Shared between DAG construction (dag.py) and error-routing audit recording
     (executors.py, processor.py) to prevent label drift.
 
     Args:
-        transform_seq: 0-based position of the transform in the pipeline's
-                       transform list (same index used in dag.py:813-823).
+        transform_id: Stable transform name for error-route labels.
     """
-    return f"__error_{transform_seq}__"
+    return f"__error_{transform_id}__"

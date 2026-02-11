@@ -20,6 +20,7 @@ Migrated from:
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import pytest
 
@@ -58,7 +59,7 @@ MULTI_QUERY_JSON_TEMPLATE = '{"score": 5, "rationale": "Test assessment rational
 
 def _feed_rows(
     transform: AzureLLMTransform | OpenRouterLLMTransform | AzureMultiQueryLLMTransform | OpenRouterMultiQueryLLMTransform,
-    rows: list[dict],
+    rows: list[dict[str, Any]],
     recorder: object,
     run_id: str,
     node_id: str,
@@ -74,14 +75,14 @@ def _feed_rows(
     input_order: list[str] = []
     for i, row in enumerate(rows):
         token = make_token(f"row-{i}", f"token-{i}")
-        row_record = recorder.create_row(  # type: ignore[union-attr]
+        row_record = recorder.create_row(  # type: ignore[attr-defined]
             run_id=run_id,
             source_node_id=node_id,
             row_index=i,
             data=row,
         )
-        token_record = recorder.create_token(row_id=row_record.row_id)  # type: ignore[union-attr]
-        state = recorder.begin_node_state(  # type: ignore[union-attr]
+        token_record = recorder.create_token(row_id=row_record.row_id)  # type: ignore[attr-defined]
+        state = recorder.begin_node_state(  # type: ignore[attr-defined]
             token_id=token_record.token_id,
             node_id=node_id,
             run_id=run_id,

@@ -1,0 +1,165 @@
+per_file_rules:
+- pattern: contracts/schema.py
+  rules:
+  - R1
+  - R5
+  reason: SchemaConfig.from_dict() parses user YAML config (Tier 3) - defensive access for optional fields
+  expires: null
+- pattern: contracts/contract_records.py
+  rules:
+  - R5
+  reason: Violation type dispatch requires isinstance() for polymorphic serialization of ContractViolation subclasses
+  expires: null
+- pattern: contracts/type_normalization.py
+  rules:
+  - R5
+  reason: Type normalization requires isinstance() for polymorphic serialization of numeric types
+  expires: null
+allow_hits:
+- key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=0fe7a31adc9f24b3
+  owner: feature
+  reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
+  safety: Fallback to same value is correct behavior, not silent coercion
+  expires: null
+- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=d1d4c7a6b6f8a842
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/data.py:R1:validate_row:fp=0f6fa60e1ef14cec
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/data.py:R3:_type_name:fp=e5ac6075b25c4cd5
+  owner: architecture
+  reason: hasattr for feature detection
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/data.py:R5:_is_union_type:fp=0cfbacff868ef7c0
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/transform_contract.py:R5:_is_union_type:fp=a9ba219b5d0e0a54
+  owner: architecture
+  reason: Type annotation introspection - required to detect Union/Optional types
+  safety: Code reviewed - same pattern as data.py:_is_union_type
+  expires: '2026-05-02'
+- key: contracts/audit.py:R5:_validate_enum:fp=f48a15b1272c5363
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/audit.py:R5:TokenOutcome:__post_init__:fp=14670c8c83113873
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=6da358fbc674d735
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=88448fd740364e24
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=4134c33898370a29
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=0a516787233a14be
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=1e6dc332e2ef9699
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=ecfef5a461fab47d
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=efa2d1bce6b292b8
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=858ee1fdd29fc79a
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=7c53c74396aa56f7
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/header_modes.py:R5:parse_header_mode:fp=dc93452b5432e8a4
+  owner: feature
+  reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
+  safety: ValueError raised for invalid config - explicit validation failure
+  expires: null
+- key: contracts/contract_propagation.py:R6:propagate_contract:fp=fbcdf96127213894
+  owner: architecture
+  reason: Type narrowing failure is silently skipped - non-primitive types aren't included in contract
+  safety: Field continues in data without contract tracking - intentional behavior
+  expires: null
+- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=b2e116f9ad91bb8f
+  owner: architecture
+  reason: Type resolution errors are logged and field is excluded from narrowed contract
+  safety: Contract narrowing continues without failed field - explicit logging
+  expires: null
+- key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=b77bb8f4e1cd3d1d
+  owner: architecture
+  reason: Optional lookup for original name - new fields from transforms may not have input mapping
+  safety: Fallback to output field's original_name is correct behavior for transform-added fields
+  expires: null
+- key: contracts/checkpoint.py:R5:ResumePoint:__post_init__:fp=06723188787bab6d
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=7df7fefcb2213125
+  owner: architecture
+  reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for
+    strict lookup'
+- key: contracts/plugin_context.py:R5:PluginContext:get:fp=76de86ac35dafae4
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=5ec999dfff114a20
+  owner: architecture
+  reason: Optional field access at trust boundary
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=94971df001b1532e
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=4e105a1207a19d87
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=27fe368832b3e2a9
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=d20c868c67b376ce
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+- key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=4d9b80b717bc7551
+  owner: bugfix
+  reason: Dataclass invariant enforcement - RoutingAction requires RoutingMode enum, not raw strings
+  safety: TypeError raised immediately on construction - explicit crash, not masking
+  expires: null
+- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=2300432a3c93d6b5
+  owner: bugfix
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl
+  safety: TypeError raised if wrong URL type - explicit failure, not masking
+  expires: null
+- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=e2fada7e3814d17c
+  owner: bugfix
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
+  safety: TypeError raised if wrong URL type - explicit failure, not masking
+  expires: null

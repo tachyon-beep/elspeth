@@ -8,7 +8,7 @@ with appropriate settings for each.
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 from sqlalchemy import Connection, create_engine, event
 from sqlalchemy.engine import Engine
@@ -63,6 +63,7 @@ class LandscapeDB:
         self,
         connection_string: str,
         *,
+        passphrase: str | None = None,
         dump_to_jsonl: bool = False,
         dump_to_jsonl_path: str | None = None,
         dump_to_jsonl_fail_on_error: bool = False,
@@ -75,6 +76,9 @@ class LandscapeDB:
             connection_string: SQLAlchemy connection string
                 e.g., "sqlite:///./state/audit.db"
                       "postgresql://user:pass@host/dbname"
+            passphrase: SQLCipher encryption passphrase. When provided, the
+                database is opened with AES-256 encryption via sqlcipher3.
+                The passphrase is never stored in the URL or audit trail.
             dump_to_jsonl: Enable JSONL change journal for emergency backups
             dump_to_jsonl_path: Optional override path for JSONL journal
             dump_to_jsonl_fail_on_error: Fail if journal write fails
@@ -82,6 +86,7 @@ class LandscapeDB:
             dump_to_jsonl_payload_base_path: Payload store base path for inlining
         """
         self.connection_string = connection_string
+        self._passphrase = passphrase
         self._engine: Engine | None = None
         self._journal: LandscapeJournal | None = None
         if dump_to_jsonl:
@@ -98,14 +103,17 @@ class LandscapeDB:
 
     def _setup_engine(self) -> None:
         """Create and configure the database engine."""
-        self._engine = create_engine(
-            self.connection_string,
-            echo=False,  # Set True for SQL debugging
-        )
-
-        # SQLite-specific configuration
-        if self.connection_string.startswith("sqlite"):
+        if self._passphrase is not None:
+            self._engine = self._create_sqlcipher_engine(self.connection_string, self._passphrase)
             LandscapeDB._configure_sqlite(self._engine)
+        else:
+            self._engine = create_engine(
+                self.connection_string,
+                echo=False,  # Set True for SQL debugging
+            )
+            # SQLite-specific configuration
+            if self.connection_string.startswith("sqlite"):
+                LandscapeDB._configure_sqlite(self._engine)
         if self._journal is not None:
             self._journal.attach(self._engine)
 
@@ -117,6 +125,9 @@ class LandscapeDB:
         - PRAGMA journal_mode=WAL (better concurrency)
         - PRAGMA foreign_keys=ON (referential integrity)
         - PRAGMA busy_timeout=5000 (contention tolerance)
+
+        For SQLCipher engines, these PRAGMAs execute AFTER the creator callback
+        returns (where PRAGMA key is issued), preserving the required ordering.
 
         Args:
             engine: SQLAlchemy Engine to configure
@@ -133,6 +144,109 @@ class LandscapeDB:
             cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
+    @staticmethod
+    def _create_sqlcipher_engine(url: str, passphrase: str) -> Engine:
+        """Create a SQLAlchemy engine backed by SQLCipher (AES-256 encryption).
+
+        Uses the creator callback pattern to keep the passphrase out of the
+        connection URL entirely (prevents leaks in logs, tracebacks, repr()).
+
+        PRAGMA key MUST be the first statement on a new SQLCipher connection.
+        The creator issues it before returning, so SQLAlchemy's "connect" event
+        (used by _configure_sqlite for WAL/FK/busy_timeout) fires afterwards.
+
+        Args:
+            url: SQLAlchemy SQLite URL (e.g., "sqlite:///./state/audit.db")
+            passphrase: Encryption passphrase for PRAGMA key
+
+        Returns:
+            Configured SQLAlchemy Engine
+
+        Raises:
+            ImportError: If sqlcipher3 is not installed
+            ValueError: If URL points to :memory: (SQLCipher requires a file)
+        """
+        try:
+            import sqlcipher3  # type: ignore[import-untyped]
+        except ImportError:
+            raise ImportError(
+                "sqlcipher3 is required for encrypted audit databases. "
+                "Install it with: uv pip install 'elspeth[security]'\n"
+                "Note: requires libsqlcipher-dev system package."
+            ) from None
+
+        parsed = make_url(url)
+
+        # SQLCipher only works with SQLite — reject other backends early
+        # to prevent silently opening a local file when the URL points elsewhere
+        # (e.g., postgresql://host/db with ELSPETH_AUDIT_KEY set in env).
+        driver = parsed.drivername.split("+")[0]  # "sqlite+aiosqlite" → "sqlite"
+        if driver != "sqlite":
+            raise ValueError(
+                f"SQLCipher encryption requires a SQLite database URL, "
+                f"got driver '{parsed.drivername}'. "
+                f"Either remove the passphrase/encryption_key_env or change "
+                f"the URL to sqlite:///path/to/audit.db"
+            )
+
+        db_path = parsed.database
+        if db_path is None or db_path == ":memory:":
+            raise ValueError("SQLCipher requires a file-backed database (cannot encrypt :memory:)")
+
+        # Resolve relative paths the same way SQLite does
+        resolved_path = str(Path(db_path).resolve())
+
+        # Forward URL query params as connect kwargs (parity with non-encrypted
+        # path, where create_engine extracts them automatically).  Coerce known
+        # sqlite3.connect() params from their string URL representation.
+        #
+        # SQLite URI-style params (mode, cache, immutable, vfs) are NOT valid
+        # connect() kwargs — they must be embedded in a file: URI when uri=True.
+        _CONNECT_KWARGS = {"check_same_thread", "uri", "timeout", "detect_types", "cached_statements", "isolation_level", "factory"}
+        # Match SQLAlchemy's pysqlite default: allow cross-thread usage so the
+        # connection pool can hand connections to worker threads.  URL params
+        # parsed below can still override this explicitly.
+        connect_kwargs: dict[str, Any] = {"check_same_thread": False}
+        uri_params: dict[str, str] = {}
+
+        for key, raw_value in parsed.query.items():
+            value = raw_value if isinstance(raw_value, str) else raw_value[0]
+            if key in _CONNECT_KWARGS:
+                if key in ("check_same_thread", "uri"):
+                    connect_kwargs[key] = value.lower() in ("true", "1", "yes")
+                elif key == "timeout":
+                    connect_kwargs[key] = float(value)
+                elif key in ("detect_types", "cached_statements"):
+                    connect_kwargs[key] = int(value)
+                else:
+                    connect_kwargs[key] = value
+            else:
+                # URI-style param (mode, cache, immutable, vfs, etc.)
+                uri_params[key] = value
+
+        # When URI params are present, build a file: URI and enable uri=True
+        # so that SQLite interprets them via the URI interface.
+        if uri_params:
+            from urllib.parse import quote, urlencode
+
+            file_uri = f"file:{quote(resolved_path)}?{urlencode(uri_params)}"
+            connect_kwargs["uri"] = True
+        else:
+            file_uri = None
+
+        def _creator() -> object:
+            db = file_uri if file_uri is not None else resolved_path
+            conn = sqlcipher3.connect(db, **connect_kwargs)
+            # PRAGMA key MUST be the first statement — SQLCipher contract.
+            # Escape double quotes in the passphrase (SQLite literal syntax:
+            # a literal " inside a double-quoted string is written as "").
+            # PRAGMA doesn't support parameter binding, so escaping is required.
+            escaped = passphrase.replace('"', '""')
+            conn.execute(f'PRAGMA key = "{escaped}"')
+            return conn
+
+        return create_engine("sqlite:///", creator=_creator, echo=False)
+
     def _create_tables(self) -> None:
         """Create all tables if they don't exist."""
         metadata.create_all(self.engine)
@@ -145,15 +259,30 @@ class LandscapeDB:
         This check catches developers using stale local audit.db files.
 
         Raises:
-            SchemaCompatibilityError: If database is missing required columns or FKs
+            SchemaCompatibilityError: If database is missing required columns or FKs,
+                or if an encrypted database is opened without the correct passphrase.
         """
         if not self.connection_string.startswith("sqlite"):
             return
 
         from sqlalchemy import inspect
+        from sqlalchemy.exc import OperationalError
 
-        inspector = inspect(self.engine)
-        existing_tables = set(inspector.get_table_names())
+        try:
+            inspector = inspect(self.engine)
+            existing_tables = set(inspector.get_table_names())
+        except OperationalError as e:
+            error_msg = str(e)
+            if "file is not a database" in error_msg or "file is encrypted" in error_msg:
+                raise SchemaCompatibilityError(
+                    "Cannot open Landscape database — file is encrypted or passphrase is incorrect.\n\n"
+                    "If this is an encrypted (SQLCipher) database, ensure:\n"
+                    "  1. The correct passphrase is set in the configured environment variable\n"
+                    "     (landscape.encryption_key_env in settings.yaml, default: ELSPETH_AUDIT_KEY)\n"
+                    "  2. backend: sqlcipher is set in settings.yaml\n\n"
+                    f"Database: {self.connection_string}"
+                ) from e
+            raise
         expected_tables = set(metadata.tables.keys())
         present_landscape_tables = existing_tables & expected_tables
 
@@ -262,6 +391,7 @@ class LandscapeDB:
         cls,
         url: str,
         *,
+        passphrase: str | None = None,
         create_tables: bool = True,
         dump_to_jsonl: bool = False,
         dump_to_jsonl_path: str | None = None,
@@ -273,6 +403,8 @@ class LandscapeDB:
 
         Args:
             url: SQLAlchemy connection URL
+            passphrase: SQLCipher encryption passphrase. When provided, the
+                database is opened with AES-256 encryption via sqlcipher3.
             create_tables: Whether to create tables if they don't exist.
                            Set to False when connecting to an existing database.
             dump_to_jsonl: Enable JSONL change journal for emergency backups
@@ -284,14 +416,19 @@ class LandscapeDB:
         Returns:
             LandscapeDB instance
         """
-        engine = create_engine(url, echo=False)
-        # SQLite-specific configuration
-        if url.startswith("sqlite"):
+        if passphrase is not None:
+            engine = cls._create_sqlcipher_engine(url, passphrase)
             cls._configure_sqlite(engine)
+        else:
+            engine = create_engine(url, echo=False)
+            # SQLite-specific configuration
+            if url.startswith("sqlite"):
+                cls._configure_sqlite(engine)
 
         # Create instance first - _validate_schema needs self.connection_string and self.engine
         instance = cls.__new__(cls)
         instance.connection_string = url
+        instance._passphrase = passphrase
         instance._engine = engine
         instance._journal = None
         if dump_to_jsonl:

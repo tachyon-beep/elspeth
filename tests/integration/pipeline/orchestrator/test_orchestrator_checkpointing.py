@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, RoutingMode, SinkName
+from elspeth.contracts import GateName, NodeID, NodeType, PipelineRow, RouteDestination, RoutingMode, SinkName
 from elspeth.plugins.base import BaseTransform
 from tests.fixtures.base_classes import (
     _TestSchema,
@@ -92,6 +92,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = IdentityTransform()
+        transform.on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -146,6 +147,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": i} for i in range(7)])
         transform = IdentityTransform()
+        transform.on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -191,6 +193,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = IdentityTransform()
+        transform.on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -229,6 +232,7 @@ class TestOrchestratorCheckpointing:
             name = "passthrough"
             input_schema = _TestSchema
             output_schema = _TestSchema
+            on_error = "discard"
 
             def __init__(self) -> None:
                 super().__init__({"schema": {"mode": "observed"}})
@@ -273,6 +277,7 @@ class TestOrchestratorCheckpointing:
 
         gate_config = GateSettings(
             name="split",
+            input="transform_out",
             condition="row['value'] % 2 == 1",
             routes={"true": "good", "false": "bad"},
         )
@@ -315,11 +320,9 @@ class TestOrchestratorCheckpointing:
         graph._transform_id_map = {0: NodeID("transform_0")}
         graph._config_gate_id_map = {GateName("split"): NodeID("config_gate_split")}
         graph._route_resolution_map = {
-            (NodeID("config_gate_split"), "true"): "good",
-            (NodeID("config_gate_split"), "false"): "bad",
+            (NodeID("config_gate_split"), "true"): RouteDestination.sink(SinkName("good")),
+            (NodeID("config_gate_split"), "false"): RouteDestination.sink(SinkName("bad")),
         }
-        graph._default_sink = "good"
-
         orchestrator = Orchestrator(
             db=landscape_db,
             checkpoint_manager=checkpoint_mgr,
@@ -377,6 +380,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = IdentityTransform()
+        transform.on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(
@@ -419,6 +423,7 @@ class TestOrchestratorCheckpointing:
 
         source = ListSource([{"value": 1}])
         transform = IdentityTransform()
+        transform.on_success = "default"
         sink = CollectSink()
 
         config = PipelineConfig(

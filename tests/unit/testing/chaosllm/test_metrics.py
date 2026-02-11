@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.testing.chaosllm.config import MetricsConfig
+from elspeth.testing.chaosengine.metrics_store import _get_bucket_utc
+from elspeth.testing.chaosengine.types import MetricsConfig
 from elspeth.testing.chaosllm.metrics import (
     MetricsRecorder,
     RequestRecord,
     _classify_outcome,
-    _get_bucket_utc,
 )
 
 
@@ -50,11 +50,13 @@ class TestGetBucketUtc:
         bucket = _get_bucket_utc(timestamp, bucket_sec=1)
         assert "2024-01-15T10:30:45" in bucket
 
-    def test_bucket_preserves_timezone(self) -> None:
-        """Bucket preserves the original timezone."""
+    def test_bucket_normalizes_to_utc(self) -> None:
+        """Bucket normalizes non-UTC timestamps to UTC."""
         timestamp = "2024-01-15T10:30:45+05:30"
         bucket = _get_bucket_utc(timestamp, bucket_sec=1)
-        assert "+05:30" in bucket
+        # 10:30:45+05:30 == 05:00:45+00:00 in UTC
+        assert bucket.startswith("2024-01-15T05:00:45")
+        assert "+00:00" in bucket
 
 
 class TestClassifyOutcome:

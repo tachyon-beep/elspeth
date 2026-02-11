@@ -48,7 +48,7 @@ from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching import OutputPort
 from elspeth.plugins.batching.mixin import BatchTransformMixin
 from elspeth.plugins.protocols import TransformProtocol
-from tests.fixtures.factories import make_contract, make_pipeline_row, make_row
+from elspeth.testing import make_contract, make_pipeline_row, make_row
 
 if TYPE_CHECKING:
     pass

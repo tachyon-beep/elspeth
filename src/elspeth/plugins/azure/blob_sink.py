@@ -545,11 +545,9 @@ class AzureBlobSink(BaseSink):
             container_client = self._get_container_client()
             blob_client = container_client.get_blob_client(rendered_path)
 
-            # Check overwrite policy
-            if not self._overwrite and blob_client.exists():
-                raise ValueError(f"Blob '{rendered_path}' already exists and overwrite=False")
-
-            # Upload the content
+            # Upload with overwrite policy enforced atomically by Azure SDK.
+            # When overwrite=False, upload_blob raises ResourceExistsError server-side,
+            # avoiding the TOCTOU race of a separate exists() check.
             blob_client.upload_blob(content, overwrite=self._overwrite)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -574,10 +572,11 @@ class AzureBlobSink(BaseSink):
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
-        except ValueError:
-            # Re-raise our own ValueError (overwrite check)
-            raise
         except Exception as e:
+            # Convert ResourceExistsError (overwrite=False) to ValueError
+            # for consistent API. Check class name to avoid importing azure SDK at top level.
+            if type(e).__name__ == "ResourceExistsError":
+                raise ValueError(f"Blob '{rendered_path}' already exists and overwrite=False") from e
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             # Record failed blob upload in audit trail
@@ -595,8 +594,11 @@ class AzureBlobSink(BaseSink):
                 provider="azure_blob_storage",
             )
 
-            # Azure SDK errors are external system errors - propagate with context
-            raise type(e)(f"Failed to upload blob '{rendered_path}' to container '{self._container}': {e}") from e
+            # Azure SDK errors are external system errors - propagate with context.
+            # Use RuntimeError wrapper instead of type(e)(...) because Azure SDK
+            # exceptions (HttpResponseError, ResourceExistsError, etc.) have
+            # multi-parameter constructors that won't accept a single string.
+            raise RuntimeError(f"Failed to upload blob '{rendered_path}' to container '{self._container}': {e}") from e
 
         return ArtifactDescriptor(
             artifact_type="file",

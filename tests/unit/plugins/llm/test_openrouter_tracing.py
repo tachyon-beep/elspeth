@@ -8,12 +8,21 @@ from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from elspeth.contracts import TransformResult
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
 from elspeth.plugins.llm.openrouter_multi_query import (
     OpenRouterMultiQueryConfig,
     OpenRouterMultiQueryLLMTransform,
 )
 from elspeth.plugins.llm.tracing import LangfuseTracingConfig
+
+# Reusable mock contract for tests that need TransformResult with PipelineRow
+_MOCK_CONTRACT = SchemaContract(
+    mode="OBSERVED",
+    fields=(FieldContract("x", "x", object, False, "inferred"),),
+    locked=True,
+)
 
 
 def _make_mock_ctx(run_id: str = "test-run") -> MagicMock:
@@ -439,14 +448,12 @@ class TestMultiQueryLangfuseSpanCreation:
         """Langfuse trace is created when processing a row (v3: span + generation)."""
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        # Record a multi-query execution summary
-        transform._record_langfuse_trace(
-            token_id="test-token",
-            query_count=1,  # 1 case study x 1 criterion
-            succeeded_count=1,
-            total_usage=None,
-            latency_ms=None,
+        # Record a multi-query execution summary via the new base class method
+        result = TransformResult.success(
+            PipelineRow({"cs1_crit1_score": 1}, _MOCK_CONTRACT),
+            success_reason={"action": "enriched", "fields_added": ["cs1_crit1_score"]},
         )
+        transform._record_row_langfuse_trace("test-token", result, 0.0)
 
         # Verify observations were created (span + generation)
         assert len(captured_observations) == 2
@@ -457,31 +464,33 @@ class TestMultiQueryLangfuseSpanCreation:
         """Langfuse generation records batch execution summary via update()."""
         transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        # Record a multi-query batch execution
-        transform._record_langfuse_trace(
-            token_id="test-token",
-            query_count=4,
-            succeeded_count=4,
-            total_usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
-            latency_ms=500.0,
+        # Record a multi-query batch execution via the new base class method.
+        # The transform config has 1 query spec (cs1 x crit1), so query_count=1.
+        result = TransformResult.success(
+            PipelineRow(
+                {"cs1_crit1_usage": {"prompt_tokens": 100, "completion_tokens": 50}},
+                _MOCK_CONTRACT,
+            ),
+            success_reason={"action": "enriched", "fields_added": ["cs1_crit1_score"]},
         )
+        transform._record_row_langfuse_trace("test-token", result, 500.0)
 
         # Verify span was created with query metadata
         span_record = captured_observations[0]
         assert span_record["kwargs"]["name"] == "elspeth.openrouter_multi_query_llm"
-        assert span_record["kwargs"]["metadata"]["query_count"] == 4
+        assert span_record["kwargs"]["metadata"]["query_count"] == 1
 
         # Verify generation was recorded with summary via update()
         gen_record = captured_observations[1]
         assert gen_record["kwargs"]["name"] == "multi_query_batch"
         # Input is in OpenAI message format
-        assert gen_record["kwargs"]["input"] == [{"role": "user", "content": "4 queries"}]
+        assert gen_record["kwargs"]["input"] == [{"role": "user", "content": "1 queries"}]
 
         # Check update() was called with summary output
         assert len(gen_record["updates"]) == 1
-        assert gen_record["updates"][0]["output"] == "4/4 succeeded"
-        assert gen_record["updates"][0]["metadata"]["query_count"] == 4
-        assert gen_record["updates"][0]["metadata"]["succeeded_count"] == 4
+        assert gen_record["updates"][0]["output"] == "1/1 succeeded"
+        assert gen_record["updates"][0]["metadata"]["query_count"] == 1
+        assert gen_record["updates"][0]["metadata"]["succeeded_count"] == 1
         assert gen_record["updates"][0]["metadata"]["latency_ms"] == 500.0
 
     def test_no_trace_when_tracing_not_active(self) -> None:
@@ -490,12 +499,10 @@ class TestMultiQueryLangfuseSpanCreation:
         transform = OpenRouterMultiQueryLLMTransform(config)
 
         # This should be a no-op (no error, no trace)
-        transform._record_langfuse_trace(
-            token_id="test-token",
-            query_count=1,
-            succeeded_count=1,
-            total_usage=None,
-            latency_ms=None,
+        result = TransformResult.success(
+            PipelineRow({}, _MOCK_CONTRACT),
+            success_reason={"action": "enriched", "fields_added": []},
         )
+        transform._record_row_langfuse_trace("test-token", result, 0.0)
         # If we get here without error and _langfuse_client is None, test passes
         assert transform._langfuse_client is None

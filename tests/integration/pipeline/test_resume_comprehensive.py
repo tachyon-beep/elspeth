@@ -41,6 +41,13 @@ from elspeth.plugins.sources.null_source import NullSource
 from elspeth.plugins.transforms.passthrough import PassThrough
 
 
+def _null_source(on_success: str = "default") -> NullSource:
+    """Create NullSource with on_success set (lifted from config to attribute)."""
+    source = NullSource({})
+    source.on_success = on_success
+    return source
+
+
 class TestResumeComprehensive:
     """Comprehensive end-to-end resume integration tests."""
 
@@ -287,9 +294,11 @@ class TestResumeComprehensive:
 
         # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
         strict_schema = {"mode": "fixed", "fields": ["id: int", "value: str"]}
+        passthrough = PassThrough({"schema": strict_schema})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
-            source=NullSource({}),
-            transforms=[PassThrough({"schema": strict_schema})],
+            source=_null_source("default"),
+            transforms=[passthrough],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
@@ -303,7 +312,6 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         resume_graph._transform_id_map = {0: NodeID("xform")}
-        resume_graph._default_sink = "default"
 
         result = orchestrator.resume(
             resume_point=resume_point,
@@ -394,9 +402,11 @@ class TestResumeComprehensive:
 
         # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
         strict_schema = {"mode": "fixed", "fields": ["id: int", "value: str"]}
+        passthrough = PassThrough({"schema": strict_schema})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
-            source=NullSource({}),
-            transforms=[PassThrough({"schema": strict_schema})],
+            source=_null_source("default"),
+            transforms=[passthrough],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
@@ -409,7 +419,6 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         resume_graph._transform_id_map = {0: NodeID("xform")}
-        resume_graph._default_sink = "default"
 
         result = orchestrator.resume(
             resume_point=resume_point,
@@ -597,9 +606,11 @@ class TestResumeComprehensive:
         # Use CSVSink with strict schema matching the data: {"id": int, "timestamp": datetime}
         # CSVSink stringifies datetime values automatically
         strict_schema = {"mode": "fixed", "fields": ["id: int", "timestamp: str"]}
+        passthrough = PassThrough({"schema": strict_schema})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
-            source=NullSource({}),
-            transforms=[PassThrough({"schema": strict_schema})],
+            source=_null_source("default"),
+            transforms=[passthrough],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
@@ -612,7 +623,6 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         resume_graph._transform_id_map = {0: NodeID("xform")}
-        resume_graph._default_sink = "default"
 
         # Write partial output (row 0 already written before crash)
         with open(output_path, "w") as f:
@@ -800,9 +810,11 @@ class TestResumeComprehensive:
         # Use CSVSink with strict schema matching the data: {"id": int, "amount": Decimal}
         # CSVSink stringifies Decimal values automatically
         strict_schema = {"mode": "fixed", "fields": ["id: int", "amount: str"]}
+        passthrough = PassThrough({"schema": strict_schema})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
-            source=NullSource({}),
-            transforms=[PassThrough({"schema": strict_schema})],
+            source=_null_source("default"),
+            transforms=[passthrough],
             sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
@@ -815,7 +827,6 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         resume_graph._transform_id_map = {0: NodeID("xform")}
-        resume_graph._default_sink = "default"
 
         # Write partial output (row 0 already written before crash)
         with open(output_path, "w") as f:
@@ -996,9 +1007,11 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        passthrough = PassThrough({"schema": {"mode": "observed"}})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
-            source=NullSource({}),
-            transforms=[PassThrough({"schema": {"mode": "observed"}})],
+            source=_null_source("default"),
+            transforms=[passthrough],
             sinks={
                 "default": JSONSink(
                     {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
@@ -1015,7 +1028,6 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         resume_graph._transform_id_map = {0: NodeID("xform")}
-        resume_graph._default_sink = "default"
 
         # Write partial output (row 0 already written before crash)
         with open(output_path, "w") as f:
@@ -1195,9 +1207,11 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        passthrough = PassThrough({"schema": {"mode": "observed"}})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
-            source=NullSource({}),
-            transforms=[PassThrough({"schema": {"mode": "observed"}})],
+            source=_null_source("default"),
+            transforms=[passthrough],
             sinks={
                 "default": JSONSink(
                     {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
@@ -1214,7 +1228,6 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         resume_graph._transform_id_map = {0: NodeID("xform")}
-        resume_graph._default_sink = "default"
 
         # Write partial output (row 0 already written before crash)
         with open(output_path, "w") as f:
@@ -1374,9 +1387,11 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        passthrough = PassThrough({"schema": {"mode": "observed"}})
+        passthrough.on_error = "discard"
         config = PipelineConfig(
-            source=NullSource({}),
-            transforms=[PassThrough({"schema": {"mode": "observed"}})],
+            source=_null_source("default"),
+            transforms=[passthrough],
             sinks={"default": JSONSink({"path": "/tmp/dummy.json", "schema": {"mode": "observed"}, "mode": "write", "format": "jsonl"})},
         )
 
@@ -1389,7 +1404,6 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         resume_graph._transform_id_map = {0: NodeID("xform")}
-        resume_graph._default_sink = "default"
 
         # CRITICAL: Must crash with clear error, not silently degrade to str
         with pytest.raises(ValueError, match=r"unsupported type 'geo-point'"):

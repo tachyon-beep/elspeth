@@ -25,6 +25,7 @@ from elspeth.contracts.enums import (
     RoutingMode,
     RowOutcome,
     RunStatus,
+    TriggerType,
 )
 
 
@@ -330,7 +331,7 @@ class RoutingEvent:
 class Batch:
     """An aggregation batch collecting tokens.
 
-    Strict contract - status must be BatchStatus enum.
+    Strict contract - status and trigger_type must be enums.
     """
 
     batch_id: str
@@ -340,13 +341,14 @@ class Batch:
     status: BatchStatus  # Strict: enum only
     created_at: datetime
     aggregation_state_id: str | None = None
-    trigger_type: str | None = None  # TriggerType enum value (count, time, end_of_source, manual)
+    trigger_type: TriggerType | None = None  # Strict: enum only
     trigger_reason: str | None = None
     completed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         """Validate enum fields - Tier 1 crash on invalid types."""
         _validate_enum(self.status, BatchStatus, "status")
+        _validate_enum(self.trigger_type, TriggerType, "trigger_type")
 
 
 @dataclass
@@ -375,11 +377,12 @@ class Checkpoint:
 
     Format Versions:
         Version 1: Pre-deterministic node IDs (legacy, incompatible)
-        Version 2: Deterministic node IDs (2026-01-24+, current)
+        Version 2: Deterministic node IDs (2026-01-24+)
+        Version 3: Phase 2 traversal refactor checkpoint break (current)
     """
 
     # Current checkpoint format version (ClassVar excludes from dataclass fields)
-    CURRENT_FORMAT_VERSION: ClassVar[int] = 2
+    CURRENT_FORMAT_VERSION: ClassVar[int] = 3
 
     checkpoint_id: str
     run_id: str

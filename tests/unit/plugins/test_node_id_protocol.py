@@ -79,39 +79,6 @@ class TestNodeIdProtocol:
         transform.node_id = "transform-456"
         assert transform.node_id == "transform-456"
 
-    def test_gate_protocol_has_node_id(self) -> None:
-        """GateProtocol defines node_id attribute."""
-        from elspeth.plugins.protocols import GateProtocol
-
-        annotations = GateProtocol.__annotations__
-        assert "node_id" in annotations, "GateProtocol should define node_id"
-        assert annotations["node_id"] == str | None
-
-    def test_base_gate_has_node_id(self) -> None:
-        """BaseGate has node_id attribute with default None."""
-
-        from elspeth.contracts import PipelineRow, PluginSchema, RoutingAction
-        from elspeth.contracts.plugin_context import PluginContext
-        from elspeth.plugins.base import BaseGate
-        from elspeth.plugins.results import GateResult
-
-        class TestSchema(PluginSchema):
-            pass
-
-        class TestGate(BaseGate):
-            name = "test"
-            input_schema = TestSchema
-            output_schema = TestSchema
-
-            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
-                return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
-
-        gate = TestGate({"routes": {"default": "continue"}})
-        assert gate.node_id is None
-
-        gate.node_id = "gate-789"
-        assert gate.node_id == "gate-789"
-
     def test_aggregation_protocol_deleted(self) -> None:
         """AggregationProtocol should be deleted (aggregation is structural)."""
         import elspeth.plugins.protocols as protocols
@@ -124,13 +91,11 @@ class TestNodeIdProtocol:
 
         assert not hasattr(base, "BaseAggregation"), "BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform"
 
-    def test_coalesce_protocol_has_node_id(self) -> None:
-        """CoalesceProtocol defines node_id attribute."""
-        from elspeth.plugins.protocols import CoalesceProtocol
+    def test_coalesce_protocol_deleted(self) -> None:
+        """CoalesceProtocol should be deleted (coalesce is structural)."""
+        import elspeth.plugins.protocols as protocols
 
-        annotations = CoalesceProtocol.__annotations__
-        assert "node_id" in annotations, "CoalesceProtocol should define node_id"
-        assert annotations["node_id"] == str | None
+        assert not hasattr(protocols, "CoalesceProtocol"), "CoalesceProtocol should be deleted - coalesce is structural"
 
     def test_sink_protocol_has_node_id(self) -> None:
         """SinkProtocol defines node_id attribute."""

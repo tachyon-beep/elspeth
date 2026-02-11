@@ -131,7 +131,6 @@ from elspeth.contracts.errors import (
     FrameworkBugError,
     MissingFieldViolation,
     PluginContractViolation,
-    PluginGateReason,
     QueryFailureDetail,
     RoutingReason,
     RowErrorEntry,
@@ -185,7 +184,13 @@ from elspeth.contracts.results import (
     SourceRow,
     TransformResult,
 )
-from elspeth.contracts.routing import EdgeInfo, RoutingAction, RoutingSpec
+from elspeth.contracts.routing import (
+    EdgeInfo,
+    RouteDestination,
+    RouteDestinationKind,
+    RoutingAction,
+    RoutingSpec,
+)
 
 # Schema contracts (Phase 1: Core Contracts)
 from elspeth.contracts.schema_contract import (
@@ -210,6 +215,7 @@ from elspeth.contracts.types import (
     GateName,
     NodeID,
     SinkName,
+    StepResolver,
 )
 from elspeth.contracts.url import (
     SENSITIVE_PARAMS,
@@ -229,7 +235,6 @@ __all__ = [  # Grouped by category for readability
     "ConfigGateReason",
     "ErrorDetail",
     "ExecutionError",
-    "PluginGateReason",
     "QueryFailureDetail",
     "RoutingReason",
     "RowErrorEntry",
@@ -318,6 +323,7 @@ __all__ = [  # Grouped by category for readability
     "GateName",
     "NodeID",
     "SinkName",
+    "StepResolver",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
     "ExceptionResult",
@@ -328,6 +334,8 @@ __all__ = [  # Grouped by category for readability
     "TransformResult",
     # routing
     "EdgeInfo",
+    "RouteDestination",
+    "RouteDestinationKind",
     "RoutingAction",
     "RoutingSpec",
     # data

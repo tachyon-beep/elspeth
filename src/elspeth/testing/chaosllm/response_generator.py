@@ -16,210 +16,12 @@ from typing import Any
 
 import jinja2
 import jinja2.sandbox
+import structlog
 
+from elspeth.testing.chaosengine.vocabulary import ENGLISH_VOCABULARY, LOREM_VOCABULARY
 from elspeth.testing.chaosllm.config import ResponseConfig
 
-# === Vocabulary Banks ===
-
-# Common English words for random generation (high-frequency words)
-ENGLISH_VOCABULARY: tuple[str, ...] = (
-    "the",
-    "be",
-    "to",
-    "of",
-    "and",
-    "a",
-    "in",
-    "that",
-    "have",
-    "it",
-    "for",
-    "not",
-    "on",
-    "with",
-    "he",
-    "as",
-    "you",
-    "do",
-    "at",
-    "this",
-    "but",
-    "his",
-    "by",
-    "from",
-    "they",
-    "we",
-    "say",
-    "her",
-    "she",
-    "or",
-    "an",
-    "will",
-    "my",
-    "one",
-    "all",
-    "would",
-    "there",
-    "their",
-    "what",
-    "so",
-    "up",
-    "out",
-    "if",
-    "about",
-    "who",
-    "get",
-    "which",
-    "go",
-    "me",
-    "when",
-    "make",
-    "can",
-    "like",
-    "time",
-    "no",
-    "just",
-    "him",
-    "know",
-    "take",
-    "people",
-    "into",
-    "year",
-    "your",
-    "good",
-    "some",
-    "could",
-    "them",
-    "see",
-    "other",
-    "than",
-    "then",
-    "now",
-    "look",
-    "only",
-    "come",
-    "its",
-    "over",
-    "think",
-    "also",
-    "back",
-    "after",
-    "use",
-    "two",
-    "how",
-    "our",
-    "work",
-    "first",
-    "well",
-    "way",
-    "even",
-    "new",
-    "want",
-    "because",
-    "any",
-    "these",
-    "give",
-    "day",
-    "most",
-    "us",
-    "data",
-    "system",
-    "process",
-    "result",
-    "query",
-    "request",
-    "response",
-    "model",
-    "analysis",
-    "output",
-)
-
-# Lorem Ipsum vocabulary (deduplicated to ensure uniform distribution)
-_LOREM_SET = {
-    "lorem",
-    "ipsum",
-    "dolor",
-    "sit",
-    "amet",
-    "consectetur",
-    "adipiscing",
-    "elit",
-    "sed",
-    "do",
-    "eiusmod",
-    "tempor",
-    "incididunt",
-    "ut",
-    "labore",
-    "et",
-    "dolore",
-    "magna",
-    "aliqua",
-    "enim",
-    "ad",
-    "minim",
-    "veniam",
-    "quis",
-    "nostrud",
-    "exercitation",
-    "ullamco",
-    "laboris",
-    "nisi",
-    "aliquip",
-    "ex",
-    "ea",
-    "commodo",
-    "consequat",
-    "duis",
-    "aute",
-    "irure",
-    "in",
-    "reprehenderit",
-    "voluptate",
-    "velit",
-    "esse",
-    "cillum",
-    "fugiat",
-    "nulla",
-    "pariatur",
-    "excepteur",
-    "sint",
-    "occaecat",
-    "cupidatat",
-    "non",
-    "proident",
-    "sunt",
-    "culpa",
-    "qui",
-    "officia",
-    "deserunt",
-    "mollit",
-    "anim",
-    "id",
-    "est",
-    "laborum",
-    "proin",
-    "nibh",
-    "nisl",
-    "condimentum",
-    "purus",
-    "vestibulum",
-    "rhoncus",
-    "pharetra",
-    "viverra",
-    "semper",
-    "blandit",
-    "massa",
-    "nec",
-    "dui",
-    "nunc",
-    "mattis",
-    "tellus",
-    "elementum",
-    "sagittis",
-    "vitae",
-}
-LOREM_VOCABULARY: tuple[str, ...] = tuple(sorted(_LOREM_SET))
+logger = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -411,6 +213,11 @@ class ResponseGenerator:
         # Setup Jinja2 environment with custom helpers
         self._jinja_env = self._create_jinja_env()
 
+    @property
+    def config(self) -> ResponseConfig:
+        """Current response generation configuration (frozen/immutable)."""
+        return self._config
+
     def _create_jinja_env(self) -> jinja2.Environment:
         """Create Jinja2 environment with custom helpers."""
         env = jinja2.sandbox.SandboxedEnvironment(
@@ -475,14 +282,21 @@ class ResponseGenerator:
     def _generate_template_response(self, request: dict[str, Any]) -> str:
         """Generate response from Jinja2 template."""
         template_str = self._config.template.body
-        template = self._jinja_env.from_string(template_str)
-
-        # Provide request context to template
-        return template.render(
-            request=request,
-            messages=request.get("messages", []),
-            model=request.get("model", "unknown"),
-        )
+        try:
+            template = self._jinja_env.from_string(template_str)
+            return template.render(
+                request=request,
+                messages=request.get("messages", []),
+                model=request.get("model", "unknown"),
+            )
+        except jinja2.TemplateError as exc:
+            logger.warning(
+                "template_rendering_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                template_length=len(template_str),
+            )
+            return f"Template rendering error: {type(exc).__name__}"
 
     def _generate_echo_response(self, request: dict[str, Any]) -> str:
         """Echo parts of the input prompt."""
@@ -569,12 +383,21 @@ class ResponseGenerator:
             if template_override is not None:
                 if len(template_override) > max_len:
                     raise ValueError(f"Template override exceeds max length ({len(template_override)} > {max_len})")
-                template = self._jinja_env.from_string(template_override)
-                content = template.render(
-                    request=request,
-                    messages=request.get("messages", []),
-                    model=request.get("model", "unknown"),
-                )
+                try:
+                    template = self._jinja_env.from_string(template_override)
+                    content = template.render(
+                        request=request,
+                        messages=request.get("messages", []),
+                        model=request.get("model", "unknown"),
+                    )
+                except jinja2.TemplateError as exc:
+                    logger.warning(
+                        "template_override_rendering_failed",
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                        template_length=len(template_override),
+                    )
+                    content = f"Template rendering error: {type(exc).__name__}"
             else:
                 content = self._generate_template_response(request)
         elif mode == "echo":

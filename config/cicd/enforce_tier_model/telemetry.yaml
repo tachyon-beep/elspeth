@@ -1,0 +1,68 @@
+per_file_rules:
+- pattern: telemetry/exporters/*
+  rules:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R9
+  reason: Telemetry services are external (Tier 3) - all defensive patterns legitimate
+  expires: null
+allow_hits:
+- key: telemetry/manager.py:R1:TelemetryManager:_export_loop:fp=591aa6cb3bc863be
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R6:TelemetryManager:_export_loop:fp=146e33a3af87bc33
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R4:TelemetryManager:_export_loop:fp=71069f18769cb05f
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R4:TelemetryManager:_dispatch_to_exporters:fp=4923356726bbe345
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R1:TelemetryManager:_dispatch_to_exporters:fp=c94c1534c6a1ab0a
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R6:TelemetryManager:handle_event:fp=d47e99102dd6d3e7
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R6:TelemetryManager:handle_event:fp=5a8a81b7924e3145
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R4:TelemetryManager:flush:fp=e70fb48b4433493e
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R6:TelemetryManager:close:fp=820b592a6ee95462
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R6:TelemetryManager:close:fp=60d6c2e8ccf5ffd2
+  owner: architecture
+  reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/manager.py:R4:TelemetryManager:close:fp=19041855a23c60b0
+  owner: architecture
+  reason: Broad exception handling at external boundary with logging
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'

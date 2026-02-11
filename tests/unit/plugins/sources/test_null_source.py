@@ -65,6 +65,16 @@ class TestNullSource:
         assert isinstance(source.plugin_version, str)
         assert source.plugin_version != ""
 
+    def test_null_source_on_success_via_bridge(self) -> None:
+        """NullSource on_success is set by instantiation bridge, not config."""
+        from elspeth.plugins.sources.null_source import NullSource
+
+        # NullSource no longer validates on_success from config dict;
+        # it's injected post-construction by the instantiation bridge.
+        source = NullSource({})
+        source.on_success = "output"
+        assert source.on_success == "output"
+
     def test_null_source_schema_is_observed(self) -> None:
         """NullSourceSchema must be recognized as observed by DAG validation.
 

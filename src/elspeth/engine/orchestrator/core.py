@@ -38,6 +38,7 @@ from elspeth.contracts import (
     NodeType,
     PendingOutcome,
     PipelineRow,
+    RouteDestination,
     RowOutcome,
     RunStatus,
     SchemaContract,
@@ -69,7 +70,7 @@ from elspeth.contracts.types import (
     NodeID,
     SinkName,
 )
-from elspeth.core.canonical import stable_hash
+from elspeth.core.canonical import repr_hash, sanitize_for_canonical, stable_hash
 from elspeth.core.config import AggregationSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -102,7 +103,7 @@ from elspeth.engine.orchestrator.validation import (
     validate_source_quarantine_destination,
     validate_transform_error_sinks,
 )
-from elspeth.engine.processor import RowProcessor
+from elspeth.engine.processor import DAGTraversalContext, RowProcessor, make_step_resolver
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
@@ -111,9 +112,10 @@ if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint
     from elspeth.contracts.config.runtime import RuntimeCheckpointConfig, RuntimeConcurrencyConfig
     from elspeth.core.checkpoint import CheckpointManager
-    from elspeth.core.config import ElspethSettings
+    from elspeth.core.config import ElspethSettings, GateSettings
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
+    from elspeth.engine.coalesce_executor import CoalesceExecutor
 
 
 class Orchestrator:
@@ -144,6 +146,7 @@ class Orchestrator:
         rate_limit_registry: RateLimitRegistry | None = None,
         concurrency_config: RuntimeConcurrencyConfig | None = None,
         telemetry_manager: TelemetryManager | None = None,
+        coalesce_completed_keys_limit: int = 10000,
     ) -> None:
         from elspeth.core.events import NullEventBus
         from elspeth.engine.clock import DEFAULT_CLOCK
@@ -157,6 +160,7 @@ class Orchestrator:
         self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._rate_limit_registry = rate_limit_registry
         self._concurrency_config = concurrency_config
+        self._coalesce_completed_keys_limit = coalesce_completed_keys_limit
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
         self._telemetry = telemetry_manager  # Optional, disabled by default
@@ -253,6 +257,7 @@ class Orchestrator:
         ctx: PluginContext,
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
         sink_id_map: dict[SinkName, NodeID],
+        sink_step: int,
         *,
         on_token_written_factory: Callable[[str], Callable[[TokenInfo], None]] | None = None,
     ) -> None:
@@ -268,6 +273,7 @@ class Orchestrator:
             ctx: Plugin context
             pending_tokens: Dict of sink_name -> list of (token, pending_outcome) pairs
             sink_id_map: Maps SinkName -> NodeID for checkpoint callbacks
+            sink_step: Audit step index for sink writes (from processor.resolve_sink_step())
             on_token_written_factory: Optional factory that creates per-sink checkpoint
                 callbacks. Takes sink_node_id, returns callback(TokenInfo) -> None.
                 When None (resume path), no checkpoint callbacks are used.
@@ -277,8 +283,7 @@ class Orchestrator:
         from elspeth.engine.executors import SinkExecutor
 
         sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
-        # Step = transforms + config gates + 1 (for sink)
-        step = len(config.transforms) + len(config.gates) + 1
+        step = sink_step
 
         for sink_name, token_outcome_pairs in pending_tokens.items():
             if token_outcome_pairs and sink_name in config.sinks:
@@ -453,46 +458,157 @@ class Orchestrator:
                 continue
             sink.node_id = sink_id_map[sink_name_typed]
 
-    def _compute_coalesce_step_map(
+    def _build_dag_traversal_context(
         self,
         graph: ExecutionGraph,
         config: PipelineConfig,
+        config_gate_id_map: dict[GateName, NodeID],
+    ) -> DAGTraversalContext:
+        """Build traversal context for RowProcessor from graph + pipeline config."""
+        node_step_map = graph.build_step_map()
+        node_to_plugin: dict[NodeID, RowPlugin | GateSettings] = {}
+
+        for transform in config.transforms:
+            node_id_raw = transform.node_id
+            if node_id_raw is None:
+                raise OrchestrationInvariantError(f"Transform '{transform.name}' missing node_id for traversal context")
+            node_to_plugin[NodeID(node_id_raw)] = transform
+
+        for gate in config.gates:
+            gate_node_id = config_gate_id_map[GateName(gate.name)]
+            node_to_plugin[gate_node_id] = gate
+
+        node_to_next: dict[NodeID, NodeID | None] = {}
+        source_id = graph.get_source()
+        if source_id is not None:
+            node_to_next[source_id] = graph.get_next_node(source_id)
+        for node_id in graph.get_pipeline_node_sequence():
+            node_to_next[node_id] = graph.get_next_node(node_id)
+        for coalesce_node_id in graph.get_coalesce_id_map().values():
+            node_to_next[coalesce_node_id] = graph.get_next_node(coalesce_node_id)
+
+        return DAGTraversalContext(
+            node_step_map=node_step_map,
+            node_to_plugin=node_to_plugin,
+            first_transform_node_id=graph.get_first_transform_node(),
+            node_to_next=node_to_next,
+            coalesce_node_map=graph.get_coalesce_id_map(),
+        )
+
+    def _build_processor(
+        self,
+        *,
+        graph: ExecutionGraph,
+        config: PipelineConfig,
         settings: ElspethSettings | None,
-    ) -> dict[CoalesceName, int]:
-        """Compute coalesce step positions aligned with graph topology.
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_id: NodeID,
+        edge_map: dict[tuple[NodeID, str], str],
+        route_resolution_map: dict[tuple[NodeID, str], RouteDestination] | None,
+        config_gate_id_map: dict[GateName, NodeID],
+        coalesce_id_map: dict[CoalesceName, NodeID],
+        payload_store: PayloadStore,
+        restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
+    ) -> tuple[RowProcessor, dict[CoalesceName, NodeID], CoalesceExecutor | None]:
+        """Build a RowProcessor with all supporting infrastructure.
 
-        Coalesce step = gate_idx + 1 (step after the producing fork gate)
-
-        This ensures:
-        1. Fork children skip to coalesce step and merge before downstream processing
-        2. Merged tokens continue from the coalesce step, executing downstream nodes
-        3. Execution path matches graph topology (coalesce → downstream → sink)
-
-        The graph's coalesce_gate_index provides the pipeline position of each
-        coalesce's producing fork gate. The coalesce step is one position after
-        that gate, allowing merged tokens to traverse downstream nodes.
-
-        Args:
-            graph: The execution graph (provides coalesce gate positions)
-            config: Pipeline configuration
-            settings: Elspeth settings (may be None)
+        Constructs the retry manager, coalesce executor, traversal context,
+        and coalesce routing maps, then assembles a RowProcessor. Used by
+        both the main run path and the resume path.
 
         Returns:
-            Dict mapping coalesce name to its step index in the pipeline
+            Tuple of (processor, coalesce_node_map, coalesce_executor).
         """
-        coalesce_step_map: dict[CoalesceName, int] = {}
-        if settings is not None and settings.coalesce:
-            # Get actual gate positions from graph topology
-            coalesce_gate_index = graph.get_coalesce_gate_index()
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
 
-            for cs in settings.coalesce:
-                coalesce_name = CoalesceName(cs.name)
-                # Coalesce step is one AFTER the fork gate
-                # This allows merged tokens to continue downstream processing
-                gate_idx = coalesce_gate_index[coalesce_name]
-                coalesce_step_map[coalesce_name] = gate_idx + 1
+        retry_manager: RetryManager | None = None
+        if settings is not None:
+            retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
 
-        return coalesce_step_map
+        # Derive coalesce routing from graph topology unconditionally.
+        # If the graph has coalesce nodes, the processor needs branch_to_coalesce
+        # regardless of whether settings is available.
+        branch_to_coalesce: dict[BranchName, CoalesceName] = graph.get_branch_to_coalesce_map()
+        coalesce_node_map: dict[CoalesceName, NodeID] = graph.get_coalesce_id_map()
+
+        # Build traversal context BEFORE CoalesceExecutor/TokenManager so that
+        # node_step_map is available for the step_resolver closure they require.
+        traversal = self._build_dag_traversal_context(graph, config, config_gate_id_map)
+
+        # Build step_resolver from shared factory (single source of truth).
+        # Same factory is used by RowProcessor internally for its executors.
+        step_resolver = make_step_resolver(traversal.node_step_map, source_id)
+
+        coalesce_executor: CoalesceExecutor | None = None
+
+        if coalesce_node_map:
+            # Graph has coalesce nodes — settings.coalesce is required for
+            # CoalesceExecutor registration (merge policy, timeout, etc.)
+            if settings is None or not settings.coalesce:
+                raise OrchestrationInvariantError(
+                    "Graph contains coalesce nodes but settings.coalesce is missing. "
+                    "Coalesce settings are required when the pipeline has fork/join patterns."
+                )
+
+            # payload_store intentionally omitted: CoalesceExecutor's TokenManager only
+            # calls coalesce_tokens(), which does not persist payloads (payloads are
+            # recorded by the RowProcessor's TokenManager during initial token creation).
+            token_manager = TokenManager(recorder, step_resolver=step_resolver)
+            coalesce_executor = CoalesceExecutor(
+                recorder=recorder,
+                span_factory=self._span_factory,
+                token_manager=token_manager,
+                run_id=run_id,
+                step_resolver=step_resolver,
+                clock=self._clock,
+                max_completed_keys=self._coalesce_completed_keys_limit,
+            )
+
+            for coalesce_settings_entry in settings.coalesce:
+                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings_entry.name)]
+                coalesce_executor.register_coalesce(coalesce_settings_entry, coalesce_node_id)
+
+        # Derive coalesce on_success from graph's terminal sink map (graph-authoritative),
+        # falling back to settings for non-terminal coalesce nodes.
+        terminal_sink_map = graph.get_terminal_sink_map()
+        coalesce_on_success_map: dict[CoalesceName, str] = {}
+        for cname, cnode_id in coalesce_node_map.items():
+            if cnode_id in terminal_sink_map:
+                coalesce_on_success_map[cname] = terminal_sink_map[cnode_id]
+            elif settings is not None and settings.coalesce:
+                for coalesce_settings_entry in settings.coalesce:
+                    if CoalesceName(coalesce_settings_entry.name) == cname and coalesce_settings_entry.on_success is not None:
+                        coalesce_on_success_map[cname] = coalesce_settings_entry.on_success
+
+        branch_to_sink = graph.get_branch_to_sink_map()
+        typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=self._span_factory,
+            run_id=run_id,
+            source_node_id=source_id,
+            source_on_success=config.source.on_success,
+            edge_map=edge_map,
+            route_resolution_map=route_resolution_map,
+            traversal=traversal,
+            aggregation_settings=typed_aggregation_settings,
+            retry_manager=retry_manager,
+            coalesce_executor=coalesce_executor,
+            branch_to_coalesce=branch_to_coalesce,
+            branch_to_sink=branch_to_sink,
+            sink_names=frozenset(config.sinks),
+            coalesce_on_success_map=coalesce_on_success_map,
+            restored_aggregation_state=restored_aggregation_state,
+            payload_store=payload_store,
+            clock=self._clock,
+            max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
+            telemetry_manager=self._telemetry,
+        )
+
+        return processor, coalesce_node_map, coalesce_executor
 
     def run(
         self,
@@ -880,10 +996,14 @@ class Orchestrator:
                     plugin_version = plugin.plugin_version
                     determinism = plugin.determinism
 
-                # Get schema_config from node_info config
-                # DataPluginConfig enforces that all data plugins have schema
-                schema_dict = node_info.config["schema"]
-                schema_config = SchemaConfig.from_dict(schema_dict)
+                # Get schema_config — prefer computed output_schema_config
+                # (includes guaranteed_fields, audit_fields from LLM transforms)
+                # over raw config["schema"] which may omit computed contract fields.
+                if node_info.output_schema_config is not None:
+                    schema_config = node_info.output_schema_config
+                else:
+                    schema_dict = node_info.config["schema"]
+                    schema_config = SchemaConfig.from_dict(schema_dict)
 
                 # Get output_contract for source nodes
                 # Sources have get_schema_contract() method that returns their output contract
@@ -960,7 +1080,7 @@ class Orchestrator:
         sink_id_map = graph.get_sink_id_map()
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
-        default_sink_name = graph.get_default_sink()
+        coalesce_id_map = graph.get_coalesce_id_map()
 
         # Assign node_ids to all plugins
         self._assign_plugin_node_ids(
@@ -997,63 +1117,18 @@ class Orchestrator:
         for sink in config.sinks.values():
             sink.on_start(ctx)
 
-        # Create retry manager from settings if available
-        retry_manager: RetryManager | None = None
-        if settings is not None:
-            retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
-
-        # Create coalesce executor if config has coalesce settings
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
-
-        coalesce_executor: CoalesceExecutor | None = None
-        branch_to_coalesce: dict[BranchName, CoalesceName] = {}
-
-        if settings is not None and settings.coalesce:
-            branch_to_coalesce = graph.get_branch_to_coalesce_map()
-            token_manager = TokenManager(recorder)
-
-            coalesce_executor = CoalesceExecutor(
-                recorder=recorder,
-                span_factory=self._span_factory,
-                token_manager=token_manager,
-                run_id=run_id,
-                clock=self._clock,
-            )
-
-            # Register each coalesce point
-            # Direct access: graph was built from same settings, so all coalesce names
-            # must exist in map. KeyError here indicates a bug in graph construction.
-            for coalesce_settings in settings.coalesce:
-                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
-                coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
-
-        # Compute coalesce step positions FROM GRAPH TOPOLOGY
-        coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
-
-        # Convert aggregation_settings keys from str to NodeID
-        typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
-
-        # Create processor with config gates info
-        processor = RowProcessor(
+        processor, coalesce_node_map, coalesce_executor = self._build_processor(
+            graph=graph,
+            config=config,
+            settings=settings,
             recorder=recorder,
-            span_factory=self._span_factory,
             run_id=run_id,
-            source_node_id=source_id,
+            source_id=source_id,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
-            config_gates=config.gates,
             config_gate_id_map=config_gate_id_map,
-            aggregation_settings=typed_aggregation_settings,
-            retry_manager=retry_manager,
-            coalesce_executor=coalesce_executor,
-            coalesce_node_ids=coalesce_id_map,
-            branch_to_coalesce=branch_to_coalesce,
-            coalesce_step_map=coalesce_step_map,
+            coalesce_id_map=coalesce_id_map,
             payload_store=payload_store,
-            clock=self._clock,
-            max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
-            telemetry_manager=self._telemetry,
         )
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
@@ -1064,14 +1139,12 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
-        # Maps node_id_str -> (transform, step_in_pipeline)
-        # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
-        # for audit recording (to avoid node_state step_index collisions)
-        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
+        # Maps node_id_str -> (transform, aggregation_node_id)
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] = {}
         if config.aggregation_settings:
-            for i, t in enumerate(config.transforms):
+            for t in config.transforms:
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = (t, i)  # 0-indexed, converted in handle_timeout_flush
+                    agg_transform_lookup[t.node_id] = (t, NodeID(t.node_id))
 
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
@@ -1213,7 +1286,13 @@ class Orchestrator:
                                     f"source._on_validation_failure='{config.source._on_validation_failure}'."
                                 )
 
-                            # Destination validated - proceed with routing
+                            # Destination validated - proceed with routing.
+                            # Sanitize quarantine data at Tier-3 boundary: replace non-finite
+                            # floats (NaN, Infinity) with None so downstream canonical JSON
+                            # and stable_hash operations succeed. The quarantine_error records
+                            # what was originally wrong with the data.
+                            source_item.row = sanitize_for_canonical(source_item.row)
+
                             # Create a token for the quarantined row using specialized method
                             # (quarantine rows don't have contracts - they failed validation)
                             quarantine_token = processor.token_manager.create_quarantine_token(
@@ -1233,6 +1312,7 @@ class Orchestrator:
                                 run_id=run_id,
                                 step_index=0,
                                 input_data=quarantine_data,
+                                quarantined=True,
                             )
                             recorder.complete_node_state(
                                 state_id=source_state.state_id,
@@ -1245,8 +1325,8 @@ class Orchestrator:
                             )
 
                             # Record DIVERT routing_event for the quarantine edge.
-                            # The __quarantine__ edge MUST exist — DAG creates it when
-                            # on_validation_failure != "discard" (dag.py:798-806).
+                            # The __quarantine__ edge MUST exist — DAG creates it in
+                            # the source quarantine edge block of from_plugin_instances().
                             quarantine_edge_key = (source_id, "__quarantine__")
                             try:
                                 quarantine_edge_id = edge_map[quarantine_edge_key]
@@ -1268,13 +1348,20 @@ class Orchestrator:
                             )
 
                             # Emit RowCreated telemetry AFTER Landscape recording succeeds
+                            # Quarantined rows are Tier-3 data that may contain non-canonical
+                            # values (NaN, Infinity). Use stable_hash when possible, fall back
+                            # to repr_hash for non-canonical data.
+                            try:
+                                quarantine_content_hash = stable_hash(source_item.row)
+                            except (ValueError, TypeError):
+                                quarantine_content_hash = repr_hash(source_item.row)
                             self._emit_telemetry(
                                 RowCreated(
                                     timestamp=datetime.now(UTC),
                                     run_id=run_id,
                                     row_id=quarantine_token.row_id,
                                     token_id=quarantine_token.token_id,
-                                    content_hash=stable_hash(source_item.row),
+                                    content_hash=quarantine_content_hash,
                                 )
                             )
 
@@ -1363,7 +1450,6 @@ class Orchestrator:
                             processor=processor,
                             ctx=ctx,
                             pending_tokens=pending_tokens,
-                            default_sink_name=default_sink_name,
                             agg_transform_lookup=agg_transform_lookup,
                         )
                         counters.accumulate_flush_result(timeout_result)
@@ -1382,7 +1468,7 @@ class Orchestrator:
                         # AFTER successful sink writes. A crash before sink write means:
                         # - Counters may be inflated (row counted but not persisted)
                         # - But recovery will correctly identify the unwritten rows
-                        accumulate_row_outcomes(results, counters, config.sinks, default_sink_name, pending_tokens)
+                        accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
                         # ─────────────────────────────────────────────────────────────────
                         # Check for timed-out coalesces after processing each row
@@ -1391,15 +1477,12 @@ class Orchestrator:
                         if coalesce_executor is not None:
                             handle_coalesce_timeouts(
                                 coalesce_executor=coalesce_executor,
-                                coalesce_step_map=coalesce_step_map,
+                                coalesce_node_map=coalesce_node_map,
                                 processor=processor,
-                                config_transforms=config.transforms,
-                                config_gates=config.gates,
                                 config_sinks=config.sinks,
                                 ctx=ctx,
                                 counters=counters,
                                 pending_tokens=pending_tokens,
-                                default_sink_name=default_sink_name,
                             )
 
                         # Emit progress every N rows or every M seconds (after outcome counters are updated)
@@ -1465,7 +1548,6 @@ class Orchestrator:
                             processor=processor,
                             ctx=ctx,
                             pending_tokens=pending_tokens,
-                            default_sink_name=default_sink_name,
                             checkpoint_callback=checkpoint_callback,
                         )
                         counters.accumulate_flush_result(flush_result)
@@ -1474,15 +1556,12 @@ class Orchestrator:
                     if coalesce_executor is not None:
                         flush_coalesce_pending(
                             coalesce_executor=coalesce_executor,
-                            coalesce_step_map=coalesce_step_map,
+                            coalesce_node_map=coalesce_node_map,
                             processor=processor,
-                            config_transforms=config.transforms,
-                            config_gates=config.gates,
                             config_sinks=config.sinks,
                             ctx=ctx,
                             counters=counters,
                             pending_tokens=pending_tokens,
-                            default_sink_name=default_sink_name,
                         )
 
                     # Source iteration complete - for loop ends here
@@ -1555,6 +1634,7 @@ class Orchestrator:
                 ctx=ctx,
                 pending_tokens=pending_tokens,
                 sink_id_map=sink_id_map,
+                sink_step=processor.resolve_sink_step(),
                 on_token_written_factory=checkpoint_after_sink,
             )
 
@@ -1790,7 +1870,6 @@ class Orchestrator:
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
         coalesce_id_map = graph.get_coalesce_id_map()
-        default_sink_name = graph.get_default_sink()
 
         # Build edge_map from database (load real edge IDs registered in original run)
         # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
@@ -1872,64 +1951,19 @@ class Orchestrator:
         for sink in config.sinks.values():
             sink.on_start(ctx)
 
-        # Create retry manager from settings if available
-        retry_manager: RetryManager | None = None
-        if settings is not None:
-            retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
-
-        # Create coalesce executor if config has coalesce settings
-        from elspeth.engine.coalesce_executor import CoalesceExecutor
-        from elspeth.engine.tokens import TokenManager
-
-        coalesce_executor: CoalesceExecutor | None = None
-        branch_to_coalesce: dict[BranchName, CoalesceName] = {}
-
-        if settings is not None and settings.coalesce:
-            branch_to_coalesce = graph.get_branch_to_coalesce_map()
-            token_manager = TokenManager(recorder)
-
-            coalesce_executor = CoalesceExecutor(
-                recorder=recorder,
-                span_factory=self._span_factory,
-                token_manager=token_manager,
-                run_id=run_id,
-                clock=self._clock,
-            )
-
-            for coalesce_settings in settings.coalesce:
-                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
-                coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
-
-        # Compute coalesce step positions FROM GRAPH TOPOLOGY (same as main run path)
-        coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
-
-        # Convert aggregation_settings keys from str to NodeID
-        typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
-
-        # Convert restored_aggregation_state keys from str to NodeID
-        typed_restored_state: dict[NodeID, dict[str, Any]] = {NodeID(k): v for k, v in restored_aggregation_state.items()}
-
-        # Create processor with restored aggregation state
-        processor = RowProcessor(
+        processor, coalesce_node_map, coalesce_executor = self._build_processor(
+            graph=graph,
+            config=config,
+            settings=settings,
             recorder=recorder,
-            span_factory=self._span_factory,
             run_id=run_id,
-            source_node_id=source_id,
+            source_id=source_id,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
-            config_gates=config.gates,
             config_gate_id_map=config_gate_id_map,
-            aggregation_settings=typed_aggregation_settings,
-            retry_manager=retry_manager,
-            coalesce_executor=coalesce_executor,
-            coalesce_node_ids=coalesce_id_map,
-            branch_to_coalesce=branch_to_coalesce,
-            coalesce_step_map=coalesce_step_map,
-            restored_aggregation_state=typed_restored_state,
+            coalesce_id_map=coalesce_id_map,
             payload_store=payload_store,
-            clock=self._clock,
-            max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
-            telemetry_manager=self._telemetry,
+            restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()},
         )
 
         # Process rows - Buffer TOKENS
@@ -1940,13 +1974,11 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
-        # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
-        # for audit recording (to avoid node_state step_index collisions)
-        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] = {}
         if config.aggregation_settings:
-            for i, t in enumerate(config.transforms):
+            for t in config.transforms:
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = (t, i)  # 0-indexed, converted in handle_timeout_flush
+                    agg_transform_lookup[t.node_id] = (t, NodeID(t.node_id))
 
         try:
             # Process each unprocessed row using process_existing_row
@@ -1973,7 +2005,6 @@ class Orchestrator:
                     processor=processor,
                     ctx=ctx,
                     pending_tokens=pending_tokens,
-                    default_sink_name=default_sink_name,
                     agg_transform_lookup=agg_transform_lookup,
                 )
                 counters.accumulate_flush_result(timeout_result)
@@ -1990,7 +2021,7 @@ class Orchestrator:
                 )
 
                 # Handle all results from this row
-                accumulate_row_outcomes(results, counters, config.sinks, default_sink_name, pending_tokens)
+                accumulate_row_outcomes(results, counters, config.sinks, pending_tokens)
 
                 # ─────────────────────────────────────────────────────────────────
                 # Check for timed-out coalesces after processing each row
@@ -1999,15 +2030,12 @@ class Orchestrator:
                 if coalesce_executor is not None:
                     handle_coalesce_timeouts(
                         coalesce_executor=coalesce_executor,
-                        coalesce_step_map=coalesce_step_map,
+                        coalesce_node_map=coalesce_node_map,
                         processor=processor,
-                        config_transforms=config.transforms,
-                        config_gates=config.gates,
                         config_sinks=config.sinks,
                         ctx=ctx,
                         counters=counters,
                         pending_tokens=pending_tokens,
-                        default_sink_name=default_sink_name,
                     )
 
             # ─────────────────────────────────────────────────────────────────
@@ -2021,7 +2049,6 @@ class Orchestrator:
                     processor=processor,
                     ctx=ctx,
                     pending_tokens=pending_tokens,
-                    default_sink_name=default_sink_name,
                     checkpoint_callback=None,
                 )
                 counters.accumulate_flush_result(flush_result)
@@ -2030,15 +2057,12 @@ class Orchestrator:
             if coalesce_executor is not None:
                 flush_coalesce_pending(
                     coalesce_executor=coalesce_executor,
-                    coalesce_step_map=coalesce_step_map,
+                    coalesce_node_map=coalesce_node_map,
                     processor=processor,
-                    config_transforms=config.transforms,
-                    config_gates=config.gates,
                     config_sinks=config.sinks,
                     ctx=ctx,
                     counters=counters,
                     pending_tokens=pending_tokens,
-                    default_sink_name=default_sink_name,
                 )
 
             # Write to sinks (no checkpoint callbacks for resume path)
@@ -2049,6 +2073,7 @@ class Orchestrator:
                 ctx=ctx,
                 pending_tokens=pending_tokens,
                 sink_id_map=sink_id_map,
+                sink_step=processor.resolve_sink_step(),
             )
 
         finally:

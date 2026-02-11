@@ -46,8 +46,8 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
+from elspeth.testing import make_field
 from tests.fixtures.base_classes import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
-from tests.fixtures.factories import make_field
 from tests.fixtures.telemetry import MockTelemetryConfig, TelemetryTestExporter
 
 if TYPE_CHECKING:
@@ -76,6 +76,7 @@ class SimpleSource(_TestSourceBase):
 
     name = "simple_source"
     output_schema = DynamicSchema
+    on_success = "output"
 
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         super().__init__()
@@ -117,11 +118,8 @@ class PassthroughTransform:
     is_batch_aware = False
     creates_tokens = False
     transforms_adds_fields = False
-    _on_error: str | None = None
-
-    @property
-    def on_error(self) -> str | None:
-        return self._on_error
+    on_error: str | None = None
+    on_success: str | None = "output"
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, PipelineRow):
@@ -152,16 +150,10 @@ def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
     ExecutionGraph.from_plugin_instances() directly for production-path
     fidelity (see BUG-LINEAGE-01).
     """
+    from elspeth.core.config import SourceSettings
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.protocols import TransformProtocol
-
-    # Determine default sink
-    if "default" in config.sinks:
-        default_sink = "default"
-    elif config.sinks:
-        default_sink = next(iter(config.sinks))
-    else:
-        default_sink = ""
+    from tests.fixtures.factories import wire_transforms
 
     # Separate transforms (only TransformProtocol instances)
     row_transforms: list[TransformProtocol] = []
@@ -169,13 +161,25 @@ def _create_test_graph(config: PipelineConfig) -> ExecutionGraph:
         if isinstance(transform, TransformProtocol):
             row_transforms.append(transform)
 
+    sink_name = next(iter(config.sinks))
+    source_on_success = "source_out" if row_transforms else sink_name
+    final_destination = config.gates[0].input if config.gates else sink_name
+    if not row_transforms and config.gates:
+        source_on_success = config.gates[0].input
+
+    config.source.on_success = source_on_success
+
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=row_transforms,
+        source_settings=SourceSettings(plugin=config.source.name, on_success=source_on_success, options={}),
+        transforms=wire_transforms(
+            row_transforms,
+            source_connection=source_on_success,
+            final_sink=final_destination,
+        ),
         sinks=config.sinks,
         aggregations={},
         gates=list(config.gates),
-        default_sink=default_sink,
         coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
     )
 

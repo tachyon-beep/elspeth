@@ -20,6 +20,8 @@ Fork terminology:
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -27,15 +29,17 @@ from sqlalchemy import text
 
 from elspeth.contracts import CoalesceName, GateName, RoutingAction, RoutingMode, SinkName
 from elspeth.contracts.enums import RowOutcome
-from elspeth.core.config import CoalesceSettings, GateSettings
+from elspeth.core.config import CoalesceSettings, GateSettings, SourceSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+from elspeth.plugins.protocols import TransformProtocol
 from tests.fixtures.base_classes import (
     as_sink,
     as_source,
     as_transform,
 )
+from tests.fixtures.factories import wire_transforms
 from tests.fixtures.plugins import (
     CollectSink,
     ListSource,
@@ -185,26 +189,32 @@ row_for_fork = st.fixed_dictionaries(
 # =============================================================================
 
 
-def _build_production_graph(config: PipelineConfig, default_sink: str | None = None) -> ExecutionGraph:
+def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build graph using production code path (from_plugin_instances).
 
     Replacement for v1 build_production_graph, inlined to avoid v1 imports.
+    Auto-sets on_success on terminal transform for linear pipelines.
     """
-    if default_sink is None:
-        if "default" in config.sinks:
-            default_sink = "default"
-        elif config.sinks:
-            default_sink = next(iter(config.sinks))
-        else:
-            default_sink = ""
+    transforms = list(config.transforms)
+    sink_name = next(iter(config.sinks))
+    source_on_success = "source_out" if transforms else sink_name
+    wired_transforms = (
+        wire_transforms(
+            cast(list[TransformProtocol], transforms),
+            source_connection=source_on_success,
+            final_sink=sink_name,
+        )
+        if transforms
+        else []
+    )
 
     return ExecutionGraph.from_plugin_instances(
         source=config.source,
-        transforms=list(config.transforms),
+        source_settings=SourceSettings(plugin=config.source.name, on_success=source_on_success, options={}),
+        transforms=wired_transforms,
         sinks=config.sinks,
         aggregations={},
         gates=list(config.gates),
-        default_sink=default_sink,
         coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
     )
 
@@ -230,48 +240,50 @@ class TestDagForkBranchValidation:
         # Create a gate config that forks to a branch that doesn't exist
         gate = GateSettings(
             name="bad_fork_gate",
+            input="gate_in",
             condition="True",  # Always fork
-            routes={"true": "fork", "false": "continue"},  # Route to fork action
+            routes={"true": "fork", "false": "default"},  # Route to fork action
             fork_to=["unknown_branch"],  # No coalesce or sink with this name
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="default")
         sink = CollectSink()
 
         # This should fail at graph construction
         with pytest.raises(GraphValidationError, match="unknown_branch"):
             ExecutionGraph.from_plugin_instances(
                 source=as_source(source),
+                source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
                 transforms=[],
                 sinks={"default": as_sink(sink)},  # No "unknown_branch" sink
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[],  # No coalesce with "unknown_branch"
-                default_sink="default",
             )
 
     def test_fork_to_sink_is_valid(self) -> None:
         """Fork branch targeting a sink is accepted."""
         gate = GateSettings(
             name="fork_to_sink_gate",
+            input="gate_in",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="sink_a")
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
         # This should succeed - branches match sink names
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[gate],
             aggregations={},
             coalesce_settings=[],
-            default_sink="sink_a",
         )
 
         gate_id = graph.get_config_gate_id_map()[GateName(gate.name)]
@@ -292,28 +304,30 @@ class TestDagForkBranchValidation:
         """Fork branch targeting a coalesce is accepted."""
         gate = GateSettings(
             name="fork_to_coalesce_gate",
+            input="gate_in",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["branch_a", "branch_b"],
         )
 
         coalesce = CoalesceSettings(
             name="merge_point",
             branches=["branch_a", "branch_b"],
+            on_success="default",
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="default")
         sink = CollectSink()
 
         # This should succeed - branches match coalesce branches
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"default": as_sink(sink)},
             gates=[gate],
             aggregations={},
             coalesce_settings=[coalesce],
-            default_sink="default",
         )
 
         branch_map = graph.get_branch_to_coalesce_map()
@@ -336,24 +350,25 @@ class TestDagForkBranchValidation:
         """Fork with duplicate branch names is rejected."""
         gate = GateSettings(
             name="dup_fork_gate",
+            input="gate_in",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["branch_a", "branch_a"],  # Duplicate!
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="default")
         sink = CollectSink()
 
         # RoutingAction.fork_to_paths() validates uniqueness
         with pytest.raises((GraphValidationError, ValueError), match=r"[Dd]uplicate"):
             ExecutionGraph.from_plugin_instances(
                 source=as_source(source),
+                source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
                 transforms=[],
                 sinks={"default": as_sink(sink)},
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[],
-                default_sink="default",
             )
 
     def test_coalesce_branch_not_produced_rejected(self) -> None:
@@ -361,8 +376,9 @@ class TestDagForkBranchValidation:
         # Gate only produces branch_a, but coalesce expects both
         gate = GateSettings(
             name="partial_fork",
+            input="gate_in",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "default"},
             fork_to=["branch_a"],  # Only one branch
         )
 
@@ -371,18 +387,18 @@ class TestDagForkBranchValidation:
             branches=["branch_a", "branch_b"],  # Expects branch_b too!
         )
 
-        source = ListSource([{"value": 1}])
+        source = ListSource([{"value": 1}], on_success="default")
         sink = CollectSink()
 
         with pytest.raises(GraphValidationError, match="branch_b"):
             ExecutionGraph.from_plugin_instances(
                 source=as_source(source),
+                source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
                 transforms=[],
                 sinks={"default": as_sink(sink)},
                 gates=[gate],
                 aggregations={},
                 coalesce_settings=[coalesce],
-                default_sink="default",
             )
 
 
@@ -407,15 +423,16 @@ class TestForkJoinRuntimeBalance:
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
-        source = ListSource(rows)
+        source = ListSource(rows, on_success="sink_a")
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
         # Gate that forks all rows to both sinks
         gate = GateSettings(
             name="fork_gate",
+            input="gate_in",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
         )
 
@@ -428,19 +445,18 @@ class TestForkJoinRuntimeBalance:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[gate],
             aggregations={},
             coalesce_settings=[],
-            default_sink="sink_a",
         )
 
         # Settings needed for fork execution
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "on_success": "sink_a", "options": {}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-            default_sink="sink_a",
             gates=[gate],
         )
 
@@ -527,14 +543,15 @@ class TestForkJoinEdgeCases:
         db = LandscapeDB.in_memory()
         payload_store = MockPayloadStore()
 
-        source = ListSource([])  # Empty
+        source = ListSource([], on_success="sink_a")  # Empty
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
         gate = GateSettings(
             name="fork_gate",
+            input="gate_in",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
         )
 
@@ -547,20 +564,19 @@ class TestForkJoinEdgeCases:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[gate],
             aggregations={},
             coalesce_settings=[],
-            default_sink="sink_a",
         )
 
         from elspeth.core.config import ElspethSettings
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "on_success": "sink_a", "options": {}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-            default_sink="sink_a",
             gates=[gate],
         )
 
@@ -601,15 +617,16 @@ class TestForkRecoveryInvariant:
         payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
-        source = ListSource(rows)
+        source = ListSource(rows, on_success="sink_a")
         sink_a = CollectSink("sink_a")
         sink_b = CollectSink("sink_b")
 
         # Gate that forks all rows to both sinks
         gate = GateSettings(
             name="fork_gate",
+            input="gate_in",
             condition="True",
-            routes={"true": "fork", "false": "continue"},
+            routes={"true": "fork", "false": "sink_a"},
             fork_to=["sink_a", "sink_b"],
         )
 
@@ -622,18 +639,17 @@ class TestForkRecoveryInvariant:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
+            source_settings=SourceSettings(plugin=source.name, on_success="gate_in", options={}),
             transforms=[],
             sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
             gates=[gate],
             aggregations={},
             coalesce_settings=[],
-            default_sink="sink_a",
         )
 
         settings_obj = ElspethSettings(
-            source={"plugin": "test"},
+            source={"plugin": "test", "on_success": "sink_a", "options": {}},
             sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
-            default_sink="sink_a",
             gates=[gate],
         )
 

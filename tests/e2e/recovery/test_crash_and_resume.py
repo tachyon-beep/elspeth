@@ -152,7 +152,6 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
 
     graph._sink_id_map = sink_ids
     graph._transform_id_map = transform_ids
-    graph._default_sink = SinkName("default") if SinkName("default") in sink_ids else next(iter(sink_ids))
     graph._route_resolution_map = {}
     graph._config_gate_id_map = {}
 
@@ -171,6 +170,7 @@ class _DoublerTransform(BaseTransform):
     input_schema = _RowSchema
     output_schema = _RowSchema
     determinism = Determinism.DETERMINISTIC
+    on_error = "discard"
 
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
@@ -189,6 +189,7 @@ class _ResumeSink(_TestSinkBase):
     results: ClassVar[list[dict[str, Any]]] = []
 
     def __init__(self) -> None:
+        super().__init__()
         _ResumeSink.results = []
 
     def on_start(self, ctx: Any) -> None:
@@ -418,7 +419,6 @@ class TestResumeIdempotence:
         graph_b.add_edge("transform_0", "sink_default", label="continue", mode=RoutingMode.MOVE)
         graph_b._sink_id_map = {SinkName("default"): NodeID("sink_default")}
         graph_b._transform_id_map = {0: NodeID("transform_0")}
-        graph_b._default_sink = SinkName("default")
         graph_b._route_resolution_map = {}
         graph_b._config_gate_id_map = {}
 
@@ -522,7 +522,7 @@ class TestRetryBehavior:
             input_schema = _RowSchema
             output_schema = _RowSchema
             determinism = Determinism.DETERMINISTIC
-            _on_error = "discard"
+            on_error = "discard"
 
             def __init__(self, fail_ids: set[str]) -> None:
                 super().__init__({"schema": {"mode": "observed"}})

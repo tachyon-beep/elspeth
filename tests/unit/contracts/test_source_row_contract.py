@@ -4,7 +4,7 @@ import pytest
 
 from elspeth.contracts.results import SourceRow
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from tests.fixtures.factories import make_field
+from elspeth.testing import make_field
 
 
 class TestSourceRowWithContract:

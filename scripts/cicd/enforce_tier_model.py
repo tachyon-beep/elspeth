@@ -12,6 +12,7 @@ Enforces ELSPETH's data manifesto (see CLAUDE.md):
 
 Usage:
     python scripts/cicd/enforce_tier_model.py check --root src
+    python scripts/cicd/enforce_tier_model.py check --root src --allowlist config/cicd/enforce_tier_model
     python scripts/cicd/enforce_tier_model.py check --root src --allowlist config/cicd/enforce_tier_model.yaml
 """
 
@@ -88,6 +89,7 @@ class AllowlistEntry:
     safety: str
     expires: date | None
     matched: bool = field(default=False, compare=False)
+    source_file: str = field(default="", compare=False)
 
 
 @dataclass
@@ -99,6 +101,7 @@ class PerFileRule:
     reason: str
     expires: date | None
     matched_count: int = field(default=0, compare=False)
+    source_file: str = field(default="", compare=False)
 
     def matches(self, file_path: str, rule_id: str) -> bool:
         """Check if this per-file rule matches a finding."""
@@ -503,21 +506,9 @@ def scan_directory(
 # =============================================================================
 
 
-def load_allowlist(path: Path) -> Allowlist:
-    """Load and parse the allowlist YAML file."""
-    if not path.exists():
-        return Allowlist(entries=[])
-
-    try:
-        with path.open() as f:
-            data = yaml.safe_load(f) or {}
-    except yaml.YAMLError as e:
-        print(f"Error: Invalid YAML in allowlist {path}: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    defaults = data.get("defaults", {})
+def _parse_allow_hits(data: dict[str, Any], source_file: str = "") -> list[AllowlistEntry]:
+    """Parse allow_hits entries from a YAML data dict."""
     entries: list[AllowlistEntry] = []
-
     for item in data.get("allow_hits", []):
         expires_str = item.get("expires")
         expires_date = None
@@ -537,10 +528,14 @@ def load_allowlist(path: Path) -> Allowlist:
                 reason=item.get("reason", ""),
                 safety=item.get("safety", ""),
                 expires=expires_date,
+                source_file=source_file,
             )
         )
+    return entries
 
-    # Parse per-file rules
+
+def _parse_per_file_rules(data: dict[str, Any], source_file: str = "") -> list[PerFileRule]:
+    """Parse per_file_rules entries from a YAML data dict."""
     per_file_rules: list[PerFileRule] = []
     for item in data.get("per_file_rules", []):
         expires_str = item.get("expires")
@@ -560,12 +555,73 @@ def load_allowlist(path: Path) -> Allowlist:
                 rules=item.get("rules", []),
                 reason=item.get("reason", ""),
                 expires=expires_date,
+                source_file=source_file,
             )
         )
+    return per_file_rules
+
+
+def _load_yaml_file(path: Path) -> dict[str, Any]:
+    """Load and return a YAML file as a dict, exiting on parse error."""
+    try:
+        with path.open() as f:
+            return yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        print(f"Error: Invalid YAML in allowlist {path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def load_allowlist_from_directory(directory: Path) -> Allowlist:
+    """Load allowlist from a directory of per-module YAML files.
+
+    Expected structure:
+        directory/
+            _defaults.yaml   — version and defaults section
+            core.yaml         — per_file_rules + allow_hits for core/*
+            plugins.yaml      — per_file_rules + allow_hits for plugins/*
+            ...
+    """
+    # Load defaults
+    defaults_path = directory / "_defaults.yaml"
+    if defaults_path.exists():
+        defaults_data = _load_yaml_file(defaults_path)
+        defaults = defaults_data.get("defaults", {})
+    else:
+        defaults = {}
+
+    # Glob all YAML files except _defaults.yaml, sorted by filename
+    yaml_files = sorted(f for f in directory.glob("*.yaml") if f.name != "_defaults.yaml")
+
+    all_entries: list[AllowlistEntry] = []
+    all_per_file_rules: list[PerFileRule] = []
+
+    for yaml_file in yaml_files:
+        data = _load_yaml_file(yaml_file)
+        all_entries.extend(_parse_allow_hits(data, source_file=yaml_file.name))
+        all_per_file_rules.extend(_parse_per_file_rules(data, source_file=yaml_file.name))
 
     return Allowlist(
-        entries=entries,
-        per_file_rules=per_file_rules,
+        entries=all_entries,
+        per_file_rules=all_per_file_rules,
+        fail_on_stale=defaults.get("fail_on_stale", True),
+        fail_on_expired=defaults.get("fail_on_expired", True),
+    )
+
+
+def load_allowlist(path: Path) -> Allowlist:
+    """Load and parse the allowlist from a YAML file or directory of YAML files."""
+    if path.is_dir():
+        return load_allowlist_from_directory(path)
+
+    if not path.exists():
+        return Allowlist(entries=[])
+
+    data = _load_yaml_file(path)
+    defaults = data.get("defaults", {})
+
+    return Allowlist(
+        entries=_parse_allow_hits(data),
+        per_file_rules=_parse_per_file_rules(data),
         fail_on_stale=defaults.get("fail_on_stale", True),
         fail_on_expired=defaults.get("fail_on_expired", True),
     )
@@ -574,6 +630,28 @@ def load_allowlist(path: Path) -> Allowlist:
 # =============================================================================
 # Reporting
 # =============================================================================
+
+
+def _suggest_module_file(finding: Finding, allowlist_path: Path) -> str:
+    """Suggest the appropriate module YAML file for a finding.
+
+    Maps the finding's file path to the per-module YAML file name.
+    Only meaningful when allowlist_path is a directory.
+    """
+    if not allowlist_path.is_dir():
+        return str(allowlist_path)
+
+    file_path = finding.file_path
+    # Bare filenames (no /) like cli.py, cli_helpers.py → cli.yaml
+    if "/" not in file_path:
+        stem = file_path.removesuffix(".py")
+        if stem.startswith("cli"):
+            return str(allowlist_path / "cli.yaml")
+        return str(allowlist_path / f"{stem}.yaml")
+
+    # First path segment determines module file
+    module = file_path.split("/", 1)[0]
+    return str(allowlist_path / f"{module}.yaml")
 
 
 def format_finding_text(finding: Finding) -> str:
@@ -593,7 +671,10 @@ def format_finding_text(finding: Finding) -> str:
 
 def format_stale_entry_text(entry: AllowlistEntry) -> str:
     """Format a stale allowlist entry for text output."""
-    return f"\n  Key: {entry.key}\n  Owner: {entry.owner}\n  Reason: {entry.reason}"
+    base = f"\n  Key: {entry.key}\n  Owner: {entry.owner}\n  Reason: {entry.reason}"
+    if entry.source_file:
+        base += f"\n  Source: {entry.source_file}"
+    return base
 
 
 def format_expired_entry_text(entry: AllowlistEntry) -> str:
@@ -658,7 +739,7 @@ def main() -> int:
         "--allowlist",
         type=Path,
         default=None,
-        help="Path to allowlist YAML file",
+        help="Path to allowlist YAML file or directory of YAML files",
     )
     check_parser.add_argument(
         "--exclude",
@@ -698,8 +779,11 @@ def run_check(args: argparse.Namespace) -> int:
     # Load allowlist
     allowlist_path = args.allowlist
     if allowlist_path is None:
-        # Default: config/cicd/enforce_tier_model.yaml relative to repo root
-        allowlist_path = Path(__file__).parent.parent.parent / "config" / "cicd" / "enforce_tier_model.yaml"
+        # Default: prefer directory, fall back to single file
+        repo_root = Path(__file__).parent.parent.parent
+        dir_path = repo_root / "config" / "cicd" / "enforce_tier_model"
+        file_path = repo_root / "config" / "cicd" / "enforce_tier_model.yaml"
+        allowlist_path = dir_path if dir_path.is_dir() else file_path
 
     allowlist = load_allowlist(allowlist_path)
 
@@ -798,7 +882,8 @@ def run_check(args: argparse.Namespace) -> int:
             print("CHECK FAILED")
             print("=" * 60)
             if violations:
-                print(f"\nTo allowlist a violation, add an entry to {allowlist_path}")
+                target = _suggest_module_file(violations[0], allowlist_path)
+                print(f"\nTo allowlist a violation, add an entry to {target}")
                 print("Example entry:")
                 if violations:
                     import pprint

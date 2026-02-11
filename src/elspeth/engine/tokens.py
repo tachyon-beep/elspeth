@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts import SourceRow, TokenInfo
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.landscape import LandscapeRecorder
 
 
@@ -30,7 +31,7 @@ class TokenManager:
     - Update token row data after transforms
 
     Example:
-        manager = TokenManager(recorder)
+        manager = TokenManager(recorder, step_resolver=graph.resolve_step)
 
         # Create token for source row
         token = manager.create_initial_token(
@@ -43,22 +44,31 @@ class TokenManager:
         # After transform
         token = manager.update_row_data(token, {"value": 42, "processed": True})
 
-        # Fork to branches (step_in_pipeline from Orchestrator)
+        # Fork to branches (node_id resolved to step internally)
         children = manager.fork_token(
             parent_token=token,
             branches=["stats", "classifier"],
-            step_in_pipeline=2,  # Orchestrator provides step position
+            node_id=NodeID("gate_classifier_abc123"),
         )
     """
 
-    def __init__(self, recorder: LandscapeRecorder, *, payload_store: PayloadStore | None = None) -> None:
-        """Initialize with recorder and optional payload store.
+    def __init__(
+        self,
+        recorder: LandscapeRecorder,
+        *,
+        step_resolver: StepResolver,
+        payload_store: PayloadStore | None = None,
+    ) -> None:
+        """Initialize with recorder, step resolver, and optional payload store.
 
         Args:
             recorder: LandscapeRecorder for audit trail
+            step_resolver: Callable that resolves NodeID to 1-indexed audit step position.
+                The canonical implementation is RowProcessor._resolve_audit_step_for_node.
             payload_store: Optional PayloadStore for persisting source row payloads
         """
         self._recorder = recorder
+        self._step_resolver = step_resolver
         self._payload_store = payload_store
 
     def create_initial_token(
@@ -158,12 +168,14 @@ class TokenManager:
         # Create PipelineRow with minimal contract
         pipeline_row = PipelineRow(row_data, quarantine_contract)
 
-        # Create row record
+        # Create row record — quarantined=True enables safe hashing for
+        # Tier-3 external data that may contain non-canonical values (NaN, Infinity)
         row = self._recorder.create_row(
             run_id=run_id,
             source_node_id=source_node_id,
             row_index=row_index,
             data=pipeline_row.to_dict(),
+            quarantined=True,
         )
 
         # Create initial token
@@ -205,7 +217,7 @@ class TokenManager:
         self,
         parent_token: TokenInfo,
         branches: list[str],
-        step_in_pipeline: int,
+        node_id: NodeID,
         run_id: str,
         row_data: PipelineRow | None = None,
     ) -> tuple[list[TokenInfo], str]:
@@ -213,13 +225,11 @@ class TokenManager:
 
         ATOMIC: Creates children AND records parent FORKED outcome in single transaction.
 
-        The step_in_pipeline is required because the Orchestrator/RowProcessor
-        owns step position - TokenManager doesn't track it.
-
         Args:
             parent_token: Parent token to fork
             branches: List of branch names
-            step_in_pipeline: Current step position in the DAG (stored in audit trail)
+            node_id: NodeID of the gate/transform performing the fork (resolved to
+                audit step position internally via step_resolver)
             run_id: Run ID (required for atomic outcome recording)
             row_data: Optional PipelineRow (defaults to parent's data)
 
@@ -231,13 +241,14 @@ class TokenManager:
             PipelineRow.__deepcopy__ preserves contract reference (immutable).
         """
         data = row_data if row_data is not None else parent_token.row_data
+        step = self._step_resolver(node_id)
 
         children, fork_group_id = self._recorder.fork_token(
             parent_token_id=parent_token.token_id,
             row_id=parent_token.row_id,
             branches=branches,
             run_id=run_id,
-            step_in_pipeline=step_in_pipeline,
+            step_in_pipeline=step,
         )
 
         # CRITICAL: Use deepcopy to prevent nested mutable objects from being
@@ -259,28 +270,27 @@ class TokenManager:
         self,
         parents: list[TokenInfo],
         merged_data: PipelineRow,
-        step_in_pipeline: int,
+        node_id: NodeID,
     ) -> TokenInfo:
         """Coalesce multiple tokens into one.
-
-        The step_in_pipeline is required because the Orchestrator/RowProcessor
-        owns step position - TokenManager doesn't track it.
 
         Args:
             parents: Parent tokens to merge
             merged_data: Merged row data as PipelineRow (with merged contract)
-            step_in_pipeline: Current step position in the DAG (stored in audit trail)
+            node_id: NodeID of the coalesce node performing the merge (resolved to
+                audit step position internally via step_resolver)
 
         Returns:
             Merged TokenInfo with PipelineRow row_data
         """
         # Use first parent's row_id (they should all be the same)
         row_id = parents[0].row_id
+        step = self._step_resolver(node_id)
 
         merged = self._recorder.coalesce_tokens(
             parent_token_ids=[p.token_id for p in parents],
             row_id=row_id,
-            step_in_pipeline=step_in_pipeline,
+            step_in_pipeline=step,
         )
 
         return TokenInfo(
@@ -311,7 +321,7 @@ class TokenManager:
         parent_token: TokenInfo,
         expanded_rows: list[dict[str, Any]],
         output_contract: SchemaContract,
-        step_in_pipeline: int,
+        node_id: NodeID,
         run_id: str,
         record_parent_outcome: bool = True,
     ) -> tuple[list[TokenInfo], str]:
@@ -328,7 +338,8 @@ class TokenManager:
             parent_token: The token being expanded
             expanded_rows: List of output row dicts (transforms output dicts, not PipelineRow)
             output_contract: Contract for output rows (from TransformResult.contract)
-            step_in_pipeline: Current step (for audit)
+            node_id: NodeID of the transform performing the expansion (resolved to
+                audit step position internally via step_resolver)
             run_id: Run ID (required for atomic outcome recording)
             record_parent_outcome: If True (default), record EXPANDED outcome for parent.
                 Set to False for batch aggregation where parent gets CONSUMED_IN_BATCH.
@@ -341,12 +352,13 @@ class TokenManager:
             with the output_contract (post-transform schema), not parent's contract.
         """
         # Delegate to recorder which handles DB operations and parent linking
+        step = self._step_resolver(node_id)
         db_children, expand_group_id = self._recorder.expand_token(
             parent_token_id=parent_token.token_id,
             row_id=parent_token.row_id,
             count=len(expanded_rows),
             run_id=run_id,
-            step_in_pipeline=step_in_pipeline,
+            step_in_pipeline=step,
             record_parent_outcome=record_parent_outcome,
         )
 
@@ -377,6 +389,7 @@ class TokenManager:
         ]
         return child_infos, expand_group_id
 
-    # NOTE: No advance_step() method - step position is the authority of
-    # Orchestrator/RowProcessor, not TokenManager. They track where tokens
-    # are in the DAG and pass step_in_pipeline when needed.
+    # NOTE: Step resolution is handled by the injected StepResolver, which
+    # maps NodeID → 1-indexed audit step position. The canonical implementation
+    # is RowProcessor._resolve_audit_step_for_node. TokenManager resolves steps
+    # internally — callers pass node_id, not step_in_pipeline.

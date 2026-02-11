@@ -33,6 +33,7 @@ from hypothesis import strategies as st
 
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.types import NodeID
 from elspeth.engine.tokens import TokenManager
 from tests.strategies.ids import multiple_branches
 from tests.strategies.json import row_data
@@ -77,7 +78,8 @@ class TestForkIsolationProperties:
         to ensure each child can be independently updated with_updated_data().
         """
         mock_recorder = _create_mock_recorder(branches)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -88,7 +90,7 @@ class TestForkIsolationProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            step_in_pipeline=1,
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
         )
 
@@ -126,7 +128,8 @@ class TestForkIsolationProperties:
             row_data = {"nested": row_data}
 
         mock_recorder = _create_mock_recorder(branches)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -137,7 +140,7 @@ class TestForkIsolationProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            step_in_pipeline=1,
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
         )
 
@@ -200,7 +203,8 @@ class TestForkParentPreservationProperties:
         have different PipelineRow instances (not shared).
         """
         mock_recorder = _create_mock_recorder(branches)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -214,7 +218,7 @@ class TestForkParentPreservationProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            step_in_pipeline=1,
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
         )
 
@@ -246,7 +250,8 @@ class TestForkParentPreservationProperties:
         - Non-None fork_group_id
         """
         mock_recorder = _create_mock_recorder(branches)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -257,7 +262,7 @@ class TestForkParentPreservationProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            step_in_pipeline=1,
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
         )
 
@@ -298,7 +303,8 @@ class TestForkRowDataOverrideProperties:
         The override row_data should be used instead of parent's data.
         """
         mock_recorder = _create_mock_recorder(branches)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -309,7 +315,7 @@ class TestForkRowDataOverrideProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            step_in_pipeline=1,
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
             row_data=_wrap_dict_as_pipeline_row(override_data),  # Explicit override
         )
@@ -335,7 +341,8 @@ class TestForkRowDataOverrideProperties:
         the parent's row_data.
         """
         mock_recorder = _create_mock_recorder(branches)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -346,7 +353,7 @@ class TestForkRowDataOverrideProperties:
         children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
-            step_in_pipeline=1,
+            node_id=NodeID("node_fork"),
             run_id="test_run_1",
             # No row_data override
         )
@@ -417,7 +424,8 @@ class TestExpandIsolationProperties:
         expanded_rows = [dict(row_data) for _ in range(count)]
         output_contract = _make_locked_contract_from_data(row_data)
         mock_recorder = _create_mock_recorder_for_expand(count)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -429,7 +437,7 @@ class TestExpandIsolationProperties:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=output_contract,
-            step_in_pipeline=1,
+            node_id=NodeID("node_expand"),
             run_id="test_run_1",
         )
 
@@ -461,7 +469,8 @@ class TestExpandIsolationProperties:
         expanded_rows = [dict(row_data) for _ in range(count)]
         output_contract = _make_locked_contract_from_data(row_data)
         mock_recorder = _create_mock_recorder_for_expand(count)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -473,7 +482,7 @@ class TestExpandIsolationProperties:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=output_contract,
-            step_in_pipeline=1,
+            node_id=NodeID("node_expand"),
             run_id="test_run_1",
         )
 
@@ -516,7 +525,8 @@ class TestExpandParentPreservationProperties:
         expanded_rows = [dict(row_data) for _ in range(count)]
         output_contract = _make_locked_contract_from_data(row_data)
         mock_recorder = _create_mock_recorder_for_expand(count)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -530,7 +540,7 @@ class TestExpandParentPreservationProperties:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=output_contract,
-            step_in_pipeline=1,
+            node_id=NodeID("node_expand"),
             run_id="test_run_1",
         )
 
@@ -555,7 +565,8 @@ class TestExpandParentPreservationProperties:
         expanded_rows = [dict(row_data) for _ in range(count)]
         output_contract = _make_locked_contract_from_data(row_data)
         mock_recorder = _create_mock_recorder_for_expand(count)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -568,7 +579,7 @@ class TestExpandParentPreservationProperties:
             parent_token=parent,
             expanded_rows=expanded_rows,
             output_contract=output_contract,
-            step_in_pipeline=1,
+            node_id=NodeID("node_expand"),
             run_id="test_run_1",
         )
 
@@ -601,7 +612,8 @@ class TestExpandParentPreservationProperties:
         expanded_rows = [dict(row_data_dict) for _ in range(count)]
         unlocked_contract = SchemaContract(mode="OBSERVED", fields=())  # locked=False
         mock_recorder = _create_mock_recorder_for_expand(count)
-        manager = TokenManager(mock_recorder)
+        step_resolver = lambda node_id: 1  # noqa: E731
+        manager = TokenManager(mock_recorder, step_resolver=step_resolver)
 
         parent = TokenInfo(
             row_id="row_1",
@@ -616,6 +628,6 @@ class TestExpandParentPreservationProperties:
                 parent_token=parent,
                 expanded_rows=expanded_rows,
                 output_contract=unlocked_contract,
-                step_in_pipeline=1,
+                node_id=NodeID("node_expand"),
                 run_id="test_run_1",
             )

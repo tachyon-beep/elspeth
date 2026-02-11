@@ -34,6 +34,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _reject_nonfinite_constant(value: str) -> None:
+    """Reject non-standard JSON constants (NaN, Infinity, -Infinity)."""
+    raise ValueError(f"Non-standard JSON constant '{value}' not allowed. Use null for missing values, not NaN/Infinity.")
+
+
 class CSVOptions(BaseModel):
     """CSV parsing options."""
 
@@ -503,7 +508,7 @@ class AzureBlobSource(BaseSource):
                 names=names_arg,  # Map columns to schema field names
                 dtype=str,  # Keep all values as strings for consistent handling
                 keep_default_na=False,  # Don't convert empty strings to NaN
-                on_bad_lines="warn",  # Warn but skip bad lines instead of crashing
+                on_bad_lines="error",  # Quarantine parse failures; never silently drop malformed lines
             )
         except Exception as e:
             # Catastrophic CSV structure failure - entire file unparseable
@@ -581,30 +586,61 @@ class AzureBlobSource(BaseSource):
         Yields:
             SourceRow for each row (valid or quarantined).
 
-        Raises:
-            ValueError: If JSON is invalid or not an array.
         """
         # Access typed config fields directly - they have defaults from JSONOptions
         encoding = self._json_options.encoding
         data_key = self._json_options.data_key
 
-        # THEIR DATA: JSON parsing - wrap operations
+        def _record_file_level_error(error_msg: str, schema_mode: str) -> Iterator[SourceRow]:
+            raw_row = {
+                "container": self._container,
+                "blob_path": self._blob_path,
+                "error": error_msg,
+            }
+            ctx.record_validation_error(
+                row=raw_row,
+                error=error_msg,
+                schema_mode=schema_mode,
+                destination=self._on_validation_failure,
+            )
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=raw_row,
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+
+        # THEIR DATA: JSON parsing - quarantine failures at boundary
         try:
             text_data = blob_data.decode(encoding)
-            data = json.loads(text_data)
         except UnicodeDecodeError as e:
-            raise ValueError(f"Failed to decode blob as {encoding}: {e}") from e
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in blob: {e}") from e
+            error_msg = f"Failed to decode blob as {encoding}: {e}"
+            yield from _record_file_level_error(error_msg, "parse")
+            return
+
+        try:
+            data = json.loads(text_data, parse_constant=_reject_nonfinite_constant)
+        except (json.JSONDecodeError, ValueError) as e:
+            error_msg = f"Invalid JSON in blob: {e}"
+            yield from _record_file_level_error(error_msg, "parse")
+            return
 
         # Extract from nested key if specified
         if data_key:
-            if not isinstance(data, dict) or data_key not in data:
-                raise ValueError(f"Expected JSON object with key '{data_key}', got {type(data).__name__}")
+            if not isinstance(data, dict):
+                error_msg = f"Cannot extract data_key '{data_key}': expected JSON object, got {type(data).__name__}"
+                yield from _record_file_level_error(error_msg, "structure")
+                return
+            if data_key not in data:
+                error_msg = f"data_key '{data_key}' not found in JSON object"
+                yield from _record_file_level_error(error_msg, "structure")
+                return
             data = data[data_key]
 
         if not isinstance(data, list):
-            raise ValueError(f"Expected JSON array, got {type(data).__name__}")
+            error_msg = f"Expected JSON array, got {type(data).__name__}"
+            yield from _record_file_level_error(error_msg, "structure")
+            return
 
         # Log row count for operator visibility
         logger.info("Parsed %d rows from JSON array blob '%s'", len(data), self._blob_path)
@@ -643,8 +679,8 @@ class AzureBlobSource(BaseSource):
 
             # Catch JSON parse errors at the trust boundary
             try:
-                row = json.loads(line)
-            except json.JSONDecodeError as e:
+                row = json.loads(line, parse_constant=_reject_nonfinite_constant)
+            except (json.JSONDecodeError, ValueError) as e:
                 # External data parse failure - quarantine, don't crash
                 # Store raw line + metadata for audit traceability
                 raw_row = {"__raw_line__": line, "__line_number__": line_num}

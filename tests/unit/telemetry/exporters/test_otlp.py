@@ -24,8 +24,8 @@ from elspeth.contracts.events import (
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.exporters.otlp import (
     OTLPExporter,
-    _derive_span_id,
     _derive_trace_id,
+    _generate_span_id,
 )
 
 # Path to patch OTLPSpanExporter - must be at the source location
@@ -56,81 +56,25 @@ class TestTraceIdDerivation:
         assert trace_id < 2**128
 
 
-class TestSpanIdDerivation:
-    """Tests for span_id derivation from events."""
-
-    def test_same_event_produces_same_span_id(self) -> None:
-        """Identical events produce identical span_ids."""
-        ts = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
-        event1 = RunStarted(
-            timestamp=ts,
-            run_id="run-123",
-            config_hash="abc123",
-            source_plugin="csv",
-        )
-        event2 = RunStarted(
-            timestamp=ts,
-            run_id="run-123",
-            config_hash="abc123",
-            source_plugin="csv",
-        )
-        span_id_1 = _derive_span_id(event1)
-        span_id_2 = _derive_span_id(event2)
-        assert span_id_1 == span_id_2
-
-    def test_different_timestamps_produce_different_span_ids(self) -> None:
-        """Events with different timestamps have different span_ids."""
-        event1 = RunStarted(
-            timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
-            run_id="run-123",
-            config_hash="abc123",
-            source_plugin="csv",
-        )
-        event2 = RunStarted(
-            timestamp=datetime(2024, 1, 15, 10, 30, 1, tzinfo=UTC),
-            run_id="run-123",
-            config_hash="abc123",
-            source_plugin="csv",
-        )
-        span_id_1 = _derive_span_id(event1)
-        span_id_2 = _derive_span_id(event2)
-        assert span_id_1 != span_id_2
-
-    def test_events_with_token_id_use_it_for_span_id(self) -> None:
-        """Events with token_id incorporate it in span_id."""
-        ts = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
-        event1 = TokenCompleted(
-            timestamp=ts,
-            run_id="run-123",
-            row_id="row-1",
-            token_id="token-aaa",
-            outcome=RowOutcome.COMPLETED,
-            sink_name="output",
-        )
-        event2 = TokenCompleted(
-            timestamp=ts,
-            run_id="run-123",
-            row_id="row-1",
-            token_id="token-bbb",
-            outcome=RowOutcome.COMPLETED,
-            sink_name="output",
-        )
-        span_id_1 = _derive_span_id(event1)
-        span_id_2 = _derive_span_id(event2)
-        assert span_id_1 != span_id_2
+class TestSpanIdGeneration:
+    """Tests for random span_id generation."""
 
     def test_span_id_is_64_bit_integer(self) -> None:
         """Span ID is a positive 64-bit integer."""
-        event = RunStarted(
-            timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
-            run_id="run-123",
-            config_hash="abc123",
-            source_plugin="csv",
-        )
-        span_id = _derive_span_id(event)
+        span_id = _generate_span_id()
         assert isinstance(span_id, int)
         assert span_id > 0
         assert span_id < 2**64
+
+    def test_span_ids_are_unique(self) -> None:
+        """Consecutive span IDs do not collide."""
+        ids = {_generate_span_id() for _ in range(1000)}
+        assert len(ids) == 1000
+
+    def test_span_id_is_nonzero(self) -> None:
+        """Span ID is never zero (OTel requirement)."""
+        for _ in range(100):
+            assert _generate_span_id() != 0
 
 
 class TestOTLPExporterConfiguration:

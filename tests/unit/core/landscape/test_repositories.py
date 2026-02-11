@@ -44,6 +44,7 @@ from elspeth.contracts.enums import (
     RoutingMode,
     RowOutcome,
     RunStatus,
+    TriggerType,
 )
 from elspeth.core.landscape.repositories import (
     ArtifactRepository,
@@ -664,12 +665,19 @@ class TestBatchRepository:
         result = repo.load(sa_row)
         assert result.batch_id == "batch-1"
         assert result.aggregation_state_id == "agg-state-1"
-        assert result.trigger_type == "count"
+        assert result.trigger_type == TriggerType.COUNT
+        assert isinstance(result.trigger_type, TriggerType)
         assert result.trigger_reason == "threshold=10"
         assert result.completed_at == NOW
 
     def test_invalid_status_raises_value_error(self) -> None:
         sa_row = self._make_batch_row(status="cooking")
+        repo = BatchRepository(session=Mock())
+        with pytest.raises(ValueError):
+            repo.load(sa_row)
+
+    def test_invalid_trigger_type_raises_value_error(self) -> None:
+        sa_row = self._make_batch_row(trigger_type="not_a_trigger")
         repo = BatchRepository(session=Mock())
         with pytest.raises(ValueError):
             repo.load(sa_row)

@@ -57,9 +57,12 @@ class NullSource(BaseSource):
         """Initialize NullSource.
 
         Args:
-            config: Configuration dict. NullSource requires no specific config,
-                but BaseSource expects schema config. If not provided, defaults
-                to dynamic schema since NullSource never validates rows anyway.
+            config: Configuration dict. Must include 'on_success' with the
+                original source's sink name. NullSource requires no other
+                specific config, but BaseSource expects schema config. If
+                not provided, defaults to dynamic schema since NullSource
+                never validates rows anyway.
+
         """
         config_copy = dict(config)
         if "schema" not in config_copy:
@@ -67,6 +70,7 @@ class NullSource(BaseSource):
         super().__init__(config_copy)
         # Set _schema_class to satisfy protocol, but resume will use stored schema from audit trail
         self._schema_class = NullSourceSchema
+        # on_success is injected by the caller (cli.py resume path or instantiation bridge)
 
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Yield no rows.

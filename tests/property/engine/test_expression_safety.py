@@ -127,18 +127,15 @@ injection_patterns = st.sampled_from(
     ]
 )
 
-# Additional injection patterns using name manipulation
+# Additional injection patterns using name manipulation.
+# Note: len, str, int, float, bool, abs are whitelisted safe builtins and
+# are tested separately in TestSafeBuiltinProperties below.
 name_injection_patterns = st.sampled_from(
     [
         "chr(65)",
         "ord('A')",
-        "len(row)",
         "list(row)",
         "dict(row)",
-        "str(row)",
-        "int(row['field'])",
-        "float(row['field'])",
-        "bool(row['field'])",
         "tuple(row)",
         "set(row)",
         "sorted(row)",
@@ -150,7 +147,6 @@ name_injection_patterns = st.sampled_from(
         "sum([1, 2, 3])",
         "max(1, 2)",
         "min(1, 2)",
-        "abs(-1)",
         "round(1.5)",
         "hex(255)",
         "oct(255)",
@@ -186,21 +182,31 @@ class TestInjectionRejectionProperties:
             ExpressionParser(pattern)
 
     @given(
-        name=st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L",))),
+        name=st.text(
+            min_size=1,
+            max_size=20,
+            alphabet=st.characters(whitelist_categories=("L",)),  # type: ignore[arg-type]  # hypothesis stubs accept tuple
+        ),
     )
     @settings(max_examples=100)
     def test_arbitrary_names_rejected(self, name: str) -> None:
-        """Property: Arbitrary names (not row/True/False/None) are rejected.
+        """Property: Arbitrary names (not row/True/False/None/safe builtins) are rejected.
 
-        Only 'row', 'True', 'False', and 'None' are allowed as names.
+        Only 'row', 'True', 'False', 'None', and safe builtin names
+        (len, str, int, float, bool, abs) are allowed.
         """
-        assume(name not in ("row", "True", "False", "None"))
+        _ALLOWED_NAMES = {"row", "True", "False", "None", "len", "str", "int", "float", "bool", "abs"}
+        assume(name not in _ALLOWED_NAMES)
 
         with pytest.raises((ExpressionSecurityError, ExpressionSyntaxError)):
             ExpressionParser(name)
 
     @given(
-        attr=st.text(min_size=1, max_size=15, alphabet=st.characters(whitelist_categories=("L",))),
+        attr=st.text(
+            min_size=1,
+            max_size=15,
+            alphabet=st.characters(whitelist_categories=("L",)),  # type: ignore[arg-type]  # hypothesis stubs accept tuple
+        ),
     )
     @settings(max_examples=50)
     def test_arbitrary_row_attributes_rejected(self, attr: str) -> None:
@@ -430,3 +436,70 @@ class TestBooleanExpressionDetectionProperties:
         """Property: False literal is boolean."""
         parser = ExpressionParser("False")
         assert parser.is_boolean_expression() is True
+
+
+# =============================================================================
+# Safe Builtin Properties
+# =============================================================================
+
+
+class TestSafeBuiltinProperties:
+    """Property tests verifying safe builtins work correctly."""
+
+    @given(
+        field=field_names,
+        func_name=st.sampled_from(["len", "str", "int", "float", "bool", "abs"]),
+    )
+    @settings(max_examples=100)
+    def test_safe_builtin_on_row_field_accepted(self, field: str, func_name: str) -> None:
+        """Property: Safe builtins applied to row fields are always accepted."""
+        expr = f"{func_name}(row['{field}'])"
+        parser = ExpressionParser(expr)
+        assert parser.expression == expr
+
+    @given(
+        field=field_names,
+        default=string_literals,
+    )
+    @settings(max_examples=50)
+    def test_len_with_row_get_default_accepted(self, field: str, default: str) -> None:
+        """Property: len(row.get('field', 'default')) is accepted."""
+        expr = f"len(row.get('{field}', '{default}'))"
+        parser = ExpressionParser(expr)
+        assert parser.expression == expr
+
+    @given(text=st.text(min_size=0, max_size=100))
+    @settings(max_examples=50)
+    def test_len_evaluates_correctly(self, text: str) -> None:
+        """Property: len(row['x']) matches Python's len()."""
+        parser = ExpressionParser("len(row['x'])")
+        result = parser.evaluate({"x": text})
+        assert result == len(text)
+
+    @given(value=st.one_of(int_literals, float_literals, st.none(), string_literals))
+    @settings(max_examples=50)
+    def test_str_evaluates_correctly(self, value: Any) -> None:
+        """Property: str(row['x']) matches Python's str()."""
+        parser = ExpressionParser("str(row['x'])")
+        result = parser.evaluate({"x": value})
+        assert result == str(value)
+
+    @given(value=st.integers(min_value=-10000, max_value=10000))
+    @settings(max_examples=50)
+    def test_abs_evaluates_correctly(self, value: int) -> None:
+        """Property: abs(row['x']) matches Python's abs()."""
+        parser = ExpressionParser("abs(row['x'])")
+        result = parser.evaluate({"x": value})
+        assert result == abs(value)
+
+    @given(
+        func_name=st.sampled_from(["len", "str", "int", "float", "bool", "abs"]),
+        cmp_op=comparison_ops,
+        threshold=int_literals,
+    )
+    @settings(max_examples=50)
+    def test_safe_builtin_in_comparison_accepted(self, func_name: str, cmp_op: str, threshold: int) -> None:
+        """Property: Safe builtins in comparisons are accepted."""
+        expr = f"{func_name}(row['x']) {cmp_op} {threshold}"
+        parser = ExpressionParser(expr)
+        assert parser.expression == expr

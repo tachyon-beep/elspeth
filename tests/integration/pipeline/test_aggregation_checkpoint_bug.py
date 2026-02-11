@@ -38,6 +38,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
+from elspeth.testing import make_pipeline_row
 from tests.fixtures.base_classes import (
     CallbackSource,
     _TestSchema,
@@ -46,6 +47,7 @@ from tests.fixtures.base_classes import (
     as_source,
     as_transform,
 )
+from tests.fixtures.factories import wire_transforms
 
 
 class BatchCollectorTransform(BaseTransform):
@@ -55,6 +57,7 @@ class BatchCollectorTransform(BaseTransform):
     input_schema = _TestSchema
     output_schema = _TestSchema
     is_batch_aware = True
+    on_success: str | None = "output"
 
     def __init__(self) -> None:
         super().__init__({"schema": {"mode": "observed"}})
@@ -77,12 +80,12 @@ class BatchCollectorTransform(BaseTransform):
             )
 
             return TransformResult.success(
-                PipelineRow(output, contract) if contract else output,
+                PipelineRow(output, contract),
                 success_reason={"action": "batch"},
             )
         else:
             # Single row - passthrough
-            return TransformResult.success(dict(row), success_reason={"action": "single"})
+            return TransformResult.success(make_pipeline_row(dict(row)), success_reason={"action": "single"})
 
 
 class CollectingSink(_TestSinkBase):
@@ -91,6 +94,7 @@ class CollectingSink(_TestSinkBase):
     name = "collecting_sink"
 
     def __init__(self) -> None:
+        super().__init__()
         self.rows: list[dict[str, Any]] = []
 
     def on_start(self, ctx: Any) -> None:
@@ -150,6 +154,7 @@ class TestAggregationCheckpointFixVerification:
             ],
             output_schema=_TestSchema,
             source_name="buffering_source",
+            on_success="source_out",
         )
         source = as_source(callback_source)
 
@@ -162,11 +167,11 @@ class TestAggregationCheckpointFixVerification:
 
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
-            transforms=[transform],
+            source_settings=SourceSettings(plugin=source.name, on_success="source_out", options={}),
+            transforms=wire_transforms([transform], source_connection="source_out", final_sink="output"),
             sinks={"output": sink},
             aggregations={},
             gates=[],
-            default_sink="output",
             coalesce_settings=None,
         )
 
@@ -177,6 +182,7 @@ class TestAggregationCheckpointFixVerification:
         agg_settings = AggregationSettings(
             name="test_agg",
             plugin="batch_collector",
+            input="source_out",
             trigger=TriggerConfig(
                 count=10,  # High count - won't trigger during 5 rows
                 timeout_seconds=3600,  # 1 hour - won't trigger
@@ -202,9 +208,8 @@ class TestAggregationCheckpointFixVerification:
         )
 
         settings = ElspethSettings(
-            source=SourceSettings(plugin="buffering_source", options={}),
+            source=SourceSettings(plugin="buffering_source", on_success="source_out", options={}),
             sinks={"output": SinkSettings(plugin="collecting_sink", options={})},
-            default_sink="output",
             transforms=[],
             gates=[],
             checkpoint=checkpoint_settings,

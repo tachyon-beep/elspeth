@@ -301,7 +301,7 @@ class TestSinkDurability:
         tokens = [token]
 
         # Patch logger to capture error log
-        with patch("elspeth.engine.executors.logger") as mock_logger:
+        with patch("elspeth.engine.executors.sink.logger") as mock_logger:
             artifact = sink_executor.write(
                 sink=mock_sink,
                 tokens=tokens,

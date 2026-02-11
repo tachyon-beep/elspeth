@@ -22,11 +22,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 # Import GateName at runtime - used in function body, not just type hints
+from elspeth.contracts import RouteDestination, RouteDestinationKind
 from elspeth.contracts.types import GateName
 from elspeth.engine.orchestrator.types import RouteValidationError
-
-# Import protocols at runtime - needed for isinstance() checks
-from elspeth.plugins.protocols import GateProtocol, TransformProtocol
 
 if TYPE_CHECKING:
     from elspeth.contracts.types import NodeID
@@ -36,7 +34,7 @@ if TYPE_CHECKING:
 
 
 def validate_route_destinations(
-    route_resolution_map: dict[tuple[NodeID, str], str],
+    route_resolution_map: dict[tuple[NodeID, str], RouteDestination],
     available_sinks: set[str],
     transform_id_map: dict[int, NodeID],
     transforms: list[RowPlugin],
@@ -49,7 +47,7 @@ def validate_route_destinations(
     This catches config errors early instead of failing mid-run.
 
     Args:
-        route_resolution_map: Maps (gate_node_id, route_label) -> destination
+        route_resolution_map: Maps (gate_node_id, route_label) -> resolved destination
         available_sinks: Set of sink names from PipelineConfig
         transform_id_map: Maps transform sequence -> node_id
         transforms: List of transform plugins
@@ -60,14 +58,9 @@ def validate_route_destinations(
         RouteValidationError: If any route references a non-existent sink
     """
     # Build reverse lookup: node_id -> gate name
-    # All gates in transforms and config_gates MUST have entries in their ID maps
+    # All gates in config_gates MUST have entries in their ID maps
     # (graph construction bug if missing)
     node_id_to_gate_name: dict[str, str] = {}
-    for seq, transform in enumerate(transforms):
-        if isinstance(transform, GateProtocol):
-            # Graph must have ID for every transform - crash if missing
-            node_id = transform_id_map[seq]
-            node_id_to_gate_name[node_id] = transform.name
 
     # Add config gates to the lookup
     if config_gate_id_map and config_gates:
@@ -78,22 +71,22 @@ def validate_route_destinations(
 
     # Check each route destination
     for (gate_node_id, route_label), destination in route_resolution_map.items():
-        # "continue" means proceed to next transform, not a sink
-        if destination == "continue":
+        if destination.kind in (RouteDestinationKind.CONTINUE, RouteDestinationKind.FORK, RouteDestinationKind.PROCESSING_NODE):
             continue
 
-        # "fork" means fork to multiple paths, not a sink
-        if destination == "fork":
-            continue
+        if destination.sink_name is None:
+            raise ValueError(
+                f"Route destination for gate_node_id={gate_node_id!r}, route_label={route_label!r} has kind='sink' but sink_name is None"
+            )
 
         # destination should be a sink name
-        if destination not in available_sinks:
+        if destination.sink_name not in available_sinks:
             # Every gate in route_resolution_map MUST have a name mapping
             gate_name = node_id_to_gate_name[gate_node_id]
             raise RouteValidationError(
-                f"Gate '{gate_name}' can route to '{destination}' "
+                f"Gate '{gate_name}' can route to '{destination.sink_name}' "
                 f"(via route label '{route_label}') but no sink named "
-                f"'{destination}' exists. Available sinks: {sorted(available_sinks)}"
+                f"'{destination.sink_name}' exists. Available sinks: {sorted(available_sinks)}"
             )
 
 
@@ -114,15 +107,11 @@ def validate_transform_error_sinks(
         RouteValidationError: If any transform on_error references a non-existent sink
     """
     for transform in transforms:
-        # Only TransformProtocol has _on_error; GateProtocol uses routing, not error sinks
-        if not isinstance(transform, TransformProtocol):
-            continue
-
         on_error = transform.on_error
-
-        if on_error is None:
-            # No error routing configured - that's fine
-            continue
+        # on_error is always set (required by TransformSettings) — Tier 1 invariant
+        assert on_error is not None, (
+            f"Transform '{transform.name}' has on_error=None — this should be impossible since TransformSettings requires on_error"
+        )
 
         if on_error == "discard":
             # "discard" is a special value, not a sink name

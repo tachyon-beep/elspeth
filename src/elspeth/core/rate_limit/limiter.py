@@ -24,14 +24,33 @@ if TYPE_CHECKING:
 # Pattern for valid rate limiter names (used in SQL table names)
 _VALID_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
 
-# Track original thread excepthook
-_original_excepthook = threading.excepthook
-
 # Thread idents registered for exception suppression during cleanup.
 # We track by thread ident (not name) to avoid accidental suppression of
 # unrelated threads that happen to share a name.
 _suppressed_thread_idents: set[int] = set()
 _suppressed_lock = threading.Lock()
+
+# Lazy hook state — installed only while suppressions are pending.
+# This avoids replacing the global threading.excepthook at import time.
+_original_excepthook: object = None
+_hook_installed: bool = False
+
+
+def _install_hook() -> None:
+    """Install custom thread excepthook. Must be called with _suppressed_lock held."""
+    global _original_excepthook, _hook_installed
+    if not _hook_installed:
+        _original_excepthook = threading.excepthook
+        threading.excepthook = _custom_excepthook
+        _hook_installed = True
+
+
+def _uninstall_hook_if_idle() -> None:
+    """Restore original excepthook if no suppressions pending. Must be called with _suppressed_lock held."""
+    global _hook_installed
+    if _hook_installed and not _suppressed_thread_idents:
+        threading.excepthook = _original_excepthook  # type: ignore[assignment]
+        _hook_installed = False
 
 
 def _custom_excepthook(args: threading.ExceptHookArgs) -> None:
@@ -59,6 +78,7 @@ def _custom_excepthook(args: threading.ExceptHookArgs) -> None:
         if thread_ident is not None and thread_ident in _suppressed_thread_idents and args.exc_type is AssertionError:
             # Remove from suppression set (one-time suppression per thread)
             _suppressed_thread_idents.discard(thread_ident)
+            _uninstall_hook_if_idle()
             logger.debug(
                 "Suppressed expected pyrate-limiter cleanup exception",
                 thread_ident=thread_ident,
@@ -66,13 +86,12 @@ def _custom_excepthook(args: threading.ExceptHookArgs) -> None:
                 exc_type=args.exc_type.__name__ if args.exc_type else None,
             )
             return
+        # Capture original reference inside lock (may be uninstalled by another thread)
+        original = _original_excepthook
 
-    # Not a suppressed scenario, use original handler
-    _original_excepthook(args)
-
-
-# Install custom excepthook
-threading.excepthook = _custom_excepthook
+    # Not a suppressed scenario, delegate to original handler
+    if original is not None:
+        original(args)  # type: ignore[operator]
 
 
 class RateLimiter:
@@ -221,19 +240,26 @@ class RateLimiter:
     def close(self) -> None:
         """Close the rate limiter and release resources."""
         # Get reference to the leaker thread before disposing.
-        # The limiter's bucket_factory has a _leaker attribute.
-        # We capture (thread, ident) pair because ident may become None after thread exits.
-        leaker = self._limiter.bucket_factory._leaker
+        # pyrate-limiter's BucketFactory._leaker is the background thread that
+        # drains bucket tokens. This is a third-party library internal (Tier 3
+        # framework boundary) — the attribute may change across versions.
+        # If the internal API changes, we skip graceful cleanup and let the
+        # thread die naturally (the custom excepthook is still a safety net).
+        try:
+            leaker = self._limiter.bucket_factory._leaker  # type: ignore[union-attr]
+        except AttributeError:
+            leaker = None
         leaker_ident: int | None = None
         if leaker is not None and leaker.is_alive() and leaker.ident is not None:
             leaker_ident = leaker.ident  # Capture before it can become None
-            # Register thread ident for exception suppression.
-            # pyrate-limiter has a race condition that causes AssertionError
-            # during cleanup - this is benign but noisy. We register by
-            # ident (not name) to avoid accidentally suppressing unrelated
-            # threads that share a name.
+            # Register thread ident for exception suppression and install
+            # the custom excepthook. pyrate-limiter has a race condition that
+            # causes AssertionError during cleanup - this is benign but noisy.
+            # We register by ident (not name) to avoid accidentally suppressing
+            # unrelated threads that share a name.
             with _suppressed_lock:
                 _suppressed_thread_idents.add(leaker_ident)
+                _install_hook()
 
         # Dispose bucket from limiter
         # This deregisters it from the leaker thread
@@ -249,8 +275,10 @@ class RateLimiter:
             # Clean up suppression registration after join completes.
             # If the thread raised AssertionError, the hook already removed it (discard is safe).
             # If the thread exited cleanly, we remove it here to prevent stale idents.
+            # Uninstall the hook if no more suppressions are pending.
             with _suppressed_lock:
                 _suppressed_thread_idents.discard(leaker_ident)
+                _uninstall_hook_if_idle()
 
         if self._conn is not None:
             self._conn.close()

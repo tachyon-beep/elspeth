@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import math
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -138,7 +139,7 @@ def _normalize_for_canonical(data: Any) -> Any:
     if isinstance(data, PipelineRow):
         data = data.to_dict()
 
-    if isinstance(data, dict):
+    if isinstance(data, Mapping):
         return {k: _normalize_for_canonical(v) for k, v in data.items()}
     if isinstance(data, list | tuple):
         return [_normalize_for_canonical(v) for v in data]
@@ -249,6 +250,25 @@ def _edge_to_canonical_dict(
         "label": edge_data["label"],
         "mode": edge_data["mode"].value,
     }
+
+
+def sanitize_for_canonical(obj: Any) -> Any:
+    """Recursively replace non-finite floats (NaN, Infinity) with None.
+
+    Used at Tier-3 trust boundaries (quarantine path) to normalize external
+    data so it can safely pass through canonical_json and stable_hash.
+    Per CLAUDE.md: sources MAY coerce to normalize external data at ingestion.
+
+    The quarantine error message records what was originally wrong with the data,
+    so replacing NaN/Infinity with None preserves auditability.
+    """
+    if isinstance(obj, dict):
+        return {k: sanitize_for_canonical(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_for_canonical(v) for v in obj]
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    return obj
 
 
 def repr_hash(obj: Any) -> str:

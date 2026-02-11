@@ -12,20 +12,25 @@ These are pure delegation functions — no internal state — tested via mocks.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.enums import BatchStatus, TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.types import NodeID
 from elspeth.engine.orchestrator.aggregation import (
+    _route_aggregation_outcome,
     check_aggregation_timeouts,
     find_aggregation_transform,
     flush_remaining_aggregation_buffers,
     handle_incomplete_batches,
 )
 from elspeth.engine.orchestrator.types import PipelineConfig
-from tests.fixtures.factories import make_row, make_token_info
+from elspeth.plugins.protocols import TransformProtocol
+from elspeth.testing import make_row, make_token_info
 
 # =============================================================================
 # Helpers
@@ -45,8 +50,8 @@ def _make_batch_transform(*, node_id: str, is_batch_aware: bool = True) -> Mock:
 
 def _make_config(
     *,
-    transforms: list | None = None,
-    aggregation_settings: dict | None = None,
+    transforms: list[Any] | None = None,
+    aggregation_settings: dict[str, Any] | None = None,
 ) -> PipelineConfig:
     """Build a minimal PipelineConfig for aggregation tests."""
     source = Mock()
@@ -81,14 +86,14 @@ def _make_result(
 def _make_work_item(
     *,
     token: TokenInfo | None = None,
-    start_step: int = 0,
-    coalesce_at_step: int | None = None,
+    current_node_id: NodeID | None = None,
+    coalesce_node_id: NodeID | None = None,
     coalesce_name: str | None = None,
 ) -> Mock:
     item = Mock()
     item.token = token or make_token_info()
-    item.start_step = start_step
-    item.coalesce_at_step = coalesce_at_step
+    item.current_node_id = current_node_id if current_node_id is not None else NodeID("node-0")
+    item.coalesce_node_id = coalesce_node_id
     item.coalesce_name = coalesce_name
     return item
 
@@ -106,14 +111,14 @@ class TestFindAggregationTransform:
     """Tests for find_aggregation_transform()."""
 
     def test_finds_batch_aware_transform(self) -> None:
-        """Returns transform and step index for matching node_id."""
+        """Returns transform and aggregation node ID for matching node_id."""
         t = _make_batch_transform(node_id="agg-node-1")
         config = _make_config(transforms=[Mock(), t, Mock()])
 
-        result_transform, result_step = find_aggregation_transform(config, "agg-node-1", "batch1")
+        result_transform, result_node_id = find_aggregation_transform(config, "agg-node-1", "batch1")
 
         assert result_transform is t
-        assert result_step == 1
+        assert result_node_id == NodeID("agg-node-1")
 
     def test_non_batch_aware_skipped(self) -> None:
         """Transform with is_batch_aware=False is not matched."""
@@ -159,10 +164,10 @@ class TestFindAggregationTransform:
         t2 = _make_batch_transform(node_id="agg-node-1")
         config = _make_config(transforms=[t1, t2])
 
-        result_transform, result_step = find_aggregation_transform(config, "agg-node-1", "batch1")
+        result_transform, result_node_id = find_aggregation_transform(config, "agg-node-1", "batch1")
 
         assert result_transform is t1
-        assert result_step == 0
+        assert result_node_id == NodeID("agg-node-1")
 
 
 # =============================================================================
@@ -259,7 +264,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
@@ -277,13 +281,12 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
 
-    def test_non_timeout_trigger_skipped(self) -> None:
-        """Count triggers are handled elsewhere — skip in timeout check."""
+    def test_count_trigger_skipped(self) -> None:
+        """Count triggers are handled in buffer_row — skip in pre-row check."""
         config = _make_config(aggregation_settings={"agg-1": _make_agg_settings()})
         processor = Mock()
         processor.check_aggregation_timeout.return_value = (True, TriggerType.COUNT)
@@ -294,10 +297,49 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
+
+    def test_condition_trigger_flushes_pre_row(self) -> None:
+        """Condition triggers that are time-based must flush before next row.
+
+        P1-2026-02-05: Condition triggers like 'batch_age_seconds >= 5' can
+        become true between rows. They must be treated like timeout triggers
+        for pre-row flush, and the actual trigger_type must be passed through
+        (not hardcoded as TIMEOUT).
+        """
+        token = make_token_info()
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
+
+        agg_transform = _make_batch_transform(node_id="agg-1")
+        config = _make_config(
+            transforms=[agg_transform],
+            aggregation_settings={"agg-1": _make_agg_settings()},
+        )
+        processor = Mock()
+        processor.check_aggregation_timeout.return_value = (True, TriggerType.CONDITION)
+        processor.get_aggregation_buffer_count.return_value = 3
+        processor.handle_timeout_flush.return_value = ([completed], [])
+
+        pending = _make_pending()
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+
+        result = check_aggregation_timeouts(
+            config=config,
+            processor=processor,
+            ctx=Mock(),
+            pending_tokens=pending,
+            agg_transform_lookup=lookup,
+        )
+
+        # Condition trigger should flush (not be skipped)
+        assert result.rows_succeeded == 1
+        assert len(pending["output"]) == 1
+
+        # Verify actual trigger_type is passed (not hardcoded TIMEOUT)
+        call_kwargs = processor.handle_timeout_flush.call_args.kwargs
+        assert call_kwargs["trigger_type"] == TriggerType.CONDITION
 
     def test_empty_buffer_skipped(self) -> None:
         """Timeout fires but buffer is empty — nothing to flush."""
@@ -312,7 +354,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
@@ -321,7 +362,7 @@ class TestCheckAggregationTimeouts:
     def test_timeout_flush_completed_results(self) -> None:
         """Timeout flush produces completed tokens routed to sink."""
         token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -334,14 +375,13 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -363,14 +403,13 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([failed], [])
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -380,8 +419,8 @@ class TestCheckAggregationTimeouts:
     def test_work_items_continue_processing(self) -> None:
         """Work items from flush continue through remaining transforms."""
         work_token = make_token_info()
-        work_item = _make_work_item(token=work_token, start_step=0, coalesce_at_step=None)
-        downstream_result = _make_result(RowOutcome.COMPLETED, token=work_token)
+        work_item = _make_work_item(token=work_token, current_node_id=NodeID("continue-node"))
+        downstream_result = _make_result(RowOutcome.COMPLETED, token=work_token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -395,25 +434,27 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [downstream_result]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
         assert result.rows_succeeded == 1
         processor.process_token.assert_called_once()
-        # start_step should be work_item.start_step + 1 = 1
-        assert processor.process_token.call_args.kwargs["start_step"] == 1
+        assert processor.process_token.call_args.kwargs["current_node_id"] == NodeID("continue-node")
 
-    def test_work_items_with_coalesce_step(self) -> None:
-        """Work items with coalesce_at_step use that as continuation start."""
-        work_item = _make_work_item(start_step=0, coalesce_at_step=2, coalesce_name="merge")
+    def test_work_items_with_coalesce_node(self) -> None:
+        """Work items can carry an explicit coalesce node continuation."""
+        work_item = _make_work_item(
+            current_node_id=NodeID("continue-node"),
+            coalesce_node_id=NodeID("coalesce::merge"),
+            coalesce_name="merge",
+        )
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -427,19 +468,18 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = []
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
-        assert processor.process_token.call_args.kwargs["start_step"] == 2
-        assert processor.process_token.call_args.kwargs["coalesce_at_step"] == 2
+        assert processor.process_token.call_args.kwargs["current_node_id"] == NodeID("continue-node")
+        assert processor.process_token.call_args.kwargs["coalesce_node_id"] == NodeID("coalesce::merge")
         assert processor.process_token.call_args.kwargs["coalesce_name"] == "merge"
 
     def test_downstream_routed_outcome(self) -> None:
@@ -458,15 +498,14 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([], [work_item])
         processor.process_token.return_value = [routed]
 
-        pending = {"output": [], "risk_sink": []}
-        lookup = {"agg-1": (agg_transform, 0)}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -491,14 +530,13 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [quarantined]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -507,7 +545,7 @@ class TestCheckAggregationTimeouts:
     def test_downstream_coalesced_outcome(self) -> None:
         """COALESCED outcome increments both coalesced and succeeded."""
         work_item = _make_work_item()
-        coalesced = _make_result(RowOutcome.COALESCED)
+        coalesced = _make_result(RowOutcome.COALESCED, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -521,14 +559,13 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [coalesced]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -552,24 +589,23 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [failed]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
         assert result.rows_failed == 1
 
     def test_downstream_completed_branch_fallback_in_timeout(self) -> None:
-        """COMPLETED work item with unknown branch falls back to default in timeout."""
+        """COMPLETED work item with unknown branch routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="unknown")
         work_item = _make_work_item(token=token)
-        completed = _make_result(RowOutcome.COMPLETED, token=token)
+        completed = _make_result(RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -583,14 +619,13 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = [completed]
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -618,14 +653,13 @@ class TestCheckAggregationTimeouts:
         processor.process_token.return_value = outcomes
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -634,9 +668,9 @@ class TestCheckAggregationTimeouts:
         assert result.rows_buffered == 1
 
     def test_completed_result_branch_fallback_in_timeout(self) -> None:
-        """Completed result with branch not in pending falls back to default."""
+        """Completed result with branch not in pending routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="missing_sink")
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -649,14 +683,13 @@ class TestCheckAggregationTimeouts:
         processor.handle_timeout_flush.return_value = ([completed], [])
 
         pending = _make_pending()
-        lookup = {"agg-1": (agg_transform, 0)}
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
 
         result = check_aggregation_timeouts(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=lookup,
         )
 
@@ -683,7 +716,6 @@ class TestCheckAggregationTimeouts:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             agg_transform_lookup=None,
         )
 
@@ -710,7 +742,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 0
@@ -719,7 +750,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_flush_completed_results(self) -> None:
         """Completed results from flush go to sink."""
         token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -737,7 +768,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
@@ -746,7 +776,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_checkpoint_callback_called_for_completed(self) -> None:
         """checkpoint_callback is invoked for each completed token."""
         token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -765,7 +795,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -792,7 +821,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -816,7 +844,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         call_kwargs = processor.handle_timeout_flush.call_args.kwargs
@@ -825,8 +852,8 @@ class TestFlushRemainingAggregationBuffers:
     def test_work_items_continue_downstream(self) -> None:
         """Work items from flush continue through remaining transforms."""
         work_token = make_token_info()
-        work_item = _make_work_item(token=work_token, start_step=0)
-        downstream = _make_result(RowOutcome.COMPLETED, token=work_token)
+        work_item = _make_work_item(token=work_token, current_node_id=NodeID("continue-node"))
+        downstream = _make_result(RowOutcome.COMPLETED, token=work_token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -846,7 +873,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -868,7 +894,7 @@ class TestFlushRemainingAggregationBuffers:
         processor.handle_timeout_flush.return_value = ([], [work_item])
         processor.process_token.return_value = [routed]
 
-        pending = {"output": [], "risk": []}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk": []}
         callback = Mock()
 
         result = flush_remaining_aggregation_buffers(
@@ -876,7 +902,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -886,7 +911,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_downstream_coalesced_with_checkpoint(self) -> None:
         """COALESCED downstream outcome increments both counters + checkpoint."""
         work_item = _make_work_item()
-        coalesced = _make_result(RowOutcome.COALESCED)
+        coalesced = _make_result(RowOutcome.COALESCED, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -906,7 +931,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=callback,
         )
 
@@ -917,7 +941,7 @@ class TestFlushRemainingAggregationBuffers:
     def test_no_callback_when_none(self) -> None:
         """No crash when checkpoint_callback is None."""
         token = make_token_info()
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -936,14 +960,13 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
             checkpoint_callback=None,
         )
 
     def test_branch_routing_for_completed_tokens(self) -> None:
-        """Completed tokens with branch_name route to matching sink."""
+        """Completed tokens route via result.sink_name, not branch_name."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="path_a")
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -954,19 +977,18 @@ class TestFlushRemainingAggregationBuffers:
         processor.get_aggregation_buffer_count.return_value = 1
         processor.handle_timeout_flush.return_value = ([completed], [])
 
-        pending = {"output": [], "path_a": []}
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "path_a": []}
 
         result = flush_remaining_aggregation_buffers(
             config=config,
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
-        assert len(pending["path_a"]) == 1
-        assert len(pending["output"]) == 0
+        assert len(pending["path_a"]) == 0
+        assert len(pending["output"]) == 1
 
     def test_downstream_failed_in_flush(self) -> None:
         """FAILED outcome from downstream work items counted in flush."""
@@ -990,16 +1012,15 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_failed == 1
 
     def test_downstream_completed_branch_fallback_in_flush(self) -> None:
-        """COMPLETED work item with unknown branch falls back to default in flush."""
+        """COMPLETED work item with unknown branch routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="unknown")
         work_item = _make_work_item(token=token)
-        completed = _make_result(RowOutcome.COMPLETED, token=token)
+        completed = _make_result(RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -1018,7 +1039,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
@@ -1046,7 +1066,6 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_quarantined == 1
@@ -1077,16 +1096,19 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_forked == 1
         assert result.rows_expanded == 1
         assert result.rows_buffered == 1
 
-    def test_work_item_with_coalesce_step_in_flush(self) -> None:
-        """Work items with coalesce_at_step use that for continuation in flush."""
-        work_item = _make_work_item(start_step=0, coalesce_at_step=2, coalesce_name="merge")
+    def test_work_item_with_coalesce_node_in_flush(self) -> None:
+        """Work items with coalesce_node_id preserve continuation metadata in flush."""
+        work_item = _make_work_item(
+            current_node_id=NodeID("continue-node"),
+            coalesce_node_id=NodeID("coalesce::merge"),
+            coalesce_name="merge",
+        )
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -1105,16 +1127,15 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
-        assert processor.process_token.call_args.kwargs["start_step"] == 2
-        assert processor.process_token.call_args.kwargs["coalesce_at_step"] == 2
+        assert processor.process_token.call_args.kwargs["current_node_id"] == NodeID("continue-node")
+        assert processor.process_token.call_args.kwargs["coalesce_node_id"] == NodeID("coalesce::merge")
 
-    def test_completed_result_branch_fallback_to_default(self) -> None:
-        """Completed result with branch not in pending falls back to default."""
+    def test_completed_result_branch_fallback_to_sink_name(self) -> None:
+        """Completed result with branch not in pending routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="missing")
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -1132,16 +1153,15 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
         assert len(pending["output"]) == 1
 
-    def test_branch_routing_falls_back_to_default(self) -> None:
-        """Branch name not in pending_tokens falls back to default sink."""
+    def test_branch_routing_falls_back_to_sink_name(self) -> None:
+        """Branch name not in pending_tokens routes to sink_name from result."""
         token = TokenInfo(row_id="row-1", token_id="tok-1", row_data=make_row({}), branch_name="nonexistent")
-        completed = Mock(outcome=RowOutcome.COMPLETED, token=token)
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
 
         agg_transform = _make_batch_transform(node_id="agg-1")
         config = _make_config(
@@ -1159,8 +1179,52 @@ class TestFlushRemainingAggregationBuffers:
             processor=processor,
             ctx=Mock(),
             pending_tokens=pending,
-            default_sink_name="output",
         )
 
         assert result.rows_succeeded == 1
         assert len(pending["output"]) == 1
+
+
+# =============================================================================
+# _route_aggregation_outcome invariant tests
+# =============================================================================
+
+
+class TestRouteAggregationOutcome:
+    """Tests for _route_aggregation_outcome() fail-closed safety check."""
+
+    def test_routes_to_known_sink(self) -> None:
+        """Successfully routes result to a known sink in pending_tokens."""
+        result = _make_result(RowOutcome.COMPLETED, sink_name="output")
+        pending = _make_pending()
+
+        _route_aggregation_outcome(result, pending)
+
+        assert len(pending["output"]) == 1
+        assert pending["output"][0][0] == result.token
+
+    def test_unknown_sink_raises_invariant_error(self) -> None:
+        """Raises OrchestrationInvariantError when sink_name is not in pending_tokens."""
+        result = _make_result(RowOutcome.COMPLETED, sink_name="nonexistent")
+        pending = _make_pending()
+
+        with pytest.raises(OrchestrationInvariantError, match="not in configured sinks"):
+            _route_aggregation_outcome(result, pending)
+
+    def test_missing_sink_name_raises_invariant_error(self) -> None:
+        """Missing sink_name must fail closed with invariant error."""
+        result = _make_result(RowOutcome.COMPLETED, sink_name=None)
+        pending = _make_pending()
+
+        with pytest.raises(OrchestrationInvariantError, match="missing sink_name"):
+            _route_aggregation_outcome(result, pending)
+
+    def test_invokes_checkpoint_callback(self) -> None:
+        """Calls checkpoint_callback with the routed token after successful routing."""
+        result = _make_result(RowOutcome.COMPLETED, sink_name="output")
+        pending = _make_pending()
+        callback = Mock()
+
+        _route_aggregation_outcome(result, pending, checkpoint_callback=callback)
+
+        callback.assert_called_once_with(result.token)

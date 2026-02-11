@@ -8,49 +8,25 @@ Configuration precedence: CLI > YAML file > preset > defaults.
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from elspeth.testing.chaosengine.config_loader import (
+    list_presets as _list_presets,
+)
+from elspeth.testing.chaosengine.config_loader import (
+    load_config as _load_config,
+)
+from elspeth.testing.chaosengine.config_loader import (
+    load_preset as _load_preset,
+)
+from elspeth.testing.chaosengine.types import (
+    LatencyConfig,
+    MetricsConfig,
+    ServerConfig,
+)
 
 # Default shared in-memory SQLite database for ephemeral metrics
 DEFAULT_MEMORY_DB = "file:chaosllm-metrics?mode=memory&cache=shared"
-
-
-class ServerConfig(BaseModel):
-    """Server binding and worker configuration."""
-
-    model_config = {"frozen": True, "extra": "forbid"}
-
-    host: str = Field(
-        default="127.0.0.1",
-        description="Host address to bind to",
-    )
-    port: int = Field(
-        default=8000,
-        gt=0,
-        le=65535,
-        description="Port to listen on",
-    )
-    workers: int = Field(
-        default=4,
-        gt=0,
-        description="Number of uvicorn workers",
-    )
-
-
-class MetricsConfig(BaseModel):
-    """Metrics storage configuration."""
-
-    model_config = {"frozen": True, "extra": "forbid"}
-
-    database: str = Field(
-        default=DEFAULT_MEMORY_DB,
-        description="SQLite database path for metrics storage (in-memory by default)",
-    )
-    timeseries_bucket_sec: int = Field(
-        default=1,
-        gt=0,
-        description="Time-series aggregation bucket size in seconds",
-    )
 
 
 class RandomResponseConfig(BaseModel):
@@ -139,23 +115,6 @@ class ResponseConfig(BaseModel):
     preset: PresetResponseConfig = Field(
         default_factory=PresetResponseConfig,
         description="Settings for preset mode",
-    )
-
-
-class LatencyConfig(BaseModel):
-    """Latency simulation configuration."""
-
-    model_config = {"frozen": True, "extra": "forbid"}
-
-    base_ms: int = Field(
-        default=50,
-        ge=0,
-        description="Base latency in milliseconds",
-    )
-    jitter_ms: int = Field(
-        default=30,
-        ge=0,
-        description="Random jitter added to base latency (+/- ms)",
     )
 
 
@@ -417,7 +376,7 @@ class ChaosLLMConfig(BaseModel):
         description="Server binding configuration",
     )
     metrics: MetricsConfig = Field(
-        default_factory=MetricsConfig,
+        default_factory=lambda: MetricsConfig(database=DEFAULT_MEMORY_DB),
         description="Metrics storage configuration",
     )
     response: ResponseConfig = Field(
@@ -436,6 +395,26 @@ class ChaosLLMConfig(BaseModel):
         default=None,
         description="Preset name used to build this config (if any)",
     )
+    allow_external_bind: bool = Field(
+        default=False,
+        description="Allow binding to 0.0.0.0 or :: (all interfaces). Blocked by default for safety.",
+    )
+
+    @model_validator(mode="after")
+    def validate_host_binding(self) -> "ChaosLLMConfig":
+        """Block binding to all interfaces unless explicitly allowed.
+
+        ChaosLLM is a testing tool that should only bind to localhost.
+        Binding to 0.0.0.0 or :: exposes the chaos server to the network,
+        which could be used to inject errors into non-test traffic.
+        """
+        dangerous_hosts = {"0.0.0.0", "::", "0:0:0:0:0:0:0:0"}
+        if self.server.host in dangerous_hosts and not self.allow_external_bind:
+            raise ValueError(
+                f"Binding to '{self.server.host}' exposes ChaosLLM to the network. "
+                f"Use allow_external_bind: true to override, or bind to 127.0.0.1."
+            )
+        return self
 
 
 # === Preset Loading ===
@@ -448,57 +427,12 @@ def _get_presets_dir() -> Path:
 
 def list_presets() -> list[str]:
     """List available preset names."""
-    presets_dir = _get_presets_dir()
-    if not presets_dir.exists():
-        return []
-    return [p.stem for p in presets_dir.glob("*.yaml")]
+    return _list_presets(_get_presets_dir())
 
 
 def load_preset(preset_name: str) -> dict[str, Any]:
-    """Load a preset configuration by name.
-
-    Args:
-        preset_name: Name of the preset (e.g., 'gentle', 'stress_aimd')
-
-    Returns:
-        Raw configuration dict from the preset YAML
-
-    Raises:
-        FileNotFoundError: If preset does not exist
-        yaml.YAMLError: If preset YAML is malformed
-    """
-    presets_dir = _get_presets_dir()
-    preset_path = presets_dir / f"{preset_name}.yaml"
-
-    if not preset_path.exists():
-        available = list_presets()
-        raise FileNotFoundError(f"Preset '{preset_name}' not found. Available presets: {available}")
-
-    with preset_path.open() as f:
-        loaded = yaml.safe_load(f)
-        # safe_load returns Any, but preset files are always dicts
-        if not isinstance(loaded, dict):
-            raise ValueError(f"Preset '{preset_name}' must be a YAML mapping, got {type(loaded).__name__}")
-        return loaded
-
-
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Deep merge two dicts, with override taking precedence.
-
-    Args:
-        base: Base configuration dict
-        override: Override values (takes precedence)
-
-    Returns:
-        Merged configuration dict
-    """
-    result = dict(base)
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
+    """Load a preset configuration by name."""
+    return _load_preset(_get_presets_dir(), preset_name)
 
 
 def load_config(
@@ -514,40 +448,11 @@ def load_config(
     2. config_file - User's YAML configuration file
     3. preset - Named preset configuration
     4. defaults - Built-in Pydantic defaults
-
-    Args:
-        preset: Optional preset name to use as base
-        config_file: Optional path to YAML config file
-        cli_overrides: Optional dict of CLI flag overrides
-
-    Returns:
-        Validated ChaosLLMConfig instance
-
-    Raises:
-        FileNotFoundError: If preset or config_file not found
-        yaml.YAMLError: If YAML is malformed
-        pydantic.ValidationError: If final config fails validation
     """
-    config_dict: dict[str, Any] = {}
-
-    # Layer 1: Preset (lowest precedence of explicit config)
-    if preset is not None:
-        config_dict = load_preset(preset)
-
-    # Layer 2: Config file
-    if config_file is not None:
-        if not config_file.exists():
-            raise FileNotFoundError(f"Config file not found: {config_file}")
-        with config_file.open() as f:
-            file_config = yaml.safe_load(f) or {}
-        config_dict = _deep_merge(config_dict, file_config)
-
-    # Layer 3: CLI overrides (highest precedence)
-    if cli_overrides is not None:
-        config_dict = _deep_merge(config_dict, cli_overrides)
-
-    # Record preset name used for this config (if any)
-    config_dict["preset_name"] = preset
-
-    # Validate and return
-    return ChaosLLMConfig(**config_dict)
+    return _load_config(
+        ChaosLLMConfig,
+        _get_presets_dir(),
+        preset=preset,
+        config_file=config_file,
+        cli_overrides=cli_overrides,
+    )

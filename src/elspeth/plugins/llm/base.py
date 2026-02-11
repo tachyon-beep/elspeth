@@ -36,7 +36,6 @@ class LLMConfig(TransformDataConfig):
 
     Extends TransformDataConfig to get:
     - schema: Input/output schema configuration (REQUIRED)
-    - on_error: Sink for failed rows (optional)
     - required_input_fields: Fields this transform requires (optional but recommended)
 
     IMPORTANT: Template Field Requirements
@@ -187,7 +186,10 @@ class BaseLLMTransform(BaseTransform):
 
             def __init__(self, config: dict[str, Any]) -> None:
                 super().__init__(config)
-                self._api_key = config["api_key"]
+                # Capture key in closure — don't store as named attribute
+                api_key = config["api_key"]
+                self._create_openai = lambda: OpenAI(api_key=api_key)
+                self._underlying_client = None
                 self._limiter = None  # Set in on_start
 
             def on_start(self, ctx: PluginContext) -> None:
@@ -200,13 +202,15 @@ class BaseLLMTransform(BaseTransform):
 
             def _get_llm_client(self, ctx: PluginContext) -> AuditedLLMClient:
                 from openai import OpenAI
-                underlying = OpenAI(api_key=self._api_key)
+                if self._underlying_client is None:
+                    self._underlying_client = self._create_openai()
+                    self._create_openai = None  # Release key reference
                 return AuditedLLMClient(
                     recorder=ctx.landscape,
                     state_id=ctx.state_id,
                     run_id=ctx.run_id,
                     telemetry_emit=ctx.telemetry_emit,
-                    underlying_client=underlying,
+                    underlying_client=self._underlying_client,
                     provider="openai",
                     limiter=self._limiter,
                 )
@@ -231,7 +235,6 @@ class BaseLLMTransform(BaseTransform):
         self._temperature = cfg.temperature
         self._max_tokens = cfg.max_tokens
         self._response_field = cfg.response_field
-        self._on_error = cfg.on_error
 
         # Schema from config (TransformDataConfig guarantees schema_config is not None)
         schema_config = cfg.schema_config

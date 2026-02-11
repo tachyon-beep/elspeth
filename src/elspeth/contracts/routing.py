@@ -5,9 +5,11 @@ These types answer: "Where does data go next?"
 
 import copy
 from dataclasses import dataclass
+from enum import StrEnum
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import RoutingReason
+from elspeth.contracts.types import NodeID, SinkName
 
 
 def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
@@ -29,7 +31,7 @@ def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
     return copy.deepcopy(reason)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RoutingAction:
     """A routing decision from a gate.
 
@@ -62,6 +64,9 @@ class RoutingAction:
 
     def __post_init__(self) -> None:
         """Validate invariants between kind, mode, and destinations."""
+        if not isinstance(self.mode, RoutingMode):
+            raise TypeError(f"mode must be RoutingMode, got {type(self.mode).__name__}: {self.mode!r}")
+
         if self.kind == RoutingKind.CONTINUE and self.destinations:
             raise ValueError("CONTINUE must have empty destinations")
 
@@ -81,6 +86,11 @@ class RoutingAction:
                 "Reason: ELSPETH's audit model enforces single terminal state per token; "
                 "COPY would require dual terminal states (ROUTED + COMPLETED)."
             )
+
+        # NOTE: reason is a mutable dict. _copy_reason() deep-copies at construction
+        # time to prevent external callers from affecting the stored value. Full
+        # immutability via MappingProxyType was attempted but breaks JSON serialization
+        # (audit trail). The deep copy + frozen dataclass provide sufficient protection.
 
     @classmethod
     def continue_(cls, *, reason: RoutingReason | None = None) -> "RoutingAction":
@@ -146,7 +156,60 @@ class RoutingAction:
         )
 
 
-@dataclass(frozen=True)
+class RouteDestinationKind(StrEnum):
+    """Resolved route destination type for gate route labels."""
+
+    CONTINUE = "continue"
+    FORK = "fork"
+    SINK = "sink"
+    PROCESSING_NODE = "processing_node"
+
+
+@dataclass(frozen=True, slots=True)
+class RouteDestination:
+    """Resolved destination for a (gate_node_id, route_label) pair."""
+
+    kind: RouteDestinationKind
+    sink_name: SinkName | None = None
+    next_node_id: NodeID | None = None
+
+    def __post_init__(self) -> None:
+        """Validate destination payload by kind."""
+        if self.kind == RouteDestinationKind.SINK:
+            if self.sink_name is None or not self.sink_name:
+                raise ValueError("SINK destination requires non-empty sink_name")
+            if self.next_node_id is not None:
+                raise ValueError("SINK destination must not include next_node_id")
+            return
+
+        if self.kind == RouteDestinationKind.PROCESSING_NODE:
+            if self.next_node_id is None or not self.next_node_id:
+                raise ValueError("PROCESSING_NODE destination requires non-empty next_node_id")
+            if self.sink_name is not None:
+                raise ValueError("PROCESSING_NODE destination must not include sink_name")
+            return
+
+        if self.sink_name is not None or self.next_node_id is not None:
+            raise ValueError(f"{self.kind.value.upper()} destination must not include sink_name or next_node_id")
+
+    @classmethod
+    def continue_(cls) -> "RouteDestination":
+        return cls(kind=RouteDestinationKind.CONTINUE)
+
+    @classmethod
+    def fork(cls) -> "RouteDestination":
+        return cls(kind=RouteDestinationKind.FORK)
+
+    @classmethod
+    def sink(cls, sink_name: SinkName) -> "RouteDestination":
+        return cls(kind=RouteDestinationKind.SINK, sink_name=sink_name)
+
+    @classmethod
+    def processing_node(cls, next_node_id: NodeID) -> "RouteDestination":
+        return cls(kind=RouteDestinationKind.PROCESSING_NODE, next_node_id=next_node_id)
+
+
+@dataclass(frozen=True, slots=True)
 class RoutingSpec:
     """Specification for a routing edge in the recorded audit trail.
 
@@ -158,7 +221,7 @@ class RoutingSpec:
     mode: RoutingMode
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class EdgeInfo:
     """Information about an edge in the execution graph.
 
@@ -166,7 +229,7 @@ class EdgeInfo:
     Strict contract - mode MUST be RoutingMode enum.
     """
 
-    from_node: str
-    to_node: str
+    from_node: NodeID
+    to_node: NodeID
     label: str
     mode: RoutingMode

@@ -1,0 +1,15 @@
+per_file_rules:
+- pattern: cli.py
+  rules:
+  - R1
+  - R3
+  - R4
+  - R5
+  - R6
+  reason: CLI handles user input, env vars, and external system checks (Tier 3)
+  expires: null
+- pattern: cli_helpers.py
+  rules:
+  - R1
+  reason: resolve_audit_passphrase reads env vars (Tier 3 boundary) - .get() returns None to signal absent passphrase
+  expires: null

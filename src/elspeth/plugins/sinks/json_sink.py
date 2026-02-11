@@ -30,7 +30,7 @@ class JSONSinkConfig(SinkPathConfig):
     Inherits from SinkPathConfig, which provides:
     - Path handling (from PathConfig)
     - Schema configuration (from DataPluginConfig)
-    - Display header options (display_headers, restore_source_headers)
+    - Header output mode (headers: normalized | original | {mapping})
     """
 
     format: Literal["json", "jsonl"] | None = None
@@ -96,7 +96,7 @@ class JSONSink(BaseSink):
         - Free mode: All schema fields present (extras allowed)
         - Dynamic mode: No validation (schema adapts to existing structure)
 
-        When display headers are configured (display_headers or restore_source_headers),
+        When display headers are configured (headers: original or headers: {mapping}),
         the existing file keys are display names, so we map expected schema fields
         to their display equivalents before comparison.
 
@@ -187,18 +187,14 @@ class JSONSink(BaseSink):
         self._indent = cfg.indent
         self._validate_input = cfg.validate_input
 
-        # Display header configuration (legacy options)
-        self._display_headers = cfg.display_headers
-        self._restore_source_headers = cfg.restore_source_headers
-        # Populated lazily on first write if restore_source_headers=True
+        # Header mode configuration
+        self._headers_mode: HeaderMode = cfg.headers_mode
+        self._headers_custom_mapping: dict[str, str] | None = cfg.headers_mapping
+        # Populated lazily on first write if headers mode is ORIGINAL
         # Must be lazy because field resolution is only recorded AFTER first source iteration,
         # which happens after on_start() is called.
         self._resolved_display_headers: dict[str, str] | None = None
-        self._display_headers_resolved: bool = False  # Track if we've attempted resolution
-
-        # New header mode configuration (takes precedence over legacy options)
-        self._headers_mode: HeaderMode = cfg.headers_mode
-        self._headers_custom_mapping: dict[str, str] | None = cfg.headers_mapping
+        self._display_headers_resolved: bool = False
 
         # Output contract for header resolution (set via set_output_contract)
         self._output_contract: SchemaContract | None = None
@@ -260,13 +256,14 @@ class JSONSink(BaseSink):
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)
 
-        # Lazy resolution of display headers from Landscape
-        # Must happen AFTER source iteration begins (when field resolution is recorded)
-        self._resolve_display_headers_if_needed(ctx)
-
         # Lazy resolution of contract from context for headers: original mode
         # ctx.contract is set by orchestrator after first valid source row
+        # MUST happen BEFORE display header resolution (contract takes precedence over Landscape)
         self._resolve_contract_from_context_if_needed(ctx)
+
+        # Lazy resolution of display headers from Landscape (fallback when no contract)
+        # Must happen AFTER source iteration begins (when field resolution is recorded)
+        self._resolve_display_headers_if_needed(ctx)
 
         # Apply display header mapping to row keys if configured
         output_rows = self._apply_display_headers(rows)
@@ -375,42 +372,32 @@ class JSONSink(BaseSink):
         """Get the effective display header mapping.
 
         Priority order:
-        1. CUSTOM mode with custom mapping from 'headers' config
-        2. ORIGINAL mode with contract - use resolve_headers()
-        3. Legacy display_headers config (explicit mapping)
-        4. Legacy restore_source_headers - resolved display headers
-        5. None (no mapping - use normalized names)
+        1. NORMALIZED mode - no mapping
+        2. CUSTOM mode - use custom mapping from 'headers' config
+        3. ORIGINAL mode with contract - use resolve_headers()
+        4. ORIGINAL mode with resolved headers (from Landscape query)
+        5. None (fallback to normalized names)
 
         Returns:
             Dict mapping normalized field name -> display name, or None if no
             display headers are configured or if using NORMALIZED mode.
         """
-        # NORMALIZED mode = no display mapping
         if self._headers_mode == HeaderMode.NORMALIZED:
             return None
 
-        # CUSTOM mode - use custom mapping from config
         if self._headers_mode == HeaderMode.CUSTOM:
-            if self._headers_custom_mapping is not None:
-                return self._headers_custom_mapping
-            # Fall through to legacy display_headers if custom mapping not set
-            if self._display_headers is not None:
-                return self._display_headers
-            return None
+            return self._headers_custom_mapping
 
         # ORIGINAL mode - use contract to resolve headers
-        # (mypy knows this is the only remaining case since HeaderMode has exactly 3 values)
         if self._output_contract is not None:
-            # Use resolve_headers() to build mapping from contract
             return resolve_headers(
                 contract=self._output_contract,
                 mode=HeaderMode.ORIGINAL,
                 custom_mapping=None,
             )
-        # Fall through to legacy resolved_display_headers if no contract
+        # Fallback to lazily-resolved display headers from Landscape
         if self._resolved_display_headers is not None:
             return self._resolved_display_headers
-        # No contract and no legacy resolution - return None (fallback to normalized)
         return None
 
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
@@ -419,18 +406,14 @@ class JSONSink(BaseSink):
         Called by CLI during `elspeth resume` to provide the source field resolution
         mapping BEFORE calling validate_output_target(). This allows validation to
         correctly compare expected display names against existing file keys when
-        restore_source_headers=True.
+        headers mode is ORIGINAL.
 
         Args:
             resolution_mapping: Dict mapping original header name -> normalized field name.
                 This is the same format returned by Landscape.get_source_field_resolution().
-
-        Note:
-            This only has effect when restore_source_headers=True. For explicit
-            display_headers, the mapping is already available from config.
         """
-        if not self._restore_source_headers:
-            return  # No-op if not using restore_source_headers
+        if self._headers_mode != HeaderMode.ORIGINAL:
+            return  # Only needed for ORIGINAL mode
 
         # Build reverse mapping: normalized -> original (display name)
         self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
@@ -489,7 +472,7 @@ class JSONSink(BaseSink):
             self._output_contract = ctx.contract
 
     def _resolve_display_headers_if_needed(self, ctx: PluginContext) -> None:
-        """Lazily resolve display headers from Landscape if restore_source_headers=True.
+        """Lazily resolve display headers from Landscape if headers mode is ORIGINAL.
 
         Called on first write() to fetch field resolution mapping. This MUST be lazy
         because the orchestrator calls sink.on_start() BEFORE source.load() iterates,
@@ -506,20 +489,23 @@ class JSONSink(BaseSink):
 
         self._display_headers_resolved = True
 
-        if not self._restore_source_headers:
+        if self._headers_mode != HeaderMode.ORIGINAL:
             return  # Nothing to resolve
+
+        # Skip if contract already provides header resolution (takes precedence)
+        if self._output_contract is not None:
+            return
 
         # Fetch source field resolution from Landscape
         if ctx.landscape is None:
             raise ValueError(
-                "restore_source_headers=True requires Landscape to be available. "
-                "This is a framework bug - context should have landscape set."
+                "headers: original requires Landscape to be available. This is a framework bug - context should have landscape set."
             )
 
         resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
         if resolution_mapping is None:
             raise ValueError(
-                "restore_source_headers=True but source did not record field resolution. "
+                "headers: original but source did not record field resolution. "
                 "Ensure source uses normalize_fields: true to enable header restoration."
             )
 
@@ -549,7 +535,7 @@ class JSONSink(BaseSink):
     def on_start(self, ctx: PluginContext) -> None:
         """Called before processing begins.
 
-        Note: restore_source_headers resolution is done lazily in write() because
+        Note: ORIGINAL header resolution is done lazily in write() because
         the field resolution mapping is only recorded AFTER source iteration begins,
         which happens after on_start() is called.
         """

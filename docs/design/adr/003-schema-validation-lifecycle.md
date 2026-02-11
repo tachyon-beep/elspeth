@@ -100,7 +100,7 @@ graph = ExecutionGraph.from_config(config, manager)
 
 # NEW (working - schemas from instances)
 plugins = instantiate_plugins_from_config(config)
-graph = ExecutionGraph.from_plugin_instances(**plugins, gates=..., default_sink=...)
+graph = ExecutionGraph.from_plugin_instances(**plugins, gates=...)
 # Schemas extracted via getattr(instance, "input_schema", None) → actual schema
 ```
 
@@ -267,7 +267,7 @@ gates:
     condition: "row['priority'] in ['high', 'medium']"
     routes:
       true: prioritized_sink
-      false: default_sink
+      false: output_sink
 ```
 
 This makes the routing explicit in the configuration.
