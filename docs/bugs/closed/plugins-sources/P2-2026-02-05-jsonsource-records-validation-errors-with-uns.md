@@ -1,12 +1,13 @@
 # Bug Report: JSONSource records validation errors with unsupported `schema_mode="structure"`
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - JSONSource now records `schema_mode="parse"` for `data_key` structural boundary errors.
+  - Added a regression test that verifies the recorded schema mode is contract-valid.
 
 
 ## Summary
@@ -57,7 +58,7 @@
 ## Evidence
 
 - `src/elspeth/plugins/sources/json_source.py:224-275` uses `schema_mode="structure"` when recording structural errors.
-- `src/elspeth/plugins/context.py:363-381` documents allowed `schema_mode` values as `fixed`, `flexible`, `observed`, or `parse`.
+- `src/elspeth/contracts/plugin_context.py:364-383` documents allowed `schema_mode` values as `fixed`, `flexible`, `observed`, or `parse`.
 - `src/elspeth/contracts/audit.py:462-476` documents `ValidationErrorRecord.schema_mode` with the same allowed set.
 
 ## Impact
@@ -79,7 +80,7 @@
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `src/elspeth/plugins/context.py:363-381`, `src/elspeth/contracts/audit.py:462-476`.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `src/elspeth/contracts/plugin_context.py:364-383`, `src/elspeth/contracts/audit.py:473-478`.
 - Observed divergence: JSONSource records `schema_mode="structure"` outside the documented contract.
 - Reason (if known): Unknown.
 - Alignment plan or decision needed: Decide whether to conform to existing allowed values or formally extend the schema_mode contract.
@@ -90,10 +91,23 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/plugins/sources/test_json_source.py -k "data_key_structural_error"`
+- Suggested tests to run: `.venv/bin/python -m pytest tests/unit/plugins/sources/test_json_source.py -k "data_key_structural_error"`
 - New tests required: yes, add assertion on schema_mode for structural errors
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `src/elspeth/contracts/audit.py`, `src/elspeth/plugins/context.py`
+- Related design docs: `src/elspeth/contracts/audit.py`, `src/elspeth/contracts/plugin_context.py`
+
+---
+
+## Verification (2026-02-11)
+
+- Reproduced prior failure:
+  - `data_key` structural failures recorded `schema_mode="structure"` in validation error records.
+- Post-fix behavior:
+  - Structural failures now record `schema_mode="parse"` across all three branches (non-object root, missing key, non-list extracted payload).
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/sources/test_json_source.py -k "data_key_structural_error or data_key_on_list_root or data_key_missing_in_object or data_key_extracts_non_list"`
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/sources/test_json_source.py`
+  - `.venv/bin/ruff check src/elspeth/plugins/sources/json_source.py tests/unit/plugins/sources/test_json_source.py`

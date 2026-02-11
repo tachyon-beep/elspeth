@@ -234,7 +234,7 @@ class JSONSource(BaseSource):
                 ctx.record_validation_error(
                     row={"file_path": str(self._path), "data_key": self._data_key},
                     error=error_msg,
-                    schema_mode="structure",
+                    schema_mode="parse",
                     destination=self._on_validation_failure,
                 )
                 if self._on_validation_failure != "discard":
@@ -251,7 +251,7 @@ class JSONSource(BaseSource):
                 ctx.record_validation_error(
                     row={"file_path": str(self._path), "data_key": self._data_key},
                     error=error_msg,
-                    schema_mode="structure",
+                    schema_mode="parse",
                     destination=self._on_validation_failure,
                 )
                 if self._on_validation_failure != "discard":
@@ -270,7 +270,7 @@ class JSONSource(BaseSource):
             ctx.record_validation_error(
                 row={"file_path": str(self._path)},
                 error=error_msg,
-                schema_mode="structure",
+                schema_mode="parse",
                 destination=self._on_validation_failure,
             )
             if self._on_validation_failure != "discard":

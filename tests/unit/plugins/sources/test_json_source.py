@@ -955,3 +955,36 @@ class TestJSONSourceDataKeyStructuralErrors:
         assert len(caplog.records) == 1
         assert "Validation error not recorded" in caplog.records[0].message
         assert "results" in caplog.records[0].message  # The missing key
+
+    def test_data_key_structural_error_uses_parse_schema_mode(self, tmp_path: Path) -> None:
+        """Structural data_key errors record contract-valid schema_mode='parse'."""
+        from unittest.mock import MagicMock
+
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        json_file.write_text('{"wrong_key": [{"id": 1}]}')
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_validation_error.return_value = "verr_test"
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_json",
+            landscape=mock_landscape,
+        )
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "data_key": "results",
+                "on_validation_failure": "quarantine",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        list(source.load(ctx))
+
+        call_kwargs = mock_landscape.record_validation_error.call_args[1]
+        assert call_kwargs["schema_mode"] == "parse"
