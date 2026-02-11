@@ -1,16 +1,16 @@
 # Bug Report: Timeout=0 Treated As Infinite Wait In Submit/Release
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - Timeout handling still uses truthiness checks, so `timeout=0.0` is treated as `None` (infinite wait).
-  - This still affects both `submit()` and `wait_for_next_release()`.
+  - Timeout handling now uses explicit `timeout is not None` checks, so `timeout=0.0` is treated as immediate timeout.
+  - Regression tests added for both `submit()` and `wait_for_next_release()`.
 - Current evidence:
-  - `src/elspeth/plugins/batching/row_reorder_buffer.py:157`
-  - `src/elspeth/plugins/batching/row_reorder_buffer.py:240`
+  - `src/elspeth/plugins/batching/row_reorder_buffer.py`
+  - `tests/unit/plugins/batching/test_row_reorder_buffer.py`
 
 ## Summary
 
@@ -100,3 +100,27 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `src/elspeth/plugins/batching/row_reorder_buffer.py` docstrings for timeout semantics
+
+## Verification Status
+
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution (2026-02-12)
+
+**Fixed by:** Codex (GPT-5)
+
+**Changes:**
+- `src/elspeth/plugins/batching/row_reorder_buffer.py`: Changed deadline calculations in `submit()` and `wait_for_next_release()` from truthiness checks to explicit `timeout is not None`.
+- `tests/unit/plugins/batching/test_row_reorder_buffer.py`: Added:
+  - `test_submit_timeout_zero_is_immediate`
+  - `test_wait_for_next_release_timeout_zero_is_immediate`
+
+**Verification:**
+- `.venv/bin/python -m pytest -q tests/unit/plugins/batching/test_row_reorder_buffer.py`
+- `.venv/bin/python -m pytest -q tests/property/plugins/batching/test_reorder_buffer_properties.py`
+- `.venv/bin/python -m ruff check src/elspeth/plugins/batching/row_reorder_buffer.py tests/unit/plugins/batching/test_row_reorder_buffer.py`
+- `.venv/bin/python -m mypy src/elspeth/plugins/batching/row_reorder_buffer.py`
