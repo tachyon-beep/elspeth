@@ -262,9 +262,19 @@ def _load_raw_yaml(config_path: Path) -> dict[str, Any]:
     This is used to extract the secrets config before loading secrets.
     The secrets config MUST use literal values (no ${VAR}) because
     secrets are loaded before environment variable resolution.
+
+    Raises:
+        ValueError: Parsed YAML root is not a mapping/object.
     """
     with open(config_path) as f:
-        return yaml.safe_load(f) or {}
+        raw_config = yaml.safe_load(f)
+
+    if raw_config is None:
+        return {}
+    if not isinstance(raw_config, dict):
+        actual_type = type(raw_config).__name__
+        raise ValueError(f"Settings YAML root must be a mapping/object, got {actual_type} (in {config_path}).")
+    return raw_config
 
 
 def _load_settings_with_secrets(
@@ -292,6 +302,7 @@ def _load_settings_with_secrets(
     Raises:
         FileNotFoundError: Settings file not found
         yaml.YAMLError: YAML syntax error
+        ValueError: Settings YAML root is not a mapping/object
         ValidationError: Pydantic validation error (secrets config or full config)
         SecretLoadError: Key Vault secret loading failed
     """
@@ -375,6 +386,9 @@ def run(
         for error in e.errors():
             loc = ".".join(str(x) for x in error["loc"])
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        typer.echo(f"Configuration error: {e}", err=True)
         raise typer.Exit(1) from None
     except SecretLoadError as e:
         typer.echo(f"Error loading secrets: {e}", err=True)
@@ -1249,6 +1263,12 @@ def purge(
                 typer.echo("Specify --database to provide path directly.", err=True)
                 raise typer.Exit(1) from None
             typer.echo("Warning: Configuration errors in settings.yaml (continuing with --database)", err=True)
+        except ValueError as e:
+            if not database:
+                typer.echo(f"Configuration error in settings.yaml: {e}", err=True)
+                typer.echo("Specify --database to provide path directly.", err=True)
+                raise typer.Exit(1) from None
+            typer.echo(f"Warning: Configuration error in settings.yaml: {e}", err=True)
         except SecretLoadError as e:
             if not database:
                 typer.echo(f"Error loading secrets: {e}", err=True)
@@ -1526,6 +1546,9 @@ def resume(
         for error in e.errors():
             loc = ".".join(str(x) for x in error["loc"])
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        typer.echo(f"Configuration error: {e}", err=True)
         raise typer.Exit(1) from None
     except SecretLoadError as e:
         typer.echo(f"Error loading secrets: {e}", err=True)

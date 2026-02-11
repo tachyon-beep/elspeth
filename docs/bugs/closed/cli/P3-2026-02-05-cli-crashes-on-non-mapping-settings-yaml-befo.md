@@ -1,22 +1,22 @@
 # Bug Report: CLI crashes on non-mapping settings YAML before validation
 
-**Status: OPEN**
+**Status: RESOLVED ✅**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - `_load_raw_yaml()` still returns parsed YAML without enforcing a mapping root.
-  - `_load_settings_with_secrets()` still calls `raw_config.get(...)` directly.
-  - Reproduced behavior: top-level list YAML still raises uncaught `AttributeError` in both `validate` and `run --dry-run`.
-- Current evidence:
-  - `src/elspeth/cli.py:241`
-  - `src/elspeth/cli.py:249`
-  - `src/elspeth/cli.py:287`
+- Classification: **Resolved**
+- Resolution summary:
+  - `_load_raw_yaml()` now enforces a mapping/object YAML root and raises `ValueError` for list/scalar roots.
+  - CLI entrypoints using `_load_settings_with_secrets()` now handle that `ValueError` as a clean user-facing config error.
+  - Verified on `run`, `validate`, `resume`, and `purge` code paths.
+- Fix evidence:
+  - `src/elspeth/cli.py` (`_load_raw_yaml`, `run`, `resume`, `purge`)
+  - `tests/unit/core/security/test_config_secrets.py`
+  - `tests/unit/cli/test_error_boundaries.py`
 
 ## Summary
 
-- `_load_raw_yaml()` and `_extract_secrets_config()` assume the YAML root is a mapping, so a non-mapping settings file triggers an uncaught `AttributeError` instead of a clear validation error.
+- `_load_raw_yaml()` accepted any YAML root type and downstream code assumed mapping semantics, causing uncaught `AttributeError` for non-mapping roots.
 
 ## Severity
 
@@ -61,9 +61,9 @@
 
 ## Evidence
 
-- `src/elspeth/cli.py:246` `_load_raw_yaml()` returns `yaml.safe_load(f) or {}` without ensuring a mapping.
-- `src/elspeth/cli.py:292` `_load_settings_with_secrets()` calls `raw_config.get(...)` unguarded.
-- `src/elspeth/cli.py:316` `_extract_secrets_config()` repeats `raw_config.get(...)` unguarded.
+- `_load_raw_yaml()` now validates parsed YAML root type before returning.
+- `run`, `resume`, and `purge` now catch and surface `ValueError` from config-boundary validation.
+- Regression tests now cover non-mapping roots across helper + CLI commands.
 
 ## Impact
 
@@ -73,13 +73,17 @@
 
 ## Root Cause Hypothesis
 
-- Missing type validation for the YAML root object before accessing `.get()` in `_load_settings_with_secrets()` and `_extract_secrets_config()`.
+- Missing type validation for external YAML root object before accessing mapping-only operations.
 
 ## Proposed Fix
 
-- Code changes (modules/files): `src/elspeth/cli.py` validate that `raw_config` is a `dict` in `_load_raw_yaml()` (or in `_extract_secrets_config()`), and raise a user-facing `ValueError` with a clear message when it isn’t.
+- Code changes (modules/files):
+  - `src/elspeth/cli.py`: validate `safe_load` result root type in `_load_raw_yaml()`.
+  - `src/elspeth/cli.py`: add `ValueError` handling in `run`, `resume`, and `purge`.
 - Config or schema changes: None.
-- Tests to add/update: Add CLI validation test for non-mapping YAML to ensure a clean error message is emitted.
+- Tests added/updated:
+  - `tests/unit/core/security/test_config_secrets.py`: helper rejects non-mapping root.
+  - `tests/unit/cli/test_error_boundaries.py`: non-mapping YAML handled cleanly in `run`, `validate`, `resume`, `purge`.
 - Risks or migration steps: None.
 
 ## Architectural Deviations
@@ -96,8 +100,11 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/unit/test_cli_validation.py -k non_mapping_yaml`
-- New tests required: yes, cover non-mapping YAML in CLI validation path.
+- Validation run:
+  - `uv run pytest -q tests/unit/core/security/test_config_secrets.py tests/unit/cli/test_error_boundaries.py`
+  - `uv run pytest -q tests/unit/cli/test_validate_command.py`
+  - `uv run ruff check src/elspeth/cli.py tests/unit/cli/test_error_boundaries.py tests/unit/core/security/test_config_secrets.py`
+- New tests required: no (covered by new regression tests).
 
 ## Notes / Links
 
