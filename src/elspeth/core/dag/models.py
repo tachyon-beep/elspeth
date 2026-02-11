@@ -74,7 +74,7 @@ class NodeInfo:
     def __post_init__(self) -> None:
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:
             msg = f"node_id exceeds {_NODE_ID_MAX_LENGTH} characters: '{self.node_id}' (length={len(self.node_id)})"
-            raise ValueError(msg)
+            raise GraphValidationError(msg)
 
 
 @dataclass(frozen=True)
