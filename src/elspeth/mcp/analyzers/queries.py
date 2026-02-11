@@ -513,32 +513,117 @@ def get_calls(db: LandscapeDB, recorder: LandscapeRecorder, state_id: str) -> li
     return [_dataclass_to_dict(call) for call in calls]
 
 
+def _strip_sql_comments(sql: str) -> str:
+    """Strip SQL comments (block and line) from a query string.
+
+    Removes ``/* ... */`` block comments and ``-- ...`` line comments.
+    Does NOT handle comments inside string literals, but the MCP analysis
+    server should never receive queries that rely on that distinction.
+    """
+    # Remove block comments (non-greedy to handle multiple)
+    result = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
+    # Remove line comments
+    result = re.sub(r"--[^\n]*", " ", result)
+    return result
+
+
+# Keyword blocklist: statements that are NOT read-only.
+# Uses word-boundary matching to avoid false positives (e.g., created_at vs CREATE).
+_FORBIDDEN_KEYWORDS = frozenset(
+    {
+        # Standard DML/DDL
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "DROP",
+        "CREATE",
+        "ALTER",
+        "TRUNCATE",
+        "GRANT",
+        "REVOKE",
+        "MERGE",
+        "REPLACE",
+        # Transaction control
+        "BEGIN",
+        "COMMIT",
+        "ROLLBACK",
+        "SAVEPOINT",
+        "RELEASE",
+        # SQLite-specific
+        "PRAGMA",
+        "ATTACH",
+        "DETACH",
+        "VACUUM",
+        "REINDEX",
+        # PostgreSQL-specific
+        "COPY",
+        "SET",
+        # Procedure execution
+        "EXEC",
+        "EXECUTE",
+        "CALL",
+        # Data loading
+        "LOAD",
+        "IMPORT",
+        "EXPORT",
+    }
+)
+
+
+def _validate_readonly_sql(sql: str) -> None:
+    """Validate that a SQL string is a single read-only SELECT or CTE.
+
+    Raises ValueError if the query is empty, contains multiple statements,
+    uses a non-SELECT/WITH prefix, or contains forbidden keywords.
+
+    Note: Semicolons inside string literals will be rejected. This is an
+    acceptable limitation for the MCP analysis server, which receives
+    machine-generated queries from LLMs.
+    """
+    # Step 1: Strip comments to prevent bypass via comment tricks
+    stripped = _strip_sql_comments(sql)
+    normalized = stripped.strip()
+
+    if not normalized:
+        raise ValueError("Query is empty")
+
+    # Step 2: Reject multi-statement payloads (semicolons).
+    # Allow a single trailing semicolon (common in SQL tools).
+    without_trailing = normalized.rstrip("; \t\n\r")
+    if ";" in without_trailing:
+        raise ValueError("Multiple statements are not allowed (semicolons found)")
+
+    # Step 3: Require SELECT or WITH prefix (case-insensitive)
+    upper = normalized.upper()
+    if not (upper.startswith("SELECT") or upper.startswith("WITH")):
+        raise ValueError("Only SELECT queries are allowed (must start with SELECT or WITH)")
+
+    # Step 4: Reject forbidden keywords (word-boundary match).
+    # Strip string literal contents first so that keywords inside quotes
+    # (e.g., WHERE status = 'INSERT') don't trigger false positives.
+    upper_stripped = re.sub(r"'[^']*'", "''", upper)
+    upper_stripped = re.sub(r'"[^"]*"', '""', upper_stripped)
+    for keyword in _FORBIDDEN_KEYWORDS:
+        if re.search(rf"\b{keyword}\b", upper_stripped):
+            raise ValueError(f"Query contains forbidden keyword: {keyword}")
+
+
 def query(db: LandscapeDB, recorder: LandscapeRecorder, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Execute a read-only SQL query.
 
     Args:
         db: Database connection
         recorder: Landscape recorder
-        sql: SQL query (must be SELECT)
+        sql: SQL query (must be a single SELECT or WITH...SELECT)
         params: Optional query parameters
 
     Returns:
         Query results as list of dicts
 
     Raises:
-        ValueError: If query is not a SELECT statement
+        ValueError: If query fails read-only validation
     """
-    # Safety check: only allow SELECT statements
-    sql_normalized = sql.strip().upper()
-    if not sql_normalized.startswith("SELECT"):
-        raise ValueError("Only SELECT queries are allowed")
-
-    # Reject dangerous keywords even in SELECT (word-boundary match to avoid
-    # false positives like created_at matching CREATE, updated_at matching UPDATE)
-    dangerous = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "GRANT", "REVOKE"]
-    for keyword in dangerous:
-        if re.search(rf"\b{keyword}\b", sql_normalized):
-            raise ValueError(f"Query contains forbidden keyword: {keyword}")
+    _validate_readonly_sql(sql)
 
     from sqlalchemy import text
 
