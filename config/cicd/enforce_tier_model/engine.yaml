@@ -16,7 +16,7 @@ allow_hits:
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion
   expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:fp=b27e21e1a0da4008
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=577d6a5d44fcb40f
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
@@ -36,67 +36,67 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=21ce5807da316aa4
+- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=7d6caeafa644ce8a
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
   expires: '2026-05-02'
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=2352904d4428b11d
+- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=7a7fb1c0cf22d8b1
   owner: architecture
   reason: isinstance(e, TimeoutError) for retry timeout handling in batch transform path
   safety: Exception type discrimination for retry logic - required for correct timeout eviction
   expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=56f3a579f88d5ffd
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_rows:fp=06051363f1310248
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=77747672c9068241
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_tokens:fp=b2b3cfd9c4ff464d
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=259322ade70bdfbf
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=512df894a2f21f11
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=14f8e573bdd6cf19
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=5216f215c86ea14f
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=c49862f9d3b0ef3f
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffer_count:fp=2af69943d496dd91
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=297f2a692482e05c
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:execute_flush:fp=0ecfec5ff2cea2f3
   owner: P2-2026-02-02
   reason: Pattern is .get() followed by explicit None check raising RuntimeError
   safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=e6d0879131bea763
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:restore_from_checkpoint:fp=6442d020c984a254
   owner: P2-2026-02-02
   reason: Version check for checkpoint format - None from missing key triggers ValueError
   safety: ValueError raised for missing or wrong version - explicit validation pattern
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=9f70ad94e0dee7a0
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_batch_id:fp=922eeb56835282e5
   owner: P2-2026-02-02
   reason: Testing/inspection method that needs to work with partial setups; returns None if no batch exists
   safety: Documented as "primarily for testing" - production uses checkpoint state
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=b70fdadd35b47754
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_restored_state:fp=f3d90467a9f6a7c8
   owner: P2-2026-02-02
   reason: Checkpoint recovery lookup - returns None if no state was restored for node
   safety: Designed API contract - None is valid return for nodes without restored state
   expires: null
-- key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=7e1f71dad437ff68
+- key: engine/executors/aggregation.py:R5:AggregationExecutor:restore_from_checkpoint:fp=ea867007e8071a7b
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -206,22 +206,22 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=ed9209a2d33784f7
+- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=3706bff320558413
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=d21331be1036eedb
+- key: engine/executors/gate.py:R5:GateExecutor:execute_config_gate:fp=abb30c18d686eebf
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=aff06f9784873ca3
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=689777d14fc32f32
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=57d57e45004e1807
+- key: engine/executors/gate.py:R1:GateExecutor:_record_routing:fp=654e8d6981aab2d3
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map

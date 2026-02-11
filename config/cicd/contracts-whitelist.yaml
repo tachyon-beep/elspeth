@@ -31,11 +31,11 @@ allowed_dict_patterns:
   - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
 
   # Aggregation executor - checkpoint and state methods
-  - "src/elspeth/engine/executors.py:AggregationExecutor.get_buffered_rows:return (list)"
-  - "src/elspeth/engine/executors.py:AggregationExecutor.get_checkpoint_state:return"
-  - "src/elspeth/engine/executors.py:AggregationExecutor.restore_from_checkpoint:state"
-  - "src/elspeth/engine/executors.py:AggregationExecutor.restore_state:state"
-  - "src/elspeth/engine/executors.py:AggregationExecutor.get_restored_state:return"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_checkpoint_state:return"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.restore_from_checkpoint:state"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.restore_state:state"
+  - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_restored_state:return"
 
   # Orchestrator - checkpoint state (refactored into orchestrator/core.py)
   - "src/elspeth/engine/orchestrator/core.py:Orchestrator._maybe_checkpoint:aggregation_state"

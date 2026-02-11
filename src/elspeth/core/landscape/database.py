@@ -203,7 +203,10 @@ class LandscapeDB:
         # SQLite URI-style params (mode, cache, immutable, vfs) are NOT valid
         # connect() kwargs — they must be embedded in a file: URI when uri=True.
         _CONNECT_KWARGS = {"check_same_thread", "uri", "timeout", "detect_types", "cached_statements", "isolation_level", "factory"}
-        connect_kwargs: dict[str, Any] = {}
+        # Match SQLAlchemy's pysqlite default: allow cross-thread usage so the
+        # connection pool can hand connections to worker threads.  URL params
+        # parsed below can still override this explicitly.
+        connect_kwargs: dict[str, Any] = {"check_same_thread": False}
         uri_params: dict[str, str] = {}
 
         for key, raw_value in parsed.query.items():

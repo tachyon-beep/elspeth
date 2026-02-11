@@ -1600,20 +1600,22 @@ def resume(
             typer.echo(json_module.dumps(resume_info, indent=2))
             return
 
-        typer.echo(f"Run {run_id} can be resumed.")
-        typer.echo("\nResume point:")
-        typer.echo(f"  Token ID: {resume_point.token_id}")
-        typer.echo(f"  Node ID: {resume_point.node_id}")
-        typer.echo(f"  Sequence number: {resume_point.sequence_number}")
-        if resume_point.aggregation_state:
-            typer.echo("  Has aggregation state: Yes")
-        else:
-            typer.echo("  Has aggregation state: No")
-        typer.echo(f"  Unprocessed rows: {len(unprocessed_row_ids)}")
+        if output_format != "json":
+            typer.echo(f"Run {run_id} can be resumed.")
+            typer.echo("\nResume point:")
+            typer.echo(f"  Token ID: {resume_point.token_id}")
+            typer.echo(f"  Node ID: {resume_point.node_id}")
+            typer.echo(f"  Sequence number: {resume_point.sequence_number}")
+            if resume_point.aggregation_state:
+                typer.echo("  Has aggregation state: Yes")
+            else:
+                typer.echo("  Has aggregation state: No")
+            typer.echo(f"  Unprocessed rows: {len(unprocessed_row_ids)}")
 
         if not execute:
-            typer.echo("\nDry run - use --execute to actually resume processing.")
-            typer.echo("Topology validation passed - checkpoint is compatible with current config.")
+            if output_format != "json":
+                typer.echo("\nDry run - use --execute to actually resume processing.")
+                typer.echo("Topology validation passed - checkpoint is compatible with current config.")
             return
 
         # Execute resume (graph already built above for validation)

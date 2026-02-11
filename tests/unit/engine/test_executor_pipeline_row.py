@@ -371,7 +371,7 @@ class TestTransformExecutorPipelineRow:
         ctx = PluginContext(run_id="run_001", config={})
 
         # Patch stable_hash to verify what gets passed
-        with patch("elspeth.engine.executors.stable_hash") as mock_hash:
+        with patch("elspeth.engine.executors.transform.stable_hash") as mock_hash:
             mock_hash.return_value = "test_hash"
 
             executor.execute_transform(
