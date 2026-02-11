@@ -346,6 +346,16 @@ allow_hits:
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check required to handle union type from batch processing
   expires: null
+- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=2ab97d065af608ef
+  owner: architecture
+  reason: Tier 2 row value type discrimination — float vs int for NaN/Infinity check (ints always finite)
+  safety: Preserves int precision for values > 2^53; only floats need isfinite() guard
+  expires: null
+- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=fb6ac6c75fbf49f7
+  owner: architecture
+  reason: Tier 2 overflow guard — only float sums can overflow to Infinity (int sums use arbitrary precision)
+  safety: Returns TransformResult.error() on overflow; int path cannot trigger this
+  expires: null
 - key: plugins/clients/http.py:R5:_contains_non_finite:fp=9370a8f4d789c2c1
   owner: architecture
   reason: isinstance() on float to detect NaN/Infinity in JSON - type discrimination for serialization

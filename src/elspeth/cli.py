@@ -1296,6 +1296,7 @@ def _execute_resume_with_instances(
     resume_point: Any,
     payload_store: PayloadStore | None,
     db: LandscapeDB,
+    output_format: Literal["console", "json"] = "console",
 ) -> Any:  # Returns RunResult from orchestrator.resume()
     """Execute resume using pre-instantiated plugins.
 
@@ -1308,6 +1309,7 @@ def _execute_resume_with_instances(
         resume_point: Resume point information
         payload_store: Payload store for retrieving row data
         db: LandscapeDB connection
+        output_format: 'console' or 'json'
 
     Returns:
         RunResult from orchestrator.resume()
@@ -1346,11 +1348,12 @@ def _execute_resume_with_instances(
     )
 
     # Create event bus and subscribe formatters
-    from elspeth.cli_formatters import create_console_formatters, subscribe_formatters
+    from elspeth.cli_formatters import create_console_formatters, create_json_formatters, subscribe_formatters
     from elspeth.core import EventBus
 
     event_bus = EventBus()
-    subscribe_formatters(event_bus, create_console_formatters(prefix="Resume"))
+    formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix="Resume")
+    subscribe_formatters(event_bus, formatters)
 
     # Create runtime configs for external calls and checkpointing
     from elspeth.contracts.config.runtime import (
@@ -1477,6 +1480,12 @@ def resume(
         "-x",
         help="Actually execute the resume (default is dry-run).",
     ),
+    output_format: Literal["console", "json"] = typer.Option(
+        "console",
+        "--format",
+        "-f",
+        help="Output format: 'console' (human-readable) or 'json' (structured JSON).",
+    ),
 ) -> None:
     """Resume a failed run from its last checkpoint.
 
@@ -1594,6 +1603,25 @@ def resume(
         unprocessed_row_ids = recovery_manager.get_unprocessed_rows(run_id)
 
         # Display resume point information
+        resume_info = {
+            "run_id": run_id,
+            "can_resume": True,
+            "resume_point": {
+                "token_id": resume_point.token_id,
+                "node_id": resume_point.node_id,
+                "sequence_number": resume_point.sequence_number,
+                "has_aggregation_state": bool(resume_point.aggregation_state),
+            },
+            "unprocessed_rows": len(unprocessed_row_ids),
+        }
+
+        if output_format == "json" and not execute:
+            import json as json_module
+
+            resume_info["dry_run"] = True
+            typer.echo(json_module.dumps(resume_info, indent=2))
+            return
+
         typer.echo(f"Run {run_id} can be resumed.")
         typer.echo("\nResume point:")
         typer.echo(f"  Token ID: {resume_point.token_id}")
@@ -1611,7 +1639,8 @@ def resume(
             return
 
         # Execute resume (graph already built above for validation)
-        typer.echo(f"\nResuming run {run_id}...")
+        if output_format != "json":
+            typer.echo(f"\nResuming run {run_id}...")
 
         # Get payload store from settings
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -1710,16 +1739,35 @@ def resume(
                 resume_point=resume_point,
                 payload_store=payload_store,
                 db=db,
+                output_format=output_format,
             )
         except Exception as e:
             typer.echo(f"Error during resume: {e}", err=True)
             raise typer.Exit(1) from None
 
-        typer.echo("\nResume complete:")
-        typer.echo(f"  Rows processed: {result.rows_processed}")
-        typer.echo(f"  Rows succeeded: {result.rows_succeeded}")
-        typer.echo(f"  Rows failed: {result.rows_failed}")
-        typer.echo(f"  Status: {result.status.value}")
+        if output_format == "json":
+            import json as json_module
+
+            typer.echo(
+                json_module.dumps(
+                    {
+                        **resume_info,
+                        "result": {
+                            "rows_processed": result.rows_processed,
+                            "rows_succeeded": result.rows_succeeded,
+                            "rows_failed": result.rows_failed,
+                            "status": result.status.value,
+                        },
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            typer.echo("\nResume complete:")
+            typer.echo(f"  Rows processed: {result.rows_processed}")
+            typer.echo(f"  Rows succeeded: {result.rows_succeeded}")
+            typer.echo(f"  Rows failed: {result.rows_failed}")
+            typer.echo(f"  Status: {result.status.value}")
 
     finally:
         db.close()
