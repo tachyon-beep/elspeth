@@ -156,31 +156,36 @@ allow_hits:
   reason: JSON Schema field access - external data at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=7f5948e29583a6c2
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=617585e2c6aa22ff
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=bd040cba51f112ec
+  expires: '2026-03-11'
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=3b8c295c2958a52e
   owner: architecture
   reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-09'
-- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=c8930ec890458ee9
+  expires: '2026-03-11'
+- key: engine/dag_navigator.py:R5:DAGNavigator:resolve_jump_target_sink:fp=6b717dfbcce9a3ae
+  owner: architecture
+  reason: Protocol dispatch to detect self-routing gates during jump-target sink resolution
+  safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
+  expires: '2026-03-11'
+- key: engine/dag_navigator.py:R5:DAGNavigator:resolve_jump_target_sink:fp=2bd427f521dee669
   owner: architecture
   reason: Protocol dispatch to detect transforms with on_success during jump-target sink resolution
   safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
-  expires: '2026-03-10'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d6d89baabae99abd
+  expires: '2026-03-11'
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d32c9d57b2d82ab8
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-10'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=5e6c1ee5159312dd
+  expires: '2026-03-11'
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=957033f8d5f90f6b
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-10'
+  expires: '2026-03-11'
 - key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=7c5419575b2202aa
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
@@ -221,17 +226,12 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_resolve_jump_target_on_success_sink:fp=14c6ab0bb0a21592
-  owner: architecture
-  reason: Protocol dispatch to detect self-routing gates during jump-target sink resolution
-  safety: isinstance for NodeType discrimination in unified node processing
-  expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=ebd4d3689544a4d8
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=1b6ffefe6e9e35ba
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=70519330cd97fa26
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=a7dc81daf277837c
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings

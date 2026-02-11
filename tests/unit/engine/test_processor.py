@@ -37,12 +37,12 @@ from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID, SinkName
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.engine.dag_navigator import WorkItem
 from elspeth.engine.executors import GateOutcome
 from elspeth.engine.processor import (
     MAX_WORK_QUEUE_ITERATIONS,
     DAGTraversalContext,
     RowProcessor,
-    _WorkItem,
 )
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
@@ -266,7 +266,7 @@ class TestTraversalNextNodeInvariants:
         )
 
         with pytest.raises(OrchestrationInvariantError, match="missing from traversal next-node map"):
-            processor._resolve_next_node_for_processing(NodeID("missing-node"))
+            processor._nav.resolve_next_node(NodeID("missing-node"))
 
     def test_process_row_raises_when_transform_missing_next_node_entry(self) -> None:
         """Processing nodes must have explicit next-node entries (None for terminal)."""
@@ -977,7 +977,7 @@ class TestProcessRowGateBranching:
 
         def continuation_side_effect(*, token, current_node_id, coalesce_name=None, on_success_sink=None):
             inherited_sinks.append(on_success_sink)
-            return _WorkItem(
+            return WorkItem(
                 token=token,
                 current_node_id=None,
                 coalesce_node_id=None,
@@ -988,7 +988,7 @@ class TestProcessRowGateBranching:
         with (
             patch.object(processor._gate_executor, "execute_config_gate", side_effect=config_gate_side_effect),
             patch.object(processor._transform_executor, "execute_transform", side_effect=transform_side_effect),
-            patch.object(processor, "_create_continuation_work_item", side_effect=continuation_side_effect),
+            patch.object(processor._nav, "create_continuation_work_item", side_effect=continuation_side_effect),
         ):
             results = processor.process_row(
                 row_index=0,
@@ -1029,7 +1029,7 @@ class TestProcessRowGateBranching:
         )
 
         with pytest.raises(OrchestrationInvariantError, match="Coalesce 'merge' not in on_success map"):
-            processor._resolve_jump_target_on_success_sink(router_node)
+            processor._nav.resolve_jump_target_sink(router_node)
 
     def test_jump_target_resolution_raises_when_no_sink_and_no_gate(self) -> None:
         """Jump path with only transforms and no terminal sink must fail closed."""
@@ -1072,7 +1072,7 @@ class TestProcessRowGateBranching:
         )
 
         with pytest.raises(OrchestrationInvariantError, match="no sink"):
-            processor._resolve_jump_target_on_success_sink(jump_start_node)
+            processor._nav.resolve_jump_target_sink(jump_start_node)
 
     def test_branch_to_sink_routing_applies_for_terminal_fork_children(self) -> None:
         """Branch-routed tokens bypassing coalesce should resolve sink via branch_to_sink."""
@@ -1512,14 +1512,14 @@ class TestDrainWorkQueueIterationGuard:
         # Mock _process_single_token to always produce more work
         def infinite_loop_producer(token, ctx, current_node_id, **kwargs):
             new_token = make_token_info(data={"value": 1})
-            return (None, [_WorkItem(token=new_token, current_node_id=NodeID("source-0"))])
+            return (None, [WorkItem(token=new_token, current_node_id=NodeID("source-0"))])
 
         with (
             patch.object(processor, "_process_single_token", side_effect=infinite_loop_producer),
             pytest.raises(RuntimeError, match=r"exceeded.*iterations"),
         ):
             processor._drain_work_queue(
-                _WorkItem(token=token, current_node_id=NodeID("source-0")),
+                WorkItem(token=token, current_node_id=NodeID("source-0")),
                 ctx=ctx,
             )
 
@@ -2014,7 +2014,7 @@ class TestMaybeCoalesceToken:
             row_data=make_row({}),
             branch_name="path_a",
         )
-        child_items: list[_WorkItem] = []
+        child_items: list[WorkItem] = []
 
         handled, result = processor._maybe_coalesce_token(
             token,
@@ -2244,7 +2244,7 @@ class TestNotifyCoalesceOfLostBranch:
             failure_reason=None,
             consumed_tokens=[],
         )
-        child_items: list[_WorkItem] = []
+        child_items: list[WorkItem] = []
         processor = _make_processor(
             recorder,
             coalesce_executor=coalesce,
@@ -2382,13 +2382,13 @@ class TestRoutingInvariantFailures:
 
 
 class TestWorkItemCoalesceInvariant:
-    """_WorkItem must carry complete coalesce metadata together."""
+    """WorkItem must carry complete coalesce metadata together."""
 
     def test_missing_coalesce_name_with_coalesce_node_id_raises(self) -> None:
         """Coalesce node without coalesce name is an invariant violation."""
         token = make_token_info(data={"value": 1})
         with pytest.raises(OrchestrationInvariantError, match="coalesce fields must be both set or both None"):
-            _WorkItem(
+            WorkItem(
                 token=token,
                 current_node_id=NodeID("coalesce::merge"),
                 coalesce_node_id=NodeID("coalesce::merge"),

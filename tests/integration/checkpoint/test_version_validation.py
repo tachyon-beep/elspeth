@@ -193,7 +193,7 @@ class TestCheckpointVersionValidation:
         assert executor.get_buffer_count(NodeID("test_node")) == 1  # Restored single buffered token
 
     def test_checkpoint_state_excludes_work_item_fields(self) -> None:
-        """Checkpoint payload must never persist transient _WorkItem traversal fields."""
+        """Checkpoint payload must never persist transient WorkItem traversal fields."""
         from elspeth.contracts import TokenInfo
         from elspeth.testing import make_row
 

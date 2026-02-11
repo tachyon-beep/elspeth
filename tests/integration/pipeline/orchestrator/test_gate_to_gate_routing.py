@@ -9,7 +9,7 @@ coalesce nodes as sink sources, causing an OrchestrationInvariantError
 when the target gate was terminal (no continue edge).
 
 Target code:
-- src/elspeth/engine/processor.py: _resolve_jump_target_on_success_sink()
+- src/elspeth/engine/dag_navigator.py: DAGNavigator.resolve_jump_target_sink()
 
 Tests:
 1. Config gate routes to terminal config gate — must not crash
