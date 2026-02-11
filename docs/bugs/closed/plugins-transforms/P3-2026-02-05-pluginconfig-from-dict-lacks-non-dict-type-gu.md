@@ -1,12 +1,13 @@
 # Bug Report: PluginConfig.from_dict Lacks Non-Dict Type Guard
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - `PluginConfig.from_dict` now performs an explicit top-level type guard and raises `PluginConfigError` when input is not a dict.
+  - Added parameterized regression coverage for non-dict payloads (`None`, `int`, `str`, `list`) to ensure consistent error handling.
 
 
 ## Summary
@@ -55,7 +56,7 @@
 
 ## Evidence
 
-- `src/elspeth/plugins/config_base.py:60-76` calls `dict(config)` without a type guard and only catches `ValidationError` and `ValueError`.
+- `src/elspeth/plugins/config_base.py:60-82` now type-checks `config` before coercion and routes malformed input through `PluginConfigError`.
 
 ## Impact
 
@@ -88,10 +89,22 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/plugins/test_config_base.py -v`
+- Suggested tests to run: `.venv/bin/python -m pytest tests/unit/plugins/test_config_base.py -v`
 - New tests required: yes, add non-dict input validation test.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
 - Related design docs: Unknown
+
+---
+
+## Verification (2026-02-11)
+
+- Reproduced prior failure:
+  - `PluginConfig.from_dict(None)` and `PluginConfig.from_dict(123)` raised raw `TypeError` from `dict(config)`.
+- Post-fix behavior:
+  - Non-dict inputs now consistently raise `PluginConfigError` with a clear type-specific message.
+- Tests executed:
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/unit/plugins/test_config_base.py`
+  - `.venv/bin/ruff check src/elspeth/plugins/config_base.py tests/unit/plugins/test_config_base.py`

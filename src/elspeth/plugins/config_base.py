@@ -57,6 +57,9 @@ class PluginConfig(BaseModel):
         Raises:
             PluginConfigError: If configuration is invalid.
         """
+        if not isinstance(config, dict):
+            raise PluginConfigError(f"Invalid configuration for {cls.__name__}: config must be a dict, got {type(config).__name__}.")
+
         try:
             config_copy = dict(config)
             if "schema" in config_copy:
