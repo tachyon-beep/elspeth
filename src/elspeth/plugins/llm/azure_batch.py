@@ -473,16 +473,8 @@ class AzureBatchLLMTransform(BaseTransform):
 
         Returns:
             Checkpoint dict or None if no checkpoint
-
-        Raises:
-            RuntimeError: If checkpoint API is not available on context
         """
-        if not hasattr(ctx, "get_checkpoint"):
-            raise RuntimeError(
-                "AzureBatchLLMTransform requires checkpoint API on PluginContext. "
-                "Ensure engine provides get_checkpoint/update_checkpoint/clear_checkpoint methods."
-            )
-        return ctx.get_checkpoint()  # type: ignore[no-any-return]  # checkpoint returns dict[str, Any] | None, guarded by hasattr above
+        return ctx.get_checkpoint()
 
     def _update_checkpoint(self, ctx: PluginContext, data: dict[str, Any]) -> None:
         """Update checkpoint state.
@@ -490,15 +482,7 @@ class AzureBatchLLMTransform(BaseTransform):
         Args:
             ctx: Plugin context
             data: Checkpoint data to save
-
-        Raises:
-            RuntimeError: If checkpoint API is not available on context
         """
-        if not hasattr(ctx, "update_checkpoint"):
-            raise RuntimeError(
-                "AzureBatchLLMTransform requires checkpoint API on PluginContext. "
-                "Ensure engine provides get_checkpoint/update_checkpoint/clear_checkpoint methods."
-            )
         ctx.update_checkpoint(data)
 
     def _clear_checkpoint(self, ctx: PluginContext) -> None:
@@ -506,15 +490,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         Args:
             ctx: Plugin context
-
-        Raises:
-            RuntimeError: If checkpoint API is not available on context
         """
-        if not hasattr(ctx, "clear_checkpoint"):
-            raise RuntimeError(
-                "AzureBatchLLMTransform requires checkpoint API on PluginContext. "
-                "Ensure engine provides get_checkpoint/update_checkpoint/clear_checkpoint methods."
-            )
         ctx.clear_checkpoint()
 
     def _submit_batch(
@@ -738,8 +714,8 @@ class AzureBatchLLMTransform(BaseTransform):
                 response_data={
                     "batch_id": batch.id,
                     "status": batch.status,
-                    "output_file_id": getattr(batch, "output_file_id", None),
-                    "error_file_id": getattr(batch, "error_file_id", None),
+                    "output_file_id": getattr(batch, "output_file_id", None),  # Tier 3: SDK attr may vary by version
+                    "error_file_id": getattr(batch, "error_file_id", None),  # Tier 3: SDK attr may vary by version
                 },
                 latency_ms=(time.perf_counter() - start) * 1000,
                 provider="azure",
@@ -794,7 +770,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 "batch_id": batch_id,
             }
             error_message = None
-            if hasattr(batch, "errors") and batch.errors:
+            if hasattr(batch, "errors") and batch.errors:  # Tier 3: SDK errors attr is optional
                 error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
                 error_message = "; ".join(e.message for e in batch.errors.data)
 

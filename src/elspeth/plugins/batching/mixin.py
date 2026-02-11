@@ -98,6 +98,24 @@ class BatchTransformMixin:
     _batch_submissions: dict[tuple[str, str], RowTicket]
     _batch_submissions_lock: threading.Lock
     _batch_wait_timeout: float  # Timeout for waiter.wait() in executor
+    _pool_size: int = 30  # Max concurrent rows; used by executor to cap adapter max_pending
+
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
+        """Accept a row for concurrent processing.
+
+        Concrete classes must override this to call accept_row() with their
+        processing function.  The executor dispatches to this method after
+        detecting the mixin via isinstance.
+        """
+        raise NotImplementedError("Subclasses must implement accept()")
+
+    def connect_output(self, output: OutputPort, max_pending: int = 30) -> None:
+        """Connect the output port and initialize batch infrastructure.
+
+        Concrete classes may override to add pre/post logic, but must call
+        init_batch_processing() to wire up the buffer and worker pool.
+        """
+        raise NotImplementedError("Subclasses must implement connect_output()")
 
     def init_batch_processing(
         self,
@@ -126,6 +144,7 @@ class BatchTransformMixin:
         self._batch_output = output
         self._batch_shutdown = threading.Event()
         self._batch_wait_timeout = batch_wait_timeout
+        self._pool_size = max_pending
 
         # Track submissions by (token_id, state_id) for eviction on timeout
         self._batch_submissions = {}

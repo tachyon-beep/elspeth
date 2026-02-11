@@ -152,16 +152,6 @@ FRAMEWORK_INTEROP_LOCATIONS: tuple[WhitelistEntry, ...] = (
         ),
     ),
     WhitelistEntry(
-        location="engine/executors.py (batch protocol attrs)",
-        type_used="type: ignore[attr-defined]",
-        justification=(
-            "BatchTransformProtocol methods (accept, connect_output, evict_submission) "
-            "and dynamic attrs (_executor_batch_adapter, _batch_initialized) are accessed "
-            "on TransformProtocol references after isinstance/hasattr checks. The type "
-            "system cannot express 'TransformProtocol that is also BatchTransformProtocol'."
-        ),
-    ),
-    WhitelistEntry(
         location="mcp/server.py, testing/chaosllm_mcp/server.py",
         type_used="type: ignore[misc, untyped-decorator]",
         justification=(

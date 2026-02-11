@@ -147,7 +147,7 @@ allow_hits:
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion
   expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:fp=f6af09f714ec682c
+- key: engine/executors.py:R4:SinkExecutor:write:fp=b27e21e1a0da4008
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
@@ -167,12 +167,12 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=2cb2abe67276b404
+- key: plugins/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=efe10b71fb5afade
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=55f64c33dbec338e
+- key: plugins/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=4217324caed47be5
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -207,87 +207,67 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:fp=2c5aafed0c8a4541
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=21ce5807da316aa4
   owner: architecture
-  reason: hasattr for feature detection
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance() check required to find batch-aware transforms - protocol contract verification
+  safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
   expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:fp=fdc6ea9f820ae612
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=2352904d4428b11d
   owner: architecture
-  reason: getattr for optional attribute access
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance(e, TimeoutError) for retry timeout handling in batch transform path
+  safety: Exception type discrimination for retry logic - required for correct timeout eviction
   expires: '2026-05-02'
-- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=d01ae7ebd1ac7338
-  owner: architecture
-  reason: hasattr for feature detection
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=de4d234ef7473f4a
-  owner: architecture
-  reason: getattr for optional attribute access
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=8fafd96dbf45c47a
-  owner: architecture
-  reason: getattr for optional attribute access
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=00b82fa85aad4751
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=e8afd34422930941
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=56f3a579f88d5ffd
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=631f6f0ece1be2d9
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=77747672c9068241
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=dc46811999243cd9
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=259322ade70bdfbf
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=8d28359a684be7ea
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=14f8e573bdd6cf19
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=c996c21c8f20ac1e
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=c49862f9d3b0ef3f
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=6abc58c94f238b78
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=297f2a692482e05c
   owner: P2-2026-02-02
   reason: Pattern is .get() followed by explicit None check raising RuntimeError
   safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=99345b091b9fae45
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=e6d0879131bea763
   owner: P2-2026-02-02
   reason: Version check for checkpoint format - None from missing key triggers ValueError
   safety: ValueError raised for missing or wrong version - explicit validation pattern
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=eea2736a8ccf972a
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=9f70ad94e0dee7a0
   owner: P2-2026-02-02
   reason: Testing/inspection method that needs to work with partial setups; returns None if no batch exists
   safety: Documented as "primarily for testing" - production uses checkpoint state
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=e61096326de71a28
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=b70fdadd35b47754
   owner: P2-2026-02-02
   reason: Checkpoint recovery lookup - returns None if no state was restored for node
   safety: Designed API contract - None is valid return for nodes without restored state
   expires: null
-- key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=cb982c6ebef6e1c1
+- key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=7e1f71dad437ff68
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -667,37 +647,37 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=dc75c0a50ecb9961
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=d4e6055c5d8f51b2
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=e4406b514a797107
+- key: plugins/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=c6fcb5c8ffb813fa
   owner: architecture
   reason: contextlib.suppress for expected exceptions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=a85655eb9d5dce08
+- key: plugins/batching/mixin.py:R7:BatchTransformMixin:_process_and_complete:fp=03c17e4a2a2b4f61
   owner: architecture
   reason: contextlib.suppress for expected exceptions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=eccdfd781f52ed76
+- key: plugins/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=1eb8d42fd33ba478
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=e05a82665f12ff8a
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=a710984dc1fb9979
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=68ee805887eb3173
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=9230e59132d3de9f
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=9e733ee9d7f79f4f
+- key: plugins/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=d64346e2eacd33f3
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
@@ -1507,22 +1487,22 @@ allow_hits:
   reason: Silent recovery with explicit error handling path - YAML optional fallback to JSON
   safety: Falls back to JSON format if yaml module unavailable - data still displayed
   expires: '2026-05-13'
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=4c2151c04e745b11
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=ed9209a2d33784f7
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=db330ed83b1d185b
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=d21331be1036eedb
   owner: architecture
   reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
   safety: Explicit isinstance branching for AST eval result types
   expires: '2026-05-13'
-- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=6f906b66bee82f87
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=aff06f9784873ca3
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=f85d85215d3e8828
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=57d57e45004e1807
   owner: architecture
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
@@ -1647,10 +1627,25 @@ allow_hits:
   reason: External HTTP request body - optional fields per OpenAI spec (Tier 3)
   safety: dict.get for optional fields in request body from external clients
   expires: '2026-05-13'
-- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=0c670d81190e126c
+- key: testing/chaosengine/metrics_store.py:R7:MetricsStore:close:fp=face415b8e4b5e9c
   owner: architecture
   reason: contextlib.suppress on ProgrammingError during connection cleanup
   safety: Only suppresses error for already-closed connections during teardown
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R9:MetricsStore:rebuild_timeseries:fp=20da87aa36d72667
+  owner: architecture
+  reason: dict.pop extracts latency_ms from classified metrics row - field is optional in variable-shape metrics data
+  safety: None default is correct - latency is not present in all metric types
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R5:MetricsStore:rebuild_timeseries:fp=b7cf4f71877df83c
+  owner: architecture
+  reason: isinstance(int) filters numeric metric values for aggregation - variable-shape metrics contain mixed types
+  safety: Non-int values are correctly skipped during summation
+  expires: '2026-05-13'
+- key: testing/chaosengine/metrics_store.py:R1:MetricsStore:rebuild_timeseries:fp=eba360b3ef712841
+  owner: architecture
+  reason: dict.get with default 0 for running totals accumulator - key may not exist on first encounter
+  safety: Standard accumulator pattern - 0 default is mathematically correct for summation
   expires: '2026-05-13'
 - key: testing/chaosengine/config_loader.py:R5:deep_merge:fp=d90637e14460de3a
   owner: architecture

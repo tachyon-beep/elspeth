@@ -12,7 +12,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
@@ -49,6 +49,7 @@ from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
+from elspeth.plugins.batching.mixin import BatchTransformMixin
 from elspeth.plugins.protocols import (
     BatchTransformProtocol,
     SinkProtocol,
@@ -169,36 +170,47 @@ class TransformExecutor:
         self._step_resolver = step_resolver
         self._max_workers = max_workers
         self._error_edge_ids = error_edge_ids or {}
+        # Adapter storage keyed by node_id — one SharedBatchAdapter per
+        # mixin-based transform, owned by the executor (not monkey-patched
+        # onto the transform instance).
+        self._batch_adapters: dict[str, "SharedBatchAdapter"] = {}  # noqa: UP037 — forward ref, no __future__ annotations
 
     def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
-        """Get or create shared batch adapter for transform.
+        """Get or create shared batch adapter for a mixin-based transform.
 
-        Creates adapter once per transform instance and stores it as an
-        instance attribute for reuse across rows. This solves the deadlock
-        where per-row adapters were created but only the first was connected.
+        Creates adapter once per transform and stores it in the executor's
+        own dict (keyed by node_id). On first call, connects the adapter as
+        the transform's output port.
+
+        Caller must verify isinstance(transform, BatchTransformMixin) before
+        calling — this method accesses mixin attributes directly.
 
         Args:
-            transform: The batch-aware transform
+            transform: Transform using BatchTransformMixin (must have node_id set)
 
         Returns:
             SharedBatchAdapter for this transform
         """
         from elspeth.engine.batch_adapter import SharedBatchAdapter
 
-        if not hasattr(transform, "_executor_batch_adapter"):
+        # node_id is always set by orchestrator before execution
+        node_id = transform.node_id
+        assert node_id is not None, "node_id must be set before execute_transform"
+
+        if node_id not in self._batch_adapters:
             adapter = SharedBatchAdapter()
-            transform._executor_batch_adapter = adapter  # type: ignore[attr-defined]  # dynamic attr on BatchTransformProtocol instances
+            self._batch_adapters[node_id] = adapter
 
             # Connect output (one-time setup)
-            # Use _pool_size stored by LLM transforms, default to 30
-            # Cap to max_workers if configured (enforces global concurrency limit)
-            max_pending = getattr(transform, "_pool_size", 30)
+            # Cap pool_size to max_workers if configured (global concurrency limit)
+            # Safe: caller guarantees isinstance(transform, BatchTransformMixin)
+            mixin = cast(BatchTransformMixin, transform)
+            max_pending = mixin._pool_size
             if self._max_workers is not None:
                 max_pending = min(max_pending, self._max_workers)
-            transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]  # BatchTransformProtocol method
-            transform._batch_initialized = True  # type: ignore[attr-defined]  # dynamic attr on BatchTransformProtocol instances
+            mixin.connect_output(output=adapter, max_pending=max_pending)
 
-        return transform._executor_batch_adapter  # type: ignore[attr-defined, return-value, no-any-return]  # dynamic attr set above
+        return self._batch_adapters[node_id]
 
     def execute_transform(
         self,
@@ -277,9 +289,11 @@ class TransformExecutor:
         # This allows transforms to access original header names via ctx.contract.resolve_name()
         ctx.contract = token.row_data.contract
 
-        # Detect batch transforms (those using BatchTransformMixin)
-        # They have accept() method and process() raises NotImplementedError
-        has_accept = hasattr(transform, "accept") and callable(getattr(transform, "accept", None))
+        # Detect mixin-based concurrent transforms (accept/connect_output pattern).
+        # isinstance is the correct narrowing — these transforms inherit
+        # BatchTransformMixin but have is_batch_aware=False (that flag is for
+        # aggregation via BatchTransformProtocol, a separate concept).
+        mixin: BatchTransformMixin | None = transform if isinstance(transform, BatchTransformMixin) else None
 
         # Execute with timing and span
         # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
@@ -292,7 +306,7 @@ class TransformExecutor:
         ):
             start = time.perf_counter()
             try:
-                if has_accept:
+                if mixin is not None:
                     # Batch transform: use accept() with SharedBatchAdapter
                     # One adapter per transform, multiple waiters per adapter
                     adapter = self._get_batch_adapter(transform)
@@ -307,7 +321,7 @@ class TransformExecutor:
                     ctx.token = token
 
                     # Submit work - this returns immediately
-                    transform.accept(token.row_data, ctx)  # type: ignore[attr-defined]  # BatchTransformProtocol method
+                    mixin.accept(token.row_data, ctx)
 
                     # Block until THIS row's result arrives.
                     #
@@ -327,8 +341,7 @@ class TransformExecutor:
                     # Timeout is derived from transform's batch_wait_timeout config
                     # (default 3600s = 1 hour) to allow for sustained rate limiting
                     # and AIMD backoff during capacity errors.
-                    wait_timeout = getattr(transform, "_batch_wait_timeout", 3600.0)
-                    result = waiter.wait(timeout=wait_timeout)
+                    result = waiter.wait(timeout=mixin._batch_wait_timeout)
                 else:
                     # Regular transform: synchronous process()
                     result = transform.process(token.row_data, ctx)
@@ -356,15 +369,9 @@ class TransformExecutor:
                 # 2. We call evict_submission() to remove buffer entry
                 # 3. Retry attempt gets new sequence number and can proceed
                 # 4. Original worker may still complete, but result is discarded
-                if isinstance(e, TimeoutError) and has_accept:
-                    # has_accept guarantees transform has evict_submission (batch protocol)
-                    evict_fn = transform.evict_submission  # type: ignore[attr-defined]  # BatchTransformProtocol method
-                    if not callable(evict_fn):
-                        raise TypeError(
-                            f"Transform '{transform.name}' evict_submission must be callable, got {type(evict_fn).__name__}"
-                        ) from None
+                if isinstance(e, TimeoutError) and mixin is not None:
                     try:
-                        evict_fn(token.token_id, state.state_id)
+                        mixin.evict_submission(token.token_id, state.state_id)
                     except Exception as evict_err:
                         raise RuntimeError(f"Failed to evict timed-out submission for token {token.token_id}") from evict_err
 
