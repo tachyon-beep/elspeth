@@ -841,9 +841,9 @@ Environment Variables:
     passphrase: str | None = None
     if args.passphrase_env is not None:
         passphrase = os.environ.get(args.passphrase_env)
-        if passphrase is None:
+        if passphrase is None or not passphrase.strip():
             sys.stderr.write(
-                f"Error: environment variable {args.passphrase_env} is not set.\n"
+                f"Error: environment variable {args.passphrase_env} is not set or is empty.\n"
                 f'Set it with: export {args.passphrase_env}="your-passphrase"\n'
             )
             sys.exit(1)

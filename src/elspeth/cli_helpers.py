@@ -198,9 +198,9 @@ def resolve_audit_passphrase(
     if settings is not None and settings.backend == "sqlcipher":
         env_var = settings.encryption_key_env
         passphrase = os.environ.get(env_var)
-        if passphrase is None:
+        if passphrase is None or not passphrase.strip():
             raise RuntimeError(
-                f'SQLCipher backend requires encryption passphrase.\nSet the environment variable: export {env_var}="your-passphrase"'
+                f'SQLCipher backend requires a non-empty encryption passphrase.\nSet the environment variable: export {env_var}="your-passphrase"'
             )
         return passphrase
 
