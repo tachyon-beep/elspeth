@@ -90,3 +90,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after re-verification against current code.
+- Verification summary: `GateExecutor` now computes `stable_hash(...)` before opening node state, so canonicalization failures occur before `begin_node_state(...)` and can no longer leave OPEN node states behind.
+- Evidence:
+  - `src/elspeth/engine/executors/gate.py`: hash computation is performed before node-state creation.
+  - `src/elspeth/engine/executors/gate.py`: node-state lifecycle no longer includes the prior post-open hashing failure path.

@@ -93,3 +93,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/2026-02-03-pipelinerow-migration.md`
+
+## Closure Update (2026-02-11)
+
+- Status: Closed after re-verification against current code.
+- Verification summary: the executor path was refactored to `PipelineRow`-first flow; `TransformResult` no longer carries a separate contract field and the old fallback that rebuilt contracts from `transform.output_schema` is gone.
+- Evidence:
+  - `src/elspeth/contracts/results.py`: `TransformResult` structure no longer includes `contract`.
+  - `src/elspeth/engine/executors/transform.py`: no fallback logic that replaces input contract with schema-derived contract.
