@@ -111,4 +111,3 @@
 - Fixed by commit: `50422dc2`
 - Fix summary: Fix JSONExplode contract for complex output_field values
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

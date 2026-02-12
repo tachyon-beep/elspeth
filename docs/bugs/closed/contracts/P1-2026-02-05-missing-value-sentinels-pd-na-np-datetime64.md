@@ -111,4 +111,3 @@
 - Fixed by commit: `e991b724`
 - Fix summary: Normalize missing sentinels in contract type normalization
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

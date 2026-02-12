@@ -112,4 +112,3 @@
 - Fixed by commit: `ee393c33`
 - Fix summary: Harden JSONFormatter against coercion and non-finite values
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

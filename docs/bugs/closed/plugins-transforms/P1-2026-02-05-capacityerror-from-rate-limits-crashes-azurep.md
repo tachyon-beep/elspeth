@@ -109,4 +109,3 @@
 - Fixed by commit: `129c08d2`
 - Fix summary: Handle PromptShield capacity errors as row-level retryable results
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

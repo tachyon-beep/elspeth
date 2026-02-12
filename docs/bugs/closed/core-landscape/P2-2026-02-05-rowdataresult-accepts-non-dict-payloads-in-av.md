@@ -110,4 +110,3 @@
 - Fixed by commit: `6bcbbf2a`
 - Fix summary: Enforce dict payload invariant for RowDataResult AVAILABLE state
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

@@ -108,4 +108,3 @@
 - Fixed by commit: `62ea627f`
 - Fix summary: Refactor selected plugins to PipelineRow-first access
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

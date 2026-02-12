@@ -90,4 +90,3 @@
 - Fixed by commit: `ae4eb816`
 - Fix summary: Fail closed on missing explicit Azure safety fields
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

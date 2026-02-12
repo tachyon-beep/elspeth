@@ -108,4 +108,3 @@
 - Fixed by commit: `4ff1d29f`
 - Fix summary: Fix Jinja field extraction for row.get keys
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

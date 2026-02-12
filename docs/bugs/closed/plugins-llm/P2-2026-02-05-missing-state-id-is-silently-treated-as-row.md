@@ -109,4 +109,3 @@ Tests will need updating; behavior becomes fail-fast as required by audit rules.
 - Fixed by commit: `ab4f6bbd`
 - Fix summary: Fail fast when openrouter batch state_id is missing
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

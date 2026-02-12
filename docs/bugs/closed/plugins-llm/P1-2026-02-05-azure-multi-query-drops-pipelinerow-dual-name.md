@@ -111,4 +111,3 @@
 - Fixed by commit: `ca932d66`
 - Fix summary: Fix multi-query dual-name resolution for PipelineRow inputs
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

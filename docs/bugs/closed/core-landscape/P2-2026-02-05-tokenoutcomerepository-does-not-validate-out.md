@@ -111,4 +111,3 @@
 - Fixed by commit: `19066c1a`
 - Fix summary: Validate outcome terminal consistency in TokenOutcomeRepository
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-

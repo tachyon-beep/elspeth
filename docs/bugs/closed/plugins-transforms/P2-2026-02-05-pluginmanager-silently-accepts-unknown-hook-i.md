@@ -109,4 +109,3 @@
 - Fixed by commit: `44482e86`
 - Fix summary: Reject unknown plugin hooks during registration
 - Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
-
