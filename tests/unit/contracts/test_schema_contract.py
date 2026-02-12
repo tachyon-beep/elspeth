@@ -161,6 +161,16 @@ class TestSchemaContractNameResolution:
         result = contract.resolve_name("amount_usd")
         assert result == "amount_usd"
 
+    def test_find_name_already_normalized(self, sample_fields: tuple[FieldContract, ...]) -> None:
+        """find_name("amount_usd") returns normalized name."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=sample_fields,
+        )
+
+        result = contract.find_name("amount_usd")
+        assert result == "amount_usd"
+
     def test_resolve_name_original_to_normalized(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """resolve_name("'Amount USD'") returns "amount_usd" (original -> normalized)."""
         contract = SchemaContract(
@@ -169,6 +179,16 @@ class TestSchemaContractNameResolution:
         )
 
         result = contract.resolve_name("'Amount USD'")
+        assert result == "amount_usd"
+
+    def test_find_name_original_to_normalized(self, sample_fields: tuple[FieldContract, ...]) -> None:
+        """find_name("'Amount USD'") returns normalized name."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=sample_fields,
+        )
+
+        result = contract.find_name("'Amount USD'")
         assert result == "amount_usd"
 
     def test_resolve_name_nonexistent_raises_keyerror(self, sample_fields: tuple[FieldContract, ...]) -> None:
@@ -180,6 +200,15 @@ class TestSchemaContractNameResolution:
 
         with pytest.raises(KeyError, match="'nonexistent' not found in schema contract"):
             contract.resolve_name("nonexistent")
+
+    def test_find_name_nonexistent_returns_none(self, sample_fields: tuple[FieldContract, ...]) -> None:
+        """find_name("nonexistent") returns None."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=sample_fields,
+        )
+
+        assert contract.find_name("nonexistent") is None
 
     def test_indices_populated(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """_by_normalized and _by_original indices are populated."""
@@ -213,14 +242,24 @@ class TestSchemaContractNameResolution:
         assert field.original_name == "'Amount USD'"
         assert field.python_type is float
 
-    def test_get_field_nonexistent_returns_none(self, sample_fields: tuple[FieldContract, ...]) -> None:
-        """get_field("nonexistent") returns None."""
+    def test_get_field_nonexistent_raises(self, sample_fields: tuple[FieldContract, ...]) -> None:
+        """get_field("nonexistent") raises KeyError."""
         contract = SchemaContract(
             mode="FIXED",
             fields=sample_fields,
         )
 
-        result = contract.get_field("nonexistent")
+        with pytest.raises(KeyError, match="'nonexistent' not found in schema contract"):
+            contract.get_field("nonexistent")
+
+    def test_find_field_nonexistent_returns_none(self, sample_fields: tuple[FieldContract, ...]) -> None:
+        """find_field("nonexistent") returns None."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=sample_fields,
+        )
+
+        result = contract.find_field("nonexistent")
         assert result is None
 
     def test_resolve_all_fields_both_directions(self, sample_fields: tuple[FieldContract, ...]) -> None:
@@ -254,7 +293,10 @@ class TestSchemaContractEdgeCases:
 
         assert len(contract._by_normalized) == 0
         assert len(contract._by_original) == 0
-        assert contract.get_field("anything") is None
+        assert contract.find_field("anything") is None
+
+        with pytest.raises(KeyError):
+            contract.get_field("anything")
 
         with pytest.raises(KeyError):
             contract.resolve_name("anything")
@@ -274,6 +316,19 @@ class TestSchemaContractEdgeCases:
         # Indices should both contain it
         assert "simple_field" in contract._by_normalized
         assert "simple_field" in contract._by_original
+
+    def test_indices_are_read_only(self, sample_fields: tuple[FieldContract, ...]) -> None:
+        """Internal indices are immutable after construction."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=sample_fields,
+        )
+
+        with pytest.raises(TypeError):
+            contract._by_normalized["new_field"] = sample_fields[0]  # type: ignore[index]
+
+        with pytest.raises(TypeError):
+            contract._by_original["new_original"] = "new_field"  # type: ignore[index]
 
 
 # --- Mutation Tests ---

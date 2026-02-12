@@ -130,7 +130,7 @@ def narrow_contract_to_output(
                 normalized_source_name = source_name
                 if source_name in original_to_normalized:
                     normalized_source_name = original_to_normalized[source_name]
-                source_contract = input_contract.get_field(normalized_source_name)
+                source_contract = input_contract.find_field(normalized_source_name)
             if source_contract is not None:
                 renamed_targets.append(name)
                 new_fields.append(

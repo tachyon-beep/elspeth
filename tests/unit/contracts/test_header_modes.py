@@ -5,6 +5,8 @@ Task 4 of Phase 3: Sink Header Modes implementation.
 
 from __future__ import annotations
 
+import types
+
 import pytest
 
 from elspeth.contracts.header_modes import (
@@ -94,7 +96,8 @@ class TestResolveHeaders:
 
     def test_original_mode_raises_on_contract_lookup_miss(self, contract: SchemaContract) -> None:
         """ORIGINAL mode should crash on contract corruption (Tier 1 data)."""
-        contract._by_normalized.pop("customer_id")
+        corrupted_index = {k: v for k, v in contract._by_normalized.items() if k != "customer_id"}
+        object.__setattr__(contract, "_by_normalized", types.MappingProxyType(corrupted_index))
 
         with pytest.raises(KeyError, match="customer_id"):
             resolve_headers(

@@ -126,10 +126,6 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=7df7fefcb2213125
-  owner: architecture
-  reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for
-    strict lookup'
 - key: contracts/plugin_context.py:R5:PluginContext:get:fp=2a573e1a799bf997
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions

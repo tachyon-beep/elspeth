@@ -47,11 +47,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/templates.py:R6:extract_jinja2_fields_with_names:fp=f6a3eb1805fd5f66
-  owner: architecture
-  reason: Contract resolution attempt - KeyError means field not in contract, handled as unresolved
-  safety: Returns explicit resolved=False state, never silently drops - legitimate boundary handling
-  expires: '2026-05-02'
 - key: core/canonical.py:R5:_normalize_value:fp=4438a2dca309b0e4
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions

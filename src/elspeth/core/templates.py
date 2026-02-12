@@ -237,23 +237,22 @@ def extract_jinja2_fields_with_names(
 
     for field_as_written in raw_fields:
         if contract is not None:
-            # Try to resolve via contract
-            try:
-                normalized = contract.resolve_name(field_as_written)
-                fc = contract.get_field(normalized)
-                original = fc.original_name if fc else field_as_written
-                result[normalized] = {
-                    "normalized": normalized,
-                    "original": original,
-                    "resolved": True,
-                }
-            except KeyError:
+            normalized = contract.find_name(field_as_written)
+            if normalized is None:
                 # Not in contract - report as-is
                 result[field_as_written] = {
                     "normalized": field_as_written,
                     "original": field_as_written,
                     "resolved": False,
                 }
+                continue
+
+            fc = contract.get_field(normalized)
+            result[normalized] = {
+                "normalized": normalized,
+                "original": fc.original_name,
+                "resolved": True,
+            }
         else:
             # No contract - report as-is
             result[field_as_written] = {

@@ -200,7 +200,7 @@ class JSONExplode(BaseTransform):
             input_contract=row.contract,
             output_row=output_rows[0],
         )
-        if output_contract.get_field(self._output_field) is None:
+        if output_contract.find_field(self._output_field) is None:
             output_contract = SchemaContract(
                 mode=output_contract.mode,
                 fields=(
