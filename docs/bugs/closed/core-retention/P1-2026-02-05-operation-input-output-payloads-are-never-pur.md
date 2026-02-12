@@ -1,18 +1,14 @@
 # Bug Report: Operation input/output payloads are never purged
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
-- Verification summary:
-  - `find_expired_payload_refs()` and `_find_affected_run_ids()` still query rows/calls/routing refs only, not `operations.input_data_ref` / `operations.output_data_ref`.
-  - Repro still shows operation I/O refs excluded from both expired-ref selection and affected-run detection.
-- Current evidence:
-  - `src/elspeth/core/retention/purge.py:120`
-  - `src/elspeth/core/retention/purge.py:221`
-  - `src/elspeth/core/retention/purge.py:321`
-  - `src/elspeth/core/retention/purge.py:362`
+- Classification: **Resolved**
+- Resolution summary:
+  - `PurgeManager.find_expired_payload_refs()` now includes `operations.input_data_ref` and `operations.output_data_ref` in both expired-run and active-run unions.
+  - `PurgeManager._find_affected_run_ids()` now includes operation input/output payload refs when determining which runs need reproducibility-grade updates.
+  - Regression tests now cover operation payload refs in both selection and affected-run detection paths.
 
 ## Summary
 
@@ -61,11 +57,10 @@
 
 ## Evidence
 
-- `src/elspeth/core/retention/purge.py:117-279` only includes rows, calls, and routing payload refs; there are no queries for `operations.input_data_ref` or `operations.output_data_ref`.
-- `src/elspeth/core/retention/purge.py:301-362` `_find_affected_run_ids()` similarly excludes `operations.input_data_ref` and `operations.output_data_ref`.
-- `src/elspeth/core/landscape/schema.py:225-236` defines `operations.input_data_ref` and `operations.output_data_ref` as payload store references.
-- `src/elspeth/core/landscape/recorder.py:2363-2367` stores `input_data_ref` via PayloadStore.
-- `src/elspeth/core/landscape/recorder.py:2415-2418` stores `output_data_ref` via PayloadStore.
+- `src/elspeth/core/retention/purge.py` now includes operation input/output refs in both expired/active anti-join query sets and affected-run query union.
+- `src/elspeth/core/landscape/schema.py:239-240` defines `operations.input_data_ref` and `operations.output_data_ref` as payload store references.
+- `src/elspeth/core/landscape/_call_recording.py:210-213` stores `input_data_ref` via PayloadStore.
+- `src/elspeth/core/landscape/_call_recording.py:276-281` stores `output_data_ref` via PayloadStore.
 
 ## Impact
 
@@ -99,10 +94,30 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/core/retention/test_purge.py`
+- Suggested tests to run: `.venv/bin/python -m pytest tests/unit/core/retention/test_purge.py`
 - New tests required: yes, add coverage for operation input/output payload retention and purge.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/design/subsystems/00-overview.md`
+
+## Verification Status
+
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution (2026-02-12)
+
+**Fixed by:** Codex (GPT-5)
+
+**Changes:**
+- `src/elspeth/core/retention/purge.py`: Added operation input/output payload refs to expired/active selection queries and affected-run lookup.
+- `tests/unit/core/retention/test_purge.py`: Added regression coverage for operation input/output refs in both `find_expired_payload_refs()` and `_find_affected_run_ids()`.
+
+**Verification:**
+- `.venv/bin/python -m pytest tests/unit/core/retention/test_purge.py`
+- `.venv/bin/python -m pytest tests/e2e/audit/test_purge_integrity.py`
