@@ -1072,6 +1072,53 @@ class TestPromptShieldBatchProcessing:
         finally:
             transform.close()
 
+    @pytest.mark.parametrize("status_code", [429, 503, 529])
+    def test_capacity_http_status_returns_row_error_in_batch_adapter(
+        self,
+        mock_httpx_client: MagicMock,
+        status_code: int,
+    ) -> None:
+        """Capacity HTTP statuses become retryable row errors (no waiter exception)."""
+        import httpx
+
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
+            f"Capacity limited ({status_code})",
+            request=Mock(),
+            response=Mock(status_code=status_code),
+        )
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        ctx = make_mock_context(state_id=f"state-{status_code}")
+        transform.on_start(ctx)
+
+        adapter = SharedBatchAdapter()
+        transform.connect_output(adapter, max_pending=10)
+
+        try:
+            waiter = adapter.register(ctx.token.token_id, ctx.state_id)
+            transform.accept(make_pipeline_row({"prompt": "test", "id": 1}), ctx)
+            result = waiter.wait(timeout=10.0)
+
+            assert isinstance(result, TransformResult)
+            assert result.status == "error"
+            assert result.retryable is True
+            assert result.reason is not None
+            assert result.reason["reason"] == "rate_limited"
+            assert result.reason["status_code"] == status_code
+        finally:
+            transform.close()
+
 
 class TestPromptShieldInternalProcessing:
     """Tests for internal processing methods (used by BatchTransformMixin)."""
