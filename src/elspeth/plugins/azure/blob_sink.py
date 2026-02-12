@@ -311,6 +311,14 @@ class AzureBlobSink(BaseSink):
 
         # Lazy-loaded clients
         self._container_client: ContainerClient | None = None
+        # Buffer rows across write() calls so each upload represents full run output.
+        self._buffered_rows: list[dict[str, Any]] = []
+        # Freeze rendered path on first write; subsequent writes target same blob.
+        self._resolved_blob_path: str | None = None
+        # Track whether this sink instance has successfully uploaded at least once.
+        # Needed to preserve overwrite=False first-write protection while allowing
+        # in-run rewrites of the same blob for accumulation.
+        self._has_uploaded: bool = False
 
     def _get_container_client(self) -> ContainerClient:
         """Get or create the Azure container client.
@@ -354,6 +362,16 @@ class AzureBlobSink(BaseSink):
             run_id=ctx.run_id,
             timestamp=datetime.now(tz=UTC).isoformat(),
         )
+
+    def _get_or_init_blob_path(self, ctx: PluginContext) -> str:
+        """Get stable blob path for this sink instance.
+
+        The path is rendered once on first write and reused thereafter so
+        repeated write() calls in the same run update the same blob.
+        """
+        if self._resolved_blob_path is None:
+            self._resolved_blob_path = self._render_blob_path(ctx)
+        return self._resolved_blob_path
 
     def _serialize_rows(self, rows: list[dict[str, Any]]) -> bytes:
         """Serialize rows to bytes based on format.
@@ -514,7 +532,7 @@ class AzureBlobSink(BaseSink):
         """
         if not rows:
             # Still render the path for consistent audit trail
-            rendered_path = self._render_blob_path(ctx)
+            rendered_path = self._get_or_init_blob_path(ctx)
             return ArtifactDescriptor(
                 artifact_type="file",
                 path_or_uri=f"azure://{self._container}/{rendered_path}",
@@ -528,11 +546,13 @@ class AzureBlobSink(BaseSink):
         if self._format in {"json", "jsonl"}:
             output_rows = self._apply_display_headers(rows)
 
-        # Render the blob path with context variables
-        rendered_path = self._render_blob_path(ctx)
+        # Render the blob path once per instance and reuse it across writes.
+        rendered_path = self._get_or_init_blob_path(ctx)
+        # Buffer output rows so each upload contains all rows from prior writes.
+        self._buffered_rows.extend(row.copy() for row in output_rows)
 
         # Serialize rows to bytes (OUR CODE - let it crash on bugs)
-        content = self._serialize_rows(output_rows)
+        content = self._serialize_rows(self._buffered_rows)
 
         # Compute content hash before upload
         content_hash = hashlib.sha256(content).hexdigest()
@@ -544,12 +564,16 @@ class AzureBlobSink(BaseSink):
         try:
             container_client = self._get_container_client()
             blob_client = container_client.get_blob_client(rendered_path)
+            # Keep overwrite=False protection for first write against pre-existing
+            # blobs, then permit in-run rewrites to update cumulative content.
+            upload_overwrite = self._overwrite or self._has_uploaded
 
             # Upload with overwrite policy enforced atomically by Azure SDK.
             # When overwrite=False, upload_blob raises ResourceExistsError server-side,
             # avoiding the TOCTOU race of a separate exists() check.
-            blob_client.upload_blob(content, overwrite=self._overwrite)
+            blob_client.upload_blob(content, overwrite=upload_overwrite)
             latency_ms = (time.perf_counter() - start_time) * 1000
+            self._has_uploaded = True
 
             # Record successful blob upload in audit trail
             ctx.record_call(
@@ -559,7 +583,7 @@ class AzureBlobSink(BaseSink):
                     "operation": "upload_blob",
                     "container": self._container,
                     "blob_path": rendered_path,
-                    "overwrite": self._overwrite,
+                    "overwrite": upload_overwrite,
                 },
                 response_data={
                     "size_bytes": size_bytes,
@@ -587,7 +611,7 @@ class AzureBlobSink(BaseSink):
                     "operation": "upload_blob",
                     "container": self._container,
                     "blob_path": rendered_path,
-                    "overwrite": self._overwrite,
+                    "overwrite": self._overwrite or self._has_uploaded,
                 },
                 error={"type": type(e).__name__, "message": str(e)},
                 latency_ms=latency_ms,
@@ -628,6 +652,9 @@ class AzureBlobSink(BaseSink):
     def close(self) -> None:
         """Release resources."""
         self._container_client = None
+        self._buffered_rows = []
+        self._resolved_blob_path = None
+        self._has_uploaded = False
 
     # === Lifecycle Hooks ===
 
