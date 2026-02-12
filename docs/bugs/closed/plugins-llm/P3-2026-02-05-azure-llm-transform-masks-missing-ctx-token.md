@@ -1,6 +1,18 @@
 # Bug Report: Azure LLM Transform Masks Missing `ctx.token` With "unknown" Token ID
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-12)
+
+- Classification: **Fixed and verified**
+- Resolution summary:
+  - Removed defensive fallback token ID (`"unknown"`) from `AzureLLMTransform._process_row()`.
+  - Added an explicit invariant check that raises when `ctx.token` is missing, so orchestration/context bugs fail fast.
+  - Added regression coverage for direct `_process_row()` invocation with `ctx.token=None` to ensure no masked correlation path remains.
+- Verification:
+  - `.venv/bin/python -m pytest tests/unit/plugins/llm/test_azure.py -q` (37 passed)
+  - `.venv/bin/python -m pytest tests/unit/plugins/llm -q` (505 passed, 3 deselected)
+  - `.venv/bin/ruff check src/elspeth/plugins/llm/azure.py tests/unit/plugins/llm/test_azure.py` (passed)
 
 ## Status Update (2026-02-11)
 

@@ -441,13 +441,15 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         try:
             import time
 
+            if ctx.token is None:
+                raise RuntimeError("Azure LLM transform requires ctx.token. Ensure transform is executed through the engine.")
+            token_id = ctx.token.token_id
             llm_client = self._get_llm_client(ctx.state_id)
 
             # 4. Call LLM (EXTERNAL - wrap)
             # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
             # to let the engine's RetryManager handle them. Non-retryable errors
             # (ContentPolicyError, ContextLengthError) return TransformResult.error().
-            token_id = ctx.token.token_id if ctx.token else "unknown"
             start_time = time.monotonic()
 
             try:
