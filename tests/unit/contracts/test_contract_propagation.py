@@ -355,6 +355,32 @@ class TestPropagateContractEdgeCases:
         customer_field = next(f for f in output_contract.fields if f.normalized_name == "customer")
         assert customer_field.original_name == "customer"  # Lost "Customer ID" metadata
 
+    def test_field_rename_preserves_metadata_when_mapping_uses_original_name(self) -> None:
+        """Rename metadata is preserved when renamed_fields uses original source names."""
+        from elspeth.contracts.contract_propagation import narrow_contract_to_output
+
+        field_amount = make_field("amount_usd", float, original_name="Amount USD", required=True, source="declared")
+        field_id = make_field("id", int, original_name="ID", required=True, source="declared")
+        input_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(field_amount, field_id),
+            locked=True,
+        )
+
+        output_row = {"price": 12.5, "id": 1}
+        output_contract = narrow_contract_to_output(
+            input_contract=input_contract,
+            output_row=output_row,
+            renamed_fields={"Amount USD": "price"},
+        )
+
+        price_field = output_contract.get_field("price")
+        assert price_field is not None
+        assert price_field.original_name == "Amount USD"
+        assert price_field.python_type is float
+        assert price_field.required is True
+        assert price_field.source == "declared"
+
     def test_type_conflict_between_contract_and_actual_data(self) -> None:
         """Input contract declares int, but output has string - documents mismatch behavior.
 

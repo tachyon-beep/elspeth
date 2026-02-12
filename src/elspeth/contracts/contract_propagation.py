@@ -120,13 +120,17 @@ def narrow_contract_to_output(
     if renamed_fields is not None:
         for source, target in renamed_fields.items():
             source_by_target[target] = source
+    original_to_normalized = {fc.original_name: fc.normalized_name for fc in input_contract.fields}
 
     for name, value in output_row.items():
         if name not in existing_names:
             source_contract = None
             if name in source_by_target:
                 source_name = source_by_target[name]
-                source_contract = input_contract.get_field(source_name)
+                normalized_source_name = source_name
+                if source_name in original_to_normalized:
+                    normalized_source_name = original_to_normalized[source_name]
+                source_contract = input_contract.get_field(normalized_source_name)
             if source_contract is not None:
                 renamed_targets.append(name)
                 new_fields.append(

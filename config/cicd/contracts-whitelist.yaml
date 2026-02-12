@@ -279,7 +279,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_json:rows (list)"
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_jsonl:rows (list)"
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink.write:rows (list)"
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._get_field_names_and_display:row"
+  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._get_field_names_and_display:rows (list)"
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._apply_display_headers:rows (list)"
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._apply_display_headers:return (list)"
 
@@ -452,7 +452,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/batching/mixin.py:BatchTransformMixin.get_batch_metrics:return"
 
   # Azure blob sink - row serialization
-  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._get_fieldnames_from_schema_or_row:row"
+  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._get_fieldnames_from_schema_or_rows:rows (list)"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # OPENROUTER MULTI-QUERY - External API trust boundary

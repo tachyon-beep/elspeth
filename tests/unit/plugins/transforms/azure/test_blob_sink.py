@@ -306,6 +306,32 @@ class TestAzureBlobSinkWriteCSV:
         assert "1,alice" in second_upload
         assert "2,bob" in second_upload
 
+    def test_csv_multiple_writes_flexible_schema_includes_new_late_columns(
+        self,
+        mock_container_client: MagicMock,
+        ctx: PluginContext,
+    ) -> None:
+        """Late columns in later batches must not crash cumulative CSV uploads."""
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(
+            make_config(
+                format="csv",
+                schema={"mode": "flexible", "fields": ["id: int", "name: str"]},
+            )
+        )
+
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+        sink.write([{"id": 2, "name": "bob", "score": 0.9}], ctx)
+
+        second_upload = mock_blob_client.upload_blob.call_args_list[1][0][0].decode().strip().splitlines()
+        assert second_upload[0] == "id,name,score"
+        assert second_upload[1] == "1,alice,"
+        assert second_upload[2] == "2,bob,0.9"
+
 
 class TestAzureBlobSinkWriteJSON:
     """Tests for JSON writing to Azure Blob."""

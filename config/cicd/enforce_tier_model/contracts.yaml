@@ -111,7 +111,7 @@ allow_hits:
   reason: Type narrowing failure is silently skipped - non-primitive types aren't included in contract
   safety: Field continues in data without contract tracking - intentional behavior
   expires: null
-- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=cf05b95c241651a9
+- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=f11bc8d1585e1aac
   owner: architecture
   reason: Type resolution errors are logged and field is excluded from narrowed contract
   safety: Contract narrowing continues without failed field - explicit logging

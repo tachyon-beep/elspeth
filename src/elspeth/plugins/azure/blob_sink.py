@@ -394,36 +394,44 @@ class AzureBlobSink(BaseSink):
             # Unreachable due to Pydantic Literal validation, but satisfies static analysis
             raise AssertionError(f"Unsupported format: {self._format}")
 
-    def _get_fieldnames_from_schema_or_row(self, row: dict[str, Any]) -> list[str]:
-        """Get fieldnames from schema or row keys.
+    def _get_fieldnames_from_schema_or_rows(self, rows: list[dict[str, Any]]) -> list[str]:
+        """Get fieldnames from schema or cumulative row keys.
 
         Field selection depends on schema mode:
         - fixed: Only declared fields (extras rejected)
-        - flexible: Declared fields first, then extras from row
-        - observed: All fields from row (infer and lock)
+        - flexible: Declared fields first, then extras seen across rows
+        - observed: All fields seen across rows
         """
+        ordered_keys: list[str] = []
+        seen_keys: set[str] = set()
+        for row in rows:
+            for key in row:
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    ordered_keys.append(key)
+
         if self._schema_config.is_observed:
-            # Observed mode: infer all fields from row keys
-            return list(row.keys())
+            # Observed mode: infer all fields from all row keys in first-seen order.
+            return ordered_keys
         elif self._schema_config.fields:
             # Explicit schema: start with declared field names in schema order
             declared_fields = [field_def.name for field_def in self._schema_config.fields]
             declared_set = set(declared_fields)
 
             if self._schema_config.mode == "flexible":
-                # Flexible mode: declared fields first, then extras from row
-                extras = [key for key in row if key not in declared_set]
+                # Flexible mode: declared fields first, then extras from all rows.
+                extras = [key for key in ordered_keys if key not in declared_set]
                 return declared_fields + extras
             else:
                 # Fixed mode: only declared fields
                 return declared_fields
         else:
-            # Fallback (shouldn't happen with valid config): use row keys
-            return list(row.keys())
+            # Fallback (shouldn't happen with valid config): use all seen keys.
+            return ordered_keys
 
-    def _get_field_names_and_display(self, row: dict[str, Any]) -> tuple[list[str], list[str]]:
+    def _get_field_names_and_display(self, rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
         """Get data field names and display names for CSV output."""
-        data_fields = self._get_fieldnames_from_schema_or_row(row)
+        data_fields = self._get_fieldnames_from_schema_or_rows(rows)
 
         display_map = self._get_effective_display_headers()
         if display_map is None:
@@ -436,7 +444,7 @@ class AzureBlobSink(BaseSink):
         """Serialize rows to CSV bytes."""
         output = io.StringIO()
 
-        data_fields, display_fields = self._get_field_names_and_display(rows[0])
+        data_fields, display_fields = self._get_field_names_and_display(rows)
         writer = csv.DictWriter(
             output,
             fieldnames=data_fields,
