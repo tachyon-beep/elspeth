@@ -1,8 +1,8 @@
 # Bug Report: TransformErrorReason Contract Omits Fields Emitted by Contract-Violation Helpers
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Pre-Fix Verification (2026-02-11)
 
 - Classification: **Still open**
 - Verification summary:
@@ -12,6 +12,23 @@
   - `src/elspeth/contracts/errors.py:251`
   - `src/elspeth/contracts/errors.py:607`
   - `src/elspeth/contracts/errors.py:769`
+
+## Resolution (2026-02-13)
+
+- Status: **FIXED**
+- Changes applied:
+  - Added missing optional fields to `TransformErrorReason` for contract-violation
+    helper payloads: `violation_type`, `original_field`, `expected_type`,
+    `actual_value`, `count`, and `violations`.
+  - Updated `TransformErrorReason` docstring to document contract-violation context.
+  - Added an alignment test ensuring all keys emitted by contract-violation
+    helpers are declared in `TransformErrorReason`.
+- Files changed:
+  - `src/elspeth/contracts/errors.py`
+  - `tests/unit/contracts/test_contract_violation_error.py`
+- Verification:
+  - `./.venv/bin/python -m pytest tests/unit/contracts/test_contract_violation_error.py -q` (26 passed)
+  - `./.venv/bin/python -m ruff check src/elspeth/contracts/errors.py tests/unit/contracts/test_contract_violation_error.py` (passed)
 
 ## Summary
 

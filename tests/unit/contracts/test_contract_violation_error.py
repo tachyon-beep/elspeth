@@ -323,3 +323,50 @@ class TestViolationsToErrorReason:
         result = violations_to_error_reason(violations)
         assert result["count"] == 3
         assert len(result["violations"]) == 3
+
+
+class TestTransformErrorReasonAlignment:
+    """Ensure helper-emitted keys are declared in TransformErrorReason."""
+
+    def test_contract_violation_helper_keys_are_declared(self) -> None:
+        """All keys emitted by violation helpers must exist in TransformErrorReason."""
+        from elspeth.contracts.errors import (
+            ContractViolation,
+            MissingFieldViolation,
+            TransformErrorReason,
+            TypeMismatchViolation,
+            violations_to_error_reason,
+        )
+
+        declared_keys = set(TransformErrorReason.__annotations__)
+
+        reasons = [
+            ContractViolation(normalized_name="id", original_name="ID").to_error_reason(),
+            TypeMismatchViolation(
+                normalized_name="amount",
+                original_name="Amount",
+                expected_type=int,
+                actual_type=str,
+                actual_value="bad",
+            ).to_error_reason(),
+            violations_to_error_reason(
+                [
+                    MissingFieldViolation(normalized_name="id", original_name="ID"),
+                    TypeMismatchViolation(
+                        normalized_name="amount",
+                        original_name="Amount",
+                        expected_type=int,
+                        actual_type=str,
+                        actual_value="bad",
+                    ),
+                ]
+            ),
+        ]
+
+        emitted_keys = set().union(*(set(reason) for reason in reasons))
+        # multiple_contract_violations embeds per-violation reasons under "violations"
+        nested_reasons = reasons[-1]["violations"]
+        emitted_keys.update(set().union(*(set(reason) for reason in nested_reasons)))
+
+        missing_keys = emitted_keys - declared_keys
+        assert missing_keys == set(), f"Undeclared TransformErrorReason keys: {sorted(missing_keys)}"

@@ -289,7 +289,16 @@ class TransformErrorReason(TypedDict):
     Type validation context:
         expected: Expected type or value
         actual: Actual type or value received
+        expected_type: Expected Python type name for contract violations
+        actual_type: Actual Python type name for contract violations
+        actual_value: repr() of offending value for contract violations
         value: The actual value (truncated for audit)
+
+    Contract violation context:
+        violation_type: Specific ContractViolation subclass name
+        original_field: Original field name before normalization
+        count: Number of violations (multiple_contract_violations only)
+        violations: Per-violation reason entries (multiple_contract_violations only)
 
     Rate limiting/timeout context:
         elapsed_seconds: Time elapsed before timeout
@@ -365,8 +374,16 @@ class TransformErrorReason(TypedDict):
     # Type validation context
     expected: NotRequired[str]
     actual: NotRequired[str]
+    expected_type: NotRequired[str]
     actual_type: NotRequired[str]
+    actual_value: NotRequired[str]
     value: NotRequired[str]
+
+    # Contract violation context
+    violation_type: NotRequired[str]
+    original_field: NotRequired[str]
+    count: NotRequired[int]
+    violations: NotRequired[list[dict[str, Any]]]
 
     # Rate limiting/timeout context
     elapsed_seconds: NotRequired[float]
