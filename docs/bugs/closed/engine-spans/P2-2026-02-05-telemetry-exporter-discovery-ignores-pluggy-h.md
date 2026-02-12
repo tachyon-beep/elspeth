@@ -1,6 +1,19 @@
 # Bug Report: Telemetry Exporter Discovery Ignores Pluggy Hooks
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-12)
+
+- Classification: **Fixed and verified**
+- Resolution summary:
+  - Replaced static exporter registry lookup with pluggy-based discovery in `src/elspeth/telemetry/factory.py`.
+  - Added discovery-time duplicate exporter name detection and clear `TelemetryExporterError` messages.
+  - Added support for caller-provided telemetry exporter plugins via `create_telemetry_manager(..., exporter_plugins=...)`.
+  - Updated factory tests to validate hook discovery behavior, duplicate detection, and invalid hook registration handling.
+- Verification:
+  - `.venv/bin/python -m pytest tests/unit/telemetry/test_factory.py -q` (29 passed)
+  - `.venv/bin/python -m pytest tests/unit/telemetry -q` (390 passed, 1 skipped)
+  - `.venv/bin/ruff check src/elspeth/telemetry/factory.py tests/unit/telemetry/test_factory.py` (passed)
 
 ## Status Update (2026-02-11)
 
