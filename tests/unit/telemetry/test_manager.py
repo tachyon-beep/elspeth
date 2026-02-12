@@ -564,6 +564,40 @@ class TestDropBackpressure:
         q.task_done()
         assert dummy._events_dropped == 2
 
+    def test_drop_mode_balances_unfinished_tasks_when_sentinel_requeue_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Evicted sentinel must still be task_done-balanced if requeue fails."""
+
+        incoming_event = _row_event()
+
+        class DummyManager:
+            _LOG_INTERVAL = 100
+
+            def __init__(self, q: queue.Queue) -> None:
+                self._queue = q
+                self._dropped_lock = threading.Lock()
+                self._events_dropped = 0
+                self._last_logged_drop_count = 0
+
+            def _log_drops_if_needed(self) -> None:
+                if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
+                    self._last_logged_drop_count = self._events_dropped
+
+        q: queue.Queue = queue.Queue(maxsize=1)
+        dummy = DummyManager(q)
+        q.put_nowait(None)
+
+        def _raise_requeue_failure(_manager: object) -> None:
+            raise RuntimeError("sentinel requeue failure")
+
+        monkeypatch.setattr(TelemetryManager, "_requeue_shutdown_sentinel_or_raise", _raise_requeue_failure)
+
+        with pytest.raises(RuntimeError, match="sentinel requeue failure"):
+            TelemetryManager._drop_oldest_and_enqueue_newest(dummy, incoming_event)
+
+        # Critical regression guard: queue task accounting must remain balanced.
+        assert q.unfinished_tasks == 0
+        q.join()
+
 
 # =============================================================================
 # Exporter Failure Isolation

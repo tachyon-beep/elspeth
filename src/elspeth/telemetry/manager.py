@@ -306,21 +306,23 @@ class TelemetryManager:
                 evicted = None
                 had_evicted = False
 
-            if had_evicted and evicted is None:
-                # Preserve shutdown sentinel if we raced with close().
-                # Must never be silently lost under concurrent producers.
-                TelemetryManager._requeue_shutdown_sentinel_or_raise(self)
-            elif had_evicted:
-                self._events_dropped += 1
-                self._log_drops_if_needed()
-
             try:
-                self._queue.put_nowait(event)
-            except queue.Full:
-                # Race: queue refilled before we could enqueue the newest.
-                # Count the incoming event as dropped.
-                self._events_dropped += 1
-                self._log_drops_if_needed()
+                if had_evicted and evicted is None:
+                    # Preserve shutdown sentinel if we raced with close().
+                    # Must never be silently lost under concurrent producers.
+                    TelemetryManager._requeue_shutdown_sentinel_or_raise(self)
+                elif had_evicted:
+                    self._events_dropped += 1
+                    self._log_drops_if_needed()
+
+                try:
+                    self._queue.put_nowait(event)
+                except queue.Full:
+                    # Race: queue refilled before we could enqueue the newest.
+                    # Count the incoming event as dropped.
+                    self._events_dropped += 1
+                    self._log_drops_if_needed()
+                    return
             finally:
                 if had_evicted:
                     # Decrement evicted unfinished task AFTER enqueue attempt.

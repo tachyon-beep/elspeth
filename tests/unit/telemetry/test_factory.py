@@ -332,6 +332,28 @@ class TestHookDiscovery:
         with pytest.raises(TelemetryExporterError, match="Invalid telemetry exporter plugin"):
             create_telemetry_manager(config, exporter_plugins=(InvalidPlugin(),))
 
+    def test_hook_returning_none_raises_actionable_error(self):
+        class NoneReturningPlugin:
+            @hookimpl
+            def elspeth_get_exporters(self):  # type: ignore[no-untyped-def]
+                return None
+
+        config = _make_config(enabled=True, exporter_configs=())
+
+        with pytest.raises(TelemetryExporterError, match="returned None"):
+            create_telemetry_manager(config, exporter_plugins=(NoneReturningPlugin(),))
+
+    def test_hook_returning_non_iterable_raises_actionable_error(self):
+        class NonIterablePlugin:
+            @hookimpl
+            def elspeth_get_exporters(self):  # type: ignore[no-untyped-def]
+                return 42
+
+        config = _make_config(enabled=True, exporter_configs=())
+
+        with pytest.raises(TelemetryExporterError, match="returned int"):
+            create_telemetry_manager(config, exporter_plugins=(NonIterablePlugin(),))
+
 
 class TestUnknownExporter:
     def test_unknown_exporter_raises_error(self):

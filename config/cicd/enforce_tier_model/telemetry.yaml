@@ -51,10 +51,10 @@ allow_hits:
   reason: Queue overflow handling at telemetry backpressure boundary
   safety: Queue.Empty indicates race during overflow handling; safe fallback keeps newest event path explicit
   expires: '2026-05-15'
-- key: telemetry/manager.py:R6:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=20e1f9a02bd09690
+- key: telemetry/manager.py:R6:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=fe59cf071879bd1c
   owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
+  reason: DROP mode intentionally counts and discards newest event when replacement enqueue races with producers
+  safety: Exception path records drop metrics, logs aggregate drops, and keeps queue task accounting balanced via finally task_done
   expires: '2026-05-15'
 - key: telemetry/manager.py:R6:TelemetryManager:_requeue_shutdown_sentinel_or_raise:fp=6557d5ad1d4d8bc4
   owner: architecture

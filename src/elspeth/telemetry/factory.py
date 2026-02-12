@@ -120,8 +120,49 @@ def _discover_exporter_registry(
             ) from e
 
     registry: dict[str, type[ExporterProtocol]] = {}
-    for exporters in plugin_manager.hook.elspeth_get_exporters():
-        for exporter_class in exporters:
+    hook_impls = plugin_manager.hook.elspeth_get_exporters.get_hookimpls()
+    for hook_impl in hook_impls:
+        hook_plugin: Any = hook_impl.plugin
+        plugin_name = type(hook_plugin).__name__
+        try:
+            hook_fn = hook_plugin.elspeth_get_exporters
+        except AttributeError as e:
+            raise TelemetryExporterError(
+                "telemetry_plugins",
+                f"Telemetry exporter plugin {plugin_name} is missing callable elspeth_get_exporters hook",
+            ) from e
+        if not callable(hook_fn):
+            raise TelemetryExporterError(
+                "telemetry_plugins",
+                f"Telemetry exporter plugin {plugin_name} is missing callable elspeth_get_exporters hook",
+            )
+        try:
+            exporters = hook_fn()
+        except Exception as e:
+            raise TelemetryExporterError(
+                "telemetry_plugins",
+                f"Telemetry exporter plugin {plugin_name} failed in elspeth_get_exporters: {e}",
+            ) from e
+
+        if exporters is None:
+            raise TelemetryExporterError(
+                "telemetry_plugins",
+                f"elspeth_get_exporters in plugin {plugin_name} returned None; expected iterable of exporter classes",
+            )
+        if type(exporters) in (str, bytes):
+            raise TelemetryExporterError(
+                "telemetry_plugins",
+                f"elspeth_get_exporters in plugin {plugin_name} returned {type(exporters).__name__}; expected iterable of exporter classes",
+            )
+        try:
+            exporter_iter = iter(exporters)
+        except TypeError as e:
+            raise TelemetryExporterError(
+                "telemetry_plugins",
+                f"elspeth_get_exporters in plugin {plugin_name} returned {type(exporters).__name__}; expected iterable of exporter classes",
+            ) from e
+
+        for exporter_class in exporter_iter:
             exporter_name = _resolve_exporter_name(exporter_class)
             if exporter_name in registry:
                 existing = registry[exporter_name].__name__
