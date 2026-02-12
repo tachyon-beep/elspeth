@@ -120,6 +120,51 @@ class TestOTLPExporterConfiguration:
                 exporter.configure({"endpoint": "http://localhost:4317", "batch_size": -5})
             assert "batch_size" in str(exc_info.value)
 
+    def test_non_string_endpoint_raises(self) -> None:
+        """Non-string endpoint raises TelemetryExporterError."""
+        exporter = OTLPExporter()
+        with patch(OTLP_EXPORTER_PATCH) as mock_exporter_class:
+            mock_exporter_class.return_value = MagicMock()
+            with pytest.raises(TelemetryExporterError) as exc_info:
+                exporter.configure({"endpoint": 4317})
+            assert "endpoint" in str(exc_info.value)
+
+    def test_non_dict_headers_raises(self) -> None:
+        """Non-dict headers raises TelemetryExporterError."""
+        exporter = OTLPExporter()
+        with patch(OTLP_EXPORTER_PATCH) as mock_exporter_class:
+            mock_exporter_class.return_value = MagicMock()
+            with pytest.raises(TelemetryExporterError) as exc_info:
+                exporter.configure({"endpoint": "http://localhost:4317", "headers": "Authorization: token"})
+            assert "headers" in str(exc_info.value)
+
+    def test_non_string_header_key_raises(self) -> None:
+        """Non-string header key raises TelemetryExporterError."""
+        exporter = OTLPExporter()
+        with patch(OTLP_EXPORTER_PATCH) as mock_exporter_class:
+            mock_exporter_class.return_value = MagicMock()
+            with pytest.raises(TelemetryExporterError) as exc_info:
+                exporter.configure({"endpoint": "http://localhost:4317", "headers": {1: "token"}})
+            assert "headers" in str(exc_info.value)
+
+    def test_non_string_header_value_raises(self) -> None:
+        """Non-string header value raises TelemetryExporterError."""
+        exporter = OTLPExporter()
+        with patch(OTLP_EXPORTER_PATCH) as mock_exporter_class:
+            mock_exporter_class.return_value = MagicMock()
+            with pytest.raises(TelemetryExporterError) as exc_info:
+                exporter.configure({"endpoint": "http://localhost:4317", "headers": {"Authorization": 123}})
+            assert "headers[Authorization]" in str(exc_info.value)
+
+    def test_non_int_batch_size_raises(self) -> None:
+        """Non-integer batch_size raises TelemetryExporterError."""
+        exporter = OTLPExporter()
+        with patch(OTLP_EXPORTER_PATCH) as mock_exporter_class:
+            mock_exporter_class.return_value = MagicMock()
+            with pytest.raises(TelemetryExporterError) as exc_info:
+                exporter.configure({"endpoint": "http://localhost:4317", "batch_size": "100"})
+            assert "batch_size" in str(exc_info.value)
+
     def test_valid_configuration(self) -> None:
         """Valid configuration initializes exporter."""
         exporter = OTLPExporter()

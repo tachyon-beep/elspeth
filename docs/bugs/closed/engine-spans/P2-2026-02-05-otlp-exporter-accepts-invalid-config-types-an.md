@@ -1,13 +1,13 @@
 # Bug Report: OTLP exporter accepts invalid config types and raises non-TelemetryExporterError
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Closed**
 - Verification summary:
-  - `OTLPExporter.configure()` still assigns `endpoint`, `headers`, and `batch_size` without explicit type validation.
-  - Invalid types can still flow into operations like `batch_size < 1` and `headers.items()`, yielding non-contract exceptions.
+  - `OTLPExporter.configure()` now validates `endpoint`, `headers`, header key/value types, and `batch_size` types before use.
+  - Invalid config types now consistently raise `TelemetryExporterError` with actionable messages.
 - Current evidence:
   - `src/elspeth/telemetry/exporters/otlp.py:125`
   - `src/elspeth/telemetry/exporters/otlp.py:126`
@@ -107,3 +107,33 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `src/elspeth/telemetry/protocols.py`
+
+## Resolution (2026-02-12)
+
+**Status: FIXED**
+
+### Changes Made
+
+1. Added explicit type validation in `src/elspeth/telemetry/exporters/otlp.py`:
+   - `endpoint` must be `str`
+   - `headers` must be `dict[str, str]` or `null`
+   - `batch_size` must be `int` and `>= 1`
+2. Normalized validated values before initializing `OTLPSpanExporter`.
+3. Added regression tests in `tests/unit/telemetry/exporters/test_otlp.py` for invalid config types:
+   - non-string `endpoint`
+   - non-dict `headers`
+   - non-string header key
+   - non-string header value
+   - non-int `batch_size`
+
+### Verification
+
+- `.venv/bin/python -m pytest tests/unit/telemetry/exporters/test_otlp.py -q`
+- `.venv/bin/python -m pytest tests/unit/telemetry/exporters -q`
+- `.venv/bin/python -m ruff check src/elspeth/telemetry/exporters/otlp.py tests/unit/telemetry/exporters/test_otlp.py`
+
+All passed.
+
+### Commit
+
+- Commit: this session's fix commit
