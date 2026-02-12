@@ -5,6 +5,7 @@ import pytest
 from elspeth.contracts import CallStatus, CallType, FrameworkBugError, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape.schema import operations_table
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
@@ -288,6 +289,22 @@ class TestCompleteOperation:
         assert op.status == "completed"
         assert op.completed_at is not None
         assert op.duration_ms == 150
+
+    def test_raises_on_invalid_status_from_db(self):
+        _db, recorder, _state_id, op_id = _setup_with_operation()
+        recorder._ops.execute_update(operations_table.update().where(operations_table.c.operation_id == op_id).values(status="corrupt"))
+
+        with pytest.raises(ValueError, match="status"):
+            recorder.get_operation(op_id)
+
+    def test_raises_on_invalid_operation_type_from_db(self):
+        _db, recorder, _state_id, op_id = _setup_with_operation()
+        recorder._ops.execute_update(
+            operations_table.update().where(operations_table.c.operation_id == op_id).values(operation_type="corrupt")
+        )
+
+        with pytest.raises(ValueError, match="operation_type"):
+            recorder.get_operation(op_id)
 
     def test_completes_with_failure(self):
         _db, recorder, _state_id, op_id = _setup_with_operation()

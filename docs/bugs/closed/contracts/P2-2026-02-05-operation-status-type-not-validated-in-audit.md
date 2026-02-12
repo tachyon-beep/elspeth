@@ -1,6 +1,15 @@
 # Bug Report: Operation Status/Type Not Validated in Audit Contract
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-12)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - Added runtime validation in `Operation.__post_init__` for `operation_type` and `status` in `src/elspeth/contracts/audit.py`.
+  - Added contract tests for invalid Operation literals in `tests/unit/contracts/test_audit.py`.
+  - Added recorder load-path tests to verify invalid DB values fail in `tests/unit/core/landscape/test_call_recording.py`.
+
 
 ## Status Update (2026-02-11)
 
