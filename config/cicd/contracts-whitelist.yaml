@@ -472,7 +472,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfigMixin.build_response_format:return"
 
   # Base multi-query transform (shared row processing for Azure/OpenRouter)
-  - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._process_single_row_internal:row"
+  - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._process_single_row_internal:row_for_queries"
+  - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._process_single_row_internal:row_data"
   - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._execute_queries_parallel:row"
   - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._execute_queries_sequential:row"
   - "src/elspeth/plugins/llm/base_multi_query.py:BaseMultiQueryTransform._process_single_query:row"

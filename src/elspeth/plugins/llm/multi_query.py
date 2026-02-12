@@ -8,6 +8,7 @@ from typing import Any, Self
 
 from pydantic import Field, field_validator, model_validator
 
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.config_base import PluginConfig
 from elspeth.plugins.llm.azure import AzureOpenAIConfig
 
@@ -93,13 +94,13 @@ class QuerySpec:
     case_study_data: dict[str, Any]
     max_tokens: int | None = None  # Per-query override for max_tokens
 
-    def build_template_context(self, row: dict[str, Any]) -> dict[str, Any]:
+    def build_template_context(self, row: PipelineRow | dict[str, Any]) -> dict[str, Any]:
         """Build template context for this query.
 
         Maps input_fields to input_1, input_2, etc. and injects criterion and case_study data.
 
         Args:
-            row: Full row data
+            row: Full row data (dict or PipelineRow)
 
         Returns:
             Context dict with input_N, criterion, case_study, and row

@@ -155,7 +155,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
 
     def _process_single_query(
         self,
-        row: dict[str, Any],
+        row: PipelineRow | dict[str, Any],
         spec: QuerySpec,
         state_id: str,
         token_id: str,
