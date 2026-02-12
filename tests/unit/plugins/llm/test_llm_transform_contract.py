@@ -254,9 +254,7 @@ class TestLLMTransformContract:
         """LLM output contract includes guaranteed _usage even in FIXED mode."""
         fixed_contract = SchemaContract(
             mode="FIXED",
-            fields=(
-                make_field("text", str, original_name="text", required=True, source="declared"),
-            ),
+            fields=(make_field("text", str, original_name="text", required=True, source="declared"),),
             locked=True,
         )
         pipeline_row = make_row({"text": "hello"}, contract=fixed_contract)
