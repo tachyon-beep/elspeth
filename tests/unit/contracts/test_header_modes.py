@@ -92,6 +92,17 @@ class TestResolveHeaders:
 
         assert headers == {"amount_usd": "'Amount USD'", "customer_id": "Customer ID"}
 
+    def test_original_mode_raises_on_contract_lookup_miss(self, contract: SchemaContract) -> None:
+        """ORIGINAL mode should crash on contract corruption (Tier 1 data)."""
+        contract._by_normalized.pop("customer_id")
+
+        with pytest.raises(KeyError, match="customer_id"):
+            resolve_headers(
+                contract=contract,
+                mode=HeaderMode.ORIGINAL,
+                custom_mapping=None,
+            )
+
     def test_custom_mode(self, contract: SchemaContract) -> None:
         """CUSTOM mode uses provided mapping."""
         custom = {"amount_usd": "AMOUNT", "customer_id": "CUSTOMER"}
