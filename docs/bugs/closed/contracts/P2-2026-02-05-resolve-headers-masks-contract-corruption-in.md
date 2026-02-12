@@ -1,17 +1,16 @@
 # Bug Report: resolve_headers masks contract corruption in ORIGINAL mode
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - ORIGINAL header mode still falls back to normalized field names when `contract.get_field()` returns `None`.
-  - `SchemaContract.get_field()` still returns `None` on lookup miss via `.get(...)`, enabling silent fallback behavior.
+  - `resolve_headers()` now raises `KeyError` in ORIGINAL mode when a contract field lookup misses.
+  - Regression coverage was added for contract index corruption in header resolution.
 - Current evidence:
-  - `src/elspeth/contracts/header_modes.py:94`
   - `src/elspeth/contracts/header_modes.py:97`
-  - `src/elspeth/contracts/schema_contract.py:137`
+  - `tests/unit/contracts/test_header_modes.py:95`
 
 ## Summary
 
@@ -105,3 +104,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md (Tier 1 trust model; defensive programming prohibition)
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `6a42515e`
+- Fix summary: Removed ORIGINAL-mode fallback to normalized header names on missing contract lookup and replaced with fail-fast `KeyError`.
+- Test coverage: Added `test_original_mode_raises_on_contract_lookup_miss` in `tests/unit/contracts/test_header_modes.py`.
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.

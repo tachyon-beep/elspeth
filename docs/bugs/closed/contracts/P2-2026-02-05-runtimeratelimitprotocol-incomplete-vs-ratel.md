@@ -1,17 +1,17 @@
 # Bug Report: RuntimeRateLimitProtocol Incomplete vs. RateLimitRegistry Usage
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - `RuntimeRateLimitProtocol` still exposes only `enabled` and `default_requests_per_minute`.
-  - `RateLimitRegistry` still uses `get_service_config(...)` and `persistence_path`, which are absent from the protocol contract.
+  - `RuntimeRateLimitProtocol` now includes `persistence_path` and `get_service_config(...)`.
+  - `RateLimitRegistry` now accepts `RuntimeRateLimitProtocol` directly, aligning typing with runtime usage.
 - Current evidence:
-  - `src/elspeth/contracts/config/protocols.py:81`
-  - `src/elspeth/contracts/config/protocols.py:97`
-  - `src/elspeth/core/rate_limit/registry.py:95`
+  - `src/elspeth/contracts/config/protocols.py:91`
+  - `src/elspeth/core/rate_limit/registry.py:73`
+  - `tests/unit/contracts/config/test_protocols.py:350`
 
 ## Summary
 
@@ -105,3 +105,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `src/elspeth/contracts/config/protocols.py`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `119bd537`
+- Fix summary: Expanded `RuntimeRateLimitProtocol` to match `RateLimitRegistry` requirements and switched registry constructor typing to protocol-based contract.
+- Test coverage: Added structural regression for legacy two-field rate-limit shape and updated protocol completeness assertions in `tests/unit/contracts/config/test_protocols.py`.
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
