@@ -24,6 +24,7 @@ Thread Safety:
     - health_metrics reads are approximately consistent
 """
 
+import contextlib
 import queue
 import threading
 from typing import TypedDict
@@ -282,9 +283,7 @@ class TelemetryManager:
             try:
                 self._queue.put_nowait(event)
             except queue.Full:
-                with self._dropped_lock:
-                    self._events_dropped += 1
-                    self._log_drops_if_needed()
+                self._drop_oldest_and_enqueue_newest(event)
         else:  # BLOCK (default)
             # Timeout prevents permanent deadlock if export thread dies
             try:
@@ -294,6 +293,36 @@ class TelemetryManager:
                 logger.error("BLOCK mode put() timed out - export thread may be stuck")
                 with self._dropped_lock:
                     self._events_dropped += 1
+
+    def _drop_oldest_and_enqueue_newest(self, event: TelemetryEvent) -> None:
+        """DROP mode overflow strategy: evict oldest queued event, keep newest.
+
+        Must maintain queue unfinished-task accounting when evicting an item.
+        """
+        with self._dropped_lock:
+            try:
+                evicted = self._queue.get_nowait()
+            except queue.Empty:
+                evicted = None
+            else:
+                # We removed an item without the export thread processing it.
+                # Adjust unfinished-task count to keep queue.join() correct.
+                self._queue.task_done()
+                if evicted is None:
+                    # Preserve shutdown sentinel if we raced with close().
+                    with contextlib.suppress(queue.Full):
+                        self._queue.put_nowait(None)
+                else:
+                    self._events_dropped += 1
+                    self._log_drops_if_needed()
+
+            try:
+                self._queue.put_nowait(event)
+            except queue.Full:
+                # Race: queue refilled before we could enqueue the newest.
+                # Count the incoming event as dropped.
+                self._events_dropped += 1
+                self._log_drops_if_needed()
 
     def _log_drops_if_needed(self) -> None:
         """Log aggregate drop message if threshold reached.
