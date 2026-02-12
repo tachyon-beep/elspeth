@@ -161,6 +161,30 @@ Analyze these entries:
         t2 = PromptTemplate("{{ lookup.categories }}", lookup_data=data)
         assert t1.lookup_hash == t2.lookup_hash
 
+    def test_lookup_top_level_mutation_after_init_does_not_change_render_or_hash(self) -> None:
+        """Lookup is snapshotted at init so external mutation cannot desync audit hashes."""
+        lookup = {"k": "v1"}
+        template = PromptTemplate("Value: {{ lookup.k }}", lookup_data=lookup)
+        initial_hash = template.lookup_hash
+
+        lookup["k"] = "v2"
+        result = template.render_with_metadata({"row_id": "r1"})
+
+        assert result.prompt == "Value: v1"
+        assert result.lookup_hash == initial_hash
+
+    def test_lookup_nested_mutation_after_init_does_not_change_render_or_hash(self) -> None:
+        """Nested lookup structures are snapshotted at init for audit consistency."""
+        lookup = {"meta": {"tone": "formal"}}
+        template = PromptTemplate("Tone: {{ lookup.meta.tone }}", lookup_data=lookup)
+        initial_hash = template.lookup_hash
+
+        lookup["meta"]["tone"] = "casual"
+        result = template.render_with_metadata({"row_id": "r1"})
+
+        assert result.prompt == "Tone: formal"
+        assert result.lookup_hash == initial_hash
+
     def test_no_lookup_has_none_hash(self) -> None:
         """Template without lookup data has None lookup_hash."""
         template = PromptTemplate("Hello, {{ row.name }}!")

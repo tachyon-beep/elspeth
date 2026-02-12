@@ -1,12 +1,14 @@
 # Bug Report: Lookup Data Mutability Produces Stale `lookup_hash` (Audit Mismatch)
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Fixed**
+- Resolution summary:
+  - `PromptTemplate` now snapshots `lookup_data` at initialization before storing and hashing it.
+  - External mutations to caller-owned lookup dictionaries (including nested structures) no longer change rendered lookup values.
+  - Regression coverage added in unit and property tests to prevent reintroduction.
 
 
 ## Summary

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -103,9 +104,10 @@ class PromptTemplate:
         # Lookup data for two-dimensional lookups
         # Note: We distinguish None (no lookup configured) from {} (empty lookup).
         # Both are valid, but they're semantically different for audit purposes.
-        self._lookup_data = lookup_data if lookup_data is not None else {}
+        lookup_snapshot = deepcopy(lookup_data) if lookup_data is not None else None
+        self._lookup_data = lookup_snapshot if lookup_snapshot is not None else {}
         self._lookup_source = lookup_source
-        self._lookup_hash = _sha256(canonical_json(lookup_data)) if lookup_data is not None else None
+        self._lookup_hash = _sha256(canonical_json(lookup_snapshot)) if lookup_snapshot is not None else None
 
         # Use sandboxed environment for security
         self._env = SandboxedEnvironment(
