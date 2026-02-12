@@ -47,6 +47,7 @@ from elspeth.engine.processor import (
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.clients.llm import LLMClientError
+from elspeth.plugins.pooling import CapacityError
 from elspeth.plugins.protocols import TransformProtocol
 from elspeth.testing import make_contract, make_row, make_source_row, make_token_info
 
@@ -1684,6 +1685,28 @@ class TestExecuteTransformNoRetry:
         assert result.status == "error"
         assert error_sink == "discard"
 
+    def test_capacity_error_with_on_error_returns_row_scoped_error(self) -> None:
+        """CapacityError with no retry manager returns retryable row error."""
+        _, _, processor = self._setup()
+        transform = _make_mock_transform(node_id="t1", on_error="discard")
+        token = make_token_info(data={"value": 42})
+        ctx = PluginContext(run_id="test-run", config={})
+
+        with patch.object(
+            processor._transform_executor,
+            "execute_transform",
+            side_effect=CapacityError(429, "rate limited"),
+        ):
+            result, _out_token, error_sink = processor._execute_transform_with_retry(
+                transform=transform,
+                token=token,
+                ctx=ctx,
+            )
+
+        assert result.status == "error"
+        assert result.retryable is True
+        assert error_sink == "discard"
+
     def test_transient_error_on_error_is_always_set(self) -> None:
         """on_error is now required at config time — None no longer reaches runtime.
 
@@ -1834,6 +1857,7 @@ class TestExecuteTransformWithRetry:
         assert is_retryable(LLMClientError("content policy", retryable=False)) is False
         assert is_retryable(ConnectionError("conn reset")) is True
         assert is_retryable(TimeoutError("timeout")) is True
+        assert is_retryable(CapacityError(429, "rate limited")) is True
         assert is_retryable(AttributeError("bug")) is False
         assert is_retryable(TypeError("bug")) is False
 

@@ -1,12 +1,12 @@
 # Bug Report: AzureBlobSink Overwrites Prior Batches on Repeated write() Calls
 
-**Status: OPEN**
+**Status: FIXED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+  - Re-verified against current code on 2026-02-12; repeated `write()` calls now upload cumulative content and no longer drop earlier batches.
 
 
 ## Summary
@@ -98,3 +98,24 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`, `src/elspeth/engine/executors.py`, `src/elspeth/engine/orchestrator/core.py`
+
+## Resolution (2026-02-12)
+
+- Fixed in commit: `dbec9280` (`Fix AzureBlobSink multi-batch overwrite data loss`)
+- Status: CLOSED
+- Resolution summary:
+  - `AzureBlobSink` now buffers rows across `write()` calls and serializes cumulative output on each upload.
+  - Blob path templating is frozen per sink instance so repeated writes update one blob path instead of drifting paths when templates include timestamps.
+  - `overwrite=False` is preserved for first upload (existing-blob protection), then subsequent in-run rewrites use overwrite to update the cumulative blob safely.
+- Evidence:
+  - `src/elspeth/plugins/azure/blob_sink.py:315` adds cumulative row buffering.
+  - `src/elspeth/plugins/azure/blob_sink.py:366` adds stable per-instance path resolution.
+  - `src/elspeth/plugins/azure/blob_sink.py:569` applies first-write vs subsequent-write overwrite semantics.
+  - `tests/unit/plugins/transforms/azure/test_blob_sink.py:291` validates CSV multi-write accumulation.
+  - `tests/unit/plugins/transforms/azure/test_blob_sink.py:360` validates JSON multi-write accumulation.
+  - `tests/unit/plugins/transforms/azure/test_blob_sink.py:431` validates JSONL multi-write accumulation.
+  - `tests/unit/plugins/transforms/azure/test_blob_sink.py:493` validates timestamp path freezing across writes.
+  - `tests/unit/plugins/transforms/azure/test_blob_sink.py:570` validates `overwrite=False` first-write guard and second-write rewrite behavior.
+- Validation run:
+  - `./.venv/bin/python -m pytest tests/unit/plugins/transforms/azure/test_blob_sink.py -q` (55 passed)
+  - `./.venv/bin/python -m pytest tests/unit/plugins/sinks/test_sink_protocol_compliance.py -q` (37 passed)

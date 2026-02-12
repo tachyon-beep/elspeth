@@ -156,14 +156,14 @@ allow_hits:
   reason: JSON Schema field access - external data at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=4d50cc10e8cea6d5
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=442c13d215077904
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=7b9aada179d30aca
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=207511cf2bd8b73e
   owner: architecture
-  reason: Retry boundary - ConnectionError/TimeoutError/OSError type check for retryable classification
+  reason: Retry boundary - ConnectionError/TimeoutError/OSError/CapacityError type check for retryable classification
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
 - key: engine/dag_navigator.py:R5:DAGNavigator:resolve_jump_target_sink:fp=6b717dfbcce9a3ae
@@ -176,12 +176,12 @@ allow_hits:
   reason: Protocol dispatch to detect transforms with on_success during jump-target sink resolution
   safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
   expires: '2026-03-11'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=a3519ef1a40e4c56
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d9917e18ce071880
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=36db507326d3c53f
+- key: engine/processor.py:R5:RowProcessor:_drain_work_queue:fp=d3d41ce5136954cb
   owner: architecture
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
@@ -231,12 +231,12 @@ allow_hits:
   reason: Optional edge_id lookup - edge map may not have all node combinations during routing
   safety: Falls back to generating edge_id when not in prebuilt map
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=f09f1a84533309b2
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=e5d39bf6e7d7aefe
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings
   expires: '2026-05-13'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=0cf05b64b2027cef
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=d060a37bc6e4c0e7
   owner: architecture
   reason: Protocol dispatch - isinstance for plugin type routing in unified node traversal
   safety: isinstance for NodeType discrimination - TransformProtocol vs GateSettings

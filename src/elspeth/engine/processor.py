@@ -48,6 +48,7 @@ from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.clients.llm import LLMClientError
+from elspeth.plugins.pooling import CapacityError
 from elspeth.plugins.protocols import BatchTransformProtocol, TransformProtocol
 
 # Iteration guard to prevent infinite loops from bugs
@@ -1027,7 +1028,7 @@ class RowProcessor:
                     )
                 # Non-retryable errors re-raise (already handled by transform)
                 raise
-            except (ConnectionError, TimeoutError, OSError) as e:
+            except (ConnectionError, TimeoutError, OSError, CapacityError) as e:
                 # Other retryable errors - convert to error result
                 #
                 # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
@@ -1094,7 +1095,7 @@ class RowProcessor:
             # - ContentPolicyError, ContextLengthError: retryable=False
             if isinstance(e, LLMClientError):
                 return e.retryable
-            return isinstance(e, ConnectionError | TimeoutError | OSError)
+            return isinstance(e, ConnectionError | TimeoutError | OSError | CapacityError)
 
         return self._retry_manager.execute_with_retry(
             operation=execute_attempt,

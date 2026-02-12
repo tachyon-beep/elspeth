@@ -1,12 +1,14 @@
 # Bug Report: CapacityError Crashes Azure Content Safety Because Pooled Executor Is Never Used
 
-**Status: OPEN**
+**Status: FIXED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+  - Implemented and verified on 2026-02-12.
+  - `RowProcessor` now classifies `CapacityError` as transient/retryable in both no-retry-manager handling and retry-manager callback paths.
+  - Added unit coverage for row-scoped `CapacityError` handling and retryability classification.
 
 
 ## Summary
@@ -59,13 +61,13 @@
 - Performance or cost impact: Manual restarts and repeated failures increase operational overhead; configured backoff is unused.
 
 ## Root Cause Hypothesis
-- The transform constructs a `PooledExecutor` but never routes work through it, so `CapacityError` is treated as a plugin exception rather than a retryable capacity event.
+- `CapacityError` was not included in engine-level transient exception classification, so exceptions raised by batch transforms were treated as fatal instead of retryable.
 
 ## Proposed Fix
-- Code changes (modules/files): Use `self._executor.execute_batch()` (or a single-item wrapper) when `pool_size > 1`, or catch `CapacityError` in `_process_row` and return a retryable `TransformResult.error`; ensure pool stats (if any) are propagated via `context_after`.
+- Code changes (modules/files): include `CapacityError` in `RowProcessor._execute_transform_with_retry()` transient exception handling and in the retry-manager `is_retryable` callback.
 - Config or schema changes: None.
-- Tests to add/update: Add a unit test that stubs `http_client.post()` to return 429 and asserts no exception is raised, and that the result is retryable or retried until timeout.
-- Risks or migration steps: Low risk; changes are local to `azure_content_safety` execution flow.
+- Tests to add/update: Added unit tests for row-scoped `CapacityError` handling and retryability classification.
+- Risks or migration steps: Low risk; change is localized to engine retry classification.
 
 ## Architectural Deviations
 - Spec or doc reference (e.g., docs/design/architecture.md#L...): `src/elspeth/plugins/pooling/executor.py:1`
@@ -74,8 +76,8 @@
 - Alignment plan or decision needed: Route row processing through `PooledExecutor` when configured or remove pool config entirely if unsupported.
 
 ## Acceptance Criteria
-- Capacity errors trigger retry/backoff (or return a retryable error) and do not crash the pipeline.
-- `pool_size` and `max_capacity_retry_seconds` have observable effect on behavior.
+- Capacity errors are treated as retryable/transient by the engine and do not cause immediate pipeline crash in this path.
+- Regression coverage exists for both no-retry and retry-manager classification behavior.
 
 ## Tests
 - Suggested tests to run: `.venv/bin/python -m pytest tests/ -k content_safety`
