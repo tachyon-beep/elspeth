@@ -1073,15 +1073,16 @@ class TestPromptShieldBatchProcessing:
             transform.close()
 
     @pytest.mark.parametrize("status_code", [429, 503, 529])
-    def test_capacity_http_status_returns_row_error_in_batch_adapter(
+    def test_capacity_http_status_raises_capacity_error_in_batch_adapter(
         self,
         mock_httpx_client: MagicMock,
         status_code: int,
     ) -> None:
-        """Capacity HTTP statuses become retryable row errors (no waiter exception)."""
+        """Capacity HTTP statuses propagate as CapacityError through waiter.wait()."""
         import httpx
 
         from elspeth.engine.batch_adapter import SharedBatchAdapter
+        from elspeth.plugins.pooling import CapacityError
         from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 
         mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
@@ -1108,14 +1109,9 @@ class TestPromptShieldBatchProcessing:
         try:
             waiter = adapter.register(ctx.token.token_id, ctx.state_id)
             transform.accept(make_pipeline_row({"prompt": "test", "id": 1}), ctx)
-            result = waiter.wait(timeout=10.0)
-
-            assert isinstance(result, TransformResult)
-            assert result.status == "error"
-            assert result.retryable is True
-            assert result.reason is not None
-            assert result.reason["reason"] == "rate_limited"
-            assert result.reason["status_code"] == status_code
+            with pytest.raises(CapacityError) as exc_info:
+                waiter.wait(timeout=10.0)
+            assert exc_info.value.status_code == status_code
         finally:
             transform.close()
 

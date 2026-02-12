@@ -257,18 +257,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
         try:
             return self._process_single_with_state(row, ctx.state_id)
-        except CapacityError as e:
-            # This transform does not use PooledExecutor for row retries.
-            # Convert capacity exceptions to row-scoped errors so batch workers
-            # don't propagate them as plugin bugs through ExceptionResult.
-            return TransformResult.error(
-                {
-                    "reason": "rate_limited",
-                    "error": str(e),
-                    "status_code": e.status_code,
-                },
-                retryable=True,
-            )
         finally:
             # Clean up cached HTTP client for this state_id
             with self._http_clients_lock:

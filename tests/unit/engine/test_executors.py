@@ -69,7 +69,7 @@ from elspeth.contracts.enums import (
     RowOutcome,
     TriggerType,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import SchemaContract
@@ -1472,6 +1472,52 @@ class TestSinkExecutor:
         assert all(isinstance(r, dict) for r in rows_passed)
 
     # --- Write exception ---
+
+    def test_contract_merge_exception_marks_all_states_failed_and_reraises(self) -> None:
+        """Contract merge failure marks opened sink states FAILED and re-raises."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract_a = _make_contract()
+        contract_b = SchemaContract(
+            fields=(
+                make_field(
+                    "value",
+                    python_type=int,
+                    original_name="value",
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            mode="FLEXIBLE",
+            locked=True,
+        )
+        tokens = [
+            _make_token(data={"value": "a"}, token_id="t1", contract=contract_a),
+            _make_token(data={"value": 1}, token_id="t2", contract=contract_b),
+        ]
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(ContractMergeError):
+            executor.write(
+                sink,
+                tokens,
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 2
+        for call in failed_calls:
+            error = call[1]["error"]
+            assert error["phase"] == "contract_merge"
+
+        sink.write.assert_not_called()
+        sink.flush.assert_not_called()
+        recorder.record_token_outcome.assert_not_called()
 
     def test_write_exception_marks_all_states_failed_and_reraises(self) -> None:
         """Exception from sink.write() marks all states FAILED and re-raises."""
