@@ -1,6 +1,6 @@
 # Bug Report: Azure Monitor flush drops “no events” acknowledgment log
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -12,6 +12,18 @@
   - `src/elspeth/telemetry/exporters/azure_monitor.py:243`
   - `src/elspeth/telemetry/exporters/azure_monitor.py:244`
   - `CLAUDE.md:524`
+
+## Resolution (2026-02-12)
+
+- Status: **FIXED**
+- Changes applied:
+  - Added explicit empty-buffer acknowledgment log in `_flush_batch()`:
+    `src/elspeth/telemetry/exporters/azure_monitor.py`
+  - Added unit coverage for empty-buffer flush acknowledgment:
+    `tests/unit/telemetry/exporters/test_azure_monitor.py`
+- Verification:
+  - `./.venv/bin/python -m pytest tests/unit/telemetry/exporters/test_azure_monitor.py -q` (25 passed)
+  - `./.venv/bin/python -m ruff check src/elspeth/telemetry/exporters/azure_monitor.py tests/unit/telemetry/exporters/test_azure_monitor.py` (passed)
 
 ## Summary
 
