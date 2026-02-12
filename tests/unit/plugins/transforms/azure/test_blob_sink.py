@@ -562,6 +562,8 @@ class TestAzureBlobSinkOverwriteBehavior:
         Azure SDK raises ResourceExistsError atomically from upload_blob(overwrite=False),
         which blob_sink converts to ValueError for a consistent API.
         """
+        ctx.record_call = MagicMock()  # type: ignore[method-assign]
+
         # Create a fake ResourceExistsError (avoid importing azure SDK in tests)
         resource_exists = type("ResourceExistsError", (Exception,), {})("Blob already exists")
 
@@ -576,6 +578,12 @@ class TestAzureBlobSinkOverwriteBehavior:
 
         with pytest.raises(ValueError, match="already exists"):
             sink.write(rows, ctx)
+
+        ctx.record_call.assert_called_once()
+        call_kwargs = ctx.record_call.call_args.kwargs
+        assert call_kwargs["status"].name == "ERROR"
+        assert call_kwargs["request_data"]["operation"] == "upload_blob"
+        assert call_kwargs["error"]["reason"] == "blob_exists"
 
     def test_overwrite_false_succeeds_if_blob_not_exists(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """With overwrite=False, succeeds if blob does not exist."""

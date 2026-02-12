@@ -608,11 +608,11 @@ class AzureBlobSink(BaseSink):
             # Re-raise ImportError as-is for clear dependency messaging
             raise
         except Exception as e:
-            # Convert ResourceExistsError (overwrite=False) to ValueError
-            # for consistent API. Check class name to avoid importing azure SDK at top level.
-            if type(e).__name__ == "ResourceExistsError":
-                raise ValueError(f"Blob '{rendered_path}' already exists and overwrite=False") from e
             latency_ms = (time.perf_counter() - start_time) * 1000
+            error_data: dict[str, Any] = {"type": type(e).__name__, "message": str(e)}
+            if type(e).__name__ == "ResourceExistsError":
+                # Preserve explicit reason for overwrite=False conflicts.
+                error_data["reason"] = "blob_exists"
 
             # Record failed blob upload in audit trail
             ctx.record_call(
@@ -624,10 +624,15 @@ class AzureBlobSink(BaseSink):
                     "blob_path": rendered_path,
                     "overwrite": self._overwrite or self._has_uploaded,
                 },
-                error={"type": type(e).__name__, "message": str(e)},
+                error=error_data,
                 latency_ms=latency_ms,
                 provider="azure_blob_storage",
             )
+
+            # Convert ResourceExistsError (overwrite=False) to ValueError
+            # for consistent API. Check class name to avoid importing azure SDK at top level.
+            if type(e).__name__ == "ResourceExistsError":
+                raise ValueError(f"Blob '{rendered_path}' already exists and overwrite=False") from e
 
             # Azure SDK errors are external system errors - propagate with context.
             # Use RuntimeError wrapper instead of type(e)(...) because Azure SDK

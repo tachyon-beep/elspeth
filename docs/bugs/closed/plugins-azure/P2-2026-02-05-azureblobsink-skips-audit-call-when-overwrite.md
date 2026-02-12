@@ -1,12 +1,28 @@
 # Bug Report: AzureBlobSink Skips Audit Call When overwrite=False and Blob Exists
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Pre-Fix Verification (2026-02-11)
 
 - Classification: **Still open**
 - Verification summary:
   - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+
+## Resolution (2026-02-13)
+
+- Status: **FIXED**
+- Changes applied:
+  - Updated `AzureBlobSink.write()` exception flow to record an ERROR external call
+    before raising the overwrite conflict `ValueError`, including
+    `error.reason = "blob_exists"` for `ResourceExistsError`.
+  - Added regression coverage asserting `ctx.record_call()` is invoked on
+    overwrite conflict and carries the expected error reason.
+- Files changed:
+  - `src/elspeth/plugins/azure/blob_sink.py`
+  - `tests/unit/plugins/transforms/azure/test_blob_sink.py`
+- Verification:
+  - `./.venv/bin/python -m pytest tests/unit/plugins/transforms/azure/test_blob_sink.py -q` (57 passed)
+  - `./.venv/bin/python -m ruff check src/elspeth/plugins/azure/blob_sink.py tests/unit/plugins/transforms/azure/test_blob_sink.py` (passed)
 
 
 ## Summary
