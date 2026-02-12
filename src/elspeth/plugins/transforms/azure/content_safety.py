@@ -305,10 +305,22 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
             CapacityError: On rate limit errors (for worker pool retry)
         """
         fields_to_scan = self._get_fields_to_scan(row)
+        all_mode = self._fields == "all"
 
         for field_name in fields_to_scan:
             if field_name not in row:
-                continue  # Skip fields not present in this row
+                if all_mode:
+                    continue  # "all" mode scans only present string fields
+                # Explicitly-configured field is missing — fail CLOSED.
+                # Security transform must not report "validated" when configured
+                # fields were never analyzed.
+                return TransformResult.error(
+                    {
+                        "reason": "missing_field",
+                        "field": field_name,
+                    },
+                    retryable=False,
+                )
 
             value = row[field_name]
             if not isinstance(value, str):

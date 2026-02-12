@@ -194,7 +194,7 @@ allow_hits:
   reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=c0617400794d3363
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=8404ee8567c3b226
   owner: architecture
   reason: Tier 3 boundary — validates row field is str before sending to Azure API
   safety: Code reviewed - legitimate pattern
@@ -224,7 +224,7 @@ allow_hits:
   reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=0dacc878bc4c9b55
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=69fe83d9ba6aa6e9
   owner: architecture
   reason: Tier 3 boundary — validates row field is str before sending to Azure API
   safety: Code reviewed - legitimate pattern
