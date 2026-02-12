@@ -284,8 +284,13 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 self._setup_azure_ai_tracing(logger, tracing_config)
             case "langfuse":
                 self._setup_langfuse_tracing(logger, tracing_config)
-            case "none" | _:
+            case "none":
                 pass  # No tracing
+            case _:
+                logger.warning(
+                    "Unknown tracing provider encountered after validation - tracing disabled",
+                    provider=tracing_config.provider,
+                )
 
     def _setup_azure_ai_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
         """Initialize Azure AI / Application Insights tracing.

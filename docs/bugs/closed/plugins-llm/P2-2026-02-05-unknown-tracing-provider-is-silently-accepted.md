@@ -1,12 +1,12 @@
 # Bug Report: Unknown Tracing Provider Is Silently Accepted and Disables Tracing
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
+- Classification: **Closed**
 - Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+  - Fixed by enforcing tracing provider validation and surfacing explicit validation warnings for unknown providers.
 
 
 ## Summary
@@ -99,3 +99,35 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/guides/tier2-tracing.md`
+
+## Resolution (2026-02-12)
+
+**Status: FIXED**
+
+### Changes Made
+
+1. Added explicit provider validation in `src/elspeth/plugins/llm/tracing.py`:
+   - Introduced `SUPPORTED_TRACING_PROVIDERS` (`none`, `azure_ai`, `langfuse`)
+   - `validate_tracing_config()` now returns a clear error for unknown providers.
+2. Removed silent unknown-provider fallback behavior across LLM transform tracing setup paths:
+   - `src/elspeth/plugins/llm/azure.py`
+   - `src/elspeth/plugins/llm/azure_batch.py`
+   - `src/elspeth/plugins/llm/azure_multi_query.py`
+   - `src/elspeth/plugins/llm/openrouter.py`
+   - `src/elspeth/plugins/llm/openrouter_batch.py`
+   - `src/elspeth/plugins/llm/openrouter_multi_query.py`
+   - Unknown providers now emit an explicit warning if ever encountered after validation.
+3. Updated tests:
+   - `tests/unit/plugins/llm/test_tracing_config.py`
+   - `tests/unit/plugins/llm/test_tracing_integration.py`
+
+### Verification
+
+- `.venv/bin/python -m pytest tests/unit/plugins/llm/test_tracing_config.py tests/unit/plugins/llm/test_tracing_integration.py tests/unit/plugins/llm/test_openrouter_tracing.py tests/unit/plugins/llm/test_azure_tracing.py -q`
+- `.venv/bin/python -m ruff check src/elspeth/plugins/llm/tracing.py src/elspeth/plugins/llm/openrouter.py src/elspeth/plugins/llm/openrouter_batch.py src/elspeth/plugins/llm/openrouter_multi_query.py src/elspeth/plugins/llm/azure.py src/elspeth/plugins/llm/azure_batch.py src/elspeth/plugins/llm/azure_multi_query.py tests/unit/plugins/llm/test_tracing_config.py tests/unit/plugins/llm/test_tracing_integration.py`
+
+Both completed successfully.
+
+### Commit
+
+- Commit: this session's fix commit

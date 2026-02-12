@@ -161,8 +161,13 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                 )
             case "langfuse":
                 self._setup_langfuse_tracing(logger)
-            case "none" | _:
+            case "none":
                 pass
+            case _:
+                logger.warning(
+                    "Unknown tracing provider encountered after validation - tracing disabled",
+                    provider=tracing_config.provider,
+                )
 
     def _process_single_query(
         self,

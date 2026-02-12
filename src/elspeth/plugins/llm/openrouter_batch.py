@@ -249,8 +249,13 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 return
             case "langfuse":
                 self._setup_langfuse_tracing(logger)
-            case "none" | _:
+            case "none":
                 pass  # No tracing
+            case _:
+                logger.warning(
+                    "Unknown tracing provider encountered after validation - tracing disabled",
+                    provider=self._tracing_config.provider,
+                )
 
     def _setup_langfuse_tracing(self, logger: Any) -> None:
         """Initialize Langfuse tracing (v3 API).
