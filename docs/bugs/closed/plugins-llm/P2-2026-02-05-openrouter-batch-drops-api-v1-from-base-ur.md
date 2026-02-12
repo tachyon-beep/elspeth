@@ -1,6 +1,19 @@
 # Bug Report: OpenRouter Batch Drops `/api/v1` From Base URL
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Overtaken by events (no longer reproducible)**
+- Verification summary:
+  - `OpenRouterBatchLLMTransform` calls `AuditedHTTPClient.post("/chat/completions", ...)` instead of using `httpx.Client(base_url=...)` URL joining directly.
+  - `AuditedHTTPClient._resolve_url()` strips any leading slash from request paths and joins against the configured base URL path (`base.rstrip("/") + "/" + path.lstrip("/")`), preserving `/api/v1`.
+  - Focused URL join tests passed: `.venv/bin/python -m pytest tests/unit/plugins/clients/test_audited_http_client.py -k "base_url_no_trailing_slash_url_no_leading_slash or base_url_trailing_slash_url_leading_slash" -q`.
+- Current evidence:
+  - `src/elspeth/plugins/llm/openrouter_batch.py:642`
+  - `src/elspeth/plugins/clients/http.py:311`
+  - `tests/unit/plugins/clients/test_audited_http_client.py:314`
+  - `tests/unit/plugins/clients/test_audited_http_client.py:344`
 
 ## Status Update (2026-02-11)
 
