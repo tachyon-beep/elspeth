@@ -626,7 +626,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # 3. Make API call via AuditedHTTPClient (automatically records to audit trail)
         state_id = ctx.state_id
         if state_id is None:
-            return {"error": {"reason": "missing_state_id"}}
+            raise RuntimeError("OpenRouter batch transform requires state_id. Ensure transform is executed through the engine.")
 
         http_client = self._get_http_client(state_id)
 

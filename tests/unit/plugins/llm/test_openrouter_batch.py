@@ -524,19 +524,17 @@ class TestOpenRouterBatchErrorHandling:
         assert result.row["llm_response"] is None
         assert result.row["llm_response_error"]["reason"] == "empty_choices"
 
-    def test_missing_state_id_returns_error(self, chaosllm_server) -> None:
-        """Missing state_id on context returns row-level error."""
+    def test_missing_state_id_raises_runtime_error(self, chaosllm_server) -> None:
+        """Missing state_id on context is a framework bug and must crash."""
         transform, ctx = _create_transform_with_context()
         ctx.state_id = None  # No state_id
         row = {"text": "Test"}
 
-        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
-            result = transform.process(make_pipeline_row(row), ctx)
-
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["llm_response"] is None
-        assert result.row["llm_response_error"]["reason"] == "missing_state_id"
+        with (
+            mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)),
+            pytest.raises(RuntimeError, match="state_id"),
+        ):
+            transform.process(make_pipeline_row(row), ctx)
 
 
 class TestOpenRouterBatchAuditFields:
