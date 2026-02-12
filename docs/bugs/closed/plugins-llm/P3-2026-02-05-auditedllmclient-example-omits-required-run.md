@@ -1,6 +1,6 @@
 # Bug Report: AuditedLLMClient example omits required `run_id` and `telemetry_emit`
 
-**Status: OPEN**
+**Status: CLOSED (FIXED)**
 
 ## Status Update (2026-02-11)
 
@@ -98,3 +98,24 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` (Telemetry section)
+
+---
+
+## Verification (2026-02-12)
+
+**Status: FIXED**
+
+- Updated `src/elspeth/plugins/clients/__init__.py` package example to include required `run_id` and `telemetry_emit` constructor arguments for `AuditedLLMClient`.
+- Verified `AuditedLLMClient.__init__` still requires both parameters (`run_id`, `telemetry_emit`) in `src/elspeth/plugins/clients/llm.py`.
+
+## Closure Report (2026-02-12)
+
+**Resolution:** CLOSED (FIXED)
+
+### Quality Gates Run
+
+- `.venv/bin/python -m ruff check src/elspeth/plugins/clients/__init__.py`
+
+### Notes
+
+- Doc/example alignment fix only; no runtime behavior changes.
