@@ -1,6 +1,6 @@
 # Bug Report: BatchStats emits `mean` for empty batches even when `compute_mean=False`
 
-**Status: OPEN**
+**Status: CLOSED (FIXED)**
 
 ## Status Update (2026-02-11)
 
@@ -99,3 +99,23 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `tests/plugins/transforms/test_batch_stats_integration.py`
+
+---
+
+## Verification (2026-02-12)
+
+**Status: FIXED**
+
+- Empty-batch handling now respects `compute_mean=False` and omits `mean` from output payload and OBSERVED contract fields. (`src/elspeth/plugins/transforms/batch_stats.py`)
+- Empty-batch `success_reason.fields_added` now mirrors emitted fields and omits `mean` when disabled. (`src/elspeth/plugins/transforms/batch_stats.py`)
+- Regression tests cover empty-batch `compute_mean=False` behavior in both unit and integration suites. (`tests/unit/plugins/transforms/test_batch_stats.py`, `tests/unit/plugins/transforms/test_batch_stats_integration.py`)
+
+## Closure Report (2026-02-12)
+
+**Resolution:** CLOSED (FIXED)
+
+### Quality Gates Run
+
+- `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_batch_stats.py tests/unit/plugins/transforms/test_batch_stats_integration.py -q`
+- `.venv/bin/python -m ruff check src/elspeth/plugins/transforms/batch_stats.py tests/unit/plugins/transforms/test_batch_stats.py tests/unit/plugins/transforms/test_batch_stats_integration.py`
+- `.venv/bin/python -m mypy src/elspeth/plugins/transforms/batch_stats.py`

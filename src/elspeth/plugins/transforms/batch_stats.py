@@ -115,7 +115,13 @@ class BatchStats(BaseTransform):
         """
         if not rows:
             # Empty batch - should not happen in normal operation
-            result_data = {"count": 0, "sum": 0, "mean": None, "batch_empty": True}
+            result_data: dict[str, Any] = {"count": 0, "sum": 0}
+            fields_added = ["count", "sum"]
+            if self._compute_mean:
+                result_data["mean"] = None
+                fields_added.append("mean")
+            result_data["batch_empty"] = True
+            fields_added.append("batch_empty")
 
             # Create OBSERVED contract for transform mode (processor.py:712 requires it)
             fields = tuple(
@@ -134,11 +140,10 @@ class BatchStats(BaseTransform):
                 PipelineRow(result_data, output_contract),
                 success_reason={
                     "action": "processed",
-                    "fields_added": ["count", "sum", "mean", "batch_empty"],
+                    "fields_added": fields_added,
                     "metadata": {"empty_batch": True},
                 },
             )
-
         # Extract numeric values - enforce type contract
         # Tier 2 pipeline data should already be validated; wrong types = upstream bug
         values: list[int | float] = []

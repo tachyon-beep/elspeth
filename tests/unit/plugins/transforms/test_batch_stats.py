@@ -115,6 +115,29 @@ class TestBatchStatsHappyPath:
         assert result.row["mean"] is None
         assert result.row["batch_empty"] is True
 
+    def test_empty_batch_without_mean_omits_mean_field(self, ctx: PluginContext) -> None:
+        """Empty batch respects compute_mean=False in output and success metadata."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "value_field": "amount",
+                "compute_mean": False,
+            }
+        )
+
+        result = transform.process([], ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["count"] == 0
+        assert result.row["sum"] == 0
+        assert result.row["batch_empty"] is True
+        assert "mean" not in result.row
+        assert result.success_reason is not None
+        assert result.success_reason["fields_added"] == ["count", "sum", "batch_empty"]
+
     def test_non_numeric_values_raise_type_error(self, ctx: PluginContext) -> None:
         """BatchStats raises TypeError on non-numeric values (no coercion).
 
