@@ -1,6 +1,18 @@
 # Bug Report: DROP Backpressure Drops Newest Event Instead of Oldest
 
-**Status: OPEN**
+**Status: FIXED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Fixed**
+- Verification summary:
+  - DROP overflow now evicts the oldest queued event and enqueues the newest event via `_drop_oldest_and_enqueue_newest(...)`.
+  - Regression coverage now asserts ordering under overflow (`run-1`, `run-3`, `run-4`) so tail-drop behavior cannot regress silently.
+- Current evidence:
+  - `src/elspeth/telemetry/manager.py:282`
+  - `src/elspeth/telemetry/manager.py:297`
+  - `tests/unit/telemetry/test_manager.py:360`
+  - `337405b8`
 
 ## Status Update (2026-02-11)
 
