@@ -519,6 +519,51 @@ class TestDropBackpressure:
         flush_thread.join(timeout=2.0)
         assert flush_returned.is_set()
 
+    def test_drop_mode_requeues_shutdown_sentinel_under_contention(self) -> None:
+        """Shutdown sentinel must survive DROP-mode eviction races."""
+
+        incoming_event = _row_event()
+        interloper_event = _lifecycle_event()
+
+        class SentinelContentionQueue(queue.Queue):
+            def __init__(self) -> None:
+                super().__init__(maxsize=1)
+                self._sentinel_requeue_attempts = 0
+
+            def put_nowait(self, item):
+                if item is None:
+                    self._sentinel_requeue_attempts += 1
+                    if self._sentinel_requeue_attempts == 1:
+                        # Simulate another producer taking the slot between
+                        # sentinel eviction and reinsertion.
+                        super().put_nowait(interloper_event)
+                        raise queue.Full
+                return super().put_nowait(item)
+
+        class DummyManager:
+            _LOG_INTERVAL = 100
+
+            def __init__(self, q: SentinelContentionQueue) -> None:
+                self._queue = q
+                self._dropped_lock = threading.Lock()
+                self._events_dropped = 0
+                self._last_logged_drop_count = 0
+
+            def _log_drops_if_needed(self) -> None:
+                if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
+                    self._last_logged_drop_count = self._events_dropped
+
+        q = SentinelContentionQueue()
+        dummy = DummyManager(q)
+        queue.Queue.put_nowait(q, None)
+
+        TelemetryManager._drop_oldest_and_enqueue_newest(dummy, incoming_event)
+
+        queued = q.get_nowait()
+        assert queued is None
+        q.task_done()
+        assert dummy._events_dropped == 2
+
 
 # =============================================================================
 # Exporter Failure Isolation

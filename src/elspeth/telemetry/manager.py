@@ -24,7 +24,6 @@ Thread Safety:
     - health_metrics reads are approximately consistent
 """
 
-import contextlib
 import queue
 import threading
 from typing import TypedDict
@@ -309,8 +308,8 @@ class TelemetryManager:
 
             if had_evicted and evicted is None:
                 # Preserve shutdown sentinel if we raced with close().
-                with contextlib.suppress(queue.Full):
-                    self._queue.put_nowait(None)
+                # Must never be silently lost under concurrent producers.
+                TelemetryManager._requeue_shutdown_sentinel_or_raise(self)
             elif had_evicted:
                 self._events_dropped += 1
                 self._log_drops_if_needed()
@@ -328,6 +327,38 @@ class TelemetryManager:
                     # This prevents queue.join() from observing a transient zero
                     # while the replacement event is being queued.
                     self._queue.task_done()
+
+    def _requeue_shutdown_sentinel_or_raise(self) -> None:
+        """Reinsert shutdown sentinel evicted during DROP-mode overflow.
+
+        Must be called while holding _dropped_lock.
+        Raises RuntimeError if sentinel cannot be restored after bounded retries.
+        """
+        pending_task_done = 0
+        max_attempts = self._queue.maxsize + 10  # Safety margin for close races
+
+        try:
+            for _ in range(max_attempts):
+                try:
+                    self._queue.put_nowait(None)
+                    return
+                except queue.Full:
+                    # Queue refilled by in-flight producer. Evict one item and retry.
+                    try:
+                        displaced = self._queue.get_nowait()
+                        pending_task_done += 1
+                    except queue.Empty:
+                        continue
+
+                    if displaced is not None:
+                        self._events_dropped += 1
+                        self._log_drops_if_needed()
+        finally:
+            # Keep unfinished-task accounting balanced for any displaced items.
+            for _ in range(pending_task_done):
+                self._queue.task_done()
+
+        raise RuntimeError("Failed to re-enqueue shutdown sentinel during DROP overflow")
 
     def _log_drops_if_needed(self) -> None:
         """Log aggregate drop message if threshold reached.
