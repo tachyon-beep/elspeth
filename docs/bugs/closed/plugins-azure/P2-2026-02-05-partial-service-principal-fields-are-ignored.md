@@ -1,6 +1,18 @@
 # Bug Report: Partial Service Principal Fields Are Ignored When Another Auth Method Is Set
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-12)
+
+- Classification: **Fixed and verified**
+- Resolution summary:
+  - Updated `AzureAuthConfig.validate_auth_method()` to reject partial Service Principal fields regardless of whether another auth method is configured.
+  - This restores the documented mutually-exclusive auth contract and prevents silent fallback to another method when SP credentials are partially present.
+  - Added regression coverage for `connection_string` + partial Service Principal fields.
+- Verification:
+  - `.venv/bin/python -m pytest tests/unit/plugins/transforms/azure/test_auth.py -q` (29 passed)
+  - `.venv/bin/python -m pytest tests/unit/plugins/transforms/azure -q` (216 passed)
+  - `.venv/bin/ruff check src/elspeth/plugins/azure/auth.py tests/unit/plugins/transforms/azure/test_auth.py` (passed)
 
 ## Status Update (2026-02-11)
 
