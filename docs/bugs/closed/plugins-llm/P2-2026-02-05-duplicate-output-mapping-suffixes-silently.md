@@ -1,6 +1,14 @@
 # Bug Report: Duplicate `output_mapping` suffixes silently overwrite output fields
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-12)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - Added shared config validation to reject duplicate `output_mapping` suffixes in `src/elspeth/plugins/llm/multi_query.py`.
+  - Added regression test coverage in `tests/unit/plugins/llm/test_multi_query.py`.
+  - Landed in commit `8cbae041` on branch `RC3-quality-sprint`.
 
 ## Status Update (2026-02-11)
 
