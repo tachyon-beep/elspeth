@@ -1,6 +1,6 @@
 # Bug Report: Duplicate CSV Headers Silently Overwrite Earlier Columns
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -97,3 +97,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `78eb27d3`
+- Fix summary: Reject duplicate raw CSV headers before passthrough mapping
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

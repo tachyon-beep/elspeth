@@ -1,6 +1,6 @@
 # Bug Report: TokenOutcomeRepository Does Not Validate `outcome` vs `is_terminal` Consistency
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -104,3 +104,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `src/elspeth/contracts/enums.py`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `19066c1a`
+- Fix summary: Validate outcome terminal consistency in TokenOutcomeRepository
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

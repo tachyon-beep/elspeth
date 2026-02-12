@@ -1,6 +1,6 @@
 # Bug Report: JSONFormatter Silently Coerces Audit Data and Allows NaN/Infinity
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -105,3 +105,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` (Tier 1 and canonical JSON rules)
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `ee393c33`
+- Fix summary: Harden JSONFormatter against coercion and non-finite values
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

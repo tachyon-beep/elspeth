@@ -1,6 +1,6 @@
 # Bug Report: Missing `state_id` Is Silently Treated as Row Error Instead of Crash
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -102,3 +102,11 @@ Tests will need updating; behavior becomes fail-fast as required by audit rules.
 
 - Related issues/PRs: N/A
 - Related design docs: Unknown
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `ab4f6bbd`
+- Fix summary: Fail fast when openrouter batch state_id is missing
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

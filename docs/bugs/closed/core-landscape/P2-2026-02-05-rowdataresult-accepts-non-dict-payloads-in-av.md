@@ -1,6 +1,6 @@
 # Bug Report: RowDataResult Accepts Non-Dict Payloads in AVAILABLE State
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -103,3 +103,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` (Auditability Standard, Three-Tier Trust Model)
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `6bcbbf2a`
+- Fix summary: Enforce dict payload invariant for RowDataResult AVAILABLE state
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

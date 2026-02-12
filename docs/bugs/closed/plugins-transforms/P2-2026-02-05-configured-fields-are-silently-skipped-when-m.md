@@ -1,6 +1,6 @@
 # Bug Report: Configured Fields Are Silently Skipped When Missing or Non-String (Content Bypass)
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -83,3 +83,11 @@
 ## Notes / Links
 - Related issues/PRs: Unknown
 - Related design docs: `CLAUDE.md:81`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `ae4eb816`
+- Fix summary: Fail closed on missing explicit Azure safety fields
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

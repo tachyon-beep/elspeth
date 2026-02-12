@@ -1,6 +1,6 @@
 # Bug Report: JSONExplode Drops `output_field` From Contract for Object Elements, Breaking FIXED-Mode Downstream Access
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -104,3 +104,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: Unknown
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `50422dc2`
+- Fix summary: Fix JSONExplode contract for complex output_field values
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

@@ -1,6 +1,6 @@
 # Bug Report: Azure LLM Template Rendering Ignores PipelineRow Contract (Dual-Name Resolution Broken)
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -101,3 +101,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/2026-02-03-pipelinerow-migration.md`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `62ea627f`
+- Fix summary: Refactor selected plugins to PipelineRow-first access
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

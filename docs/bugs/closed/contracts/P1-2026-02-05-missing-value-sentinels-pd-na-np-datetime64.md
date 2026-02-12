@@ -1,6 +1,6 @@
 # Bug Report: Missing-value sentinels (pd.NA, np.datetime64("NaT")) not normalized to `type(None)`
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -104,3 +104,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/design/architecture.md`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `e991b724`
+- Fix summary: Normalize missing sentinels in contract type normalization
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

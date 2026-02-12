@@ -1,6 +1,6 @@
 # Bug Report: Template Field Extraction Misidentifies `row.get()` and Drops Actual Field
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -101,3 +101,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/completed/2026-02-02-phase4-template-resolver.md:553`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `4ff1d29f`
+- Fix summary: Fix Jinja field extraction for row.get keys
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

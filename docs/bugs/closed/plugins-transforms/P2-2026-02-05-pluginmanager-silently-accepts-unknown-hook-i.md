@@ -1,6 +1,6 @@
 # Bug Report: PluginManager Silently Accepts Unknown Hook Implementations
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -102,3 +102,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`, `docs/contracts/plugin-protocol.md`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `44482e86`
+- Fix summary: Reject unknown plugin hooks during registration
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+

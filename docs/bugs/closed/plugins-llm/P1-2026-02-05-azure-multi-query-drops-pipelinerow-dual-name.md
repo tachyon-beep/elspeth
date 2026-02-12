@@ -1,6 +1,6 @@
 # Bug Report: Azure Multi-Query Drops PipelineRow Dual-Name Resolution
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -104,3 +104,11 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/2026-02-03-pipelinerow-migration.md`
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED
+- Fixed by commit: `ca932d66`
+- Fix summary: Fix multi-query dual-name resolution for PipelineRow inputs
+- Ticket moved from `docs/bugs/open/` to `docs/bugs/closed/` on 2026-02-12.
+
