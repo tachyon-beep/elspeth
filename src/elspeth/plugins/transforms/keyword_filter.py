@@ -151,10 +151,12 @@ class KeywordFilter(BaseTransform):
         fields_to_scan = self._get_fields_to_scan(row_dict)
 
         for field_name in fields_to_scan:
-            if field_name not in row_dict:
+            # Use PipelineRow access semantics so configured fields can be either
+            # original names or normalized names from the contract.
+            if field_name not in row:
                 continue  # Skip fields not present in this row
 
-            value = row_dict[field_name]
+            value = row[field_name]
 
             # Only scan string values
             if not isinstance(value, str):
