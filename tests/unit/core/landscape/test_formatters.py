@@ -323,6 +323,31 @@ class TestCSVFormatter:
 
         assert flat["scores"] == "[0.1, 0.5, 0.9]"
 
+    def test_csv_formatter_serializes_scalar_datetime_to_iso(self) -> None:
+        """CSV formatter should serialize scalar datetimes to ISO strings."""
+        formatter = CSVFormatter()
+        record = {
+            "timestamp": datetime(2026, 2, 4, 10, 11, 12, tzinfo=UTC),
+        }
+
+        flat = formatter.flatten(record)
+
+        assert flat["timestamp"] == "2026-02-04T10:11:12+00:00"
+
+    def test_csv_formatter_rejects_scalar_nan(self) -> None:
+        """CSV formatter must reject scalar NaN values for audit integrity."""
+        formatter = CSVFormatter()
+
+        with pytest.raises(ValueError, match="NaN"):
+            formatter.flatten({"latency_ms": float("nan")})
+
+    def test_csv_formatter_rejects_scalar_infinity(self) -> None:
+        """CSV formatter must reject scalar Infinity values for audit integrity."""
+        formatter = CSVFormatter()
+
+        with pytest.raises(ValueError, match="Infinity"):
+            formatter.flatten({"latency_ms": float("inf")})
+
 
 class TestJSONFormatter:
     """JSONFormatter preserves nested structure for JSON output."""

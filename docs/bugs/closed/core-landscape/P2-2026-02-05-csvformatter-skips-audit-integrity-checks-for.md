@@ -1,6 +1,6 @@
 # Bug Report: CSVFormatter Skips Audit Integrity Checks for Scalar Values
 
-**Status: OPEN**
+**Status: CLOSED (FIXED)**
 
 ## Status Update (2026-02-11)
 
@@ -101,3 +101,18 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md` (Tier 1 and canonical JSON rules)
+
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED (FIXED)
+- Fix summary: `CSVFormatter.flatten()` now runs scalar values through `serialize_datetime`, so scalar datetimes are normalized to ISO and scalar NaN/Infinity values raise `ValueError` per Tier 1 integrity rules.
+- Code updated:
+  - `src/elspeth/core/landscape/formatters.py`
+- Tests added/updated:
+  - `tests/unit/core/landscape/test_formatters.py`
+- Verification:
+  - `ruff check src/elspeth/core/landscape/formatters.py tests/unit/core/landscape/test_formatters.py`
+  - `pytest tests/unit/core/landscape/test_formatters.py` (`40 passed`)
+  - Manual repro check confirmed scalar datetime ISO serialization and scalar Infinity rejection.
+- Ticket moved from `docs/bugs/open/core-landscape/` to `docs/bugs/closed/core-landscape/`.
