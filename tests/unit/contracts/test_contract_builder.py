@@ -137,6 +137,21 @@ class TestContractBuilderInference:
         field = updated.fields[0]
         assert field.python_type is type(None)
 
+    def test_infer_pandas_na_type(self) -> None:
+        """pd.NA values infer as type(None) (missing sentinel)."""
+        from elspeth.contracts.contract_builder import ContractBuilder
+
+        contract = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        builder = ContractBuilder(contract)
+
+        first_row = {"nullable": pd.NA}
+        field_resolution = {"nullable": "nullable"}
+
+        updated = builder.process_first_row(first_row, field_resolution)
+
+        field = updated.fields[0]
+        assert field.python_type is type(None)
+
 
 class TestContractBuilderValidation:
     """Test validation after locking."""

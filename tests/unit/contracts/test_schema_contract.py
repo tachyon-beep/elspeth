@@ -497,6 +497,26 @@ class TestSchemaContractValidation:
         assert violations[0].expected_type is str
         assert violations[0].actual_type is type(None)
 
+    def test_validate_required_datetime_rejects_numpy_nat(self) -> None:
+        """Required datetime field rejects np.datetime64('NaT') as missing."""
+        from datetime import datetime
+
+        import numpy as np
+
+        from elspeth.contracts.errors import TypeMismatchViolation
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(make_field("event_time", datetime, original_name="Event Time", required=True, source="declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"event_time": np.datetime64("NaT")})
+
+        assert len(violations) == 1
+        assert isinstance(violations[0], TypeMismatchViolation)
+        assert violations[0].expected_type is datetime
+        assert violations[0].actual_type is type(None)
+
     def test_validate_fixed_rejects_extras(self) -> None:
         """FIXED mode rejects extra fields."""
         from elspeth.contracts.errors import ExtraFieldViolation
