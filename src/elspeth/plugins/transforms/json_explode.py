@@ -27,7 +27,7 @@ from pydantic import Field
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import DataPluginConfig, PluginConfigError
 from elspeth.plugins.results import TransformResult
@@ -200,6 +200,21 @@ class JSONExplode(BaseTransform):
             input_contract=row.contract,
             output_row=output_rows[0],
         )
+        if output_contract.get_field(self._output_field) is None:
+            output_contract = SchemaContract(
+                mode=output_contract.mode,
+                fields=(
+                    *output_contract.fields,
+                    FieldContract(
+                        normalized_name=self._output_field,
+                        original_name=self._output_field,
+                        python_type=object,
+                        required=False,
+                        source="inferred",
+                    ),
+                ),
+                locked=True,
+            )
 
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],

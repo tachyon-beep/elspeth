@@ -508,6 +508,38 @@ class TestJSONExplodeContractPropagation:
         with pytest.raises(KeyError, match="not found in schema contract"):
             _ = output_row["tags"]
 
+    def test_fixed_mode_object_elements_keep_output_field_in_contract(self, ctx: PluginContext) -> None:
+        """FIXED mode keeps output_field contract when exploded elements are objects."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": {"mode": "fixed", "fields": ["id: int", "items: any"]},
+                "array_field": "items",
+                "output_field": "item",
+            }
+        )
+
+        input_contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                make_field("id", int, required=True, source="declared"),
+                make_field("items", object, required=True, source="declared"),
+            ),
+            locked=True,
+        )
+        row = PipelineRow({"id": 1, "items": [{"sku": "A1"}]}, input_contract)
+
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        output_row = result.rows[0]
+        item_field = output_row.contract.get_field("item")
+        assert item_field is not None
+        assert item_field.python_type is object
+        assert output_row["item"] == {"sku": "A1"}
+
 
 class TestJSONExplodeCopyIsolation:
     """Tests that exploded rows have independent copies of nested data.
