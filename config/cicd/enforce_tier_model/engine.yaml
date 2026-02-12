@@ -16,7 +16,7 @@ allow_hits:
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
   safety: TypeError raised with expression details - explicit failure, not silent coercion
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=577d6a5d44fcb40f
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=93433a51b0d92b55
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay

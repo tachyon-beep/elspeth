@@ -141,6 +141,13 @@ class SinkExecutor:
                 input_data=input_dict,
             )
             states.append((token, state))
+        # Synchronize context contract to the sink-bound tokens.
+        # Sinks (e.g., headers: original) lazily capture ctx.contract during write().
+        # For mixed batches, merge contracts to preserve all available header lineage.
+        batch_contract = tokens[0].row_data.contract
+        for token in tokens[1:]:
+            batch_contract = batch_contract.merge(token.row_data.contract)
+        ctx.contract = batch_contract
 
         # CRITICAL: Clear state_id before entering operation context.
         # The ctx.state_id may still be set from the last transform that processed

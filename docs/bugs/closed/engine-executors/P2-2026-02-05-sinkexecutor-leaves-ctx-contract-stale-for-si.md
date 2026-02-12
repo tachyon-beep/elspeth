@@ -1,6 +1,6 @@
 # Bug Report: SinkExecutor Leaves ctx.contract Stale for Sink Writes
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -103,3 +103,17 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+## Closure Update (2026-02-12)
+
+- Status: Closed after implementation and regression test coverage.
+- Fix summary:
+  - `SinkExecutor.write()` now synchronizes `ctx.contract` from sink-bound token contracts before `sink.write()`.
+  - Mixed sink batches now merge contracts to preserve available header lineage.
+- Evidence:
+  - `src/elspeth/engine/executors/sink.py`: contract synchronization + merge before sink execution.
+  - `tests/unit/engine/test_executor_pipeline_row.py`: added regression tests for stale context contract replacement and mixed-contract merge behavior.
+- Verification:
+  - `.venv/bin/python -m pytest -q tests/unit/engine/test_executor_pipeline_row.py -k "sink"`
+  - `.venv/bin/python -m pytest -q tests/unit/engine/test_executors.py -k "TestSinkExecutor"`
+  - `.venv/bin/python -m pytest -q tests/unit/plugins/sinks/test_csv_sink_headers.py -k "original_headers_from_ctx_contract or original_headers_from_contract"`
