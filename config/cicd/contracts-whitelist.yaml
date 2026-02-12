@@ -61,9 +61,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._apply_display_headers:rows (list)"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._apply_display_headers:return (list)"
 
-  # Transform plugins - row processing
-  - "src/elspeth/plugins/transforms/keyword_filter.py:KeywordFilter._get_fields_to_scan:row"
-
   # Source plugins - row validation
   - "src/elspeth/plugins/sources/json_source.py:JSONSource._validate_and_yield:row"
 
@@ -288,11 +285,9 @@ allowed_dict_patterns:
 
   # Azure content safety (refactored: PipelineRow is now the row type at plugin boundary)
   - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety.__init__:config"
-  - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety._get_fields_to_scan:row"
 
   # Azure prompt shield (refactored: PipelineRow is now the row type at plugin boundary)
   - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield.__init__:config"
-  - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield._get_fields_to_scan:row"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # HTTP CLIENTS - External API trust boundary
@@ -480,5 +475,4 @@ allowed_dict_patterns:
 
   # OpenRouter batch LLM (async batch API)
   - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform._process_single_row:row"
   - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform._process_single_row:return"

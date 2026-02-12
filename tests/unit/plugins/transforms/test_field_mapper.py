@@ -68,6 +68,29 @@ class TestFieldMapper:
         assert result.row is not None
         assert result.row.to_dict() == {"firstName": "Alice", "lastName": "Smith", "id": 1}
 
+    def test_mapping_source_can_use_original_field_name(self, ctx: PluginContext) -> None:
+        """Mapping sources resolve original names through the input contract."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "mapping": {"Amount USD": "price"},
+            }
+        )
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(make_field("amount_usd", float, original_name="Amount USD", required=False, source="inferred"),),
+            locked=True,
+        )
+        row = PipelineRow({"amount_usd": 12.5}, contract)
+
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row.to_dict() == {"price": 12.5}
+
     def test_select_fields_only(self, ctx: PluginContext) -> None:
         """Only include specified fields (drop others)."""
         from elspeth.plugins.transforms.field_mapper import FieldMapper

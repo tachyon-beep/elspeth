@@ -152,9 +152,13 @@ class JSONExplode(BaseTransform):
                 f"This indicates an upstream validation bug - check source schema or prior transforms."
             )
 
-        # Build base output (all fields except the array field)
-        row_dict = row.to_dict()
-        base = {k: v for k, v in row_dict.items() if k != self._array_field}
+        row_data = row.to_dict()
+        if self._array_field in row_data:
+            normalized_array_field = self._array_field
+        else:
+            # row[self._array_field] above already validated resolvability.
+            normalized_array_field = row.contract.resolve_name(self._array_field)
+        base = {k: v for k, v in row_data.items() if k != normalized_array_field}
 
         # Empty array: nothing to deaggregate — quarantine with clear audit trail
         if len(array_value) == 0:

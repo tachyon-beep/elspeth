@@ -12,9 +12,9 @@ THREE-TIER TRUST MODEL:
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.testing import make_pipeline_row
+from elspeth.testing import make_field, make_pipeline_row
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
@@ -178,6 +178,33 @@ class TestJSONExplodeHappyPath:
 
         # Array field is NOT preserved (replaced by output_field)
         assert "items" not in output
+
+    def test_array_field_original_name_is_resolved(self, ctx: PluginContext) -> None:
+        """Configured original array_field names resolve through PipelineRow contract."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "Line Items",
+            }
+        )
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                make_field("id", int, original_name="ID"),
+                make_field("line_items", object, original_name="Line Items"),
+            ),
+            locked=True,
+        )
+        row = PipelineRow({"id": 1, "line_items": ["a", "b"]}, contract)
+
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert result.rows[0].to_dict() == {"id": 1, "item": "a", "item_index": 0}
+        assert result.rows[1].to_dict() == {"id": 1, "item": "b", "item_index": 1}
 
 
 class TestJSONExplodeTypeViolations:

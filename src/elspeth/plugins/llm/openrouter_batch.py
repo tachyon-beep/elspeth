@@ -452,7 +452,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         results: dict[int, dict[str, Any] | Exception] = {}
 
         with ThreadPoolExecutor(max_workers=self._pool_size) as executor:
-            futures = {executor.submit(self._process_single_row, idx, row.to_dict(), ctx): idx for idx, row in enumerate(rows)}
+            futures = {executor.submit(self._process_single_row, idx, row, ctx): idx for idx, row in enumerate(rows)}
 
             # Collect results - catch only transport exceptions, let plugin bugs crash.
             # _process_single_row already handles HTTPStatusError and RequestError
@@ -565,7 +565,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
     def _process_single_row(
         self,
         idx: int,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> dict[str, Any]:
         """Process a single row through OpenRouter API.
@@ -587,7 +587,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         """
         # 1. Render template (THEIR DATA - wrap)
         try:
-            rendered = self._template.render_with_metadata(row)
+            rendered = self._template.render_with_metadata(row, contract=row.contract)
         except TemplateError as e:
             # Record template error to audit trail — this happens before any HTTP
             # call, so AuditedHTTPClient can't record it. Use ctx.record_call().
@@ -729,7 +729,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         )
 
         # 7. Build output row (OUR CODE - let exceptions crash)
-        output: dict[str, Any] = dict(row)
+        output = row.to_dict()
         output[self._response_field] = content
         output[f"{self._response_field}_usage"] = usage
         output[f"{self._response_field}_template_hash"] = rendered.template_hash

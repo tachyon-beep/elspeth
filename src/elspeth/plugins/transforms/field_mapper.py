@@ -95,23 +95,28 @@ class FieldMapper(BaseTransform):
             ValidationError: If validate_input=True and row fails schema validation.
                 This indicates a bug in the upstream source/transform.
         """
-        # Get dict representation for processing
-        row_dict = row.to_dict()
+        # Keep a normalized dict view only for validation and dotted-path lookups.
+        row_data = row.to_dict()
 
         # Optional input validation - crash on wrong types (source bug!)
         if self._validate_input and not self._schema_config.is_observed:
-            self.input_schema.model_validate(row_dict)  # Raises on failure
+            self.input_schema.model_validate(row_data)  # Raises on failure
 
         # Start with empty or copy depending on select_only
         if self._select_only:
             output: dict[str, Any] = {}
         else:
-            output = copy.deepcopy(row_dict)
+            output = copy.deepcopy(row_data)
 
         # Apply mappings
         applied_mappings: dict[str, str] = {}
         for source, target in self._mapping.items():
-            value = get_nested_field(row_dict, source)
+            if "." in source:
+                value = get_nested_field(row_data, source)
+            elif source in row:
+                value = row[source]
+            else:
+                value = MISSING
 
             if value is MISSING:
                 if self._strict:
@@ -121,8 +126,13 @@ class FieldMapper(BaseTransform):
                 continue  # Skip missing fields in non-strict mode
 
             # Remove old key if it exists (for rename within same dict)
-            if not self._select_only and "." not in source and source in output:
-                del output[source]
+            if not self._select_only and "." not in source and source in row:
+                if source in output:
+                    del output[source]
+                else:
+                    normalized_source = row.contract.resolve_name(source)
+                    if normalized_source in output:
+                        del output[normalized_source]
 
             output[target] = value
             applied_mappings[source] = target
@@ -131,7 +141,7 @@ class FieldMapper(BaseTransform):
         fields_modified: list[str] = []
         fields_added: list[str] = []
         for target in applied_mappings.values():
-            if target in row_dict:
+            if target in row:
                 fields_modified.append(target)
             else:
                 fields_added.append(target)

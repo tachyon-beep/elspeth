@@ -499,12 +499,9 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         Returns:
             TransformResult with processed row or error
         """
-        # Extract dict from PipelineRow for template rendering (which hashes the data)
-        row_data = row.to_dict()
-
         # 1. Render template with row data (THEIR DATA - wrap)
         try:
-            rendered = self._template.render_with_metadata(row_data)
+            rendered = self._template.render_with_metadata(row, contract=row.contract)
         except TemplateError as e:
             error_reason: TransformErrorReason = {
                 "reason": "template_rendering_failed",
@@ -644,7 +641,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
             # 7. Build output row (OUR CODE - let exceptions crash)
-            output = row_data.copy()
+            output = row.to_dict()
             output[self._response_field] = content
             output[f"{self._response_field}_usage"] = usage
             output[f"{self._response_field}_template_hash"] = rendered.template_hash

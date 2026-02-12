@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.plugins.transforms.truncate import Truncate
-from elspeth.testing import make_pipeline_row
+from elspeth.testing import make_field, make_pipeline_row
 from tests.fixtures.factories import make_context
 
 from .test_transform_protocol import (
@@ -171,3 +171,36 @@ class TestTruncateNonStringContract(TransformErrorContractTestBase):
         assert result.reason["field"] == "value"
         assert result.reason["expected"] == "str"
         assert result.reason["actual"] == "int"
+
+    def test_configured_original_field_name_is_resolved(
+        self,
+        transform: TransformProtocol,
+        ctx: Any,
+    ) -> None:
+        """Configured original names should resolve via PipelineRow contract."""
+        from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+
+        mapped_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                make_field("value", str, original_name="Value Text", required=False, source="inferred"),
+                make_field("id", int, original_name="ID", required=False, source="inferred"),
+            ),
+            locked=True,
+        )
+        mapped_row = PipelineRow({"value": "abcdefghijk", "id": 1}, mapped_contract)
+
+        # Use a transform configured with the original field name
+        original_name_transform = Truncate(
+            {
+                "fields": {"Value Text": 5},
+                "strict": False,
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        result = original_name_transform.process(mapped_row, ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["value"] == "abcde"

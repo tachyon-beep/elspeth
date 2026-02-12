@@ -140,14 +140,14 @@ class PromptTemplate:
 
     def render(
         self,
-        row: dict[str, Any],
+        row: dict[str, Any] | PipelineRow,
         *,
         contract: SchemaContract | None = None,
     ) -> str:
         """Render template with row data.
 
         Args:
-            row: Row data (accessed as row.* in template)
+            row: Row data (dict or PipelineRow, accessed as row.* in template)
             contract: Optional schema contract for dual-name resolution.
                 If provided, templates can use original names like
                 {{ row["'Amount USD'"] }} in addition to normalized names.
@@ -158,9 +158,13 @@ class PromptTemplate:
         Raises:
             TemplateError: If rendering fails (undefined variable, sandbox violation, etc.)
         """
-        # Wrap row for dual-name access if contract provided
-        if contract is not None:
-            row_context: Any = PipelineRow(row, contract)
+        # Use PipelineRow directly when provided; otherwise wrap dict for
+        # dual-name access only when contract is explicitly supplied.
+        row_context: Any
+        if isinstance(row, PipelineRow):
+            row_context = row
+        elif contract is not None:
+            row_context = PipelineRow(row, contract)
         else:
             row_context = row
 
@@ -181,14 +185,14 @@ class PromptTemplate:
 
     def render_with_metadata(
         self,
-        row: dict[str, Any],
+        row: dict[str, Any] | PipelineRow,
         *,
         contract: SchemaContract | None = None,
     ) -> RenderedPrompt:
         """Render template and return with audit metadata.
 
         Args:
-            row: Row data (accessed as row.* in template)
+            row: Row data (dict or PipelineRow, accessed as row.* in template)
             contract: Optional schema contract for dual-name resolution.
                 If provided, templates can use original names and the
                 contract hash will be included in the returned metadata.
@@ -204,10 +208,11 @@ class PromptTemplate:
 
         # Compute variables hash using canonical JSON (row data only)
         # Always hash the raw row data (normalized keys) for determinism
+        row_for_hash = row.to_dict() if isinstance(row, PipelineRow) else row
         # Wrap ValueError/TypeError from canonical_json (NaN/Infinity rejection, non-serializable types)
         # This ensures row-scoped failures don't crash the entire run (Tier 2 trust model)
         try:
-            variables_hash = _sha256(canonical_json(row))
+            variables_hash = _sha256(canonical_json(row_for_hash))
         except (ValueError, TypeError) as e:
             raise TemplateError(f"Cannot compute variables hash: {e}") from e
 

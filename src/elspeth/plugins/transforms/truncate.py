@@ -105,12 +105,11 @@ class Truncate(BaseTransform):
         Returns:
             TransformResult with truncated field values
         """
-        row_dict = row.to_dict()
-        output = copy.deepcopy(row_dict)
+        output = copy.deepcopy(row.to_dict())
         fields_modified: list[str] = []
 
         for field_name, max_len in self._fields.items():
-            if field_name not in output:
+            if field_name not in row:
                 if self._strict:
                     return TransformResult.error(
                         {
@@ -120,7 +119,11 @@ class Truncate(BaseTransform):
                     )
                 continue  # Skip missing fields in non-strict mode
 
-            value = output[field_name]
+            value = row[field_name]
+            if field_name in output:
+                normalized_field_name = field_name
+            else:
+                normalized_field_name = row.contract.resolve_name(field_name)
 
             # Type mismatches are upstream contract bugs; always surface explicitly.
             if type(value) is not str:
@@ -138,9 +141,9 @@ class Truncate(BaseTransform):
                 if self._suffix:
                     # Truncate leaving room for suffix
                     truncate_at = max_len - len(self._suffix)
-                    output[field_name] = value[:truncate_at] + self._suffix
+                    output[normalized_field_name] = value[:truncate_at] + self._suffix
                 else:
-                    output[field_name] = value[:max_len]
+                    output[normalized_field_name] = value[:max_len]
                 fields_modified.append(field_name)
 
         return TransformResult.success(

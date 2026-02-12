@@ -3,7 +3,9 @@
 
 import pytest
 
+from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.testing import make_field, make_row
 
 
 class TestPromptTemplate:
@@ -63,6 +65,21 @@ Analyze these entries:
         assert result.template_hash is not None
         assert result.variables_hash is not None
         assert result.rendered_hash is not None
+
+    def test_render_with_metadata_accepts_pipeline_row(self) -> None:
+        """render_with_metadata() accepts PipelineRow inputs directly."""
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(make_field("prompt_text", str, original_name="Prompt Text"),),
+            locked=True,
+        )
+        row = make_row({"prompt_text": "sample"}, contract=contract)
+        template = PromptTemplate("Analyze: {{ row['Prompt Text'] }}")
+
+        result = template.render_with_metadata(row, contract=contract)
+
+        assert result.prompt == "Analyze: sample"
+        assert result.variables_hash is not None
 
     def test_undefined_variable_raises_error(self) -> None:
         """Missing required variable raises TemplateError."""

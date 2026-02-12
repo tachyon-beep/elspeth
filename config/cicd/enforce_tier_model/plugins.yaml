@@ -99,12 +99,12 @@ allow_hits:
   reason: Tier 2 contract enforcement - isinstance validates copies_field type before arithmetic
   safety: Wrong types crash (upstream bug); wrong values quarantined via error result
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=9160e4e0b95ed5e8
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=215bae67b700c3fd
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=af2344f0f0f5938f
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=f93822a8a17d752b
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -194,12 +194,12 @@ allow_hits:
   reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=8404ee8567c3b226
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=c0617400794d3363
   owner: architecture
   reason: Tier 3 boundary — validates row field is str before sending to Azure API
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_get_fields_to_scan:fp=9bb006a32eb07a28
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_get_fields_to_scan:fp=4bc821183ed1cfbd
   owner: architecture
   reason: Tier 2 row filtering — isinstance selects str fields for content scanning
   safety: Code reviewed - legitimate pattern
@@ -224,12 +224,12 @@ allow_hits:
   reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=69fe83d9ba6aa6e9
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=0dacc878bc4c9b55
   owner: architecture
   reason: Tier 3 boundary — validates row field is str before sending to Azure API
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_get_fields_to_scan:fp=6756f72f855a6bcf
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_get_fields_to_scan:fp=26f6b1fa2d11c919
   owner: architecture
   reason: Tier 2 row filtering — isinstance selects str fields for scanning
   safety: Code reviewed - legitimate pattern

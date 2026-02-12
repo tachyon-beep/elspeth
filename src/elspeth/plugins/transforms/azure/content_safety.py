@@ -304,15 +304,13 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         Raises:
             CapacityError: On rate limit errors (for worker pool retry)
         """
-        # Get dict representation for field scanning
-        row_dict = row.to_dict()
-        fields_to_scan = self._get_fields_to_scan(row_dict)
+        fields_to_scan = self._get_fields_to_scan(row)
 
         for field_name in fields_to_scan:
-            if field_name not in row_dict:
+            if field_name not in row:
                 continue  # Skip fields not present in this row
 
-            value = row_dict[field_name]
+            value = row[field_name]
             if not isinstance(value, str):
                 # Explicitly-configured field is non-string — fail CLOSED.
                 # Security transform cannot analyze non-string content for safety.
@@ -390,14 +388,14 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                 )
 
         return TransformResult.success(
-            PipelineRow(row_dict, row.contract),
+            row,
             success_reason={"action": "validated"},
         )
 
-    def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
+    def _get_fields_to_scan(self, row: PipelineRow) -> list[str]:
         """Determine which fields to scan based on config."""
         if self._fields == "all":
-            return [k for k, v in row.items() if isinstance(v, str)]
+            return [field_name for field_name in row if isinstance(row[field_name], str)]
         elif isinstance(self._fields, str):
             return [self._fields]
         else:

@@ -519,7 +519,7 @@ class AzureBatchLLMTransform(BaseTransform):
             custom_id = f"row-{idx}-{uuid.uuid4().hex[:8]}"
 
             try:
-                rendered = self._template.render_with_metadata(row.to_dict())
+                rendered = self._template.render_with_metadata(row, contract=row.contract)
             except TemplateError as e:
                 template_errors.append((idx, str(e)))
                 continue
