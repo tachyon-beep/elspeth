@@ -12,6 +12,7 @@ Phase 3 Integration Points:
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
@@ -322,10 +323,14 @@ class PluginContext:
             from elspeth.contracts.events import ExternalCallCompleted
             from elspeth.core.canonical import stable_hash
 
+            # Snapshot payloads so async telemetry exports can't drift from call-time hashes.
+            request_snapshot = copy.deepcopy(request_data)
+            response_snapshot = copy.deepcopy(response_data) if response_data is not None else None
+
             # Extract token usage for LLM calls if available
             token_usage = None
-            if call_type == CallTypeEnum.LLM and response_data is not None:
-                usage = response_data.get("usage")
+            if call_type == CallTypeEnum.LLM and response_snapshot is not None:
+                usage = response_snapshot.get("usage")
                 if usage and isinstance(usage, dict):
                     token_usage = usage
 
@@ -340,10 +345,10 @@ class PluginContext:
                     provider=provider,
                     status=status,
                     latency_ms=latency_ms or 0.0,
-                    request_hash=stable_hash(request_data),
-                    response_hash=stable_hash(response_data) if response_data is not None else None,
-                    request_payload=request_data,  # Full request for observability
-                    response_payload=response_data,  # Full response for observability
+                    request_hash=stable_hash(request_snapshot),
+                    response_hash=stable_hash(response_snapshot) if response_snapshot is not None else None,
+                    request_payload=request_snapshot,  # Full request snapshot for observability
+                    response_payload=response_snapshot,  # Full response snapshot for observability
                     token_usage=token_usage,
                 )
             )

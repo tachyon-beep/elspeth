@@ -130,22 +130,22 @@ allow_hits:
   owner: architecture
   reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for
     strict lookup'
-- key: contracts/plugin_context.py:R5:PluginContext:get:fp=76de86ac35dafae4
+- key: contracts/plugin_context.py:R5:PluginContext:get:fp=2a573e1a799bf997
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=5ec999dfff114a20
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=f10de163eec9f50c
   owner: architecture
   reason: Optional field access at trust boundary
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=94971df001b1532e
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=8a3e698ac7e24563
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=4e105a1207a19d87
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=ce3ee284886d2454
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=27fe368832b3e2a9
+- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=17cecdb36463a49a
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=d20c868c67b376ce
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=d75ceb3203014c15
   owner: architecture
   reason: Silent recovery with explicit error handling path
 - key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=4d9b80b717bc7551

@@ -1,6 +1,6 @@
 # Bug Report: Telemetry Payloads Are Mutable References (Can Drift From Audit Hashes)
 
-**Status: OPEN**
+**Status: CLOSED (FIXED)**
 
 ## Status Update (2026-02-11)
 
@@ -98,3 +98,18 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md:573-623`, `docs/guides/telemetry.md`
+
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED (FIXED)
+- Fix summary: `PluginContext.record_call()` now deep-copies request/response payloads before emitting telemetry and hashes those snapshots, preventing post-call mutation drift.
+- Code updated:
+  - `src/elspeth/contracts/plugin_context.py`
+- Tests added/updated:
+  - `tests/unit/plugins/test_context.py`
+- Verification:
+  - `ruff check src/elspeth/contracts/plugin_context.py tests/unit/plugins/test_context.py`
+  - `pytest tests/unit/plugins/test_context.py` (`37 passed`)
+  - Manual repro check confirms emitted payloads remain unchanged after caller mutation.
+- Ticket moved from `docs/bugs/open/plugins-transforms/` to `docs/bugs/closed/plugins-transforms/`.
