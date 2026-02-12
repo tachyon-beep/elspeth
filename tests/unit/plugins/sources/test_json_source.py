@@ -1,5 +1,6 @@
 """Tests for JSON source plugin."""
 
+import io
 import json
 from pathlib import Path
 
@@ -588,6 +589,57 @@ class TestJSONSourceParseErrors:
         assert quarantined.quarantine_error is not None
         assert "line 2" in quarantined.quarantine_error
         assert "utf-8" in quarantined.quarantine_error.lower()
+        assert "__raw_bytes_hex__" in quarantined.row
+        assert quarantined.row["__line_number__"] == 2
+
+    def test_jsonl_utf16_surrogateescape_line_quarantined_not_crash(
+        self,
+        tmp_path: Path,
+        ctx: PluginContext,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """UTF-16 surrogateescape lines are quarantined without crashing."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "data.jsonl"
+        jsonl_file.write_text("{}", encoding="utf-8")
+
+        # Simulate text-decoder output containing surrogateescape bytes for a
+        # UTF-16 source line. Re-encoding with utf-16 used to crash here.
+        fake_file = io.StringIO('{"id": 1}\n\udcff\n{"id": 3}\n')
+        real_open = open
+
+        def fake_open(file: object, *args: object, **kwargs: object) -> object:
+            if Path(file) == jsonl_file and kwargs.get("encoding") == "utf-16":
+                fake_file.seek(0)
+                return fake_file
+            return real_open(file, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", fake_open)
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "encoding": "utf-16",
+                "on_validation_failure": "quarantine",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 3
+        assert results[0].is_quarantined is False
+        assert results[0].row == {"id": 1}
+        assert results[2].is_quarantined is False
+        assert results[2].row == {"id": 3}
+
+        quarantined = results[1]
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_error is not None
+        assert "line 2" in quarantined.quarantine_error
+        assert "utf-16" in quarantined.quarantine_error.lower()
         assert "__raw_bytes_hex__" in quarantined.row
         assert quarantined.row["__line_number__"] == 2
 

@@ -47,6 +47,19 @@ def _contains_surrogateescape_chars(value: str) -> bool:
     return any(0xDC80 <= ord(char) <= 0xDCFF for char in value)
 
 
+def _surrogateescape_line_to_bytes(value: str, encoding: str) -> bytes:
+    """Encode a surrogateescape-decoded line back to bytes for quarantine.
+
+    UTF-16/UTF-32 codecs reject low-surrogate code points on encode, even when
+    ``errors="surrogateescape"`` is requested. Fall back to UTF-8 with
+    surrogateescape to preserve raw undecodable byte values without crashing.
+    """
+    try:
+        return value.encode(encoding, errors="surrogateescape")
+    except UnicodeEncodeError:
+        return value.encode("utf-8", errors="surrogateescape")
+
+
 class JSONSourceConfig(SourceDataConfig):
     """Configuration for JSON source plugin.
 
@@ -175,7 +188,7 @@ class JSONSource(BaseSource):
             with open(self._path, encoding=self._encoding, errors="surrogateescape", newline="") as f:
                 for line_num, raw_line in enumerate(f, start=1):
                     if _contains_surrogateescape_chars(raw_line):
-                        raw_bytes = raw_line.encode(self._encoding, errors="surrogateescape")
+                        raw_bytes = _surrogateescape_line_to_bytes(raw_line, self._encoding)
                         raw_row = {"__raw_bytes_hex__": raw_bytes.hex(), "__line_number__": line_num}
                         error_msg = f"JSON parse error at line {line_num}: invalid {self._encoding} encoding"
                         quarantined = self._record_parse_error(
