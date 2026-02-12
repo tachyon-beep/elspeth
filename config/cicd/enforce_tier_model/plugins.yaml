@@ -74,16 +74,6 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/validation.py:R5:PluginConfigValidator:validate_source_config:fp=3bd8f6558f2b54b2
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/validation.py:R5:PluginConfigValidator:validate_transform_config:fp=b60f09b21ed871b6
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=2313ec3565068c68
   owner: architecture
   reason: Optional field access at trust boundary
@@ -366,12 +356,6 @@ allow_hits:
   reason: Tier 3 boundary - response.text is external data, extract_content() can fail unpredictably
   safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL
   expires: '2026-05-02'
-- key: plugins/validation.py:R5:PluginConfigValidator:validate_sink_config:fp=39024a41cd690457
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-- key: plugins/validation.py:R1:PluginConfigValidator:_extract_errors:fp=76f7694624d8cfcc
-  owner: architecture
-  reason: Optional field access at trust boundary
 # Refactored: post()/get() shared logic now in _execute_request/_parse_response_body/_record_and_emit
 - key: plugins/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=1b8441ef483bc723
   owner: architecture

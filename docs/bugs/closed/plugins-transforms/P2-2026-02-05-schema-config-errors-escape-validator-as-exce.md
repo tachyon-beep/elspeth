@@ -1,6 +1,18 @@
 # Bug Report: Schema Config Errors Escape Validator as Exceptions Instead of Structured Errors
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-12)
+
+- Classification: **Fixed and verified**
+- Resolution summary:
+  - Updated `PluginConfigValidator` to catch `PluginConfigError` explicitly and convert wrapped schema `ValueError` causes into structured `ValidationError` entries.
+  - Applied this conversion path consistently across source, transform, and sink validators.
+  - Added regression coverage for invalid embedded `schema.mode` on source/transform/sink validation paths.
+- Verification:
+  - `.venv/bin/python -m pytest tests/unit/plugins/test_validation.py -q` (24 passed)
+  - `.venv/bin/python -m pytest tests/unit/plugins -q` (1810 passed, 3 xfailed, 3 deselected)
+  - `.venv/bin/ruff check src/elspeth/plugins/validation.py tests/unit/plugins/test_validation.py` (passed)
 
 ## Status Update (2026-02-11)
 
