@@ -1972,6 +1972,47 @@ class TestMaybeCoalesceToken:
         assert handled is True
         assert result is None
 
+    def test_coalesce_failure_with_outcomes_recorded_does_not_duplicate_recording(self) -> None:
+        """When executor already recorded FAILED outcome, processor must not record again."""
+        _, recorder = _make_recorder()
+        coalesce = Mock()
+        coalesce.accept.return_value = Mock(
+            held=False,
+            merged_token=None,
+            failure_reason="late_arrival_after_merge",
+            outcomes_recorded=True,
+        )
+        processor = _make_processor(
+            recorder,
+            coalesce_executor=coalesce,
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+            node_step_map={NodeID("coalesce::merge"): 2},
+        )
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="token-1",
+            row_data=make_row({}),
+            branch_name="path_a",
+        )
+
+        with (
+            patch.object(recorder, "record_token_outcome") as record_outcome,
+            patch.object(processor, "_emit_token_completed") as emit_token_completed,
+        ):
+            handled, result = processor._maybe_coalesce_token(
+                token,
+                current_node_id=NodeID("coalesce::merge"),
+                coalesce_node_id=NodeID("coalesce::merge"),
+                coalesce_name=CoalesceName("merge"),
+                child_items=[],
+            )
+
+        assert handled is True
+        assert result is not None
+        assert result.outcome == RowOutcome.FAILED
+        record_outcome.assert_not_called()
+        emit_token_completed.assert_called_once()
+
     def test_coalesce_merged_at_terminal_returns_coalesced_result(self) -> None:
         """All branches arrived at terminal coalesce → COALESCED result."""
         _, recorder = _make_recorder()

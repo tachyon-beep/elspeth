@@ -1,6 +1,6 @@
 # Bug Report: Late-arrival coalesce failures miss immediate token outcome recording
 
-**Status: OPEN**
+**Status: CLOSED (FIXED)**
 
 ## Status Update (2026-02-11)
 
@@ -107,3 +107,29 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/architecture/landscape-audit-entry-points.md`
+
+---
+
+## Verification (2026-02-12)
+
+**Status: FIXED**
+
+- Late-arrival handling now records a terminal FAILED token outcome in `CoalesceExecutor.accept()` and sets `outcomes_recorded=True` in the returned `CoalesceOutcome`. (`src/elspeth/engine/coalesce_executor.py`)
+- Existing late-arrival tests now verify both immediate outcome recording and `outcomes_recorded=True`. (`tests/unit/engine/test_coalesce_executor.py`)
+- Processor behavior is explicitly covered to ensure no duplicate token outcome recording when executor already recorded outcomes. (`tests/unit/engine/test_processor.py`)
+
+## Closure Report (2026-02-12)
+
+**Resolution:** CLOSED (FIXED)
+
+### Quality Gates Run
+
+- `.venv/bin/python -m pytest tests/unit/engine/test_coalesce_executor.py -k late_arrival -q`
+- `.venv/bin/python -m pytest tests/unit/engine/test_coalesce_executor.py -q`
+- `.venv/bin/python -m pytest tests/unit/engine/test_processor.py -k TestMaybeCoalesceToken -q`
+- `.venv/bin/python -m ruff check src/elspeth/engine/coalesce_executor.py tests/unit/engine/test_coalesce_executor.py tests/unit/engine/test_processor.py`
+
+### Notes
+
+- This fix closes the late-arrival crash window where node state failure could be persisted without a terminal token outcome.
+- The failure reason hash generation follows existing coalesce failure patterns for consistency and audit traceability.
