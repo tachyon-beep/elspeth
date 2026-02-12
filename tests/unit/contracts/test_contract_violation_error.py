@@ -2,7 +2,7 @@
 
 Tests for:
 - ContractViolation.to_error_reason(): base conversion with reason, violation_type, field, original_field
-- TypeMismatchViolation.to_error_reason(): adds expected_type, actual_type, actual_value
+- TypeMismatchViolation.to_error_reason(): adds expected, actual, value
 - MissingFieldViolation.to_error_reason(): uses base implementation
 - ExtraFieldViolation.to_error_reason(): uses base implementation
 - violations_to_error_reason(): single violation returns direct dict, multiple wraps with count
@@ -126,8 +126,8 @@ class TestTypeMismatchViolationToErrorReason:
         result = exc.to_error_reason()
         assert result["violation_type"] == "TypeMismatchViolation"
 
-    def test_type_mismatch_to_error_reason_has_expected_type(self) -> None:
-        """TypeMismatchViolation.to_error_reason() includes expected_type as string."""
+    def test_type_mismatch_to_error_reason_has_expected(self) -> None:
+        """TypeMismatchViolation.to_error_reason() includes expected as string."""
         from elspeth.contracts.errors import TypeMismatchViolation
 
         exc = TypeMismatchViolation(
@@ -138,10 +138,10 @@ class TestTypeMismatchViolationToErrorReason:
             actual_value="not_a_number",
         )
         result = exc.to_error_reason()
-        assert result["expected_type"] == "int"
+        assert result["expected"] == "int"
 
-    def test_type_mismatch_to_error_reason_has_actual_type(self) -> None:
-        """TypeMismatchViolation.to_error_reason() includes actual_type as string."""
+    def test_type_mismatch_to_error_reason_has_actual(self) -> None:
+        """TypeMismatchViolation.to_error_reason() includes actual as string."""
         from elspeth.contracts.errors import TypeMismatchViolation
 
         exc = TypeMismatchViolation(
@@ -152,10 +152,10 @@ class TestTypeMismatchViolationToErrorReason:
             actual_value="not_a_number",
         )
         result = exc.to_error_reason()
-        assert result["actual_type"] == "str"
+        assert result["actual"] == "str"
 
-    def test_type_mismatch_to_error_reason_has_actual_value_as_repr(self) -> None:
-        """TypeMismatchViolation.to_error_reason() includes actual_value as repr."""
+    def test_type_mismatch_to_error_reason_has_value_as_repr(self) -> None:
+        """TypeMismatchViolation.to_error_reason() includes value as repr."""
         from elspeth.contracts.errors import TypeMismatchViolation
 
         exc = TypeMismatchViolation(
@@ -166,7 +166,7 @@ class TestTypeMismatchViolationToErrorReason:
             actual_value="not_a_number",
         )
         result = exc.to_error_reason()
-        assert result["actual_value"] == "'not_a_number'"
+        assert result["value"] == "'not_a_number'"
 
     def test_type_mismatch_to_error_reason_repr_handles_complex_values(self) -> None:
         """TypeMismatchViolation.to_error_reason() uses repr for complex values."""
@@ -180,7 +180,7 @@ class TestTypeMismatchViolationToErrorReason:
             actual_value=[1, 2, 3],
         )
         result = exc.to_error_reason()
-        assert result["actual_value"] == "[1, 2, 3]"
+        assert result["value"] == "[1, 2, 3]"
 
 
 class TestExtraFieldViolationToErrorReason:

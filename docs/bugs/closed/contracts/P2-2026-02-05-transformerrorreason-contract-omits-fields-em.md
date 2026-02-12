@@ -17,9 +17,12 @@
 
 - Status: **FIXED**
 - Changes applied:
-  - Added missing optional fields to `TransformErrorReason` for contract-violation
-    helper payloads: `violation_type`, `original_field`, `expected_type`,
-    `actual_value`, `count`, and `violations`.
+  - Aligned contract-violation helper payloads with canonical error keys:
+    `expected`, `actual`, and `value` (instead of emitting parallel
+    `expected_type`/`actual_value` variants).
+  - Added the missing optional fields required by helper payloads in
+    `TransformErrorReason`: `violation_type`, `original_field`, `count`,
+    and `violations`.
   - Updated `TransformErrorReason` docstring to document contract-violation context.
   - Added an alignment test ensuring all keys emitted by contract-violation
     helpers are declared in `TransformErrorReason`.

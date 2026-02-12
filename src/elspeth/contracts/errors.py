@@ -289,9 +289,7 @@ class TransformErrorReason(TypedDict):
     Type validation context:
         expected: Expected type or value
         actual: Actual type or value received
-        expected_type: Expected Python type name for contract violations
-        actual_type: Actual Python type name for contract violations
-        actual_value: repr() of offending value for contract violations
+        actual_type: Actual Python type name for type checks
         value: The actual value (truncated for audit)
 
     Contract violation context:
@@ -374,9 +372,7 @@ class TransformErrorReason(TypedDict):
     # Type validation context
     expected: NotRequired[str]
     actual: NotRequired[str]
-    expected_type: NotRequired[str]
     actual_type: NotRequired[str]
-    actual_value: NotRequired[str]
     value: NotRequired[str]
 
     # Contract violation context
@@ -713,15 +709,15 @@ class TypeMismatchViolation(ContractViolation):
 
         Returns:
             Dict with 'reason' key and type-specific fields suitable for
-            TransformResult.error(). Includes expected_type, actual_type,
-            and actual_value (as repr for safe string representation).
+            TransformResult.error(). Includes expected, actual, and value
+            (as repr for safe string representation).
         """
         base = super().to_error_reason()
         base.update(
             {
-                "expected_type": self.expected_type.__name__,
-                "actual_type": self.actual_type.__name__,
-                "actual_value": repr(self.actual_value),
+                "expected": self.expected_type.__name__,
+                "actual": self.actual_type.__name__,
+                "value": repr(self.actual_value),
             }
         )
         return base
