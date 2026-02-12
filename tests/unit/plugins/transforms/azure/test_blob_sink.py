@@ -690,6 +690,33 @@ class TestAzureBlobSinkErrors:
         assert exc_info.value.__cause__ is not None
         assert "Network error" in str(exc_info.value.__cause__)
 
+    def test_retry_after_failed_upload_does_not_duplicate_rows(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """Failed upload must not mutate cumulative buffer before a retry."""
+        mock_blob_client = MagicMock()
+        mock_blob_client.upload_blob.side_effect = [Exception("Network error"), None]
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(make_config(format="csv"))
+        rows = [{"id": 1, "name": "alice"}]
+
+        with pytest.raises(RuntimeError, match="Failed to upload blob"):
+            sink.write(rows, ctx)
+
+        # Failed upload must not commit to cumulative state.
+        assert sink._buffered_rows == []
+
+        result = sink.write(rows, ctx)
+        assert isinstance(result, ArtifactDescriptor)
+        assert mock_blob_client.upload_blob.call_count == 2
+
+        second_upload_lines = mock_blob_client.upload_blob.call_args_list[1][0][0].decode().strip().splitlines()
+        assert second_upload_lines[0] == "id,name"
+        assert second_upload_lines[1] == "1,alice"
+        assert len(second_upload_lines) == 2
+        assert sink._buffered_rows == [{"id": 1, "name": "alice"}]
+
     def test_connection_error_propagates(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Connection errors propagate to caller."""
         mock_container_client.side_effect = Exception("Connection refused")

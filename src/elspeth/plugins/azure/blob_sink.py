@@ -556,12 +556,13 @@ class AzureBlobSink(BaseSink):
 
         # Render the blob path once per instance and reuse it across writes.
         rendered_path = self._get_or_init_blob_path(ctx)
-        # Buffer output rows so each upload contains all rows from prior writes.
-        self._buffered_rows.extend(row.copy() for row in output_rows)
+
+        # Build candidate cumulative rows for this upload, but only commit them
+        # to sink state after external upload succeeds (retry-idempotent).
+        candidate_rows = [*self._buffered_rows, *(row.copy() for row in output_rows)]
 
         # Serialize rows to bytes (OUR CODE - let it crash on bugs)
-        content = self._serialize_rows(self._buffered_rows)
-
+        content = self._serialize_rows(candidate_rows)
         # Compute content hash before upload
         content_hash = hashlib.sha256(content).hexdigest()
         size_bytes = len(content)
@@ -580,6 +581,8 @@ class AzureBlobSink(BaseSink):
             # When overwrite=False, upload_blob raises ResourceExistsError server-side,
             # avoiding the TOCTOU race of a separate exists() check.
             blob_client.upload_blob(content, overwrite=upload_overwrite)
+            # Commit buffered state only after successful external upload.
+            self._buffered_rows = candidate_rows
             latency_ms = (time.perf_counter() - start_time) * 1000
             self._has_uploaded = True
 
