@@ -302,19 +302,18 @@ class TelemetryManager:
         with self._dropped_lock:
             try:
                 evicted = self._queue.get_nowait()
+                had_evicted = True
             except queue.Empty:
                 evicted = None
-            else:
-                # We removed an item without the export thread processing it.
-                # Adjust unfinished-task count to keep queue.join() correct.
-                self._queue.task_done()
-                if evicted is None:
-                    # Preserve shutdown sentinel if we raced with close().
-                    with contextlib.suppress(queue.Full):
-                        self._queue.put_nowait(None)
-                else:
-                    self._events_dropped += 1
-                    self._log_drops_if_needed()
+                had_evicted = False
+
+            if had_evicted and evicted is None:
+                # Preserve shutdown sentinel if we raced with close().
+                with contextlib.suppress(queue.Full):
+                    self._queue.put_nowait(None)
+            elif had_evicted:
+                self._events_dropped += 1
+                self._log_drops_if_needed()
 
             try:
                 self._queue.put_nowait(event)
@@ -323,6 +322,12 @@ class TelemetryManager:
                 # Count the incoming event as dropped.
                 self._events_dropped += 1
                 self._log_drops_if_needed()
+            finally:
+                if had_evicted:
+                    # Decrement evicted unfinished task AFTER enqueue attempt.
+                    # This prevents queue.join() from observing a transient zero
+                    # while the replacement event is being queued.
+                    self._queue.task_done()
 
     def _log_drops_if_needed(self) -> None:
         """Log aggregate drop message if threshold reached.

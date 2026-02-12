@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
 from datetime import UTC, datetime
@@ -440,6 +441,83 @@ class TestDropBackpressure:
                 object.__setattr__(manager, "_dispatch_to_exporters", original_dispatch)
             manager.close()
             INTERNAL_DEFAULTS["telemetry"]["queue_size"] = original_queue_size
+
+    def test_drop_mode_replacement_keeps_join_blocked_until_replacement_queued(self) -> None:
+        """Eviction must not let queue.join() observe a transient zero.
+
+        Regression test for DROP-mode overflow replacement: if task_done() is
+        called before put_nowait(replacement), a concurrent flush() can return
+        before the replacement event is queued.
+        """
+
+        replacement_event = _row_event()
+
+        class BlockingReplacementQueue(queue.Queue):
+            def __init__(self) -> None:
+                super().__init__(maxsize=1)
+                self.replacement_put_entered = threading.Event()
+                self.allow_replacement_put = threading.Event()
+
+            def put_nowait(self, item):
+                if item is replacement_event:
+                    self.replacement_put_entered.set()
+                    assert self.allow_replacement_put.wait(timeout=2.0), "Timed out waiting to release replacement put"
+                return super().put_nowait(item)
+
+        class DummyManager:
+            _LOG_INTERVAL = 100
+
+            def __init__(self, q: BlockingReplacementQueue) -> None:
+                self._queue = q
+                self._dropped_lock = threading.Lock()
+                self._events_dropped = 0
+                self._last_logged_drop_count = 0
+
+            def _log_drops_if_needed(self) -> None:
+                if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
+                    self._last_logged_drop_count = self._events_dropped
+
+        q = BlockingReplacementQueue()
+        dummy = DummyManager(q)
+        old_event = _lifecycle_event()
+        q.put_nowait(old_event)
+
+        flush_returned = threading.Event()
+
+        def flush_waiter() -> None:
+            q.join()
+            flush_returned.set()
+
+        flush_thread = threading.Thread(target=flush_waiter, name="flush-waiter")
+        flush_thread.start()
+
+        drop_thread = threading.Thread(
+            target=TelemetryManager._drop_oldest_and_enqueue_newest,
+            args=(dummy, replacement_event),
+            name="drop-replace",
+        )
+        drop_thread.start()
+
+        assert q.replacement_put_entered.wait(timeout=2.0), "Did not reach replacement put"
+
+        # Critical assertion: join() must still be blocked while replacement
+        # put is in progress. Old ordering (task_done then put) fails here.
+        assert not flush_returned.is_set()
+
+        q.allow_replacement_put.set()
+        drop_thread.join(timeout=2.0)
+        assert not drop_thread.is_alive()
+
+        # Replacement is now queued and unfinished. join() must still block until
+        # the replacement task is completed.
+        assert not flush_returned.is_set()
+
+        queued = q.get_nowait()
+        assert queued is replacement_event
+        q.task_done()
+
+        flush_thread.join(timeout=2.0)
+        assert flush_returned.is_set()
 
 
 # =============================================================================

@@ -46,17 +46,17 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: telemetry/manager.py:R6:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=53fc7c7e0502578c
+- key: telemetry/manager.py:R6:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=30098fd13284c047
   owner: architecture
   reason: Queue overflow handling at telemetry backpressure boundary
   safety: Queue.Empty indicates race during overflow handling; safe fallback keeps newest event path explicit
   expires: '2026-05-02'
-- key: telemetry/manager.py:R7:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=ac85ea3916656c87
+- key: telemetry/manager.py:R7:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=283ea87669eebc53
   owner: architecture
   reason: Sentinel reinsertion best-effort during shutdown race
   safety: Suppression is limited to queue.Full while preserving shutdown semantics; no data integrity impact
   expires: '2026-05-02'
-- key: telemetry/manager.py:R6:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=7fa30018543175a0
+- key: telemetry/manager.py:R6:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=5207caef8e815264
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
