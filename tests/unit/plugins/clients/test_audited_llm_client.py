@@ -266,6 +266,31 @@ class TestAuditedLLMClient:
                 messages=[{"role": "user", "content": "Hello"}],
             )
 
+    def test_non_rate_substring_does_not_raise_rate_limit_error(self) -> None:
+        """Errors like 'enumerate' should not be misclassified as rate limit."""
+        recorder = self._create_mock_recorder()
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.side_effect = Exception("400 Bad Request: enumerate at least one item")
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        with pytest.raises(LLMClientError) as exc_info:
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        assert type(exc_info.value) is LLMClientError
+        assert exc_info.value.retryable is False
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["error"]["retryable"] is False
+
     def test_temperature_and_max_tokens_recorded(self) -> None:
         """Temperature and max_tokens are recorded in request."""
         recorder = self._create_mock_recorder()

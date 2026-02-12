@@ -179,12 +179,12 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=5bdbfe7db9e32163
+- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=f97a4254a3ac6975
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=695415b2ec4d8fee
+- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=66b4ed77a37877c1
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -296,12 +296,12 @@ allow_hits:
   reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
   safety: MalformedResponseError raised on wrong type
   expires: '2026-05-02'
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=cb8f391ad82b21df
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=bf79975bdf2ede4c
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=6b5b01f9759184f2
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=3979cd7bedc550ef
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing

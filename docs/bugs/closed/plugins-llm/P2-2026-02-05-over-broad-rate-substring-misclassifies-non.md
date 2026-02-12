@@ -1,6 +1,6 @@
 # Bug Report: Over-broad “rate” substring misclassifies non‑rate errors as retryable
 
-**Status: OPEN**
+**Status: CLOSED (FIXED)**
 
 ## Status Update (2026-02-11)
 
@@ -100,3 +100,16 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED (FIXED)
+- Fix summary: Replaced broad substring matching with canonical error classification and explicit rate-limit indicators.
+- Code updated:
+  - `src/elspeth/plugins/clients/llm.py`
+- Tests added/updated:
+  - `tests/unit/plugins/clients/test_llm_error_classification.py`
+  - `tests/unit/plugins/clients/test_audited_llm_client.py`
+- Verification: `ruff check` passed and targeted pytest passed (`39 passed`).
+- Ticket moved from `docs/bugs/open/plugins-llm/` to `docs/bugs/closed/plugins-llm/`.
