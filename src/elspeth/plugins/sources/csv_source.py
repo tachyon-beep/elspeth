@@ -148,6 +148,30 @@ class CSVSource(BaseSource):
                     raw_headers = next(reader)
                 except StopIteration:
                     return  # Empty file after skip_rows
+                except csv.Error as e:
+                    # Header parse failure at source boundary (Tier 3): record and quarantine/discard
+                    physical_line = reader.line_num if reader.line_num > 0 else self._skip_rows + 1
+                    raw_row = {
+                        "file_path": str(self._path),
+                        "__line_number__": physical_line,
+                        "__raw_line__": "(unparseable CSV header)",
+                    }
+                    error_msg = f"CSV parse error at line {physical_line}: {e}"
+
+                    ctx.record_validation_error(
+                        row=raw_row,
+                        error=error_msg,
+                        schema_mode="parse",
+                        destination=self._on_validation_failure,
+                    )
+
+                    if self._on_validation_failure != "discard":
+                        yield SourceRow.quarantined(
+                            row=raw_row,
+                            error=error_msg,
+                            destination=self._on_validation_failure,
+                        )
+                    return
 
             # Resolve field names (normalization + mapping)
             # This may raise ValueError on collision

@@ -1,5 +1,6 @@
 """Tests for CSV source plugin."""
 
+import csv
 from pathlib import Path
 
 import pytest
@@ -486,6 +487,62 @@ class TestCSVSourceQuarantineYielding:
 
         assert not results[2].is_quarantined
         assert results[2].row == {"id": "3", "name": "carol"}
+
+    def test_malformed_header_csv_error_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Header parse csv.Error is quarantined (Tier-3 boundary), not raised."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "bad_header.csv"
+        csv_file.write_text("id,verylongheadername\n1,alice\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        old_limit = csv.field_size_limit()
+        try:
+            csv.field_size_limit(10)
+            results = list(source.load(ctx))
+        finally:
+            csv.field_size_limit(old_limit)
+
+        assert len(results) == 1
+        quarantined = results[0]
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_destination == "quarantine"
+        assert quarantined.quarantine_error is not None
+        assert "CSV parse error" in quarantined.quarantine_error
+        assert "field larger than field limit" in quarantined.quarantine_error
+        assert "file_path" in quarantined.row
+        assert quarantined.row["__line_number__"] == 1
+
+    def test_malformed_header_csv_error_discard_mode(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Header parse csv.Error respects discard mode (no yielded quarantine row)."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "bad_header_discard.csv"
+        csv_file.write_text("id,verylongheadername\n1,alice\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "discard",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        old_limit = csv.field_size_limit()
+        try:
+            csv.field_size_limit(10)
+            results = list(source.load(ctx))
+        finally:
+            csv.field_size_limit(old_limit)
+
+        assert results == []
 
 
 class TestCSVSourceFieldNormalization:

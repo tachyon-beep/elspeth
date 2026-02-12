@@ -1,6 +1,6 @@
 # Bug Report: Malformed CSV Header Raises csv.Error Without Quarantine or Audit Record
 
-**Status: OPEN**
+**Status: CLOSED**
 
 ## Status Update (2026-02-11)
 
@@ -96,3 +96,18 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+## Closure Update (2026-02-12)
+
+- Status: Closed after implementing header-level parse error handling and regression coverage.
+- Fix summary:
+  - `CSVSource.load()` now catches `csv.Error` while reading the header row.
+  - Header parse errors are recorded via `ctx.record_validation_error(..., schema_mode="parse")`.
+  - Non-discard modes yield a quarantined `SourceRow`; discard mode returns without crashing.
+- Evidence:
+  - `src/elspeth/plugins/sources/csv_source.py`: header read block now handles `csv.Error` and routes through quarantine/discard flow.
+  - `tests/unit/plugins/sources/test_csv_source.py`: added deterministic tests using `csv.field_size_limit()` to trigger header parse errors.
+- Verification:
+  - `.venv/bin/python -m pytest -q tests/unit/plugins/sources/test_csv_source.py -k "malformed_header_csv_error"`
+  - `.venv/bin/python -m pytest -q tests/unit/plugins/sources/test_csv_source.py`
+  - `.venv/bin/python -m pytest -q tests/unit/plugins/sources/test_csv_source_contract.py`
