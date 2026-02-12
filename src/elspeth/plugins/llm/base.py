@@ -18,7 +18,7 @@ from pydantic import Field, field_validator, model_validator
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
@@ -365,6 +365,27 @@ class BaseLLMTransform(BaseTransform):
             output_row=output,
             transform_adds_fields=True,  # LLM transforms add response field + metadata
         )
+
+        # propagate_contract() intentionally skips non-primitive types (dict/list),
+        # so _usage would be omitted without explicit registration. LLM plugins
+        # guarantee this field as contract-stable metadata.
+        usage_field_name = f"{self._response_field}_usage"
+        existing_names = {f.normalized_name for f in output_contract.fields}
+        if usage_field_name not in existing_names:
+            output_contract = SchemaContract(
+                mode=output_contract.mode,
+                fields=(
+                    *output_contract.fields,
+                    FieldContract(
+                        normalized_name=usage_field_name,
+                        original_name=usage_field_name,
+                        python_type=object,
+                        required=False,
+                        source="inferred",
+                    ),
+                ),
+                locked=True,
+            )
 
         return TransformResult.success(
             PipelineRow(output, output_contract),
