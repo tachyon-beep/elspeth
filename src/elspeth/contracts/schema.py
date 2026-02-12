@@ -326,8 +326,9 @@ class SchemaConfig:
             # Observed schemas may have optional fields for contracts (guaranteed_fields)
             # but don't define explicit field types
             fields_value = config.get("fields")
-            # Allow empty list or None, but not explicit field definitions
-            if fields_value is not None and isinstance(fields_value, list) and len(fields_value) > 0:
+            # Allow only None or [] for backwards compatibility; any other value
+            # is an explicit schema declaration and must be rejected.
+            if fields_value is not None and fields_value != []:
                 raise ValueError(
                     "Observed schemas (mode: observed) cannot have explicit field definitions. "
                     "Use guaranteed_fields/required_fields for contracts instead."

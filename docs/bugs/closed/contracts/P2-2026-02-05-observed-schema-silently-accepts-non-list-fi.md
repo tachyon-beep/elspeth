@@ -1,6 +1,13 @@
 # Bug Report: Observed schema silently accepts non-list `fields` values
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-12)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - Tightened observed-mode validation in `SchemaConfig.from_dict` to reject any `fields` value other than `None` or `[]` in `src/elspeth/contracts/schema.py`.
+  - Added regression tests for string and dict `fields` values in observed mode, plus explicit coverage that `[]` remains allowed in `tests/unit/contracts/test_schema_config.py`.
 
 ## Status Update (2026-02-11)
 
