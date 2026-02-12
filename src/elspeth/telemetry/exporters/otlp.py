@@ -229,6 +229,10 @@ class OTLPExporter:
         externally via flush().
         """
         if not self._buffer:
+            logger.debug(
+                "OTLP flush requested with empty buffer",
+                exporter=self._name,
+            )
             return
 
         if not self._span_exporter:

@@ -271,6 +271,19 @@ class TestOTLPExporterBuffering:
         exporter.flush()
         mock_sdk.export.assert_not_called()
 
+    def test_flush_logs_ack_when_buffer_empty(self) -> None:
+        """flush() logs acknowledgment when there are no buffered events."""
+        exporter, mock_sdk = self._create_configured_exporter()
+
+        with patch("elspeth.telemetry.exporters.otlp.logger.debug") as mock_debug:
+            exporter.flush()
+
+        mock_sdk.export.assert_not_called()
+        mock_debug.assert_called_once_with(
+            "OTLP flush requested with empty buffer",
+            exporter="otlp",
+        )
+
     def test_export_without_configure_logs_warning(self) -> None:
         """export() without configure() logs warning and continues."""
         exporter = OTLPExporter()
