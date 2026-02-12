@@ -1,12 +1,14 @@
 # Bug Report: KeywordFilter Ignores PipelineRow Dual-Name Resolution, Allowing Original-Name Fields to Bypass Filtering
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-12)
 
-- Classification: **Still open**
-- Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+- Classification: **Resolved**
+- Resolution summary:
+  - Updated `KeywordFilter` field lookup to use `PipelineRow` access semantics (`in row` + `row[field]`) instead of plain-dict membership/value checks.
+  - Added regression coverage for original header-name resolution (`"Amount USD"` resolving to `amount_usd`) so blocked content is no longer bypassed.
+  - Fix landed in commit `81796824` on branch `RC3-quality-sprint`.
 
 
 ## Summary
@@ -58,7 +60,7 @@
 
 - `src/elspeth/plugins/transforms/keyword_filter.py:109-116` converts to `row_dict` and skips fields not present in the dict, bypassing dual-name resolution.
 - `src/elspeth/contracts/schema_contract.py:518-536` documents that `PipelineRow.__getitem__` resolves both original and normalized field names.
-- `docs/plans/2026-02-03-pipelinerow-migration.md:874-889` specifies transforms should access fields via `PipelineRow` to use dual-name resolution.
+- `docs/plans/completed/2026-02-03-pipelinerow-migration.md:874-889` specifies transforms should access fields via `PipelineRow` to use dual-name resolution.
 
 ## Impact
 
@@ -74,12 +76,12 @@
 
 - Code changes (modules/files): Update `src/elspeth/plugins/transforms/keyword_filter.py` to access values via `row[field_name]` with a `try/except KeyError` (or similar) so original names resolve correctly; only use `row.to_dict()` for output serialization.
 - Config or schema changes: None.
-- Tests to add/update: Add a test in `tests/plugins/transforms/test_keyword_filter.py` that uses a `PipelineRow` with original-name mappings and ensures original-name fields are detected and blocked.
+- Tests to add/update: Add a test in `tests/unit/plugins/transforms/test_keyword_filter.py` that uses a `PipelineRow` with original-name mappings and ensures original-name fields are detected and blocked.
 - Risks or migration steps: Low; behavior should remain unchanged for normalized names, with added support for original names.
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `docs/plans/2026-02-03-pipelinerow-migration.md:874-889`.
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `docs/plans/completed/2026-02-03-pipelinerow-migration.md:874-889`.
 - Observed divergence: KeywordFilter checks fields on a plain dict instead of using `PipelineRow` dual-name access.
 - Reason (if known): Incomplete PipelineRow migration in the transform’s field access path.
 - Alignment plan or decision needed: Use `PipelineRow` access for field lookup, preserving dual-name behavior.
@@ -90,10 +92,24 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/plugins/transforms/test_keyword_filter.py -v`
+- Suggested tests to run: `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_keyword_filter.py -v`
 - New tests required: yes, add coverage for original-name field resolution.
 
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `docs/plans/2026-02-03-pipelinerow-migration.md`
+- Related design docs: `docs/plans/completed/2026-02-03-pipelinerow-migration.md`
+
+---
+
+## Verification (2026-02-12)
+
+- Reproduced before fix:
+  - Configuring `fields: ["Amount USD"]` with data under normalized key `amount_usd` returned `success` and did not block matched patterns.
+- Post-fix behavior:
+  - `KeywordFilter` correctly resolves configured original header names via `PipelineRow` and returns `TransformResult.error` with `reason="blocked_content"`.
+  - Existing normalized-name behavior remains unchanged.
+- Tests executed:
+  - `.venv/bin/python -m pytest tests/unit/plugins/transforms/test_keyword_filter.py -q`
+  - `.venv/bin/python -m pytest tests/unit/contracts/transform_contracts/test_keyword_filter_contract.py -q`
+  - `.venv/bin/python -m ruff check src/elspeth/plugins/transforms/keyword_filter.py tests/unit/plugins/transforms/test_keyword_filter.py`
