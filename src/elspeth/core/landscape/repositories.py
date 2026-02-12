@@ -90,10 +90,16 @@ class NodeRepository:
         """
         import json
 
-        # Parse schema_fields_json back to list
+        # Parse schema_fields_json back to list[dict[str, object]]
         schema_fields: list[dict[str, object]] | None = None
         if row.schema_fields_json is not None:
-            schema_fields = json.loads(row.schema_fields_json)
+            parsed_fields = json.loads(row.schema_fields_json)
+            if type(parsed_fields) is not list:
+                raise ValueError(f"schema_fields_json must decode to list[dict], got {type(parsed_fields).__name__}")
+            for idx, item in enumerate(parsed_fields):
+                if type(item) is not dict:
+                    raise ValueError(f"schema_fields_json[{idx}] must be object/dict, got {type(item).__name__}")
+            schema_fields = parsed_fields
 
         return Node(
             node_id=row.node_id,

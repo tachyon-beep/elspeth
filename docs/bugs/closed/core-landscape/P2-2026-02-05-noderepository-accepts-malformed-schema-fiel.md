@@ -1,6 +1,6 @@
 # Bug Report: NodeRepository Accepts Malformed `schema_fields_json` Without Crashing
 
-**Status: OPEN**
+**Status: CLOSED (FIXED)**
 
 ## Status Update (2026-02-11)
 
@@ -104,3 +104,18 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `src/elspeth/contracts/audit.py`
+
+
+## Resolution (2026-02-12)
+
+- Status: CLOSED (FIXED)
+- Fix summary: `NodeRepository.load()` now enforces `schema_fields_json` decodes to `list[dict]` and raises `ValueError` for malformed shapes (`null`, object JSON, non-dict list elements).
+- Code updated:
+  - `src/elspeth/core/landscape/repositories.py`
+- Tests added/updated:
+  - `tests/unit/core/landscape/test_repositories.py`
+- Verification:
+  - `pytest tests/unit/core/landscape/test_repositories.py` (`131 passed`)
+  - `pytest tests/integration/audit/test_recorder_nodes.py` (`12 passed`)
+  - `ruff check src/elspeth/core/landscape/repositories.py tests/unit/core/landscape/test_repositories.py`
+- Ticket moved from `docs/bugs/open/core-landscape/` to `docs/bugs/closed/core-landscape/`.

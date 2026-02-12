@@ -297,6 +297,24 @@ class TestNodeRepository:
         result = repo.load(sa_row)
         assert result.schema_fields == []
 
+    def test_schema_fields_json_null_raises_value_error(self) -> None:
+        sa_row = self._make_node_row(schema_fields_json="null")
+        repo = NodeRepository(session=Mock())
+        with pytest.raises(ValueError, match="must decode to list"):
+            repo.load(sa_row)
+
+    def test_schema_fields_json_object_raises_value_error(self) -> None:
+        sa_row = self._make_node_row(schema_fields_json='{"name": "id"}')
+        repo = NodeRepository(session=Mock())
+        with pytest.raises(ValueError, match="must decode to list"):
+            repo.load(sa_row)
+
+    def test_schema_fields_json_non_dict_element_raises_value_error(self) -> None:
+        sa_row = self._make_node_row(schema_fields_json='[{"name": "id"}, 42]')
+        repo = NodeRepository(session=Mock())
+        with pytest.raises(ValueError, match="must be object/dict"):
+            repo.load(sa_row)
+
 
 # ---------------------------------------------------------------------------
 # EdgeRepository
