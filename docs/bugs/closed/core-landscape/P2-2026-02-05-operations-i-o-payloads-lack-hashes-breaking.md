@@ -1,6 +1,18 @@
 # Bug Report: Operations I/O Payloads Lack Hashes, Breaking Audit Integrity After Purge
 
-**Status: OPEN**
+**Status: FIXED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Fixed** on branch `RC3-quality-sprint`
+- Fix summary:
+  - Added `input_data_hash` and `output_data_hash` columns to `operations` table (`schema.py:240,242`)
+  - Added corresponding fields to `Operation` contract (`contracts/audit.py`)
+  - Recorder computes `stable_hash()` for input/output data independently of payload store (`_call_recording.py:212,258`)
+  - Exporter includes hash fields in operation exports (`exporter.py:257,259`)
+  - Schema validation (`_REQUIRED_COLUMNS`) enforces new columns on existing databases (`database.py`)
+  - 6 new/updated test assertions covering hash persistence, round-trip, and no-payload-store scenarios
+- Verification: 123 affected tests pass, mypy clean, ruff clean
 
 ## Status Update (2026-02-11)
 

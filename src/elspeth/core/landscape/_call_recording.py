@@ -207,9 +207,12 @@ class CallRecordingMixin:
         operation_id = f"op_{uuid4().hex}"  # "op_" + 32 hex = 35 chars, well under 64
 
         input_ref = None
-        if input_data and self._payload_store is not None:
-            input_bytes = canonical_json(input_data).encode("utf-8")
-            input_ref = self._payload_store.store(input_bytes)
+        input_hash = None
+        if input_data:
+            input_hash = stable_hash(input_data)
+            if self._payload_store is not None:
+                input_bytes = canonical_json(input_data).encode("utf-8")
+                input_ref = self._payload_store.store(input_bytes)
 
         timestamp = now()
         operation = Operation(
@@ -220,6 +223,7 @@ class CallRecordingMixin:
             started_at=timestamp,
             status="open",
             input_data_ref=input_ref,
+            input_data_hash=input_hash,
         )
 
         self._ops.execute_insert(operations_table.insert().values(**operation.to_dict()))
@@ -251,6 +255,7 @@ class CallRecordingMixin:
         # Payload storage is deferred until AFTER the status check succeeds
         # to avoid orphaned blobs on duplicate-completion races or invalid IDs.
         timestamp = now()
+        output_hash = stable_hash(output_data) if output_data else None
         stmt = (
             operations_table.update()
             .where((operations_table.c.operation_id == operation_id) & (operations_table.c.status == "open"))
@@ -259,6 +264,7 @@ class CallRecordingMixin:
                 status=status,
                 error_message=error,
                 duration_ms=duration_ms,
+                output_data_hash=output_hash,
             )
         )
         with self._ops._db.connection() as conn:
@@ -413,7 +419,9 @@ class CallRecordingMixin:
             completed_at=row.completed_at,
             status=row.status,
             input_data_ref=row.input_data_ref,
+            input_data_hash=row.input_data_hash,
             output_data_ref=row.output_data_ref,
+            output_data_hash=row.output_data_hash,
             error_message=row.error_message,
             duration_ms=row.duration_ms,
         )
@@ -452,7 +460,9 @@ class CallRecordingMixin:
                 completed_at=row.completed_at,
                 status=row.status,
                 input_data_ref=row.input_data_ref,
+                input_data_hash=row.input_data_hash,
                 output_data_ref=row.output_data_ref,
+                output_data_hash=row.output_data_hash,
                 error_message=row.error_message,
                 duration_ms=row.duration_ms,
             )

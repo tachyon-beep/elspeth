@@ -4,6 +4,7 @@ import pytest
 
 from elspeth.contracts import CallStatus, CallType, FrameworkBugError, NodeType
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.schema import operations_table
 
@@ -275,6 +276,39 @@ class TestBeginOperation:
 
         assert op.operation_id is not None
         assert op.status == "open"
+        assert op.input_data_hash == stable_hash({"path": "/data/input.csv"})
+
+    def test_operation_without_input_data_has_no_hash(self):
+        _db, recorder, _state_id = _setup()
+
+        op = recorder.begin_operation("run-1", "source-0", "source_load")
+
+        assert op.input_data_hash is None
+        assert op.input_data_ref is None
+
+    def test_input_hash_persisted_without_payload_store(self):
+        """Hash must be computed even when no payload store is configured."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)  # No payload_store
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+
+        op = recorder.begin_operation("run-1", "source-0", "source_load", input_data={"file": "data.csv"})
+
+        assert op.input_data_hash == stable_hash({"file": "data.csv"})
+        assert op.input_data_ref is None  # No payload store → no ref
+
+        # Verify hash round-trips through the database
+        fetched = recorder.get_operation(op.operation_id)
+        assert fetched.input_data_hash == op.input_data_hash
 
 
 class TestCompleteOperation:
@@ -323,6 +357,37 @@ class TestCompleteOperation:
 
         op = recorder.get_operation(op_id)
         assert op.status == "completed"
+        assert op.output_data_hash == stable_hash({"rows_loaded": 100})
+
+    def test_output_hash_none_when_no_output_data(self):
+        _db, recorder, _state_id, op_id = _setup_with_operation()
+
+        recorder.complete_operation(op_id, "completed", duration_ms=150)
+
+        op = recorder.get_operation(op_id)
+        assert op.output_data_hash is None
+
+    def test_output_hash_persisted_without_payload_store(self):
+        """Output hash must be computed even when no payload store is configured."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)  # No payload_store
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        op = recorder.begin_operation("run-1", "source-0", "source_load")
+
+        recorder.complete_operation(op.operation_id, "completed", output_data={"count": 42}, duration_ms=100)
+
+        fetched = recorder.get_operation(op.operation_id)
+        assert fetched.output_data_hash == stable_hash({"count": 42})
+        assert fetched.output_data_ref is None  # No payload store → no ref
 
     def test_raises_framework_bug_error_for_nonexistent_operation(self):
         _db, recorder, _state_id = _setup()
@@ -414,6 +479,7 @@ class TestCompleteOperation:
         completed = recorder.get_operation(op.operation_id)
         assert completed.status == "completed"
         assert completed.output_data_ref is not None, "output_data_ref should be set when payload store is configured"
+        assert completed.output_data_hash == stable_hash({"rows_loaded": 42}), "output_data_hash should be set alongside ref"
 
 
 class TestAllocateOperationCallIndex:

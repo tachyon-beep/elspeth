@@ -630,7 +630,9 @@ class Operation:
     status: Literal["open", "completed", "failed", "pending"]
     completed_at: datetime | None = None
     input_data_ref: str | None = None
+    input_data_hash: str | None = None
     output_data_ref: str | None = None
+    output_data_hash: str | None = None
     error_message: str | None = None
     duration_ms: float | None = None
 
@@ -659,7 +661,9 @@ class Operation:
             "completed_at": self.completed_at,
             "status": self.status,
             "input_data_ref": self.input_data_ref,
+            "input_data_hash": self.input_data_hash,
             "output_data_ref": self.output_data_ref,
+            "output_data_hash": self.output_data_hash,
             "error_message": self.error_message,
             "duration_ms": self.duration_ms,
         }
