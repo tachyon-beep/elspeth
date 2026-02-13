@@ -683,8 +683,14 @@ class CoalesceSettings(BaseModel):
 
         branches: [a, b] becomes branches: {a: a, b: b}
         This is config ergonomics — list is cleaner when no transforms are needed.
+
+        Rejects duplicate branch names in list form — dict comprehension
+        would silently discard them, hiding a config error.
         """
         if isinstance(v, list):
+            if len(v) != len(set(v)):
+                dupes = sorted({b for b in v if v.count(b) > 1})
+                raise ValueError(f"Duplicate branch names in list: {dupes}")
             return {b: b for b in v}
         return v  # type: ignore[no-any-return]  # Pydantic validates dict[str, str]
 

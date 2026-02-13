@@ -68,6 +68,25 @@ def _field_name_type(field_spec: Any) -> tuple[str, str]:
     raise ValueError(msg)
 
 
+def _field_required(field_spec: Any) -> bool:
+    """Extract required status from a field spec.
+
+    - String ending with ``?``: optional (``False``)
+    - Dict with ``"required"`` key: use that value
+    - YAML dict ``{"id": "int?"}`` ending with ``?``: optional
+    - Otherwise: required (``True``)
+    """
+    if isinstance(field_spec, str):
+        return not field_spec.strip().endswith("?")
+    if isinstance(field_spec, dict):
+        if "required" in field_spec:
+            return bool(field_spec["required"])
+        if len(field_spec) == 1:
+            ftype = str(next(iter(field_spec.values())))
+            return not ftype.strip().endswith("?")
+    return True
+
+
 def build_execution_graph(
     cls: type[ExecutionGraph],
     source: SourceProtocol,
@@ -813,7 +832,8 @@ def build_execution_graph(
         if coal_config.merge == "union":
             # Union merge: require compatible types on ALL pairwise overlapping fields.
             # Parse each branch's SchemaConfig dict to extract field definitions.
-            seen_types: dict[str, tuple[str, str]] = {}  # field → (type, first_branch)
+            # Tracks (type, required, first_branch) to preserve optionality markers.
+            seen_types: dict[str, tuple[str, bool, str]] = {}  # field → (type, required, first_branch)
             all_observed = False
             for branch_name, schema_dict in branch_to_schema.items():
                 if schema_dict.get("mode") == "observed":
@@ -824,8 +844,9 @@ def build_execution_graph(
                     continue
                 for field_spec in fields_list:
                     fname, ftype = _field_name_type(field_spec)
+                    freq = _field_required(field_spec)
                     if fname in seen_types:
-                        prior_type, prior_branch = seen_types[fname]
+                        prior_type, _prior_req, prior_branch = seen_types[fname]
                         if prior_type != ftype:
                             raise GraphValidationError(
                                 f"Coalesce node '{coalesce_id}' receives incompatible "
@@ -834,15 +855,18 @@ def build_execution_graph(
                                 f"branch '{branch_name}' has {ftype!r}. "
                                 "Union merge requires compatible types on shared fields."
                             )
+                        # If optional in ANY branch, optional in the merged output.
+                        if not freq:
+                            seen_types[fname] = (prior_type, False, prior_branch)
                     else:
-                        seen_types[fname] = (ftype, branch_name)
+                        seen_types[fname] = (ftype, freq, branch_name)
             # Build merged schema preserving contract fields.
             if all_observed or not seen_types:
                 merged: dict[str, Any] = {"mode": "observed"}
             else:
                 merged = {
                     "mode": "flexible",
-                    "fields": [f"{name}: {ftype}" for name, (ftype, _) in seen_types.items()],
+                    "fields": [f"{name}: {ftype}{'?' if not req else ''}" for name, (ftype, req, _) in seen_types.items()],
                 }
             # Propagate contract fields from branches:
             #   guaranteed_fields = intersection (guaranteed by ALL branches)
@@ -891,6 +915,10 @@ def build_execution_graph(
 
     # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
     graph.validate_edge_compatibility()
+
+    # Warn about DIVERT edges feeding require_all coalesces (non-fatal).
+    if coalesce_id_to_config:
+        graph.warn_divert_coalesce_interactions(coalesce_id_to_config)
 
     # Freeze all NodeInfo configs now that schema resolution is complete.
     # NodeInfo is frozen=True so we use object.__setattr__ to replace the

@@ -1782,6 +1782,46 @@ class TestCoalesceSettings:
 
         assert from_list.branches == from_dict.branches
 
+    def test_coalesce_branches_list_rejects_duplicates(self) -> None:
+        """Duplicate branch names in list form must be rejected.
+
+        Without this check, dict comprehension {b: b for b in v} silently
+        discards duplicates, hiding a config error.
+        """
+        from elspeth.core.config import CoalesceSettings
+
+        with pytest.raises(ValidationError, match="Duplicate branch names"):
+            CoalesceSettings(
+                name="merge",
+                branches=["path_a", "path_b", "path_a"],
+                policy="require_all",
+                merge="union",
+            )
+
+    def test_coalesce_branches_list_no_duplicates_ok(self) -> None:
+        """Unique list branches should normalize correctly."""
+        from elspeth.core.config import CoalesceSettings
+
+        settings = CoalesceSettings(
+            name="merge",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+        )
+        assert settings.branches == {"path_a": "path_a", "path_b": "path_b"}
+
+    def test_coalesce_branches_dict_unaffected_by_dedup_check(self) -> None:
+        """Dict-form branches bypass the duplicate check (keys inherently unique)."""
+        from elspeth.core.config import CoalesceSettings
+
+        settings = CoalesceSettings(
+            name="merge",
+            branches={"path_a": "path_a", "path_b": "path_b"},
+            policy="require_all",
+            merge="union",
+        )
+        assert settings.branches == {"path_a": "path_a", "path_b": "path_b"}
+
     def test_coalesce_branches_dict_validates_values(self) -> None:
         """Invalid connection names in dict values should be rejected.
 

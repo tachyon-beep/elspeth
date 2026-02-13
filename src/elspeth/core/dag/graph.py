@@ -32,6 +32,7 @@ from elspeth.contracts.types import (
 )
 from elspeth.core.dag.models import (
     GraphValidationError,
+    GraphValidationWarning,
     NodeConfig,
     NodeInfo,
     _suggest_similar,
@@ -852,6 +853,112 @@ class ExecutionGraph:
         coalesce_nodes = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == NodeType.COALESCE]
         for coalesce_id in coalesce_nodes:
             self._validate_coalesce_compatibility(coalesce_id)
+
+    def warn_divert_coalesce_interactions(
+        self,
+        coalesce_configs: dict[NodeID, CoalesceSettings],
+    ) -> list[GraphValidationWarning]:
+        """Detect transforms with DIVERT edges that feed require_all coalesces.
+
+        When a branch transform has ``on_error`` routing (DIVERT edge), rows that
+        hit the error path are diverted to an error sink and never reach the
+        coalesce. If the coalesce uses ``require_all`` policy, it will wait
+        indefinitely for the missing branch, holding the other branches' tokens
+        in memory until end-of-source flush.
+
+        This is a build-time warning, not an error — the configuration is valid
+        but likely to cause operational surprises.
+
+        Algorithm:
+          1. Pre-compute set of transform node IDs that have outgoing DIVERT edges.
+          2. For each ``require_all`` coalesce, walk backwards from each incoming
+             MOVE edge (transform branch) to check if any transform in the chain
+             has a DIVERT edge.
+
+        Args:
+            coalesce_configs: Mapping of coalesce node IDs to their settings.
+
+        Returns:
+            List of warnings (also logged via structlog).
+        """
+        import structlog
+
+        log = structlog.get_logger()
+
+        # Step 1: pre-compute transforms with DIVERT edges (exit early if none)
+        divert_transforms: set[NodeID] = set()
+        for edge in self.get_edges():
+            if edge.mode == RoutingMode.DIVERT:
+                from_info = self.get_node_info(edge.from_node)
+                if from_info.node_type == NodeType.TRANSFORM:
+                    divert_transforms.add(edge.from_node)
+
+        if not divert_transforms:
+            return []
+
+        warnings: list[GraphValidationWarning] = []
+
+        # Step 2: check each require_all coalesce
+        for coalesce_nid, coal_config in coalesce_configs.items():
+            if coal_config.policy != "require_all":
+                continue
+
+            for from_id, _to_id, _key, data in self._graph.in_edges(coalesce_nid, keys=True, data=True):
+                edge_mode = data["mode"]
+
+                # Identity branches (COPY from gate) have no transforms — skip
+                if edge_mode == RoutingMode.COPY:
+                    continue
+
+                # Transform branch (MOVE edge from last transform in chain).
+                # Walk backwards through predecessor transforms.
+                if edge_mode != RoutingMode.MOVE:
+                    continue
+
+                current = NodeID(from_id)
+                visited: set[NodeID] = set()
+
+                while current not in visited:
+                    visited.add(current)
+                    current_info = self.get_node_info(current)
+                    if current_info.node_type != NodeType.TRANSFORM:
+                        break  # Hit gate/source — stop walking
+
+                    if current in divert_transforms:
+                        warning = GraphValidationWarning(
+                            code="DIVERT_COALESCE_REQUIRE_ALL",
+                            message=(
+                                f"Transform '{current}' has on_error routing (DIVERT edge) "
+                                f"and feeds require_all coalesce '{coalesce_nid}'. "
+                                f"Rows diverted on error will never reach the coalesce, "
+                                f"causing other branches to wait until end-of-source flush."
+                            ),
+                            node_ids=(str(current), str(coalesce_nid)),
+                        )
+                        warnings.append(warning)
+                        log.warning(
+                            "divert_coalesce_interaction",
+                            code=warning.code,
+                            transform=str(current),
+                            coalesce=str(coalesce_nid),
+                            message=warning.message,
+                        )
+                        break  # One warning per branch is enough
+
+                    # Walk backwards: find incoming MOVE edge (stay on main chain)
+                    predecessor: NodeID | None = None
+                    for pred_from, _pred_to, _pred_key, pred_data in self._graph.in_edges(current, keys=True, data=True):
+                        if pred_data["mode"] == RoutingMode.DIVERT:
+                            continue  # Skip DIVERT edges — stay on main chain
+                        if pred_data["mode"] == RoutingMode.MOVE:
+                            predecessor = NodeID(pred_from)
+                            break
+
+                    if predecessor is None:
+                        break
+                    current = predecessor
+
+        return warnings
 
     def _validate_single_edge(self, from_node_id: str, to_node_id: str) -> None:
         """Validate schema compatibility for a single edge.
