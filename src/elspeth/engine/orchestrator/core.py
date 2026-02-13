@@ -1595,6 +1595,26 @@ class Orchestrator:
                             )
                             field_resolution_recorded = True
 
+                    # ─────────────────────────────────────────────────────────────────
+                    # Record schema contract for runs with no valid source rows.
+                    #
+                    # In-loop recording happens on the first VALID row. For all-invalid
+                    # or empty inputs, that branch never executes. Sources may still
+                    # finalize a locked contract at end-of-load (e.g. FLEXIBLE with
+                    # declared fields, OBSERVED/FLEXIBLE empty input). Persist it here
+                    # so resume invariants still hold.
+                    # ─────────────────────────────────────────────────────────────────
+                    if not schema_contract_recorded:
+                        schema_contract = config.source.get_schema_contract()
+                        if schema_contract is not None:
+                            schema_contract_recorded = True
+                            # Update run-level contract
+                            recorder.update_run_contract(run_id, schema_contract)
+                            # Update source node's output_contract (was NULL at registration)
+                            recorder.update_node_output_contract(run_id, source_id, schema_contract)
+                            # Keep context contract aligned with recorded contract
+                            ctx.contract = schema_contract
+
                 except BatchPendingError:
                     # BatchPendingError is a control-flow signal, not an error.
                     # Don't emit PhaseError - the run isn't failing, it's just waiting.

@@ -725,6 +725,44 @@ class TestAzureBlobSinkErrors:
         assert len(second_upload_lines) == 2
         assert sink._buffered_rows == [{"id": 1, "name": "alice"}]
 
+    def test_retry_after_post_upload_recording_failure_does_not_duplicate_rows(
+        self,
+        mock_container_client: MagicMock,
+        ctx: PluginContext,
+    ) -> None:
+        """Audit recording failure after upload keeps retries idempotent."""
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        # First success record raises; error record succeeds; retry succeeds.
+        ctx.record_call = MagicMock(  # type: ignore[method-assign]
+            side_effect=[Exception("Audit DB unavailable"), None, None]
+        )
+
+        sink = AzureBlobSink(make_config(format="csv", overwrite=False))
+        rows = [{"id": 1, "name": "alice"}]
+
+        with pytest.raises(RuntimeError, match="Failed to upload blob"):
+            sink.write(rows, ctx)
+
+        # Post-upload failure must not commit cumulative rows.
+        assert sink._buffered_rows == []
+
+        result = sink.write(rows, ctx)
+        assert isinstance(result, ArtifactDescriptor)
+
+        assert mock_blob_client.upload_blob.call_count == 2
+        assert mock_blob_client.upload_blob.call_args_list[0][1]["overwrite"] is False
+        assert mock_blob_client.upload_blob.call_args_list[1][1]["overwrite"] is True
+
+        second_upload_lines = mock_blob_client.upload_blob.call_args_list[1][0][0].decode().strip().splitlines()
+        assert second_upload_lines[0] == "id,name"
+        assert second_upload_lines[1] == "1,alice"
+        assert len(second_upload_lines) == 2
+        assert sink._buffered_rows == [{"id": 1, "name": "alice"}]
+
     def test_connection_error_propagates(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
         """Connection errors propagate to caller."""
         mock_container_client.side_effect = Exception("Connection refused")

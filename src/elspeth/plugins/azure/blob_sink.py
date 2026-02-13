@@ -581,9 +581,9 @@ class AzureBlobSink(BaseSink):
             # When overwrite=False, upload_blob raises ResourceExistsError server-side,
             # avoiding the TOCTOU race of a separate exists() check.
             blob_client.upload_blob(content, overwrite=upload_overwrite)
-            # Commit buffered state only after successful external upload.
-            self._buffered_rows = candidate_rows
             latency_ms = (time.perf_counter() - start_time) * 1000
+            # Mark external blob existence immediately after upload so retries
+            # can safely overwrite the same blob if post-upload steps fail.
             self._has_uploaded = True
 
             # Record successful blob upload in audit trail
@@ -603,6 +603,9 @@ class AzureBlobSink(BaseSink):
                 latency_ms=latency_ms,
                 provider="azure_blob_storage",
             )
+            # Commit cumulative in-memory buffer only after full success path
+            # (upload + audit recording) to keep write retries idempotent.
+            self._buffered_rows = candidate_rows
 
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
