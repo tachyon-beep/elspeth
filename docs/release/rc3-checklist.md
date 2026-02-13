@@ -430,13 +430,12 @@ These are documented limitations, not blockers:
 1. **Timeout triggers** - Fire only when next row arrives (documented limitation, same as RC-2)
 2. **Concurrent processing** - Single-threaded only (acceptable for RC-3)
 3. **True idle timeout** - Aggregation buffers not flushed during completely idle periods without heartbeat rows
-4. **Per-branch fork transforms** - Fork branches wire directly to coalesce nodes; per-branch intermediate transforms not yet supported (ARCH-15, tracked as `elspeth-rapid-jyvr`)
-5. **Circuit breaker** - RetryManager has no circuit breaker; many rows against a dead service retry individually (FEAT-06, deferred)
-6. **CLI surface gaps** - `elspeth status`, `elspeth export`, `elspeth db migrate` not yet implemented (FEAT-04, deferred)
-7. **AggregationExecutor parallel dictionaries** - 6 parallel dicts instead of consolidated dataclass (ARCH-06, deferred)
-8. **Resume schema verification** - No schema fingerprint comparison between original and resumed run (ARCH-14, deferred)
-9. **LLM boundary `.get()` chains** - 4 files use `data.get("usage") or {}` on external responses; technically correct at Tier 3 but produces silent empty-dict fallbacks (CRIT-02, deferred)
-10. **Prometheus metrics** - No pull-based metrics endpoint for operational dashboards (OBS-04, deferred)
+4. **Circuit breaker** - RetryManager has no circuit breaker; many rows against a dead service retry individually (FEAT-06, deferred)
+5. **CLI surface gaps** - `elspeth status`, `elspeth export`, `elspeth db migrate` not yet implemented (FEAT-04, deferred)
+6. **AggregationExecutor parallel dictionaries** - 6 parallel dicts instead of consolidated dataclass (ARCH-06, deferred)
+7. **Resume schema verification** - No schema fingerprint comparison between original and resumed run (ARCH-14, deferred)
+8. **LLM boundary `.get()` chains** - 4 files use `data.get("usage") or {}` on external responses; technically correct at Tier 3 but produces silent empty-dict fallbacks (CRIT-02, deferred)
+9. **Prometheus metrics** - No pull-based metrics endpoint for operational dashboards (OBS-04, deferred)
 
 ---
 

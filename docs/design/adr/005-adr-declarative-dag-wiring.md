@@ -171,8 +171,11 @@ transforms:
 
 coalesce:
   - name: merger
-    branches: [merge_input_a, merge_input_b]   # multiple branches
+    branches:                                   # dict format (ARCH-15): branch → input connection
+      analysis_a: merge_input_a                 # branch routes through transform chain
+      analysis_b: merge_input_b
     on_success: final_sink
+    # List format also works for identity branches: branches: [branch_a, branch_b]
 ```
 
 ### Source-Only Pipeline

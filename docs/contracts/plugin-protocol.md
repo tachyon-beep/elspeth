@@ -1132,6 +1132,7 @@ Parent Token (T1)
 pipeline:
   # ... fork happens earlier ...
 
+  # List format (identity branches — no per-branch transforms):
   - coalesce: merge_results
     branches:
       - sentiment_path
@@ -1141,6 +1142,25 @@ pipeline:
     timeout: 5m            # Max wait time
     merge: union           # How to combine row data
 ```
+
+```yaml
+pipeline:
+  # ... fork happens earlier, transforms declared with input/on_success ...
+
+  # Dict format (per-branch transforms — ARCH-15):
+  # Keys are branch names (from fork_to), values are the input connections
+  # that feed each branch into the coalesce node.
+  - coalesce: merge_results
+    branches:
+      sentiment_path: sentiment_output    # branch routes through sentiment transform chain
+      entity_path: entities_output        # branch routes through entity transform chain
+      summary_path: summary_output        # branch routes through summary transform chain
+    policy: require_all
+    timeout: 5m
+    merge: union
+```
+
+> **Note:** List format is syntactic sugar. `branches: [a, b]` normalizes to `branches: {a: a, b: b}` (identity mapping — tokens skip directly to coalesce with no intermediate transforms).
 
 #### Policies
 

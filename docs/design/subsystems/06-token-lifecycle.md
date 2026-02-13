@@ -196,7 +196,7 @@ def create_initial_token(
 def fork_token(
     self,
     parent_token: TokenInfo,
-    branches: list[str],
+    branches: list[str],  # branch names from gate fork_to (config uses dict[str, str] for branch→connection mapping)
     step_in_pipeline: int,
     run_id: str,
     row_data: dict[str, Any] | None = None,

@@ -128,6 +128,17 @@ Key design decisions:
 - `branch_name` is lineage metadata only, never used for routing
 - Aggregations stay post-transform; mid-chain aggregations deferred
 
+### Per-Branch Fork Transforms (ARCH-15)
+
+Fork branches can now have intermediate transforms before reaching coalesce. `CoalesceSettings.branches` accepts dict format (`{branch_name: input_connection}`) to wire per-branch transform chains. List format (`[a, b]`) normalizes to identity dict (`{a: a, b: b}`) — fully backward compatible.
+
+- `ExecutionGraph.get_branch_first_nodes()` provides O(1) dispatch to first transform per branch
+- DAG builder: conditional producer registration (identity branches use COPY edges, transform branches use connection resolution)
+- Strategy-aware schema validation: union merges check type compatibility across branches; nested/select skip cross-branch checks
+- 23 new tests (10 unit, 8 property, 5 integration)
+
+**Commit:** `83a6d40a`
+
 ### DROP-Mode Sentinel Requeue Handling
 
 Prevents DROP-mode sentinel requeue failure from raising to callers. Fixes a race condition where shutdown sentinels could fail to requeue in telemetry DROP mode.
@@ -357,7 +368,6 @@ A full project audit identified 20 documentation and metadata findings (F-01 thr
 | FEAT-06 | No circuit breaker in retry logic | MEDIUM |
 | ARCH-06 | AggregationExecutor maintains 6 parallel dictionaries | MEDIUM |
 | ARCH-14 | Resume schema verification gap (no schema fingerprint) | MEDIUM |
-| ARCH-15 | No per-branch transforms between fork and coalesce | MEDIUM |
 | QW-10 | CLI event formatters not extracted (~2,000 lines monolithic) | LOW |
 | OBS-04 | No Prometheus-style pull metrics | LOW |
 
