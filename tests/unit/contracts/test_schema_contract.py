@@ -941,6 +941,34 @@ class TestSchemaContractMerge:
 
         assert len(merged.fields) == 0
 
+    def test_merge_orders_fields_by_normalized_name(self) -> None:
+        """Merge produces deterministic field ordering by normalized name."""
+        c1 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("zeta", int, original_name="Zeta", required=True, source="declared"),
+                make_field("bravo", str, original_name="Bravo", required=True, source="declared"),
+            ),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("alpha", float, original_name="Alpha", required=True, source="declared"),
+                make_field("yankee", bool, original_name="Yankee", required=True, source="declared"),
+            ),
+            locked=True,
+        )
+
+        merged = c1.merge(c2)
+
+        assert [field.normalized_name for field in merged.fields] == [
+            "alpha",
+            "bravo",
+            "yankee",
+            "zeta",
+        ]
+
 
 # --- Any Type Tests ---
 

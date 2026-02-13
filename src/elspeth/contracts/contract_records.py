@@ -112,11 +112,12 @@ class ContractAuditRecord:
         Returns:
             ContractAuditRecord suitable for JSON serialization
         """
+        sorted_fields = sorted(contract.fields, key=lambda fc: fc.normalized_name)
         return cls(
             mode=contract.mode,
             locked=contract.locked,
             version_hash=contract.version_hash(),
-            fields=tuple(FieldAuditRecord.from_field_contract(fc) for fc in contract.fields),
+            fields=tuple(FieldAuditRecord.from_field_contract(fc) for fc in sorted_fields),
         )
 
     def to_json(self) -> str:
@@ -130,11 +131,14 @@ class ContractAuditRecord:
         """
         from elspeth.core.canonical import canonical_json
 
+        # Canonicalize field order so semantically equivalent contracts serialize
+        # identically regardless of upstream insertion/merge ordering.
+        sorted_fields = sorted(self.fields, key=lambda f: f.normalized_name)
         data = {
             "mode": self.mode,
             "locked": self.locked,
             "version_hash": self.version_hash,
-            "fields": [f.to_dict() for f in self.fields],
+            "fields": [f.to_dict() for f in sorted_fields],
         }
         return canonical_json(data)
 

@@ -1,6 +1,22 @@
 # Bug Report: ContractAuditRecord JSON Is Not Deterministic After Contract Merges
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - `ContractAuditRecord.from_contract()` now canonicalizes field order by `normalized_name` before building audit records (`src/elspeth/contracts/contract_records.py:115`).
+  - `ContractAuditRecord.to_json()` now serializes fields in deterministic `normalized_name` order (`src/elspeth/contracts/contract_records.py:136`).
+  - `SchemaContract.merge()` now iterates merged field names in sorted order, removing hash-seed-dependent merge ordering (`src/elspeth/contracts/schema_contract.py:453`).
+  - Added regression tests covering canonical field ordering and stable JSON for semantically identical contracts (`tests/unit/contracts/test_contract_records.py:164`, `tests/unit/contracts/test_contract_records.py:181`) and deterministic merge ordering (`tests/unit/contracts/test_schema_contract.py:944`).
+- Verification summary:
+  - Verified merged contract field order and `ContractAuditRecord.to_json()` output are stable across `PYTHONHASHSEED=1..5`.
+  - Test gates passed:
+    - `.venv/bin/python -m pytest tests/unit/contracts/test_contract_records.py -q`
+    - `.venv/bin/python -m pytest tests/unit/contracts/test_schema_contract.py -q`
+    - `.venv/bin/python -m ruff check src/elspeth/contracts/contract_records.py src/elspeth/contracts/schema_contract.py tests/unit/contracts/test_contract_records.py tests/unit/contracts/test_schema_contract.py`
+    - `.venv/bin/python -m mypy src/elspeth/contracts`
 
 ## Status Update (2026-02-11)
 

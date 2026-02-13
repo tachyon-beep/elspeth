@@ -450,7 +450,7 @@ class SchemaContract:
 
         all_names = {fc.normalized_name for fc in self.fields} | {fc.normalized_name for fc in other.fields}
 
-        for name in all_names:
+        for name in sorted(all_names):
             in_self = name in self._by_normalized
             in_other = name in other._by_normalized
 
