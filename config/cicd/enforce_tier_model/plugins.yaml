@@ -59,11 +59,6 @@ allow_hits:
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/discovery.py:R2:_discover_in_file:fp=f42969a5d77096b3
-  owner: architecture
-  reason: getattr for optional attribute access
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/discovery.py:R2:get_plugin_description:fp=0806b3aad609f380
   owner: architecture
   reason: getattr for optional attribute access

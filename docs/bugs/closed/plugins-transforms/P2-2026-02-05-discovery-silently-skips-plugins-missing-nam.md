@@ -1,6 +1,27 @@
 # Bug Report: Discovery Silently Skips Plugins Missing `name` Attribute
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - `discover_plugins_in_directory()` now fails fast when a concrete plugin class
+    is missing required `name` metadata instead of warning-and-skipping.
+  - `_discover_in_file()` now raises `ValueError` for missing `name` and for
+    invalid `name` values (non-string or empty string), with class/file context.
+  - Added regression test ensuring missing `name` raises during discovery.
+- Current evidence:
+  - `src/elspeth/plugins/discovery.py`
+  - `tests/unit/plugins/test_discovery.py`
+- Verification summary:
+  - Reproduced pre-fix behavior (warning + skip), then verified post-fix behavior
+    raises `ValueError` with explicit contract violation message.
+  - Tests/quality gates passed:
+    - `.venv/bin/python -m pytest tests/unit/plugins/test_discovery.py -q`
+    - `.venv/bin/python -m pytest tests/unit/plugins/test_manager.py -q`
+    - `.venv/bin/python -m ruff check src/elspeth/plugins/discovery.py tests/unit/plugins/test_discovery.py`
+    - `.venv/bin/python -m mypy src/elspeth/plugins/discovery.py`
 
 ## Status Update (2026-02-11)
 
