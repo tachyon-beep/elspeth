@@ -68,7 +68,7 @@ class ExecutionGraph:
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = {}  # branch_name -> coalesce_name
         self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
         self._route_resolution_map: dict[tuple[NodeID, str], RouteDestination] = {}
-        self._coalesce_gate_index: dict[CoalesceName, int] = {}  # coalesce_name -> gate pipeline index
+        self._branch_gate_map: dict[BranchName, NodeID] = {}  # branch_name -> producing gate node ID
         self._pipeline_nodes: list[NodeID] | None = None  # Ordered processing nodes (no source/sinks); None = not yet populated
         self._node_step_map: dict[NodeID, int] = {}  # node_id -> audit step (source=0)
 
@@ -557,9 +557,9 @@ class ExecutionGraph:
         """Set the (gate_node, sink_name) -> route_label mapping."""
         self._route_label_map = dict(mapping)
 
-    def set_coalesce_gate_index(self, mapping: dict[CoalesceName, int]) -> None:
-        """Set the coalesce_name -> gate pipeline index mapping."""
-        self._coalesce_gate_index = dict(mapping)
+    def set_branch_gate_map(self, mapping: dict[BranchName, NodeID]) -> None:
+        """Set the branch_name -> producing gate node ID mapping."""
+        self._branch_gate_map = dict(mapping)
 
     def set_pipeline_nodes(self, nodes: list[NodeID]) -> None:
         """Set the ordered processing node sequence."""
@@ -699,12 +699,8 @@ class ExecutionGraph:
         Raises:
             GraphValidationError: If the branch chain cannot be traced
         """
-        # Resolve the fork gate that originates this branch.
-        # coalesce_gate_index maps coalesce_name → pipeline index,
-        # pipeline_nodes[index] → gate node ID.
-        coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
-        gate_pipeline_idx = self._coalesce_gate_index[coalesce_name]
-        fork_gate_nid = self._pipeline_nodes[gate_pipeline_idx]  # type: ignore[index]
+        # Resolve the fork gate that originates this specific branch.
+        fork_gate_nid = self._branch_gate_map[BranchName(branch_name)]
 
         visited: set[NodeID] = set()
         candidates: list[NodeID] = []
@@ -771,17 +767,17 @@ class ExecutionGraph:
                 result[BranchName(data["label"])] = sink_node_to_name[NodeID(to_id)]
         return result
 
-    def get_coalesce_gate_index(self) -> dict[CoalesceName, int]:
-        """Get coalesce_name -> producing gate pipeline index mapping.
+    def get_branch_gate_map(self) -> dict[BranchName, NodeID]:
+        """Get branch_name -> producing gate node ID mapping.
 
-        Returns the pipeline index of the gate that produces each coalesce's
-        branches.
+        Returns the node ID of the gate that produces each coalesce branch.
+        Each branch has exactly one producing gate (validated at build time).
 
         Returns:
-            Dict mapping coalesce name to the pipeline index of its producing
-            fork gate. Empty dict if no coalesce configured.
+            Dict mapping branch name to the node ID of its producing fork gate.
+            Empty dict if no coalesce configured.
         """
-        return dict(self._coalesce_gate_index)  # Return copy to prevent mutation
+        return dict(self._branch_gate_map)  # Return copy to prevent mutation
 
     def get_terminal_sink_map(self) -> dict[NodeID, SinkName]:
         """Get mapping of terminal node IDs to their on_success sink names.

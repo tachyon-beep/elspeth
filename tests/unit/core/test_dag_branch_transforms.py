@@ -335,15 +335,8 @@ class TestGetBranchFirstNodes:
             }
         )
 
-        # Build pipeline_nodes: gate, then all branch transforms, then coalesce
-        pipeline_nodes: list[NodeID] = [NodeID(gate)]
-        for transforms in branches.values():
-            for t_name in transforms:
-                pipeline_nodes.append(NodeID(t_name))
-        pipeline_nodes.append(NodeID(coalesce))
-        graph.set_pipeline_nodes(pipeline_nodes)
-        # Gate is always at index 0 in this helper
-        graph.set_coalesce_gate_index({CoalesceName("coalesce-node"): 0})
+        # Map each branch to its producing gate node ID
+        graph.set_branch_gate_map({BranchName(b): NodeID(gate) for b in branches})
 
         return graph
 
@@ -439,12 +432,67 @@ class TestGetBranchFirstNodes:
         # Metadata
         graph.set_branch_to_coalesce({BranchName("b1"): CoalesceName("coalesce-node")})
         graph.set_coalesce_id_map({CoalesceName("coalesce-node"): NodeID("coalesce-node")})
-        # Pipeline nodes and coalesce gate index needed by the fix
-        pipeline_nodes = [NodeID("fork-gate"), NodeID("g1"), NodeID("g2"), NodeID("coalesce-node")]
-        graph.set_pipeline_nodes(pipeline_nodes)
-        graph.set_coalesce_gate_index({CoalesceName("coalesce-node"): 0})  # fork-gate is at index 0
+        # Map branch to its producing gate node ID
+        graph.set_branch_gate_map({BranchName("b1"): NodeID("fork-gate")})
 
         result = graph.get_branch_first_nodes()
 
         # Must resolve to g1 (the true branch start), NOT g2
         assert result["b1"] == NodeID("g1")
+
+    def test_get_branch_first_nodes_multi_gate_coalesce(self) -> None:
+        """Branches from different gates feeding one coalesce resolve correctly.
+
+        Regression: _trace_branch_endpoints() assumed one gate per coalesce
+        via _coalesce_gate_index, so branches from a second gate would fail
+        the from_id == fork_gate_nid check and raise GraphValidationError.
+
+        Graph: source → gate_a → [t_a] → coalesce → sink
+               source → gate_b → [t_b] → coalesce
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.types import BranchName, CoalesceName
+
+        graph = ExecutionGraph()
+
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test-source", config={})
+        graph.add_node("gate_a", node_type=NodeType.GATE, plugin_name="test-gate-a", config={})
+        graph.add_node("gate_b", node_type=NodeType.GATE, plugin_name="test-gate-b", config={})
+        graph.add_node("t_a", node_type=NodeType.TRANSFORM, plugin_name="transform-a", config={})
+        graph.add_node("t_b", node_type=NodeType.TRANSFORM, plugin_name="transform-b", config={})
+        graph.add_node("coalesce", node_type=NodeType.COALESCE, plugin_name="coalesce", config={})
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test-sink", config={})
+
+        graph.add_edge("source", "gate_a", label="continue")
+        graph.add_edge("source", "gate_b", label="continue")
+
+        # Gate A produces path_a
+        graph.add_edge("gate_a", "t_a", label="path_a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_a", "coalesce", label="continue", mode=RoutingMode.MOVE)
+
+        # Gate B produces path_b
+        graph.add_edge("gate_b", "t_b", label="path_b", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="continue", mode=RoutingMode.MOVE)
+
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        # Metadata: both branches feed the same coalesce, from different gates
+        graph.set_branch_to_coalesce(
+            {
+                BranchName("path_a"): CoalesceName("coalesce"),
+                BranchName("path_b"): CoalesceName("coalesce"),
+            }
+        )
+        graph.set_coalesce_id_map({CoalesceName("coalesce"): NodeID("coalesce")})
+        graph.set_branch_gate_map(
+            {
+                BranchName("path_a"): NodeID("gate_a"),
+                BranchName("path_b"): NodeID("gate_b"),
+            }
+        )
+
+        result = graph.get_branch_first_nodes()
+
+        # Both branches must resolve despite coming from different gates
+        assert result["path_a"] == NodeID("t_a")
+        assert result["path_b"] == NodeID("t_b")

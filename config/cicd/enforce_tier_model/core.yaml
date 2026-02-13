@@ -323,7 +323,7 @@ allow_hits:
   reason: Gate default-continue target lookup during fallthrough edge wiring
   safety: Missing target is handled explicitly — ambiguous gates are skipped
   expires: '2026-03-13'
-- key: core/dag/builder.py:R5:build_execution_graph:fp=25193c00cdb4dce7
+- key: core/dag/builder.py:R5:build_execution_graph:fp=01dbfe027a81e071
   owner: architecture
   reason: isinstance check for dict vs NodeConfig on config field during schema population
   safety: Crashes on type mismatch - no silent fallback
@@ -372,22 +372,22 @@ allow_hits:
   safety: Crashes with ValueError on unrecognised format — no silent fallback
   expires: '2026-05-13'
 # ARCH-15: coalesce schema population uses .get() for optional schema metadata
-- key: core/dag/builder.py:R1:build_execution_graph:fp=9306da7ff1ef199d
+- key: core/dag/builder.py:R1:build_execution_graph:fp=d635a4a4e2e52d0b
   owner: ARCH-15
   reason: Optional schema_config access during coalesce branch schema population
   safety: Missing schema yields None — handled explicitly by conditional skip
   expires: '2026-05-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=d159c1f22e6f1642
+- key: core/dag/builder.py:R1:build_execution_graph:fp=4366c507d69abe93
   owner: ARCH-15
   reason: Optional guaranteed_fields access during coalesce contract propagation
   safety: Missing key yields empty list — intersection logic still correct
   expires: '2026-05-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=811cb2579fae993d
+- key: core/dag/builder.py:R1:build_execution_graph:fp=0c00b8bad4547a7f
   owner: ARCH-15
   reason: Optional audit_fields access during coalesce contract propagation
   safety: Missing key yields empty list — union logic still correct
   expires: '2026-05-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=6e008e474300ce70
+- key: core/dag/builder.py:R1:build_execution_graph:fp=3429228dc05cfeca
   owner: ARCH-15
   reason: Optional select_branch config access during coalesce select-merge population
   safety: Crashes with GraphValidationError if missing — explicit failure

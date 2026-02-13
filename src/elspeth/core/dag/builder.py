@@ -756,32 +756,16 @@ def build_execution_graph(
             raise GraphValidationError("Pipeline contains a cycle") from None
     pipeline_nodes = [node_id for node_id in topo_order if node_id in processing_node_ids]
 
-    pipeline_index: dict[NodeID, int] = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
-
-    coalesce_gate_index: dict[CoalesceName, int] = {}
+    branch_gate_map: dict[BranchName, NodeID] = {}
     if coalesce_settings:
         for gate_entry in gate_entries:
             if gate_entry.fork_to is None:
                 continue
-            gate_idx = pipeline_index[gate_entry.node_id]
             for branch_name in gate_entry.fork_to:
                 branch_key = BranchName(branch_name)
-                if branch_key not in branch_to_coalesce:
-                    continue
-                coalesce_name = branch_to_coalesce[branch_key]
-                if coalesce_name in coalesce_gate_index:  # noqa: SIM401
-                    existing_idx = coalesce_gate_index[coalesce_name]
-                else:
-                    existing_idx = None
-                if existing_idx is None or gate_idx > existing_idx:
-                    coalesce_gate_index[coalesce_name] = gate_idx
-
-        for coalesce_name in coalesce_ids:
-            if coalesce_name not in coalesce_gate_index:
-                raise GraphValidationError(
-                    f"Coalesce '{coalesce_name}' has no producing gate. This should have been caught by branch validation."
-                )
-    graph.set_coalesce_gate_index(coalesce_gate_index)
+                if branch_key in branch_to_coalesce:
+                    branch_gate_map[branch_key] = gate_entry.node_id
+    graph.set_branch_gate_map(branch_gate_map)
 
     # ===== POPULATE COALESCE SCHEMA CONFIG =====
     # Coalesce nodes are structural pass-throughs; record the upstream schema

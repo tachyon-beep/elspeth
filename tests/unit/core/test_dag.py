@@ -4444,12 +4444,12 @@ class TestDeterministicNodeIDs:
             )
 
 
-class TestCoalesceGateIndex:
-    """Test coalesce_gate_index exposure from ExecutionGraph."""
+class TestBranchGateMap:
+    """Test branch_gate_map exposure from ExecutionGraph."""
 
-    def test_get_coalesce_gate_index_returns_copy(self) -> None:
+    def test_get_branch_gate_map_returns_copy(self) -> None:
         """Getter should return a copy to prevent external mutation."""
-        from elspeth.contracts.types import CoalesceName
+        from elspeth.contracts.types import BranchName, NodeID
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -4491,21 +4491,21 @@ class TestCoalesceGateIndex:
             coalesce_settings=settings.coalesce,
         )
 
-        # Get the index
-        index = graph.get_coalesce_gate_index()
+        # Get the map
+        branch_map = graph.get_branch_gate_map()
 
-        # Verify it contains expected mapping
-        assert CoalesceName("merge_branches") in index
-        assert isinstance(index[CoalesceName("merge_branches")], int)
+        # Verify it contains expected mappings (each branch maps to a NodeID)
+        assert BranchName("branch_a") in branch_map
+        assert BranchName("branch_b") in branch_map
 
         # Verify it's a copy (mutation doesn't affect internal state)
-        original_value = index[CoalesceName("merge_branches")]
-        index[CoalesceName("merge_branches")] = 999
+        original_value = branch_map[BranchName("branch_a")]
+        branch_map[BranchName("branch_a")] = NodeID("fake")
 
-        fresh_index = graph.get_coalesce_gate_index()
-        assert fresh_index[CoalesceName("merge_branches")] == original_value
+        fresh_map = graph.get_branch_gate_map()
+        assert fresh_map[BranchName("branch_a")] == original_value
 
-    def test_get_coalesce_gate_index_empty_when_no_coalesce(self) -> None:
+    def test_get_branch_gate_map_empty_when_no_coalesce(self) -> None:
         """Getter returns empty dict when no coalesce configured."""
         from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
         from elspeth.core.dag import ExecutionGraph
@@ -4526,8 +4526,8 @@ class TestCoalesceGateIndex:
             coalesce_settings=settings.coalesce,
         )
 
-        index = graph.get_coalesce_gate_index()
-        assert index == {}
+        branch_map = graph.get_branch_gate_map()
+        assert branch_map == {}
 
 
 class TestDivertEdges:
