@@ -25,9 +25,13 @@ These examples run locally with no credentials or external services.
 | [`explicit_routing`](explicit_routing/) | Declarative `on_success`/`input` wiring pattern |
 | [`error_routing`](error_routing/) | `on_error` diversion to quarantine sinks |
 | [`deep_routing`](deep_routing/) | 5 chained gates, 3 transforms, 7 sinks — complex decision tree |
+| [`fork_coalesce`](fork_coalesce/) | Fork/join DAG pattern — parallel paths merged with configurable policy |
 | [`batch_aggregation`](batch_aggregation/) | Count-triggered aggregation with group-by statistics |
 | [`deaggregation`](deaggregation/) | 1-to-N row expansion via `batch_replicate` |
 | [`json_explode`](json_explode/) | Expand nested JSON arrays into individual rows |
+| [`database_sink`](database_sink/) | Write pipeline output to a SQLite database |
+| [`checkpoint_resume`](checkpoint_resume/) | Crash recovery via checkpointing and `elspeth resume` |
+| [`retention_purge`](retention_purge/) | Payload retention lifecycle and `elspeth purge` |
 | [`audit_export`](audit_export/) | Export the Landscape audit trail to JSON |
 | [`landscape_journal`](landscape_journal/) | Event journaling for real-time audit monitoring |
 | [`schema_contracts_demo`](schema_contracts_demo/) | DAG-time schema validation (`guaranteed_fields` / `required_input_fields`) |
@@ -66,6 +70,7 @@ These examples use ELSPETH's built-in fault injection servers to test pipeline r
 |---------|---------------------|
 | [`chaosllm_sentiment`](chaosllm_sentiment/) | Sentiment analysis against ChaosLLM (mirrors `openrouter_sentiment`) |
 | [`chaosllm_endurance`](chaosllm_endurance/) | Multi-query endurance test with fault injection |
+| [`rate_limited_llm`](rate_limited_llm/) | LLM pipeline with rate limiting (30 req/min cap) |
 | [`chaosweb`](chaosweb/) | Web scraping resilience with ChaosWeb fault injection |
 | [`chaosllm`](chaosllm/) | Response data used by ChaosLLM server (not a runnable pipeline) |
 
@@ -78,33 +83,26 @@ These examples use ELSPETH's built-in fault injection servers to test pipeline r
 | **How wiring works** | [`explicit_routing`](explicit_routing/) — the canonical minimal example |
 | **Simple routing** | [`threshold_gate`](threshold_gate/) or [`boolean_routing`](boolean_routing/) |
 | **Complex decision trees** | [`deep_routing`](deep_routing/) — 5 gates, 7 sinks, 8-node-deep DAG |
+| **Fork/join patterns** | [`fork_coalesce`](fork_coalesce/) — parallel paths with merge policies |
 | **Error handling / quarantine** | [`error_routing`](error_routing/) — `on_error` diversion pattern |
-| **Aggregation (N→1)** | [`batch_aggregation`](batch_aggregation/) — count triggers, group-by stats |
-| **Deaggregation (1→N)** | [`deaggregation`](deaggregation/) or [`json_explode`](json_explode/) |
+| **Aggregation (N to 1)** | [`batch_aggregation`](batch_aggregation/) — count triggers, group-by stats |
+| **Deaggregation (1 to N)** | [`deaggregation`](deaggregation/) or [`json_explode`](json_explode/) |
 | **LLM integration (quick start)** | [`openrouter_sentiment`](openrouter_sentiment/) — simplest real LLM pipeline |
 | **LLM without API keys** | [`chaosllm_sentiment`](chaosllm_sentiment/) — same pipeline, local ChaosLLM server |
 | **Multi-query LLM matrices** | [`openrouter_multi_query_assessment`](openrouter_multi_query_assessment/) — case studies x criteria |
 | **Pooled/concurrent execution** | [`openrouter_sentiment`](openrouter_sentiment/) — has `settings_pooled.yaml` variant |
 | **Batch aggregation + LLM** | [`openrouter_sentiment`](openrouter_sentiment/) — has `settings_batched.yaml` variant |
+| **Rate limiting** | [`rate_limited_llm`](rate_limited_llm/) — throttled API calls with ChaosLLM |
 | **Schema contracts** | [`schema_contracts_demo`](schema_contracts_demo/) (pure data) or [`schema_contracts_llm_assessment`](schema_contracts_llm_assessment/) (with LLM) |
 | **Jinja2 templates** | [`template_lookups`](template_lookups/) — field extraction and template-driven prompts |
 | **Web scraping** | [`chaosweb`](chaosweb/) — fault-injected scraping with content gates |
+| **Database output** | [`database_sink`](database_sink/) — write to SQLite (or PostgreSQL/MySQL) |
+| **Crash recovery / resume** | [`checkpoint_resume`](checkpoint_resume/) — checkpoint + Ctrl-C + `elspeth resume` |
+| **Graceful shutdown** | [`checkpoint_resume`](checkpoint_resume/) — covers Ctrl-C shutdown behaviour |
+| **Payload retention** | [`retention_purge`](retention_purge/) — payload lifecycle and `elspeth purge` |
 | **Audit trail export** | [`audit_export`](audit_export/) — JSON export with optional signing |
 | **Event journaling** | [`landscape_journal`](landscape_journal/) — real-time audit event stream |
 | **Azure integration** | [`azure_openai_sentiment`](azure_openai_sentiment/), [`azure_blob_sentiment`](azure_blob_sentiment/), [`azure_keyvault_secrets`](azure_keyvault_secrets/) |
 | **Docker deployment** | [`threshold_gate_container`](threshold_gate_container/) — containerised pipeline |
 | **Retry under faults** | [`chaosllm_endurance`](chaosllm_endurance/) — 5 retries with exponential backoff against ChaosLLM |
 | **Stress testing** | [`large_scale_test`](large_scale_test/) or [`chaosllm_endurance`](chaosllm_endurance/) |
-
-## Coverage Gaps
-
-The following features do not yet have dedicated examples:
-
-| Feature | Notes |
-|---------|-------|
-| **Fork / Coalesce** | No working example of DAG fork/join patterns (tracked as DOC-02 in RC3-remediation) |
-| **Checkpoint / Resume** | No example demonstrating crash recovery and `elspeth resume` |
-| **Rate Limiting** | Rate limiting is configured but no dedicated example shows the feature |
-| **Database Sink** | No example writing to a database sink |
-| **Graceful Shutdown** | No example demonstrating `Ctrl-C` → checkpoint → resume workflow |
-| **Retention / Purge** | No example demonstrating payload retention policies and `elspeth purge` |
