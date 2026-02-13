@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -376,3 +377,319 @@ class TestInterruptAndResume:
         # Verify checkpoint was created
         checkpoint = checkpoint_mgr.get_latest_checkpoint(run_id)
         assert checkpoint is not None
+
+    def _setup_failed_run(
+        self,
+        db: LandscapeDB,
+        payload_store: Any,
+        run_id: str,
+        num_rows: int,
+        processed_count: int,
+    ) -> Any:
+        """Set up a failed run with some rows processed and others pending.
+
+        Creates DB records manually so resume has unprocessed rows to work with.
+        Uses the same pattern as TestResumeComprehensive._setup_failed_run.
+
+        Args:
+            db: LandscapeDB connection
+            payload_store: PayloadStore for row data
+            run_id: Run identifier
+            num_rows: Total rows to create
+            processed_count: Number of rows already processed (with terminal outcomes)
+
+        Returns:
+            ExecutionGraph for the run
+        """
+        import json as json_mod
+
+        from sqlalchemy import insert
+
+        from elspeth.contracts import NodeType, RowOutcome
+        from elspeth.contracts.contract_records import ContractAuditRecord
+        from elspeth.contracts.enums import Determinism, RoutingMode
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+        from elspeth.core.checkpoint import CheckpointManager
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.schema import (
+            edges_table,
+            nodes_table,
+            rows_table,
+            runs_table,
+            tokens_table,
+        )
+
+        now = datetime.now(UTC)
+
+        graph = ExecutionGraph()
+        schema_config = {"schema": {"mode": "observed"}}
+        graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="collect", config=schema_config)
+        graph.add_edge("src", "xform", label="continue")
+        graph.add_edge("xform", "sink", label="continue")
+
+        source_schema_json = json_mod.dumps({"properties": {"value": {"type": "integer"}}, "required": ["value"]})
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+        audit_record = ContractAuditRecord.from_contract(contract)
+        schema_contract_json = audit_record.to_json()
+        schema_contract_hash = contract.version_hash()
+
+        with db.engine.begin() as conn:
+            conn.execute(
+                insert(runs_table).values(
+                    run_id=run_id,
+                    started_at=now,
+                    config_hash="test",
+                    settings_json="{}",
+                    canonical_version="v1",
+                    status=RunStatus.FAILED,
+                    source_schema_json=source_schema_json,
+                    schema_contract_json=schema_contract_json,
+                    schema_contract_hash=schema_contract_hash,
+                )
+            )
+
+            for node_id, plugin_name, node_type in [
+                ("src", "null", NodeType.SOURCE),
+                ("xform", "passthrough", NodeType.TRANSFORM),
+                ("sink", "collect", NodeType.SINK),
+            ]:
+                conn.execute(
+                    insert(nodes_table).values(
+                        node_id=node_id,
+                        run_id=run_id,
+                        plugin_name=plugin_name,
+                        node_type=node_type,
+                        plugin_version="1.0.0",
+                        determinism=Determinism.DETERMINISTIC if node_type != NodeType.SINK else Determinism.IO_WRITE,
+                        config_hash="test",
+                        config_json="{}",
+                        registered_at=now,
+                    )
+                )
+
+            for edge_id, from_node, to_node in [
+                ("e1", "src", "xform"),
+                ("e2", "xform", "sink"),
+            ]:
+                conn.execute(
+                    insert(edges_table).values(
+                        edge_id=edge_id,
+                        run_id=run_id,
+                        from_node_id=from_node,
+                        to_node_id=to_node,
+                        label="continue",
+                        default_mode=RoutingMode.MOVE,
+                        created_at=now,
+                    )
+                )
+
+            for i in range(num_rows):
+                row_data = {"value": i}
+                ref = payload_store.store(json_mod.dumps(row_data).encode())
+                conn.execute(
+                    insert(rows_table).values(
+                        row_id=f"r{i}",
+                        run_id=run_id,
+                        source_node_id="src",
+                        row_index=i,
+                        source_data_hash=f"h{i}",
+                        source_data_ref=ref,
+                        created_at=now,
+                    )
+                )
+                conn.execute(
+                    insert(tokens_table).values(
+                        token_id=f"t{i}",
+                        row_id=f"r{i}",
+                        created_at=now,
+                    )
+                )
+
+        # Mark first N rows as completed
+        recorder = LandscapeRecorder(db)
+        for i in range(processed_count):
+            recorder.record_token_outcome(
+                run_id=run_id,
+                token_id=f"t{i}",
+                outcome=RowOutcome.COMPLETED,
+                sink_name="sink",
+            )
+
+        # Create checkpoint at last processed row
+        if processed_count > 0:
+            checkpoint_mgr = CheckpointManager(db)
+            checkpoint_mgr.create_checkpoint(
+                run_id=run_id,
+                token_id=f"t{processed_count - 1}",
+                node_id="xform",
+                sequence_number=processed_count - 1,
+                graph=graph,
+            )
+
+        return graph
+
+    def test_resume_honors_shutdown_event(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Interrupt during resume: GracefulShutdownError raised, run marked INTERRUPTED."""
+        from sqlalchemy import select
+
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.contracts.types import NodeID, SinkName
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.core.landscape.schema import runs_table
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from elspeth.plugins.sources.null_source import NullSource
+
+        run_id = "resume-shutdown-test"
+        total_rows = 10
+        processed_count = 3
+
+        # Set up failed run: 10 rows, 3 processed, 7 remaining
+        graph = self._setup_failed_run(
+            landscape_db,
+            payload_store,
+            run_id,
+            num_rows=total_rows,
+            processed_count=processed_count,
+        )
+        graph.set_sink_id_map({SinkName("default"): NodeID("sink")})
+        graph.set_transform_id_map({0: NodeID("xform")})
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
+        recovery = RecoveryManager(landscape_db, checkpoint_mgr)
+        resume_point = recovery.get_resume_point(run_id, graph)
+        assert resume_point is not None
+
+        # Set up resume with shutdown event that fires after 2 rows
+        resume_shutdown = threading.Event()
+        resume_transform = InterruptAfterN(2, resume_shutdown)
+        resume_transform.on_success = "default"
+        resume_transform.on_error = "discard"
+        resume_sink = CollectSink()
+        null_source = NullSource({})
+        null_source.on_success = "default"
+
+        resume_config = PipelineConfig(
+            source=as_source(null_source),
+            transforms=[as_transform(resume_transform)],
+            sinks={"default": as_sink(resume_sink)},
+        )
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        with pytest.raises(GracefulShutdownError) as resume_exc:
+            orchestrator.resume(
+                resume_point=resume_point,
+                config=resume_config,
+                graph=graph,
+                payload_store=payload_store,
+                shutdown_event=resume_shutdown,
+            )
+
+        # GracefulShutdownError has correct rows_processed and run_id
+        assert resume_exc.value.rows_processed >= 2
+        assert resume_exc.value.run_id == run_id
+
+        # Run is INTERRUPTED in database (not FAILED or RUNNING)
+        with landscape_db.engine.connect() as conn:
+            run = conn.execute(select(runs_table.c.status).where(runs_table.c.run_id == run_id)).fetchone()
+        assert run is not None
+        assert run.status == RunStatus.INTERRUPTED
+
+        # Processed rows reached the sink
+        assert len(resume_sink.results) >= 2
+
+    def test_resume_without_shutdown_completes_normally(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Resume without shutdown event completes all remaining rows."""
+        from sqlalchemy import select
+
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.contracts.types import NodeID, SinkName
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.core.landscape.schema import runs_table
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from elspeth.plugins.sources.null_source import NullSource
+        from elspeth.plugins.transforms.passthrough import PassThrough
+
+        run_id = "resume-no-shutdown-test"
+        total_rows = 10
+        processed_count = 5
+
+        # Set up failed run: 10 rows, 5 processed, 5 remaining
+        graph = self._setup_failed_run(
+            landscape_db,
+            payload_store,
+            run_id,
+            num_rows=total_rows,
+            processed_count=processed_count,
+        )
+        graph.set_sink_id_map({SinkName("default"): NodeID("sink")})
+        graph.set_transform_id_map({0: NodeID("xform")})
+
+        checkpoint_mgr = CheckpointManager(landscape_db)
+        settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
+        recovery = RecoveryManager(landscape_db, checkpoint_mgr)
+        resume_point = recovery.get_resume_point(run_id, graph)
+        assert resume_point is not None
+
+        # Set up resume WITHOUT shutdown event
+        passthrough = PassThrough({"schema": {"mode": "observed"}})
+        passthrough.on_success = "default"
+        passthrough.on_error = "discard"
+        resume_sink = CollectSink()
+        null_source = NullSource({})
+        null_source.on_success = "default"
+
+        resume_config = PipelineConfig(
+            source=as_source(null_source),
+            transforms=[as_transform(passthrough)],
+            sinks={"default": as_sink(resume_sink)},
+        )
+
+        orchestrator = Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_mgr,
+            checkpoint_config=checkpoint_config,
+        )
+
+        result = orchestrator.resume(
+            resume_point=resume_point,
+            config=resume_config,
+            graph=graph,
+            payload_store=payload_store,
+        )
+
+        remaining_rows = total_rows - processed_count
+        assert result.rows_processed == remaining_rows
+        assert result.status == RunStatus.COMPLETED
+        assert len(resume_sink.results) == remaining_rows
+
+        # Run is COMPLETED in database
+        with landscape_db.engine.connect() as conn:
+            run = conn.execute(select(runs_table.c.status).where(runs_table.c.run_id == run_id)).fetchone()
+        assert run is not None
+        assert run.status == RunStatus.COMPLETED

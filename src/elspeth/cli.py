@@ -1810,6 +1810,24 @@ def resume(
                 db=db,
                 output_format=output_format,
             )
+        except GracefulShutdownError as e:
+            if output_format == "json":
+                import json as json_mod
+
+                typer.echo(
+                    json_mod.dumps(
+                        {
+                            "event": "interrupted",
+                            "run_id": e.run_id,
+                            "rows_processed": e.rows_processed,
+                            "message": str(e),
+                        }
+                    )
+                )
+            else:
+                typer.echo(f"\nResume interrupted after {e.rows_processed} rows.")
+                typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
+            raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
         except Exception as e:
             typer.echo(f"Error during resume: {e}", err=True)
             raise typer.Exit(1) from None

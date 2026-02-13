@@ -1810,6 +1810,7 @@ class Orchestrator:
         *,
         payload_store: PayloadStore,
         settings: ElspethSettings | None = None,
+        shutdown_event: threading.Event | None = None,
     ) -> RunResult:
         """Resume a failed run from a checkpoint.
 
@@ -1905,21 +1906,62 @@ class Orchestrator:
                 routed_destinations={},
             )
 
-        # 5. Process unprocessed rows
+        # 5. Process unprocessed rows (with graceful shutdown support)
         from elspeth.telemetry import RunFinished
 
         resume_start_time = time.perf_counter()
-        result = self._process_resumed_rows(
-            recorder=recorder,
-            run_id=run_id,
-            config=config,
-            graph=graph,
-            unprocessed_rows=unprocessed_rows,
-            restored_aggregation_state=restored_state,
-            settings=settings,
-            payload_store=payload_store,
-            schema_contract=schema_contract,
-        )
+
+        # When shutdown_event is provided (testing), skip signal handler
+        # installation and use the caller's event directly.
+        shutdown_ctx = nullcontext(shutdown_event) if shutdown_event is not None else self._shutdown_handler_context()
+
+        try:
+            with shutdown_ctx as active_event:
+                result = self._process_resumed_rows(
+                    recorder=recorder,
+                    run_id=run_id,
+                    config=config,
+                    graph=graph,
+                    unprocessed_rows=unprocessed_rows,
+                    restored_aggregation_state=restored_state,
+                    settings=settings,
+                    payload_store=payload_store,
+                    schema_contract=schema_contract,
+                    shutdown_event=active_event,
+                )
+        except GracefulShutdownError as shutdown_exc:
+            # Graceful shutdown: all in-flight work flushed, sinks written.
+            # Mark run INTERRUPTED (resumable via `elspeth resume`).
+            total_duration = time.perf_counter() - resume_start_time
+            recorder.finalize_run(run_id, status=RunStatus.INTERRUPTED)
+
+            run_duration_ms = total_duration * 1000
+            self._emit_telemetry(
+                RunFinished(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    status=RunStatus.INTERRUPTED,
+                    row_count=shutdown_exc.rows_processed,
+                    duration_ms=run_duration_ms,
+                )
+            )
+
+            self._events.emit(
+                RunSummary(
+                    run_id=run_id,
+                    status=RunCompletionStatus.INTERRUPTED,
+                    total_rows=shutdown_exc.rows_processed,
+                    succeeded=0,
+                    failed=0,
+                    quarantined=0,
+                    duration_seconds=total_duration,
+                    exit_code=3,
+                    routed=0,
+                    routed_destinations=(),
+                )
+            )
+
+            raise  # Propagate to CLI
 
         # 6. Complete the run with reproducibility grade
         recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
@@ -1971,6 +2013,7 @@ class Orchestrator:
         *,
         payload_store: PayloadStore,
         schema_contract: SchemaContract,
+        shutdown_event: threading.Event | None = None,
     ) -> RunResult:
         """Process unprocessed rows during resume.
 
@@ -2115,6 +2158,8 @@ class Orchestrator:
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
                     agg_transform_lookup[t.node_id] = (t, NodeID(t.node_id))
 
+        interrupted_by_shutdown = False
+
         try:
             # Process each unprocessed row using process_existing_row
             # (rows already exist in DB, only tokens need to be created)
@@ -2173,6 +2218,16 @@ class Orchestrator:
                         pending_tokens=pending_tokens,
                     )
 
+                # ─────────────────────────────────────────────────────────────
+                # GRACEFUL SHUTDOWN CHECK
+                # Check between row iterations — current row is fully
+                # processed, outcomes recorded, safe to stop here.
+                # No quarantine path in resume (rows already validated).
+                # ─────────────────────────────────────────────────────────────
+                if shutdown_event is not None and shutdown_event.is_set():
+                    interrupted_by_shutdown = True
+                    break
+
             # ─────────────────────────────────────────────────────────────────
             # CRITICAL: Flush remaining aggregation buffers at end-of-source
             # ─────────────────────────────────────────────────────────────────
@@ -2210,6 +2265,14 @@ class Orchestrator:
                 sink_id_map=sink_id_map,
                 sink_step=processor.resolve_sink_step(),
             )
+
+            # If shutdown interrupted the loop, raise after all pending work is flushed.
+            # At this point: aggregation buffers flushed, coalesce flushed, sink writes done.
+            if interrupted_by_shutdown:
+                raise GracefulShutdownError(
+                    rows_processed=counters.rows_processed,
+                    run_id=run_id,
+                )
 
         finally:
             self._cleanup_plugins(config, ctx, include_source=False)
