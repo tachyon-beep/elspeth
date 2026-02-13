@@ -8,12 +8,15 @@ pending work is flushed, run is marked INTERRUPTED, and is resumable.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from elspeth.contracts import PipelineRow, RunStatus
+from elspeth.contracts.enums import Determinism
 from elspeth.contracts.errors import GracefulShutdownError
+from elspeth.contracts.results import SourceRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.fixtures.base_classes import (
@@ -47,6 +50,51 @@ class InterruptAfterN(BaseTransform):
         if self._count >= self._n:
             self._event.set()
         return TransformResult.success(row, success_reason={"action": "processed"})
+
+
+class QuarantineSource:
+    """Source that emits quarantined rows, setting shutdown event after N."""
+
+    name = "quarantine_source"
+    output_schema = _TestSchema
+    node_id: str | None = None
+    determinism = Determinism.DETERMINISTIC
+    plugin_version = "1.0.0"
+    _on_validation_failure: str = "quarantine"
+    on_success: str = "default"
+
+    def __init__(self, total: int, interrupt_after: int, shutdown_event: threading.Event) -> None:
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
+        self._total = total
+        self._interrupt_after = interrupt_after
+        self._event = shutdown_event
+        self._count = 0
+
+    def on_start(self, ctx: Any) -> None:
+        pass
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        for i in range(self._total):
+            self._count += 1
+            if self._count >= self._interrupt_after:
+                self._event.set()
+            yield SourceRow.quarantined(
+                row={"value": i},
+                error=f"validation_error_{i}",
+                destination="quarantine",
+            )
+
+    def on_complete(self, ctx: Any) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        return None
+
+    def get_schema_contract(self) -> None:
+        return None
 
 
 class TestShutdownBreaksLoop:
@@ -203,6 +251,32 @@ class TestShutdownBreaksLoop:
         # All 5 rows were processed before shutdown triggered
         assert exc_info.value.rows_processed == 5
         assert len(sink.results) == 5
+
+    def test_shutdown_interrupts_quarantined_row_stream(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Shutdown event is checked on quarantine path, not just normal path."""
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        shutdown_event = threading.Event()
+        # Source emits 100 quarantined rows; event set after row 5
+        source = QuarantineSource(total=100, interrupt_after=5, shutdown_event=shutdown_event)
+        quarantine_sink = CollectSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(CollectSink()), "quarantine": as_sink(quarantine_sink)},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        graph = build_production_graph(config)
+
+        with pytest.raises(GracefulShutdownError) as exc_info:
+            orchestrator.run(config, graph=graph, payload_store=payload_store, shutdown_event=shutdown_event)
+
+        # Should stop well before 100 rows — event fires at row 5,
+        # so at most a few more rows may be processed before the check fires.
+        assert exc_info.value.rows_processed <= 10
+        assert exc_info.value.rows_processed >= 5
 
 
 class TestInterruptAndResume:

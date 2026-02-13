@@ -1490,6 +1490,15 @@ class Orchestrator:
                             # Restore operation_id before next iteration
                             # (generator may execute external calls on next() call)
                             ctx.operation_id = source_operation_id
+
+                            # Shutdown check for quarantine path — without this,
+                            # a stream of quarantined rows would never hit the
+                            # normal-path shutdown check (line ~1605) because
+                            # `continue` skips it.
+                            if shutdown_event is not None and shutdown_event.is_set():
+                                interrupted_by_shutdown = True
+                                break
+
                             # Skip normal processing - row is already handled
                             continue
 
