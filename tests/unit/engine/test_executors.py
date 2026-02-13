@@ -1272,6 +1272,56 @@ class TestAggregationExecutor:
         failed_calls = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
         assert len(failed_calls) == 1
 
+    def test_execute_flush_exception_clears_batch_token_ids(self) -> None:
+        """Exception path clears ctx.batch_token_ids to prevent stale leakage.
+
+        Regression: PluginContext is reused across calls. If execute_flush()
+        raises without clearing batch_token_ids, subsequent transforms
+        (e.g. OpenRouterBatchLLMTransform) see stale IDs and misattribute
+        telemetry to tokens from the failed batch.
+        """
+        executor, _recorder, nid = self._make_agg_executor(count=2)
+        contract = _make_contract()
+
+        executor.buffer_row(nid, _make_token(data={"v": "a"}, token_id="t1", contract=contract))
+        executor.buffer_row(nid, _make_token(data={"v": "b"}, token_id="t2", contract=contract))
+
+        transform = MagicMock()
+        transform.name = "agg"
+        transform.process.side_effect = RuntimeError("boom")
+        ctx = _make_ctx()
+
+        with pytest.raises(RuntimeError, match="boom"):
+            executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
+
+        # batch_token_ids must be None after error, not stale ["t1", "t2"]
+        assert ctx.batch_token_ids is None
+
+    def test_execute_flush_batch_pending_clears_batch_token_ids(self) -> None:
+        """BatchPendingError path clears ctx.batch_token_ids.
+
+        Regression: Same stale-ID leakage as the exception path — the
+        BatchPendingError control flow signal re-raised before cleanup.
+        """
+        from elspeth.contracts.errors import BatchPendingError
+
+        executor, _recorder, nid = self._make_agg_executor(count=2)
+        contract = _make_contract()
+
+        executor.buffer_row(nid, _make_token(data={"v": "a"}, token_id="t1", contract=contract))
+        executor.buffer_row(nid, _make_token(data={"v": "b"}, token_id="t2", contract=contract))
+
+        transform = MagicMock()
+        transform.name = "agg"
+        transform.process.side_effect = BatchPendingError("batch-123", "submitted")
+        ctx = _make_ctx()
+
+        with pytest.raises(BatchPendingError):
+            executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
+
+        # batch_token_ids must be None after pending, not stale ["t1", "t2"]
+        assert ctx.batch_token_ids is None
+
     def test_execute_flush_resets_batch_state(self) -> None:
         """After flush, batch state is reset (new batch on next row)."""
         executor, _recorder, nid = self._make_agg_executor(count=1)

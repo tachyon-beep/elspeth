@@ -291,6 +291,7 @@ def _json_schema_to_python_type(
     - UUID: {"type": "string", "format": "uuid"}
     - Decimal: {"anyOf": [{"type": "number"}, {"type": "string"}]}
     - Nullable: {"anyOf": [{"type": "T"}, {"type": "null"}]} -> T
+    - Nullable ref: {"anyOf": [{"$ref": "#/$defs/M"}, {"type": "null"}]} -> M
     - list[T]: {"type": "array", "items": {...}}
     - dict: {"type": "object"} without properties
 
@@ -319,19 +320,23 @@ def _json_schema_to_python_type(
             return Decimal
 
         # Pattern 2: Nullable - {"anyOf": [{"type": "T", ...}, {"type": "null"}]}
+        #   or with $ref:  {"anyOf": [{"$ref": "#/$defs/M"}, {"type": "null"}]}
         # Extract the non-null type and recursively resolve it
         if "null" in type_strs:
-            non_null_items = [item for item in any_of_items if item["type"] != "null"]
+            # Items without "type" key (e.g. $ref entries) are non-null by definition
+            non_null_items = [item for item in any_of_items if item.get("type") != "null"]
             if len(non_null_items) == 1:
-                # Recursively resolve the non-null type
-                # This handles cases like: date | None where the non-null part has format
-                return _json_schema_to_python_type(
+                # Recursively resolve the non-null type, then wrap as Optional.
+                # Returning T | None (not bare T) is critical: Pydantic model types
+                # reject None unless the type annotation explicitly includes it.
+                inner_type = _json_schema_to_python_type(
                     field_name,
                     non_null_items[0],
                     schema_defs=schema_defs,
                     create_model=create_model,
                     schema_base=schema_base,
                 )
+                return inner_type | None
 
         # Unsupported anyOf pattern (e.g., Union[str, int] without null)
         raise ValueError(

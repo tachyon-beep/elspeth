@@ -383,6 +383,10 @@ class AggregationExecutor:
                     state_id=state.state_id,
                 )
 
+                # Clear batch_token_ids before re-raise to prevent stale IDs
+                # leaking to subsequent calls (PluginContext is reused).
+                ctx.batch_token_ids = None
+
                 # Re-raise for orchestrator to schedule retry.
                 # The batch remains in "executing" status, checkpoint is preserved.
                 raise
@@ -411,6 +415,10 @@ class AggregationExecutor:
 
                 # Reset for next batch
                 self._reset_batch_state(node_id)
+
+                # Clear batch_token_ids before re-raise to prevent stale IDs
+                # leaking to subsequent calls (PluginContext is reused).
+                ctx.batch_token_ids = None
                 raise
 
         # Step 4: Populate audit fields on result

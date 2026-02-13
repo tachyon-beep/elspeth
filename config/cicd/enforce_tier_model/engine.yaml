@@ -101,6 +101,11 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=ff8235b7d923ad65
+  owner: bugfix
+  reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get() filters null vs non-null items
+  safety: Non-null items fed to recursive resolver which crashes on unrecognized schemas
+  expires: null
 - key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=864f8798598aa264
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
