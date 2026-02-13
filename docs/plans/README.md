@@ -23,7 +23,7 @@ Plans at the root level, either in progress or queued for current sprint:
 | Plan | Description | Status |
 |------|-------------|--------|
 | `RC3-remediation.md` | RC-3 remaining remediation (9 items from original 75+) | Active |
-| `RC3-doc-updates.md` | RC-3 documentation and project layout remediation | In progress |
+| `RC3-doc-updates.md` | RC-3 documentation and project layout remediation | Complete (pending move) |
 | `2026-02-02-whitelist-reduction.md` | Tier model whitelist reduction | In progress |
 | `2026-02-13-contract-propagation-complex-fields.md` | Preserve dict/list fields in propagated contracts | Queued |
 | `2026-02-01-nodeinfo-typed-config.md` | Type NodeInfo.config with discriminated union | Queued |

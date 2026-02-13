@@ -1,7 +1,7 @@
 # ELSPETH RC-3 Documentation & Project Layout Remediation Plan
 
 **Date:** 2026-02-13
-**Status:** In Progress
+**Status:** IMPLEMENTED (2026-02-13)
 **Auditor:** Claude Code (RC3-quality-sprint)
 **Scope:** Documentation, project metadata, configuration paths — no runtime code changes.
 
@@ -289,34 +289,19 @@ In `docs/plans/README.md`:
 
 ---
 
-## Phase 4 — Polish and Coverage (P3)
+## Phase 4 — Polish and Coverage (P3) — DONE
 
-### F-17: Example README Coverage Gaps
+### F-17: Example README Coverage Gaps — DONE
 
-12 example directories lack README files:
+12 example directories now have README files. Additionally, a master `examples/README.md` was created with a full index, categorised listings, and a "If you want to see X, look at Y" guide. Coverage gaps (fork/coalesce, checkpoint/resume, rate limiting, database sink) are documented in the master README.
 
-1. `examples/batch_aggregation`
-2. `examples/boolean_routing`
-3. `examples/chaosllm`
-4. `examples/chaosllm_endurance`
-5. `examples/chaosllm_sentiment`
-6. `examples/deaggregation`
-7. `examples/deep_routing`
-8. `examples/error_routing`
-9. `examples/explicit_routing`
-10. `examples/json_explode`
-11. `examples/threshold_gate`
-12. `examples/threshold_gate_container`
+### F-18: Archived Docs Point to Non-Existent Location — DONE
 
-Each should have a brief README explaining what it demonstrates and how to run it.
+`docs/archive/quality-audit-2026-01-22/README.md` updated to remove stale reference to non-existent `docs/quality-audit/` directory.
 
-### F-18: Archived Docs Point to Non-Existent Location
+### F-19: Layout Inconsistency for Analysis Docs — DONE
 
-`docs/archive/quality-audit-2026-01-22/README.md` references `docs/quality-audit/` which does not exist. Fix the breadcrumb link.
-
-### F-19: Layout Inconsistency for Analysis Docs
-
-A timestamped analysis folder exists at `docs/arch-analysis-2026-02-02-1114` while older analyses are under `docs/archive/`. Decide on a consistent policy and relocate.
+`docs/arch-analysis-2026-02-02-1114` deleted entirely (7 files). Will regenerate architecture docs fresh when needed.
 
 ---
 
