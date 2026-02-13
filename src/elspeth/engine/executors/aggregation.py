@@ -344,12 +344,11 @@ class AggregationExecutor:
         ctx.node_id = node_id
         # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
 
-        # Step 3: Execute with timing and span
-        # P2-2026-01-21: Use aggregation_span (not transform_span) for flush operations
-        # This ensures spans are distinguishable from regular transforms and carry batch_id
-        # P2-2026-01-21: Pass node_id for disambiguation when multiple aggregations exist
-        # P3-2026-02-01: Pass input_hash for trace-to-audit correlation
+        # Expose per-row token identity for batch transforms. This allows transforms
+        # like OpenRouterBatchLLMTransform to pass the correct token_id to audited
+        # clients, ensuring per-token telemetry correlation in multi-token batches.
         batch_token_ids = [t.token_id for t in buffered_tokens]
+        ctx.batch_token_ids = batch_token_ids
         with self._spans.aggregation_span(
             transform.name,
             node_id=node_id,
@@ -500,6 +499,9 @@ class AggregationExecutor:
         # Direct access since buffer_row validates node_id is in aggregation_settings,
         # which guarantees a trigger evaluator exists
         self._trigger_evaluators[node_id].reset()
+
+        # Clear batch_token_ids to prevent stale data leaking to next batch
+        ctx.batch_token_ids = None
 
         return result, buffered_tokens, flushed_batch_id
 

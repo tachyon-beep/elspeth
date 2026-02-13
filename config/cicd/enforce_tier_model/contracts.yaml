@@ -131,22 +131,22 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/plugin_context.py:R5:PluginContext:get:fp=2a573e1a799bf997
+- key: contracts/plugin_context.py:R5:PluginContext:get:fp=1ba9331f7213c9c0
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=f10de163eec9f50c
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=03ac36437fc77924
   owner: architecture
   reason: Optional field access at trust boundary
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=8a3e698ac7e24563
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=cf15783cae827033
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=ce3ee284886d2454
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=eff3c261c6ecf430
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=17cecdb36463a49a
+- key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=8a007856aa7c655f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=d75ceb3203014c15
+- key: contracts/plugin_context.py:R6:PluginContext:record_validation_error:fp=004c532fa0483dba
   owner: architecture
   reason: Silent recovery with explicit error handling path
 - key: contracts/routing.py:R5:RoutingAction:__post_init__:fp=4d9b80b717bc7551

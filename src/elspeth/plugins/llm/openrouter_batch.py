@@ -634,17 +634,28 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         if state_id is None:
             raise RuntimeError("OpenRouter batch transform requires state_id. Ensure transform is executed through the engine.")
 
-        token_id = ctx.token.token_id if ctx.token is not None else None
-        http_client = self._get_http_client(state_id, token_id=token_id)
+        # Resolve per-row token_id for telemetry attribution. In batch mode,
+        # ctx.batch_token_ids maps row index to token_id (set by AggregationExecutor).
+        # Falls back to ctx.token for single-row mode or legacy callers.
+        if ctx.batch_token_ids is not None and idx < len(ctx.batch_token_ids):
+            row_token_id = ctx.batch_token_ids[idx]
+        elif ctx.token is not None:
+            row_token_id = ctx.token.token_id
+        else:
+            row_token_id = None
+
+        http_client = self._get_http_client(state_id, token_id=row_token_id)
 
         try:
             # AuditedHTTPClient.post() records the call to Landscape and emits
             # telemetry automatically. It does NOT call raise_for_status() — we
             # do that ourselves below to handle error responses per-row.
+            # Per-call token_id ensures correct telemetry attribution in batches.
             response = http_client.post(
                 "/chat/completions",
                 json=request_body,
                 headers={"Content-Type": "application/json"},
+                token_id=row_token_id,
             )
             response.raise_for_status()
 

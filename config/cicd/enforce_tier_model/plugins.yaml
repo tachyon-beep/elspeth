@@ -347,7 +347,7 @@ allow_hits:
   reason: HTTP response content-type header - external system boundary, header may be missing
   safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=434361e998470580
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=e6561b1525ab61cf
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing

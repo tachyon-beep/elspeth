@@ -105,6 +105,13 @@ class PluginContext:
     # with the authoritative token flowing through the pipeline.
     token: TokenInfo | None = field(default=None)
 
+    # === Batch Token Identity (Aggregation) ===
+    # Set by AggregationExecutor.execute_flush() before calling batch-aware transforms.
+    # Maps row index in the batch to the originating token_id. Batch transforms
+    # use this to pass per-row token_id to audited clients for correct telemetry
+    # attribution. When None, the transform falls back to ctx.token (single-token mode).
+    batch_token_ids: list[str] | None = field(default=None)
+
     # === Schema Contract (Phase 3: Transform/Sink Integration) ===
     # Set by executor when processing transforms to enable contract-aware template
     # access (original header names). When transforms receive a plain dict (not
