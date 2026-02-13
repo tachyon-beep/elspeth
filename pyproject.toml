@@ -257,8 +257,6 @@ show_error_codes = true
 plugins = ["pydantic.mypy"]
 # Allow unused ignores - needed for pre-commit which runs in isolated env
 warn_unused_ignores = false
-# Exclude alembic migration files - they're not packages
-exclude = ["alembic/versions/.*\\.py$"]
 
 [[tool.mypy.overrides]]
 module = [
