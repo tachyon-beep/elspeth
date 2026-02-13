@@ -955,11 +955,19 @@ class ExecutionGraph:
 
         # Coalesce nodes are NOT pass-throughs — they transform data via merge
         # strategy (nested wraps in {branch: data}, union merges fields, select
-        # picks a branch).  The builder validates schema compatibility in a
-        # strategy-aware manner during graph construction.  Return None here to
-        # indicate dynamic output schema, which correctly bypasses downstream
-        # type validation for outgoing edges.
+        # picks a branch).  Strategy-aware handling:
+        #   - select: passes through one branch unchanged → trace that branch's schema
+        #   - union/nested: output shape differs from any input → return None (dynamic)
         if node_info.node_type == NodeType.COALESCE:
+            merge_strategy = node_info.config["merge"]
+            if merge_strategy == "select":
+                # Select merge passes through the selected branch's data unchanged.
+                # Trace back to that branch's producer schema for type validation.
+                select_branch = node_info.config.get("select_branch")
+                if select_branch is not None:
+                    for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
+                        if edge_data.get("label") == select_branch:
+                            return self.get_effective_producer_schema(from_id)
             return None
 
         # Gates are true pass-throughs — inherit schema from upstream producers
@@ -1267,12 +1275,10 @@ class ExecutionGraph:
     def get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
         """Get effective output guarantees, walking through pass-through nodes.
 
-        Gates and coalesce nodes don't transform data - they inherit guarantees
-        from their upstream producers. This method walks backwards through the
-        graph to find actual guarantees.
-
-        For coalesce nodes, returns the intersection of all branch guarantees
-        (only fields guaranteed by ALL branches are guaranteed after merge).
+        Gates inherit guarantees from upstream. Coalesce nodes are strategy-aware:
+        - **union**: intersection of branch guarantees (only fields in ALL branches)
+        - **nested**: the node's own guarantees (branch names, not inner fields)
+        - **select**: the node's own guarantees (selected branch's schema)
 
         IMPORTANT: Gates ALWAYS inherit from upstream, even if they have raw schema
         guarantees. This is because gates copy raw config["schema"] from upstream,
@@ -1298,16 +1304,26 @@ class ExecutionGraph:
             # Gates pass through - inherit from single upstream
             return self.get_effective_guaranteed_fields(incoming[0][0])
 
-        # Coalesce nodes return intersection of branch guarantees
+        # Coalesce nodes: strategy-aware guaranteed fields
         if node_info.node_type == NodeType.COALESCE:
+            merge_strategy = node_info.config["merge"]
+
+            # nested/select: use the node's own config schema (set by builder).
+            # - Nested output is {branch_a: data, branch_b: data} — guarantees
+            #   are the branch names, NOT the inner field names.
+            # - Select output is the selected branch's data — its schema was
+            #   copied by the builder into this node's config.
+            if merge_strategy in ("nested", "select"):
+                return self.get_guaranteed_fields(node_id)
+
+            # union: intersection of branch guarantees. Only fields present in
+            # ALL branches are guaranteed in the flat merged output.
             incoming = list(self._graph.in_edges(node_id, data=True))
             if not incoming:
                 return frozenset()
-            # Coalesce guarantees the INTERSECTION of branch guarantees
             branch_guarantees = [self.get_effective_guaranteed_fields(from_id) for from_id, _, _ in incoming]
             if not branch_guarantees:
                 return frozenset()
-            # Start with first, intersect with rest
             result = branch_guarantees[0]
             for guarantees in branch_guarantees[1:]:
                 result = result & guarantees

@@ -328,6 +328,17 @@ allow_hits:
   reason: isinstance check for dict vs NodeConfig on config field during schema population
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-13'
+# ARCH-15: select merge trace-back in get_effective_producer_schema
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=5c55d56e9f1566f6
+  owner: ARCH-15
+  reason: Optional select_branch config lookup for select-merge schema trace-back
+  safety: Falls through to return None if missing — conservative (skips type validation)
+  expires: '2026-05-13'
+- key: core/dag/graph.py:R1:ExecutionGraph:get_effective_producer_schema:fp=f55aab92ac99cece
+  owner: ARCH-15
+  reason: Edge label lookup to identify selected branch's incoming edge
+  safety: Falls through to return None if no matching edge — conservative (skips type validation)
+  expires: '2026-05-13'
 # ARCH-15: per-branch transform field parsing
 - key: core/dag/builder.py:R5:_field_name_type:fp=b7ead318ec3c86b3
   owner: ARCH-15

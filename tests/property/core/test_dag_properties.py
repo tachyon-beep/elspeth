@@ -631,8 +631,8 @@ class TestGuaranteedFieldsProperties:
             config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_b_guarantees)}},
         )
 
-        # Coalesce node (merge point)
-        graph.add_node("coalesce", node_type="coalesce", plugin_name="test_coalesce")
+        # Coalesce node (merge point) — union merge uses intersection of guarantees
+        graph.add_node("coalesce", node_type="coalesce", plugin_name="test_coalesce", config={"merge": "union"})
 
         # Sink
         graph.add_node("sink", node_type="sink", plugin_name="test_sink")
