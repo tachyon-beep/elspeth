@@ -56,6 +56,11 @@ allow_hits:
   reason: DROP mode intentionally counts and discards newest event when replacement enqueue races with producers
   safety: Exception path records drop metrics, logs aggregate drops, and keeps queue task accounting balanced via finally task_done
   expires: '2026-05-15'
+- key: telemetry/manager.py:R6:TelemetryManager:_drop_oldest_and_enqueue_newest:fp=86d01b5df37aef96
+  owner: P2-2026-02-13
+  reason: Sentinel requeue failure during shutdown race — caught to prevent telemetry from crashing pipeline code
+  safety: Logged with warning, event counted as dropped, close() retries sentinel insertion independently
+  expires: '2026-05-15'
 - key: telemetry/manager.py:R6:TelemetryManager:_requeue_shutdown_sentinel_or_raise:fp=6557d5ad1d4d8bc4
   owner: architecture
   reason: Sentinel reinsertion loop handles bounded queue contention

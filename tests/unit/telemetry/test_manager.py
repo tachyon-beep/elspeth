@@ -564,8 +564,8 @@ class TestDropBackpressure:
         q.task_done()
         assert dummy._events_dropped == 2
 
-    def test_drop_mode_balances_unfinished_tasks_when_sentinel_requeue_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Evicted sentinel must still be task_done-balanced if requeue fails."""
+    def test_drop_mode_degrades_gracefully_when_sentinel_requeue_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Sentinel requeue failure degrades to dropped event, never raises."""
 
         incoming_event = _row_event()
 
@@ -591,12 +591,15 @@ class TestDropBackpressure:
 
         monkeypatch.setattr(TelemetryManager, "_requeue_shutdown_sentinel_or_raise", _raise_requeue_failure)
 
-        with pytest.raises(RuntimeError, match="sentinel requeue failure"):
-            TelemetryManager._drop_oldest_and_enqueue_newest(dummy, incoming_event)
+        # Must NOT raise — telemetry failures never propagate to callers
+        TelemetryManager._drop_oldest_and_enqueue_newest(dummy, incoming_event)
 
         # Critical regression guard: queue task accounting must remain balanced.
         assert q.unfinished_tasks == 0
         q.join()
+
+        # Event counted as dropped (not silently swallowed)
+        assert dummy._events_dropped == 1
 
 
 # =============================================================================

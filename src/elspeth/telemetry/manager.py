@@ -309,8 +309,17 @@ class TelemetryManager:
             try:
                 if had_evicted and evicted is None:
                     # Preserve shutdown sentinel if we raced with close().
-                    # Must never be silently lost under concurrent producers.
-                    TelemetryManager._requeue_shutdown_sentinel_or_raise(self)
+                    try:
+                        TelemetryManager._requeue_shutdown_sentinel_or_raise(self)
+                    except RuntimeError:
+                        # Sentinel could not be restored after bounded retries.
+                        # This is recoverable: close() will retry sentinel insertion
+                        # independently, and the export thread join has a timeout.
+                        # Log and drop the incoming event — never propagate to callers.
+                        logger.warning("Could not restore shutdown sentinel during DROP overflow; close() will retry independently")
+                        self._events_dropped += 1
+                        self._log_drops_if_needed()
+                        return
                 elif had_evicted:
                     self._events_dropped += 1
                     self._log_drops_if_needed()
@@ -335,6 +344,8 @@ class TelemetryManager:
 
         Must be called while holding _dropped_lock.
         Raises RuntimeError if sentinel cannot be restored after bounded retries.
+        Callers must catch RuntimeError and degrade gracefully — telemetry
+        must never propagate exceptions to pipeline code.
         """
         pending_task_done = 0
         max_attempts = self._queue.maxsize + 10  # Safety margin for close races
