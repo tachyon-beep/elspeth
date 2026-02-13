@@ -228,9 +228,8 @@ class TestJSONSourceFlexibleContract:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
 
-    def test_flexible_infers_extra_field_and_enforces_type_after_lock(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """First valid row infers extras; contract catches later type drift."""
-        from elspeth.contracts.errors import TypeMismatchViolation
+    def test_flexible_infers_extra_field_and_quarantines_type_drift(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """First valid row infers extras; subsequent rows with type drift are quarantined."""
         from elspeth.plugins.sources.json_source import JSONSource
 
         json_file = tmp_path / "data.json"
@@ -251,20 +250,14 @@ class TestJSONSourceFlexibleContract:
 
         assert len(rows) == 2
         assert rows[0].is_quarantined is False
-        assert rows[1].is_quarantined is False
+        assert rows[1].is_quarantined is True
+        assert "extra" in rows[1].quarantine_error
 
         contract = source.get_schema_contract()
         assert contract is not None
         assert contract.mode == "FLEXIBLE"
         assert contract.locked is True
         assert {field.normalized_name for field in contract.fields} == {"id", "extra"}
-
-        violations = contract.validate(rows[1].row)
-        assert len(violations) == 1
-        assert isinstance(violations[0], TypeMismatchViolation)
-        assert violations[0].normalized_name == "extra"
-        assert violations[0].expected_type is str
-        assert violations[0].actual_type is int
 
     def test_flexible_all_invalid_rows_still_publish_locked_declared_contract(
         self,

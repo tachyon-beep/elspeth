@@ -349,7 +349,29 @@ class JSONSource(BaseSource):
                 self.set_schema_contract(self._contract_builder.contract)
                 self._first_valid_row_processed = True
 
-            yield SourceRow.valid(validated_row, contract=self.get_schema_contract())
+            # Validate against locked contract to catch type drift on inferred fields.
+            # Pydantic's extra="allow" accepts any type for extras — the contract
+            # knows the inferred types from the first row and enforces them here.
+            contract = self.get_schema_contract()
+            if contract is not None and contract.locked:
+                violations = contract.validate(validated_row)
+                if violations:
+                    error_msg = "; ".join(str(v) for v in violations)
+                    ctx.record_validation_error(
+                        row=validated_row,
+                        error=error_msg,
+                        schema_mode=self._schema_config.mode,
+                        destination=self._on_validation_failure,
+                    )
+                    if self._on_validation_failure != "discard":
+                        yield SourceRow.quarantined(
+                            row=validated_row,
+                            error=error_msg,
+                            destination=self._on_validation_failure,
+                        )
+                    return
+
+            yield SourceRow.valid(validated_row, contract=contract)
         except ValidationError as e:
             # Record validation failure in audit trail
             # This is a trust boundary: external data may be invalid

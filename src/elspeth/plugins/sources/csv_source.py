@@ -286,9 +286,31 @@ class CSVSource(BaseSource):
                         self.set_schema_contract(self._contract_builder.contract)
                         first_valid_row_processed = True
 
+                    # Validate against locked contract to catch type drift on
+                    # inferred fields. Pydantic extra="allow" accepts any type
+                    # for extras — the contract enforces inferred types here.
+                    contract = self.get_schema_contract()
+                    if contract is not None and contract.locked:
+                        violations = contract.validate(validated_row)
+                        if violations:
+                            error_msg = "; ".join(str(v) for v in violations)
+                            ctx.record_validation_error(
+                                row=validated_row,
+                                error=error_msg,
+                                schema_mode=self._schema_config.mode,
+                                destination=self._on_validation_failure,
+                            )
+                            if self._on_validation_failure != "discard":
+                                yield SourceRow.quarantined(
+                                    row=validated_row,
+                                    error=error_msg,
+                                    destination=self._on_validation_failure,
+                                )
+                            continue
+
                     yield SourceRow.valid(
                         validated_row,
-                        contract=self.get_schema_contract(),
+                        contract=contract,
                     )
                 except ValidationError as e:
                     ctx.record_validation_error(
