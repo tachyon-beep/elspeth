@@ -308,26 +308,26 @@ allow_hits:
   reason: Optional _output_schema_config metadata is present only on select aggregation plugins
   safety: Missing metadata is handled as None; aggregation schemas still validated via contracts
   expires: '2026-03-10'
-- key: core/dag/builder.py:R8:build_execution_graph:fp=46f830f519308eec
+- key: core/dag/builder.py:R8:build_execution_graph:fp=1cc30d17f4d414f1
   owner: architecture
   reason: setdefault used for route-label grouping while building gate continue-route diagnostics
   safety: Grouping is deterministic and validated before runtime routing
-  expires: '2026-03-10'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=bcb4e6135cfe02c1
+  expires: '2026-03-13'
+- key: core/dag/builder.py:R1:build_execution_graph:fp=df1653ae77941631
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: Missing lookup returns None — handled explicitly by conditional check
-  expires: '2026-03-10'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=558ac31b1c086a15
+  expires: '2026-03-13'
+- key: core/dag/builder.py:R1:build_execution_graph:fp=b753ce1e6558fcc0
   owner: architecture
   reason: Gate default-continue target lookup during fallthrough edge wiring
   safety: Missing target is handled explicitly — ambiguous gates are skipped
-  expires: '2026-03-10'
-- key: core/dag/builder.py:R5:build_execution_graph:fp=2bcc9328e8841353
+  expires: '2026-03-13'
+- key: core/dag/builder.py:R5:build_execution_graph:fp=7e63a74f70b723db
   owner: architecture
   reason: isinstance check for dict vs NodeConfig on config field during schema population
   safety: Crashes on type mismatch - no silent fallback
-  expires: '2026-03-10'
+  expires: '2026-03-13'
 - key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=ca8865dffba274b3
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)

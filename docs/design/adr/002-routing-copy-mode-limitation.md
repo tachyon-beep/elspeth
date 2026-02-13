@@ -63,7 +63,7 @@ From CLAUDE.md:
 
 > Every row reaches exactly one terminal state - no silent drops
 
-Terminal states: `COMPLETED`, `ROUTED`, `FORKED`, `CONSUMED_IN_BATCH`, `COALESCED`, `QUARANTINED`, `FAILED`
+Terminal states: `COMPLETED`, `ROUTED`, `FORKED`, `CONSUMED_IN_BATCH`, `COALESCED`, `QUARANTINED`, `FAILED`, `EXPANDED`
 
 This is an **architectural invariant** enforced throughout the audit trail:
 

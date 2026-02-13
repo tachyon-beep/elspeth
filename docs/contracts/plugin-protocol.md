@@ -1,7 +1,7 @@
 # ELSPETH Plugin Protocol Contract
 
-> **Status:** FINAL (v1.9)
-> **Last Updated:** 2026-02-08
+> **Status:** FINAL (v1.10)
+> **Last Updated:** 2026-02-13
 > **Authority:** This document is the master reference for all plugin interactions.
 
 ## Overview
@@ -914,7 +914,7 @@ The following are **engine-level operations** that coordinate token flow through
 │                                    ▼                              │
 │  ROUTING DECISIONS                                                │
 │  ─────────────────                                               │
-│  Gate: "where does this token go?" (config OR plugin)            │
+│  Gate: "where does this token go?" (config-driven)               │
 │                                                                   │
 │  STRUCTURAL OPERATIONS (config-driven only)                      │
 │  ──────────────────────────────────────────                      │
@@ -931,7 +931,7 @@ The following are **engine-level operations** that coordinate token flow through
 
 **Purpose:** Evaluate a condition on row data and decide where the token goes next.
 
-**Key property:** Gates make routing decisions. They may optionally modify row data (e.g., adding routing metadata).
+**Key property:** Gates make routing decisions. They evaluate conditions on row data and determine token destinations.
 
 Gates are **config-driven operations** defined in YAML. They are NOT plugins.
 
@@ -1439,6 +1439,7 @@ Plugins make calls; the engine throttles them.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.10 | 2026-02-13 | RC-3 alignment — Fixed stale "(config OR plugin)" gate description to "(config-driven)" (gate plugins removed 2026-02-11). Corrected gate key property to reflect routing-only behavior (no row modification). |
 | 1.9 | 2026-02-08 | Second accuracy pass — Fixed `Determinism` comment (all 6 levels, not 3), `Enum` → `StrEnum`, `list[dict]` → `list[PipelineRow]` in aggregation section, `invalid_data` → `invalid_input` error category, `RoutingAction.route()` parameter clarification, `BatchTransformProtocol` attribute precision |
 | 1.8 | 2026-02-08 | Accuracy pass — Fixed `RoutingAction.fork()` → `fork_to_paths()`, documented `SanitizedDatabaseUrl`/`SanitizedWebhookUrl` for ArtifactDescriptor factories, documented `BatchTransformProtocol` as separate protocol, added `transforms_adds_fields` attribute, expanded expression language reference, fixed `ctx.run_started_at` reference, documented sink resume capability, noted `CoalesceProtocol` existence |
 | 1.7 | 2026-02-05 | **CRITICAL UPDATES**: (1) `TransformResult.success()` requires `success_reason` parameter (keyword-only, crashes if missing), (2) Row type changed from `dict[str, Any]` to `PipelineRow` in Transform/Gate signatures, (3) Added `context_after` field for operational metadata, (4) Added `contract` field and `to_pipeline_row()` methods on all result types, (5) Enhanced `flush()` documentation with durability guarantees, (6) Updated `SourceRow` to document `contract` parameter and `to_pipeline_row()` method, (7) Fixed `load()` return type to `Iterator[SourceRow]` |

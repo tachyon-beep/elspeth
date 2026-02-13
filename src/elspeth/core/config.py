@@ -671,10 +671,23 @@ class CoalesceSettings(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     name: str = Field(description="Unique identifier for this coalesce point")
-    branches: list[str] = Field(
+    branches: dict[str, str] = Field(
         min_length=2,
-        description="Branch names to wait for (from fork_to paths)",
+        description="Branch identity → input connection mapping. List format normalized to identity dict.",
     )
+
+    @field_validator("branches", mode="before")
+    @classmethod
+    def normalize_branches(cls, v: Any) -> dict[str, str]:
+        """Normalize list format to identity dict.
+
+        branches: [a, b] becomes branches: {a: a, b: b}
+        This is config ergonomics — list is cleaner when no transforms are needed.
+        """
+        if isinstance(v, list):
+            return {b: b for b in v}
+        return v  # type: ignore[no-any-return]  # Pydantic validates dict[str, str]
+
     policy: Literal["require_all", "quorum", "best_effort", "first"] = Field(
         default="require_all",
         description="How to handle partial arrivals",
@@ -719,16 +732,20 @@ class CoalesceSettings(BaseModel):
 
     @field_validator("branches")
     @classmethod
-    def validate_branch_names(cls, v: list[str]) -> list[str]:
-        """Ensure coalesce branch names are bounded and non-reserved."""
-        stripped = []
-        for branch in v:
-            if not branch or not branch.strip():
+    def validate_branch_names(cls, v: dict[str, str]) -> dict[str, str]:
+        """Ensure coalesce branch names (keys) and input connections (values) are valid."""
+        validated: dict[str, str] = {}
+        for branch_name, input_connection in v.items():
+            if not branch_name or not branch_name.strip():
                 raise ValueError("Coalesce branch names must not be empty")
-            value = branch.strip()
-            _validate_connection_or_sink_name(value, field_label="Coalesce branch name")
-            stripped.append(value)
-        return stripped
+            if not input_connection or not input_connection.strip():
+                raise ValueError(f"Coalesce branch '{branch_name}' input connection must not be empty")
+            key = branch_name.strip()
+            val = input_connection.strip()
+            _validate_connection_or_sink_name(key, field_label="Coalesce branch name")
+            _validate_connection_or_sink_name(val, field_label=f"Coalesce branch '{key}' input connection")
+            validated[key] = val
+        return validated
 
     @model_validator(mode="after")
     def validate_policy_requirements(self) -> "CoalesceSettings":
@@ -750,7 +767,7 @@ class CoalesceSettings(BaseModel):
             raise ValueError(f"Coalesce '{self.name}': select merge strategy requires select_branch")
         if self.select_branch is not None and self.select_branch not in self.branches:
             raise ValueError(
-                f"Coalesce '{self.name}': select_branch '{self.select_branch}' must be one of the expected branches: {self.branches}"
+                f"Coalesce '{self.name}': select_branch '{self.select_branch}' must be one of the expected branches: {sorted(self.branches.keys())}"
             )
         return self
 
