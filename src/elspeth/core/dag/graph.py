@@ -663,39 +663,37 @@ class ExecutionGraph:
             else:
                 # Transform branch: trace backwards from coalesce through MOVE edges
                 # to find the first node in this branch's transform chain.
-                # The chain is: gate -[branch_name MOVE]-> T1 -[continue MOVE]-> T2 -[... MOVE]-> coalesce
+                # The chain is: gate -[branch_name MOVE]-> T1 -[... MOVE]-> Tn -[... MOVE]-> coalesce
                 # We need T1 (the first transform after the gate).
-                first_node = self._trace_branch_first_node(coalesce_nid, branch_name)
+                first_node, _last_node = self._trace_branch_endpoints(coalesce_nid, branch_name)
                 result[branch_name] = first_node
 
         return result
 
-    def _trace_branch_first_node(self, coalesce_nid: NodeID, branch_name: str) -> NodeID:
-        """Trace backwards from coalesce to find the first transform in a branch chain.
+    def _trace_branch_endpoints(self, coalesce_nid: NodeID, branch_name: str) -> tuple[NodeID, NodeID]:
+        """Trace backwards from coalesce to find the first AND last transforms in a branch chain.
 
-        Walks backwards through MOVE edges from the coalesce node to find the
-        start of the transform chain for a given branch. The chain terminates at
-        the gate node (which produces the branch via a MOVE edge labelled with
+        Walks backwards through MOVE edges from the coalesce node to find both
+        endpoints of the transform chain for a given branch. The chain terminates
+        at the gate node (which produces the branch via a MOVE edge labelled with
         the branch name).
+
+        The backward walk follows ANY MOVE edge, not just ``"continue"`` edges,
+        because branch chains may include intermediate routing gates whose
+        outgoing edges carry route-specific labels (e.g., ``"approved"``).
 
         Args:
             coalesce_nid: The coalesce node to trace back from
             branch_name: The branch name to trace
 
         Returns:
-            NodeID of the first transform in the branch chain
+            ``(first_node, last_node)`` — first_node is the first transform
+            after the gate (receives the branch_name MOVE edge); last_node is
+            the immediate MOVE predecessor of the coalesce.
 
         Raises:
             GraphValidationError: If the branch chain cannot be traced
         """
-        # Find the immediate predecessor of the coalesce node for this branch.
-        # For a transform branch, the coalesce's incoming MOVE edges come from
-        # the last transform in each branch chain. We need to identify which
-        # incoming edge belongs to this branch, then walk back to the start.
-
-        # Strategy: Walk backwards from coalesce through the transform chain
-        # until we find the node whose incoming edge is labelled with the branch_name
-        # (that edge comes from the gate).
         visited: set[NodeID] = set()
         candidates: list[NodeID] = []
 
@@ -704,7 +702,7 @@ class ExecutionGraph:
             if data["mode"] == RoutingMode.MOVE:
                 candidates.append(NodeID(from_id))
 
-        # For each candidate, walk backwards through MOVE "continue" edges
+        # For each candidate, walk backwards through MOVE edges
         # until we find the node whose incoming edge has label == branch_name
         for candidate in candidates:
             current = candidate
@@ -716,23 +714,24 @@ class ExecutionGraph:
                 found_branch_entry = False
                 for _from_id, _to_id, _key, data in self._graph.in_edges(current, keys=True, data=True):
                     if data["mode"] == RoutingMode.MOVE and data["label"] == branch_name:
-                        # This node is the first transform in the branch chain
                         found_branch_entry = True
                         break
 
                 if found_branch_entry:
-                    # current is the first node — it receives the branch_name MOVE edge from the gate
-                    return current
+                    # current = first node; candidate = last node before coalesce
+                    return current, candidate
 
-                # Walk backwards through "continue" MOVE edge to find predecessor
+                # Walk backwards through any MOVE edge to find predecessor.
+                # Not restricted to "continue" because intermediate routing gates
+                # produce edges with route-specific labels (e.g., "approved").
                 predecessor: NodeID | None = None
                 for from_id, _to_id, _key, data in self._graph.in_edges(current, keys=True, data=True):
-                    if data["label"] == "continue" and data["mode"] == RoutingMode.MOVE:
+                    if data["mode"] == RoutingMode.MOVE:
                         predecessor = NodeID(from_id)
                         break
 
                 if predecessor is None:
-                    break  # No continue predecessor — try next candidate
+                    break  # No MOVE predecessor — try next candidate
                 current = predecessor
 
         raise GraphValidationError(
@@ -965,9 +964,17 @@ class ExecutionGraph:
                 # Trace back to that branch's producer schema for type validation.
                 select_branch = node_info.config.get("select_branch")
                 if select_branch is not None:
+                    # Identity branch: COPY edge from gate to coalesce with label == select_branch
                     for from_id, _, edge_data in self._graph.in_edges(node_id, data=True):
-                        if edge_data.get("label") == select_branch:
+                        if edge_data.get("mode") == RoutingMode.COPY and edge_data.get("label") == select_branch:
                             return self.get_effective_producer_schema(from_id)
+                    # Transform branch: last transform's edge has label "continue", not
+                    # the branch name. Trace backward to find the last transform node.
+                    try:
+                        _first, last = self._trace_branch_endpoints(NodeID(node_id), select_branch)
+                        return self.get_effective_producer_schema(last)
+                    except GraphValidationError:
+                        pass  # Fall through to None if trace fails
             return None
 
         # Gates are true pass-throughs — inherit schema from upstream producers
