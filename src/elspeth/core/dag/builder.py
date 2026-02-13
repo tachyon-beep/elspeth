@@ -148,7 +148,7 @@ def build_execution_graph(
             input_schema=sink.input_schema,  # SinkProtocol requires this
         )
 
-    graph._sink_id_map = dict(sink_ids)
+    graph.set_sink_id_map(sink_ids)
 
     # Build transforms
     transform_ids_by_name: dict[str, NodeID] = {}
@@ -183,7 +183,7 @@ def build_execution_graph(
             output_schema_config=output_schema_config,
         )
 
-    graph._transform_id_map = transform_ids_by_seq
+    graph.set_transform_id_map(transform_ids_by_seq)
 
     # Build aggregations
     aggregation_ids: dict[AggregationName, NodeID] = {}
@@ -211,7 +211,7 @@ def build_execution_graph(
             output_schema_config=agg_output_schema_config,
         )
 
-    graph._aggregation_id_map = aggregation_ids
+    graph.set_aggregation_id_map(aggregation_ids)
 
     # Build config gates (no plugin instances)
     config_gate_ids: dict[GateName, NodeID] = {}
@@ -241,12 +241,12 @@ def build_execution_graph(
         for route_label, target in gate_config.routes.items():
             if target == "fork":
                 # Fork is a special routing mode - handled by fork_to branches
-                graph._route_resolution_map[(gid, route_label)] = RouteDestination.fork()
+                graph.add_route_resolution_entry(gid, route_label, RouteDestination.fork())
             elif SinkName(target) in sink_ids:
                 target_sink_id = sink_ids[SinkName(target)]
                 graph.add_edge(gid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
-                graph._route_label_map[(gid, target)] = route_label
-                graph._route_resolution_map[(gid, route_label)] = RouteDestination.sink(SinkName(target))
+                graph.add_route_label_entry(gid, target, route_label)
+                graph.add_route_resolution_entry(gid, route_label, RouteDestination.sink(SinkName(target)))
             else:
                 gate_route_connections.append((gid, route_label, target))
 
@@ -259,7 +259,7 @@ def build_execution_graph(
             )
         )
 
-    graph._config_gate_id_map = config_gate_ids
+    graph.set_config_gate_id_map(config_gate_ids)
 
     # ===== COALESCE IMPLEMENTATION (BUILD NODES AND MAPPINGS FIRST) =====
     # Build coalesce nodes BEFORE connecting gates (needed for branch routing)
@@ -305,8 +305,8 @@ def build_execution_graph(
                 config=config_dict,
             )
 
-        graph._coalesce_id_map = coalesce_ids
-        graph._branch_to_coalesce = branch_to_coalesce
+        graph.set_coalesce_id_map(coalesce_ids)
+        graph.set_branch_to_coalesce(branch_to_coalesce)
     else:
         branch_to_coalesce = {}
 
@@ -534,7 +534,7 @@ def build_execution_graph(
             suggestions = _suggest_similar(target, sorted(consumers.keys()))
             hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
             raise GraphValidationError(f"Gate route target '{target}' is neither a sink nor a known connection name.{hint}")
-        graph._route_resolution_map[(gate_id, route_label)] = RouteDestination.processing_node(consumers[target])
+        graph.add_route_resolution_entry(gate_id, route_label, RouteDestination.processing_node(consumers[target]))
 
     # Ensure all declared gate route labels are resolvable before runtime.
     graph._validate_route_resolution_map_complete()
@@ -696,7 +696,7 @@ def build_execution_graph(
                 raise GraphValidationError(
                     f"Coalesce '{coalesce_name}' has no producing gate. This should have been caught by branch validation."
                 )
-    graph._coalesce_gate_index = coalesce_gate_index
+    graph.set_coalesce_gate_index(coalesce_gate_index)
 
     # ===== POPULATE COALESCE SCHEMA CONFIG =====
     # Coalesce nodes are structural pass-throughs; record the upstream schema
@@ -738,7 +738,7 @@ def build_execution_graph(
             object.__setattr__(info, "config", MappingProxyType(info.config))
 
     # Step maps and node sequence support node_id-based processor traversal.
-    graph._pipeline_nodes = list(pipeline_nodes)
-    graph._node_step_map = graph.build_step_map()
+    graph.set_pipeline_nodes(pipeline_nodes)
+    graph.set_node_step_map(graph.build_step_map())
 
     return graph

@@ -522,6 +522,62 @@ class ExecutionGraph:
             coalesce_settings=coalesce_settings,
         )
 
+    # ===== PUBLIC SETTERS (construction-time) =====
+
+    def set_sink_id_map(self, mapping: dict[SinkName, NodeID]) -> None:
+        """Set the sink_name -> node_id mapping."""
+        self._sink_id_map = dict(mapping)
+
+    def set_transform_id_map(self, mapping: dict[int, NodeID]) -> None:
+        """Set the transform sequence -> node_id mapping."""
+        self._transform_id_map = dict(mapping)
+
+    def set_config_gate_id_map(self, mapping: dict[GateName, NodeID]) -> None:
+        """Set the gate_name -> node_id mapping."""
+        self._config_gate_id_map = dict(mapping)
+
+    def set_route_resolution_map(self, mapping: dict[tuple[NodeID, str], RouteDestination]) -> None:
+        """Set the (gate_node_id, route_label) -> destination mapping."""
+        self._route_resolution_map = dict(mapping)
+
+    def set_aggregation_id_map(self, mapping: dict[AggregationName, NodeID]) -> None:
+        """Set the agg_name -> node_id mapping."""
+        self._aggregation_id_map = dict(mapping)
+
+    def set_coalesce_id_map(self, mapping: dict[CoalesceName, NodeID]) -> None:
+        """Set the coalesce_name -> node_id mapping."""
+        self._coalesce_id_map = dict(mapping)
+
+    def set_branch_to_coalesce(self, mapping: dict[BranchName, CoalesceName]) -> None:
+        """Set the branch_name -> coalesce_name mapping."""
+        self._branch_to_coalesce = dict(mapping)
+
+    def set_route_label_map(self, mapping: dict[tuple[NodeID, str], str]) -> None:
+        """Set the (gate_node, sink_name) -> route_label mapping."""
+        self._route_label_map = dict(mapping)
+
+    def set_coalesce_gate_index(self, mapping: dict[CoalesceName, int]) -> None:
+        """Set the coalesce_name -> gate pipeline index mapping."""
+        self._coalesce_gate_index = dict(mapping)
+
+    def set_pipeline_nodes(self, nodes: list[NodeID]) -> None:
+        """Set the ordered processing node sequence."""
+        self._pipeline_nodes = list(nodes)
+
+    def set_node_step_map(self, mapping: dict[NodeID, int]) -> None:
+        """Set the node_id -> audit step mapping."""
+        self._node_step_map = dict(mapping)
+
+    def add_route_resolution_entry(self, gate_id: NodeID, label: str, dest: RouteDestination) -> None:
+        """Add a single entry to the route resolution map."""
+        self._route_resolution_map[(gate_id, label)] = dest
+
+    def add_route_label_entry(self, gate_id: NodeID, sink_name: str, label: str) -> None:
+        """Add a single entry to the route label map."""
+        self._route_label_map[(gate_id, sink_name)] = label
+
+    # ===== PUBLIC GETTERS =====
+
     def get_sink_id_map(self) -> dict[SinkName, NodeID]:
         """Get explicit sink_name -> node_id mapping.
 
@@ -713,11 +769,11 @@ class ExecutionGraph:
 
         # ===== PHASE 1: CONTRACT VALIDATION (field name requirements) =====
         # This catches missing fields even for dynamic schemas
-        consumer_required = self._get_required_fields(to_node_id)
+        consumer_required = self.get_required_fields(to_node_id)
 
         if consumer_required:
             # Get effective guaranteed fields (walks through pass-through nodes)
-            producer_guaranteed = self._get_effective_guaranteed_fields(from_node_id)
+            producer_guaranteed = self.get_effective_guaranteed_fields(from_node_id)
 
             missing = consumer_required - producer_guaranteed
             if missing:
@@ -737,7 +793,7 @@ class ExecutionGraph:
 
         # ===== PHASE 2: TYPE VALIDATION (schema compatibility) =====
         # Get EFFECTIVE producer schema (walks through gates if needed)
-        producer_schema = self._get_effective_producer_schema(from_node_id)
+        producer_schema = self.get_effective_producer_schema(from_node_id)
         consumer_schema = to_info.input_schema
 
         # Rule 1: Dynamic schemas (None) bypass type validation
@@ -762,7 +818,7 @@ class ExecutionGraph:
                 f"consumer schema '{consumer_schema.__name__}': {result.error_message}"
             )
 
-    def _get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
+    def get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
         """Get effective output schema, walking through pass-through nodes (gates, coalesce).
 
         Gates and coalesce nodes don't transform data - they inherit schema from their
@@ -799,7 +855,7 @@ class ExecutionGraph:
             # Gather all input schemas for validation
             all_schemas: list[tuple[str, type[PluginSchema] | None]] = []
             for from_id, _, _ in incoming:
-                schema = self._get_effective_producer_schema(from_id)
+                schema = self.get_effective_producer_schema(from_id)
                 all_schemas.append((from_id, schema))
 
             # For multi-input nodes, check for mixed observed/explicit schemas first
@@ -929,12 +985,12 @@ class ExecutionGraph:
 
         # Get effective schema from first branch
         first_edge_source = incoming[0][0]
-        first_schema = self._get_effective_producer_schema(first_edge_source)
+        first_schema = self.get_effective_producer_schema(first_edge_source)
 
         # Verify all other branches have structurally compatible schemas
         # Note: Uses structural comparison, not class identity (P2-2026-01-30 fix)
         for from_id, _, _ in incoming[1:]:
-            other_schema = self._get_effective_producer_schema(from_id)
+            other_schema = self.get_effective_producer_schema(from_id)
             compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
             if not compatible:
                 first_name = first_schema.__name__ if first_schema else "observed"
@@ -947,7 +1003,7 @@ class ExecutionGraph:
 
     # ===== CONTRACT VALIDATION HELPERS =====
 
-    def _get_schema_config_from_node(self, node_id: str) -> SchemaConfig | None:
+    def get_schema_config_from_node(self, node_id: str) -> SchemaConfig | None:
         """Extract SchemaConfig from node.
 
         Priority:
@@ -984,7 +1040,7 @@ class ExecutionGraph:
 
         return None
 
-    def _get_guaranteed_fields(self, node_id: str) -> frozenset[str]:
+    def get_guaranteed_fields(self, node_id: str) -> frozenset[str]:
         """Get fields that a node guarantees in its output.
 
         Priority:
@@ -998,14 +1054,14 @@ class ExecutionGraph:
         Returns:
             Frozenset of field names the node guarantees to output
         """
-        schema_config = self._get_schema_config_from_node(node_id)
+        schema_config = self.get_schema_config_from_node(node_id)
 
         if schema_config is None:
             return frozenset()
 
         return schema_config.get_effective_guaranteed_fields()
 
-    def _get_required_fields(self, node_id: str) -> frozenset[str]:
+    def get_required_fields(self, node_id: str) -> frozenset[str]:
         """Get fields that a node EXPLICITLY requires in its input.
 
         This returns only explicit contract declarations, not implicit
@@ -1045,7 +1101,7 @@ class ExecutionGraph:
                     return frozenset(required_input)
 
         # Check for explicit required_fields in schema config
-        schema_config = self._get_schema_config_from_node(node_id)
+        schema_config = self.get_schema_config_from_node(node_id)
 
         if schema_config is None:
             return frozenset()
@@ -1056,7 +1112,7 @@ class ExecutionGraph:
 
         return frozenset()
 
-    def _get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
+    def get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
         """Get effective output guarantees, walking through pass-through nodes.
 
         Gates and coalesce nodes don't transform data - they inherit guarantees
@@ -1088,7 +1144,7 @@ class ExecutionGraph:
             if not incoming:
                 return frozenset()
             # Gates pass through - inherit from single upstream
-            return self._get_effective_guaranteed_fields(incoming[0][0])
+            return self.get_effective_guaranteed_fields(incoming[0][0])
 
         # Coalesce nodes return intersection of branch guarantees
         if node_info.node_type == NodeType.COALESCE:
@@ -1096,7 +1152,7 @@ class ExecutionGraph:
             if not incoming:
                 return frozenset()
             # Coalesce guarantees the INTERSECTION of branch guarantees
-            branch_guarantees = [self._get_effective_guaranteed_fields(from_id) for from_id, _, _ in incoming]
+            branch_guarantees = [self.get_effective_guaranteed_fields(from_id) for from_id, _, _ in incoming]
             if not branch_guarantees:
                 return frozenset()
             # Start with first, intersect with rest
@@ -1106,4 +1162,4 @@ class ExecutionGraph:
             return result
 
         # Non-pass-through nodes return their own guarantees
-        return self._get_guaranteed_fields(node_id)
+        return self.get_guaranteed_fields(node_id)

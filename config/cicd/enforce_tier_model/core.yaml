@@ -328,22 +328,22 @@ allow_hits:
   reason: isinstance check for dict vs NodeConfig on config field during schema population
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-10'
-- key: core/dag/graph.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=9e0e42e0fd1769e8
+- key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=ca8865dffba274b3
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=eb8794673e8182ba
+- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=732770e4d2ad822d
   owner: architecture
   reason: Runtime shape check before coercing schema dict to SchemaConfig
   safety: Non-dict payloads are rejected and converted to explicit validation failures
   expires: '2026-03-10'
-- key: core/dag/graph.py:R1:ExecutionGraph:_get_required_fields:fp=d073823b3a3e0dc9
+- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=84a6115fe8b43899
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:_get_required_fields:fp=4925783a4368c59d
+- key: core/dag/graph.py:R5:ExecutionGraph:get_required_fields:fp=5144d87f8d25dcf1
   owner: architecture
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced

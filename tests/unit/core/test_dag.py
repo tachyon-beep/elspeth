@@ -729,7 +729,7 @@ class TestExecutionGraphAccessors:
         graph.add_edge("gate", "sink", label="flagged", mode=RoutingMode.MOVE)
 
         # Gate's effective producer schema should be source's output schema
-        effective_schema = graph._get_effective_producer_schema("gate")
+        effective_schema = graph.get_effective_producer_schema("gate")
 
         assert effective_schema == OutputSchema
 
@@ -744,7 +744,7 @@ class TestExecutionGraphAccessors:
         # Gate with no inputs is a bug in our code - should crash
         # ValueError is raised by internal validation during edge compatibility checking
         with pytest.raises(ValueError) as exc_info:
-            graph._get_effective_producer_schema("gate")
+            graph.get_effective_producer_schema("gate")
 
         assert "no incoming edges" in str(exc_info.value).lower()
         assert "bug in graph construction" in str(exc_info.value).lower()
@@ -771,7 +771,7 @@ class TestExecutionGraphAccessors:
         graph.add_edge("gate2", "sink", label="approved", mode=RoutingMode.MOVE)
 
         # gate2's effective schema should trace back to source
-        effective_schema = graph._get_effective_producer_schema("gate2")
+        effective_schema = graph.get_effective_producer_schema("gate2")
 
         assert effective_schema == SourceOutput
 
@@ -813,7 +813,7 @@ class TestExecutionGraphAccessors:
             output_schema=TransformOutput,
         )
 
-        effective_schema = graph._get_effective_producer_schema("transform")
+        effective_schema = graph.get_effective_producer_schema("transform")
 
         assert effective_schema == TransformOutput
 
@@ -3946,7 +3946,6 @@ def test_from_plugin_instances_extracts_schemas():
     import tempfile
     from pathlib import Path
 
-    from elspeth.contracts import NodeType
     from elspeth.core.config import load_settings
     from elspeth.core.dag import ExecutionGraph
 
@@ -4004,8 +4003,9 @@ sinks:
         )
 
         # Verify schemas extracted
-        source_nodes = [n for n, d in graph._graph.nodes(data=True) if d["info"].node_type == NodeType.SOURCE]
-        source_info = graph.get_node_info(source_nodes[0])
+        source_id = graph.get_source()
+        assert source_id is not None
+        source_info = graph.get_node_info(source_id)
         assert source_info.output_schema is not None
 
     finally:

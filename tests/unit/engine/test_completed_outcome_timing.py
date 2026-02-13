@@ -90,10 +90,10 @@ def _build_graph(config: PipelineConfig) -> ExecutionGraph:
     graph.add_edge(prev, sink_node_id, label="continue", mode=RoutingMode.MOVE)
 
     # Set internal mappings
-    graph._sink_id_map = {SinkName("default"): sink_node_id}
-    graph._transform_id_map = {i: NodeID(f"transform_{i}") for i in range(len(config.transforms))}
-    graph._config_gate_id_map = {}
-    graph._route_resolution_map = {}
+    graph.set_sink_id_map({SinkName("default"): sink_node_id})
+    graph.set_transform_id_map({i: NodeID(f"transform_{i}") for i in range(len(config.transforms))})
+    graph.set_config_gate_id_map({})
+    graph.set_route_resolution_map({})
 
     return graph
 
