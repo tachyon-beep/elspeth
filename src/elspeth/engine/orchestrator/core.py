@@ -630,10 +630,23 @@ class Orchestrator:
         On first signal: sets the event, restores default SIGINT handler
         (so second Ctrl-C force-kills via KeyboardInterrupt).
 
+        When called from a non-main thread (e.g., programmatic/embedded usage),
+        signal registration is skipped — Python raises ValueError if
+        signal.signal() is called outside the main thread.  The returned
+        Event still works; it just won't be triggered by OS signals.
+
         Yields the Event for the processing loop to check.
-        Restores original handlers in finally block.
+        Restores original handlers in finally block (main thread only).
         """
         shutdown_event = threading.Event()
+
+        # signal.signal() can only be called from the main thread.
+        # In embedded/programmatic usage the orchestrator may run on a
+        # worker thread — fall back to a plain event without handlers.
+        if threading.current_thread() is not threading.main_thread():
+            yield shutdown_event
+            return
+
         original_sigint = signal.getsignal(signal.SIGINT)
         original_sigterm = signal.getsignal(signal.SIGTERM)
 
