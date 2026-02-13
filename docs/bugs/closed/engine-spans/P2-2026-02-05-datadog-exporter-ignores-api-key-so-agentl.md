@@ -1,6 +1,32 @@
 # Bug Report: Datadog exporter ignores `api_key`, so agentless Datadog telemetry never works
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - `DatadogExporter.configure()` now rejects non-null `api_key` with a clear
+    `TelemetryExporterError`, preventing silent misconfiguration in unsupported
+    agentless mode (`src/elspeth/telemetry/exporters/datadog.py`).
+  - Datadog exporter docs were aligned to agent-only operation by removing
+    `api_key` from exporter options and removing direct-API instructions:
+    - `docs/guides/telemetry.md`
+    - `docs/reference/configuration.md`
+    - `docs/reference/environment-variables.md`
+    - `docs/architecture/telemetry-implementation-summary.md`
+  - Datadog exporter unit test coverage now asserts `api_key` is rejected with
+    a clear error (`tests/unit/telemetry/exporters/test_datadog.py`).
+- Verification summary:
+  - Reproduced pre-fix behavior where `configure({"api_key": ...})` silently
+    succeeded and configured only agent host/port.
+  - Confirmed post-fix behavior raises explicit configuration error on
+    `api_key`.
+  - Test/quality gates passed:
+    - `.venv/bin/python -m pytest tests/unit/telemetry/exporters/test_datadog.py -q`
+    - `.venv/bin/python -m pytest tests/unit/telemetry/test_contracts.py -q`
+    - `.venv/bin/python -m ruff check src/elspeth/telemetry/exporters/datadog.py tests/unit/telemetry/exporters/test_datadog.py`
+    - `.venv/bin/python -m mypy src/elspeth/telemetry/exporters/datadog.py`
 
 ## Status Update (2026-02-11)
 

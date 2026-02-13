@@ -928,7 +928,6 @@ options:
 **Datadog**
 ```yaml
 options:
-  api_key: ${DD_API_KEY}          # optional if using local agent
   service_name: "elspeth"         # optional
   env: "production"               # optional
   agent_host: "localhost"         # optional

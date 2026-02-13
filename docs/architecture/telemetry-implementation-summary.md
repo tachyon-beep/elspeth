@@ -122,13 +122,12 @@ src/elspeth/telemetry/
   - Creates real Datadog spans with explicit timestamps
   - All event fields become `elspeth.*` span tags
   - Flattens nested dicts to dotted keys (e.g., `token_usage.prompt_tokens`)
-  - Supports local Datadog Agent or direct API
+  - Supports local Datadog Agent
 - **Status:** ✅ Complete
 
 ```yaml
 - name: datadog
   options:
-    api_key: ${DD_API_KEY}          # Optional with local agent
     service_name: "elspeth"
     env: "production"
     agent_host: "localhost"

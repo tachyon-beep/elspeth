@@ -185,7 +185,6 @@ telemetry:
   exporters:
     - name: datadog
       options:
-        api_key: ${DD_API_KEY}       # Optional if using local agent
         service_name: elspeth-pipeline  # Default: "elspeth"
         env: production             # Default: "production"
         agent_host: localhost       # Default: "localhost"
@@ -201,7 +200,7 @@ uv pip install ddtrace
 **Datadog-specific features:**
 - All event fields available as `elspeth.*` tags
 - Native Datadog APM integration
-- Works with local Datadog Agent or direct API
+- Works with local Datadog Agent
 
 **Using with Datadog Agent (recommended):**
 ```bash
@@ -212,9 +211,6 @@ docker run -d --name dd-agent \
   -p 8126:8126 \
   datadog/agent:latest
 ```
-
-**Using without Agent:**
-The `api_key` configuration sends traces directly to Datadog API (higher latency, requires network access).
 
 ## Secrets Handling
 
@@ -244,7 +240,7 @@ OTEL_TOKEN=my-secret-token
 |-------------|---------------------|
 | OTLP auth token | `OTEL_TOKEN` |
 | Azure Monitor | `APPLICATIONINSIGHTS_CONNECTION_STRING` |
-| Datadog API key | `DD_API_KEY` |
+| Datadog Agent API key | `DD_API_KEY` (for the Datadog Agent process, not ELSPETH exporter options) |
 
 ## Correlation Workflow
 
