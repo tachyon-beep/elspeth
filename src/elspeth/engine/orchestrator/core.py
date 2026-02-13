@@ -327,9 +327,17 @@ class Orchestrator:
     ) -> None:
         """Clean up all plugins in the finally block.
 
-        Calls on_complete() on all plugins, then close() on transforms, sinks,
-        and optionally source. Collects all errors and raises after all cleanup
-        attempts complete.
+        Implements the lifecycle teardown contract:
+        1. on_complete(ctx) on all plugins (transforms, sinks, optionally source)
+        2. close() on all plugins (source, transforms, sinks)
+
+        on_complete() is called even on pipeline error -- it signals "processing
+        is done" (success or failure), not "processing succeeded". close() is
+        pure resource teardown and always follows on_complete().
+
+        Each call is individually try/excepted so one plugin's failure does not
+        prevent other plugins from cleaning up. All errors are collected and
+        raised together after all cleanup completes.
 
         Extracted from _execute_run() and _process_resumed_rows() to eliminate
         duplication of the finally-block cleanup pattern.
@@ -1109,8 +1117,11 @@ class Orchestrator:
         # (e.g., malformed CSV rows) can be attributed to the source node
         ctx.node_id = source_id
 
-        # Call on_start for all plugins BEFORE processing
-        # Base classes provide no-op implementations, so no hasattr needed
+        # Call on_start for all plugins BEFORE processing.
+        # Order: source -> transforms (pipeline order) -> sinks.
+        # Base classes provide no-op implementations, so no hasattr needed.
+        # NOTE: on_start is called OUTSIDE the try/finally that calls
+        # _cleanup_plugins. If on_start raises, on_complete/close are NOT called.
         config.source.on_start(ctx)
         for transform in config.transforms:
             transform.on_start(ctx)
