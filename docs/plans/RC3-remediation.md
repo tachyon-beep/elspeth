@@ -133,18 +133,42 @@ formatting to a helper module to reduce duplication.
 
 ---
 
-### DOC-01: Add Missing Example READMEs
+### DOC-01: Add Missing Example READMEs — DONE
 **Source:** Examples Analysis | **Priority:** LOW
 
-Directories missing READMEs: `batch_aggregation`, `boolean_routing`, `deaggregation`,
-`json_explode`, `threshold_gate`, `threshold_gate_container`.
+All 12 missing READMEs created. Master `examples/README.md` index added. 5 new
+gap-filling examples created (fork_coalesce, checkpoint_resume, database_sink,
+rate_limited_llm, retention_purge). Committed `8318c2e4` + `863d882e`.
 
 ---
 
-### DOC-02: Add Fork/Coalesce Examples
+### DOC-02: Add Fork/Coalesce Examples — DONE (partial)
 **Source:** Examples Analysis | **Priority:** LOW
 
-No working examples demonstrating fork/join DAG patterns.
+Fork/coalesce example created (`examples/fork_coalesce/`). However, during implementation
+a **feature gap was discovered**: the DAG builder wires fork branches directly to coalesce
+nodes with no support for per-branch intermediate transforms (see ARCH-15 below).
+Tracked as `elspeth-rapid-jyvr`.
+
+---
+
+### ARCH-15: Support Per-Branch Transforms Between Fork and Coalesce
+**Source:** Discovery during DOC-02 | **Priority:** MEDIUM
+
+The DAG builder (`core/dag/builder.py`) wires fork branches directly to coalesce nodes.
+Two constraints prevent per-branch transforms:
+
+1. Fork branch wiring only checks `branch_to_coalesce` and `sink_ids` — no transform routing
+2. Coalesce branches must exactly match `fork_to` paths — can't use transform output connections
+
+This means the fork/coalesce pattern is a merge barrier only. The canonical use case
+(fork to sentiment API + entity API, merge results) requires per-branch transforms.
+
+**Fix:** Allow fork branches to wire through transforms by treating branch names as
+consumable connections. Token branch identity (already tracked) can be used for
+coalesce correlation instead of requiring branch-name matching.
+
+**Tracked:** `elspeth-rapid-jyvr`
 
 ---
 
