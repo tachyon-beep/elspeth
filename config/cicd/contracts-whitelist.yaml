@@ -147,8 +147,6 @@ allowed_dict_patterns:
   - "src/elspeth/core/dag/builder.py:_best_schema_dict:return"
 
   # Schema reconstruction - deserializing schemas from landscape database (refactored into orchestrator/export.py)
-  - "src/elspeth/engine/orchestrator/export.py:reconstruct_schema_from_json:schema_dict"
-  - "src/elspeth/engine/orchestrator/export.py:_json_schema_to_python_type:field_info"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AGGREGATION STATE

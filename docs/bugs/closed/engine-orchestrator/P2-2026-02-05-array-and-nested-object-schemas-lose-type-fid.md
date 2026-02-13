@@ -1,18 +1,18 @@
 # Bug Report: Array and Nested Object Schemas Lose Type Fidelity on Resume
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-13)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - Schema reconstruction still returns bare `list` for arrays and bare `dict` for objects.
-  - Recursive handling of `items`/`properties` is still not implemented, so nested type fidelity is still lost on resume.
+  - Resume schema reconstruction now recursively restores array `items` and nested object `properties`.
+  - Arrays validate item types and nested objects validate required fields/types during resume.
 - Current evidence:
-  - `src/elspeth/engine/orchestrator/export.py:326`
-  - `src/elspeth/engine/orchestrator/export.py:329`
-  - `src/elspeth/engine/orchestrator/export.py:332`
-  - `src/elspeth/engine/orchestrator/export.py:334`
+  - `src/elspeth/engine/orchestrator/export.py:238`
+  - `src/elspeth/engine/orchestrator/export.py:403`
+  - `src/elspeth/engine/orchestrator/export.py:420`
+  - `tests/unit/engine/orchestrator/test_export.py:466`
 
 ## Summary
 

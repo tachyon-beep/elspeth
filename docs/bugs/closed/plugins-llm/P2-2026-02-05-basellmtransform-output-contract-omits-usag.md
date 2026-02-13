@@ -1,12 +1,16 @@
 # Bug Report: BaseLLMTransform Output Contract Omits `_usage` Metadata, Violating Guaranteed Fields
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-13)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+  - Contract propagation now preserves dict/list fields as `object`, which includes `<response_field>_usage`.
+  - BaseLLMTransform also has an explicit guard ensuring `_usage` remains present in output contracts.
+- Current evidence:
+  - `src/elspeth/contracts/contract_propagation.py:56`
+  - `src/elspeth/plugins/llm/base.py:372`
 
 
 ## Summary

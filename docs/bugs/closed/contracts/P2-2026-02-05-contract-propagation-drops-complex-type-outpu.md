@@ -1,17 +1,17 @@
 # Bug Report: Contract propagation drops complex-type output fields, breaking downstream access
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-13)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - Contract propagation still skips new fields when type normalization raises `TypeError` (for dict/list values).
-  - Existing unit tests currently assert and preserve this skip behavior.
+  - Contract propagation now preserves dict/list outputs as `python_type=object` instead of dropping fields.
+  - Regression tests assert dict/list field preservation in propagation and narrowing paths.
 - Current evidence:
-  - `src/elspeth/contracts/contract_propagation.py:47`
-  - `src/elspeth/contracts/contract_propagation.py:113`
-  - `tests/unit/contracts/test_contract_propagation.py:431`
+  - `src/elspeth/contracts/contract_propagation.py:56`
+  - `src/elspeth/contracts/contract_propagation.py:151`
+  - `tests/unit/contracts/test_contract_propagation.py:458`
 
 ## Summary
 

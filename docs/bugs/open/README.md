@@ -5,6 +5,15 @@ This directory contains all open bugs organized by the subsystem they affect. Th
 - **Developer assignment**: Assign subsystem experts to relevant bugs
 - **Quality insights**: See where bugs cluster
 
+## Current Snapshot (2026-02-13)
+
+- Active open bug files in this directory: **1**
+- Remaining open ticket:
+  - `core-landscape/P2-2026-02-05-operations-i-o-payloads-lack-hashes-breaking.md`
+- Notes:
+  - Tickets re-verified as already fixed or overtaken were archived to `docs/bugs/closed/`.
+  - Historical counts below are retained for audit history and may not reflect this current snapshot.
+
 ## Directory Structure
 
 ```

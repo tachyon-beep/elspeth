@@ -131,31 +131,11 @@ allow_hits:
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=76eb122944753b45
-  owner: bugfix
-  reason: JSON Schema items may not have "type" key - external data at trust boundary
-  safety: Missing type handled by subsequent "type" in item check; falls through to error
-  expires: null
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=ff1b7e567dcc1a55
-  owner: bugfix
-  reason: JSON Schema items may not have "type" key - external data at trust boundary
-  safety: Filters items by type != "null"; items without type are correctly excluded
-  expires: null
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=117a3e0e68aa409d
-  owner: bugfix
-  reason: JSON Schema "format" field is optional per spec - external data at trust boundary
-  safety: Missing format defaults to None, falls through to plain str return - correct behavior
-  expires: null
 - key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=dcd7d270154917c7
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check converts PipelineRow to dict for audit trail consistency
   expires: null
-- key: engine/orchestrator/export.py:R1:reconstruct_schema_from_json:fp=64bce9b651db0fad
-  owner: bugfix
-  reason: JSON Schema field access - external data at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=442c13d215077904
   owner: architecture
   reason: Retry boundary - LLMClientError exception type check for retryable classification

@@ -1,12 +1,17 @@
 # Bug Report: LLM Transforms Can Return Errors Without Mandatory `on_error`, Causing Runtime Crash
 
-**Status: OPEN**
+**Status: OVERTAKEN BY EVENTS**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-13)
 
-- Classification: **Still open**
+- Classification: **Overtaken by events**
 - Verification summary:
-  - Re-verified against current code on 2026-02-11; the behavior described in this ticket is still present.
+  - `on_error` is required by `TransformSettings` at configuration boundary, so LLM transforms cannot be instantiated without it in normal pipeline config.
+  - Transform execution path now treats missing `on_error` as an invariant violation rather than a user-configurable runtime case.
+- Current evidence:
+  - `src/elspeth/core/config.py:824`
+  - `src/elspeth/core/config.py:867`
+  - `src/elspeth/engine/executors/transform.py:382`
 
 
 ## Summary

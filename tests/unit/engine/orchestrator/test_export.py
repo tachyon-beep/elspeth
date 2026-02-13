@@ -20,6 +20,7 @@ from unittest.mock import Mock, patch
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 
 from elspeth.engine.orchestrator.export import (
     _export_csv_multifile,
@@ -462,6 +463,19 @@ class TestReconstructSchemaBasic:
         instance = model(tags=["a", "b"])
         assert instance.tags == ["a", "b"]
 
+    def test_array_field_with_items_enforces_item_type(self) -> None:
+        """Array with items schema enforces item type on resume."""
+        schema = {
+            "properties": {"scores": {"type": "array", "items": {"type": "integer"}}},
+            "required": ["scores"],
+        }
+        model = reconstruct_schema_from_json(schema)
+        instance = model(scores=[1, 2, 3])
+        assert instance.scores == [1, 2, 3]
+
+        with pytest.raises(ValidationError, match="scores\\.0"):
+            model(scores=["not-an-int"])
+
     def test_object_field(self) -> None:
         """Object type maps to dict."""
         schema = {
@@ -471,6 +485,32 @@ class TestReconstructSchemaBasic:
         model = reconstruct_schema_from_json(schema)
         instance = model(metadata={"key": "val"})
         assert instance.metadata == {"key": "val"}
+
+    def test_object_field_with_properties_enforces_nested_schema(self) -> None:
+        """Nested object properties are reconstructed and validated."""
+        schema = {
+            "properties": {
+                "profile": {
+                    "type": "object",
+                    "properties": {
+                        "age": {"type": "integer"},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["age", "name"],
+                }
+            },
+            "required": ["profile"],
+        }
+        model = reconstruct_schema_from_json(schema)
+        instance = model(profile={"age": 42, "name": "Ada"})
+        assert instance.profile.age == 42
+        assert instance.profile.name == "Ada"
+
+        with pytest.raises(ValidationError, match="profile\\.age"):
+            model(profile={"age": "not-an-int", "name": "Ada"})
+
+        with pytest.raises(ValidationError, match="profile\\.name"):
+            model(profile={"age": 42})
 
 
 # =============================================================================
