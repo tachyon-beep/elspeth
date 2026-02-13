@@ -505,6 +505,7 @@ class Orchestrator:
             first_transform_node_id=graph.get_first_transform_node(),
             node_to_next=node_to_next,
             coalesce_node_map=graph.get_coalesce_id_map(),
+            branch_first_node=graph.get_branch_first_nodes(),
         )
 
     def _build_processor(

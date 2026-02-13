@@ -69,12 +69,14 @@ class DAGTraversalContext:
     first_transform_node_id: NodeID | None
     node_to_next: Mapping[NodeID, NodeID | None]
     coalesce_node_map: Mapping[CoalesceName, NodeID]
+    branch_first_node: Mapping[str, NodeID] = MappingProxyType({})
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "node_step_map", MappingProxyType(dict(self.node_step_map)))
         object.__setattr__(self, "node_to_plugin", MappingProxyType(dict(self.node_to_plugin)))
         object.__setattr__(self, "node_to_next", MappingProxyType(dict(self.node_to_next)))
         object.__setattr__(self, "coalesce_node_map", MappingProxyType(dict(self.coalesce_node_map)))
+        object.__setattr__(self, "branch_first_node", MappingProxyType(dict(self.branch_first_node)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,6 +254,7 @@ class RowProcessor:
             coalesce_name_by_node_id=self._coalesce_name_by_node_id,
             coalesce_on_success_map=self._coalesce_on_success_map,
             sink_names=self._sink_names,
+            branch_first_node=dict(traversal.branch_first_node),
         )
 
         # Build error edge map: transform node_id -> DIVERT edge_id.

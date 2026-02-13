@@ -47,6 +47,27 @@ if TYPE_CHECKING:
     from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
+def _field_name_type(field_spec: Any) -> tuple[str, str]:
+    """Extract (field_name, field_type) from a field spec in any format.
+
+    Handles:
+    - String: ``"name: str"`` or ``"name: str?"``
+    - to_dict() dict: ``{"name": "x", "type": "str", "required": true}``
+    - YAML dict: ``{"id": "int"}``
+    """
+    if isinstance(field_spec, str):
+        name, _, type_part = field_spec.partition(":")
+        return name.strip(), type_part.strip().rstrip("?")
+    if isinstance(field_spec, dict):
+        if "name" in field_spec and "type" in field_spec:
+            return field_spec["name"], field_spec["type"]
+        if len(field_spec) == 1:
+            name, ftype = next(iter(field_spec.items()))
+            return str(name), str(ftype).rstrip("?")
+    msg = f"Cannot parse field spec: {field_spec!r}"
+    raise ValueError(msg)
+
+
 def build_execution_graph(
     cls: type[ExecutionGraph],
     source: SourceProtocol,
@@ -757,38 +778,110 @@ def build_execution_graph(
             coalesce_id_to_config[cid] = coalesce_config
 
     for coalesce_id in coalesce_ids.values():
-        incoming_edges = list(graph._graph.in_edges(coalesce_id))
-        if not incoming_edges:
+        incoming_edges_with_data = list(graph._graph.in_edges(coalesce_id, data=True, keys=True))
+        if not incoming_edges_with_data:
             raise GraphValidationError(f"Coalesce node '{coalesce_id}' has no incoming branches; cannot determine schema for audit.")
 
         coal_config = coalesce_id_to_config[coalesce_id]
-        branch_schemas = [_best_schema_dict(NodeID(from_node)) for from_node, _to_node in incoming_edges]
+
+        # Build a branch_name → schema mapping using edge labels.
+        # Identity branches have COPY edges labelled with branch_name.
+        # Transform branches have MOVE edges from the last transform — we
+        # correlate via the coalesce config's branch_input → branch_name mapping.
+        branch_to_schema: dict[str, dict[str, Any]] = {}
+
+        for from_id, _to_id, _key, data in incoming_edges_with_data:
+            edge_label = data["label"]
+            edge_mode = data["mode"]
+            schema = _best_schema_dict(NodeID(from_id))
+
+            if edge_mode == RoutingMode.COPY and edge_label in coal_config.branches:
+                # Identity branch: COPY edge labelled with branch name
+                branch_to_schema[edge_label] = schema
+            elif edge_mode == RoutingMode.MOVE:
+                # Transform branch: MOVE edge from last transform in chain.
+                # The producer connection name was registered as the branch's
+                # input_connection — look up the corresponding branch name.
+                # For "continue" edges from connection resolution, we need to
+                # match via the source node.  Check each branch's input
+                # connection to find which branch this edge serves.
+                for branch_name, input_conn in coal_config.branches.items():
+                    if input_conn != branch_name and input_conn in producers and producers[input_conn][0] == NodeID(from_id):
+                        branch_to_schema[branch_name] = schema
+                        break
 
         if coal_config.merge == "union":
-            # Union merge: require compatible types on overlapping fields
-            first_schema = branch_schemas[0]
-            for idx, other_schema in enumerate(branch_schemas[1:], 1):
-                for field_name in set(first_schema) & set(other_schema):
-                    first_type = first_schema[field_name]
-                    other_type = other_schema[field_name]
-                    if first_type != other_type:
-                        raise GraphValidationError(
-                            f"Coalesce node '{coalesce_id}' receives incompatible types for field '{field_name}' "
-                            f"in union merge: branch 0 has {first_type!r}, branch {idx} has {other_type!r}. "
-                            "Union merge requires compatible types on shared fields."
-                        )
-            # Populate with merged superset of all branch schemas
-            merged_schema: dict[str, Any] = {}
-            for schema in branch_schemas:
-                merged_schema.update(schema)
-            graph.get_node_info(coalesce_id).config["schema"] = merged_schema
+            # Union merge: require compatible types on ALL pairwise overlapping fields.
+            # Parse each branch's SchemaConfig dict to extract field definitions.
+            seen_types: dict[str, tuple[str, str]] = {}  # field → (type, first_branch)
+            all_observed = False
+            for branch_name, schema_dict in branch_to_schema.items():
+                if schema_dict.get("mode") == "observed":
+                    all_observed = True
+                    break
+                fields_list = schema_dict.get("fields")
+                if not fields_list:
+                    continue
+                for field_spec in fields_list:
+                    fname, ftype = _field_name_type(field_spec)
+                    if fname in seen_types:
+                        prior_type, prior_branch = seen_types[fname]
+                        if prior_type != ftype:
+                            raise GraphValidationError(
+                                f"Coalesce node '{coalesce_id}' receives incompatible "
+                                f"types for field '{fname}' in union merge: "
+                                f"branch '{prior_branch}' has {prior_type!r}, "
+                                f"branch '{branch_name}' has {ftype!r}. "
+                                "Union merge requires compatible types on shared fields."
+                            )
+                    else:
+                        seen_types[fname] = (ftype, branch_name)
+            # Build merged schema preserving contract fields.
+            if all_observed or not seen_types:
+                merged: dict[str, Any] = {"mode": "observed"}
+            else:
+                merged = {
+                    "mode": "flexible",
+                    "fields": [f"{name}: {ftype}" for name, (ftype, _) in seen_types.items()],
+                }
+            # Propagate contract fields from branches:
+            #   guaranteed_fields = intersection (guaranteed by ALL branches)
+            #   audit_fields = union (any audit field from any branch)
+            guaranteed_sets: list[set[str]] = []
+            audit_sets: list[set[str]] = []
+            for schema_dict in branch_to_schema.values():
+                gf = schema_dict.get("guaranteed_fields")
+                if gf is not None:
+                    guaranteed_sets.append(set(gf))
+                af = schema_dict.get("audit_fields")
+                if af is not None:
+                    audit_sets.append(set(af))
+            if guaranteed_sets:
+                merged["guaranteed_fields"] = sorted(set.intersection(*guaranteed_sets))
+            if audit_sets:
+                merged["audit_fields"] = sorted(set.union(*audit_sets))
+            graph.get_node_info(coalesce_id).config["schema"] = merged
         elif coal_config.merge == "select":
-            # Select merge: use selected branch's schema (no cross-branch constraint)
-            # The select_branch is validated by Pydantic to exist in branches
-            graph.get_node_info(coalesce_id).config["schema"] = branch_schemas[0]
+            # Select merge: use selected branch's schema directly.
+            # _best_schema_dict() returns a SchemaConfig-compatible dict.
+            select_branch = coal_config.select_branch
+            assert select_branch is not None  # Guaranteed by validate_merge_requirements
+            if select_branch not in branch_to_schema:
+                raise GraphValidationError(
+                    f"Coalesce node '{coalesce_id}' select_branch '{select_branch}' "
+                    f"has no schema mapping. Available branches: "
+                    f"{sorted(branch_to_schema.keys())}. "
+                    "This indicates a graph construction bug."
+                )
+            graph.get_node_info(coalesce_id).config["schema"] = branch_to_schema[select_branch]
         else:
-            # Nested merge: no cross-branch constraint
-            graph.get_node_info(coalesce_id).config["schema"] = branch_schemas[0]
+            # Nested merge: output has branch names as top-level fields, each
+            # containing the branch's row data as a nested dict.  Since the type
+            # system only supports flat types, declare branch fields as "any".
+            graph.get_node_info(coalesce_id).config["schema"] = {
+                "mode": "flexible",
+                "fields": [f"{branch}: any" for branch in branch_to_schema],
+            }
 
     # Config gate schema resolution (pass 2): resolve gates that were deferred
     # because their upstream producer (e.g., coalesce) didn't have schema yet.

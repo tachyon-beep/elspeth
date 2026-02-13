@@ -298,52 +298,84 @@ allow_hits:
 - key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=0bc9a6b3b94f93c9
   owner: architecture
   reason: Graceful handling of purged payloads - retention policy may have deleted response data
-- key: core/dag/builder.py:R2:build_execution_graph:fp=41b8bffbf0744eea
+- key: core/dag/builder.py:R2:build_execution_graph:fp=5ec6b5cd6af00d81
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select plugins
   safety: Missing metadata is handled as None; core schema enforcement still validates edges
   expires: '2026-03-10'
-- key: core/dag/builder.py:R2:build_execution_graph:fp=406e4b57a6bea9e5
+- key: core/dag/builder.py:R2:build_execution_graph:fp=dd47de27b4f8c423
   owner: architecture
   reason: Optional _output_schema_config metadata is present only on select aggregation plugins
   safety: Missing metadata is handled as None; aggregation schemas still validated via contracts
   expires: '2026-03-10'
-- key: core/dag/builder.py:R8:build_execution_graph:fp=1cc30d17f4d414f1
+- key: core/dag/builder.py:R8:build_execution_graph:fp=32164aaa17c73c0e
   owner: architecture
   reason: setdefault used for route-label grouping while building gate continue-route diagnostics
   safety: Grouping is deterministic and validated before runtime routing
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=df1653ae77941631
+- key: core/dag/builder.py:R1:build_execution_graph:fp=943ec970e169eed1
   owner: architecture
   reason: Optional gate connection route label lookup for coalesce provenance wiring
   safety: Missing lookup returns None — handled explicitly by conditional check
   expires: '2026-03-13'
-- key: core/dag/builder.py:R1:build_execution_graph:fp=b753ce1e6558fcc0
+- key: core/dag/builder.py:R1:build_execution_graph:fp=ff714a3ac084f707
   owner: architecture
   reason: Gate default-continue target lookup during fallthrough edge wiring
   safety: Missing target is handled explicitly — ambiguous gates are skipped
   expires: '2026-03-13'
-- key: core/dag/builder.py:R5:build_execution_graph:fp=7e63a74f70b723db
+- key: core/dag/builder.py:R5:build_execution_graph:fp=30a2b388e75dc0b6
   owner: architecture
   reason: isinstance check for dict vs NodeConfig on config field during schema population
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-13'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=ca8865dffba274b3
+# ARCH-15: per-branch transform field parsing
+- key: core/dag/builder.py:R5:_field_name_type:fp=b7ead318ec3c86b3
+  owner: ARCH-15
+  reason: isinstance check for dict vs str field spec in schema parsing helper
+  safety: Crashes with ValueError on unrecognised format — no silent fallback
+  expires: '2026-05-13'
+- key: core/dag/builder.py:R5:_field_name_type:fp=fd4b76a8459735b1
+  owner: ARCH-15
+  reason: isinstance check for dict vs str field spec (second branch) in schema parsing helper
+  safety: Crashes with ValueError on unrecognised format — no silent fallback
+  expires: '2026-05-13'
+# ARCH-15: coalesce schema population uses .get() for optional schema metadata
+- key: core/dag/builder.py:R1:build_execution_graph:fp=f61652d861ecc031
+  owner: ARCH-15
+  reason: Optional schema_config access during coalesce branch schema population
+  safety: Missing schema yields None — handled explicitly by conditional skip
+  expires: '2026-05-13'
+- key: core/dag/builder.py:R1:build_execution_graph:fp=e71f551bc115f6e5
+  owner: ARCH-15
+  reason: Optional guaranteed_fields access during coalesce contract propagation
+  safety: Missing key yields empty list — intersection logic still correct
+  expires: '2026-05-13'
+- key: core/dag/builder.py:R1:build_execution_graph:fp=50cc210b2d03f90e
+  owner: ARCH-15
+  reason: Optional audit_fields access during coalesce contract propagation
+  safety: Missing key yields empty list — union logic still correct
+  expires: '2026-05-13'
+- key: core/dag/builder.py:R1:build_execution_graph:fp=581cefff11fde67a
+  owner: ARCH-15
+  reason: Optional select_branch config access during coalesce select-merge population
+  safety: Crashes with GraphValidationError if missing — explicit failure
+  expires: '2026-05-13'
+- key: core/dag/graph.py:R1:ExecutionGraph:get_schema_config_from_node:fp=3c129a515e7d5f73
   owner: architecture
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=732770e4d2ad822d
+- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=d11128ad88baa7a1
   owner: architecture
   reason: Runtime shape check before coercing schema dict to SchemaConfig
   safety: Non-dict payloads are rejected and converted to explicit validation failures
   expires: '2026-03-10'
-- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=84a6115fe8b43899
+- key: core/dag/graph.py:R1:ExecutionGraph:get_required_fields:fp=0494de4da2db8a87
   owner: architecture
   reason: Optional required_input_fields key supports transforms with implicit/no required field contract
   safety: Missing key yields empty set; downstream schema checks still enforce compatibility
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_required_fields:fp=5144d87f8d25dcf1
+- key: core/dag/graph.py:R5:ExecutionGraph:get_required_fields:fp=7fa4054cb8d4b234
   owner: architecture
   reason: Options payload shape check at config boundary before extracting nested required_input_fields
   safety: Non-dict options are treated as no declared requirements and never silently coerced

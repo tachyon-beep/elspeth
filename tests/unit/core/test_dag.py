@@ -3185,7 +3185,7 @@ class TestCoalesceNodes:
         node_info = graph.get_node_info(coalesce_id)
 
         # Verify config is stored
-        assert node_info.config["branches"] == ["path_a", "path_b"]
+        assert node_info.config["branches"] == {"path_a": "path_a", "path_b": "path_b"}
         assert node_info.config["policy"] == "quorum"
         assert node_info.config["merge"] == "nested"
         assert node_info.config["timeout_seconds"] == 30.0

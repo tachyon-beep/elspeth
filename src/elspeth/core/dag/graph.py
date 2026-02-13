@@ -628,6 +628,119 @@ class ExecutionGraph:
         """
         return dict(self._branch_to_coalesce)
 
+    def get_branch_first_nodes(self) -> dict[str, NodeID]:
+        """Get mapping of branch names to their first processing node.
+
+        For every branch that routes to a coalesce node, returns the first
+        node the token should visit:
+        - Identity branches (COPY edge gate→coalesce): maps to coalesce node ID
+        - Transform branches (MOVE edge chain→coalesce): maps to the first
+          transform's node ID in the branch chain
+
+        The mapping covers ALL coalesce branches, eliminating the need for
+        defensive .get() at runtime.
+
+        Returns:
+            Dict mapping branch name (str) to the first processing NodeID.
+            Empty dict if no coalesce branches exist.
+        """
+        result: dict[str, NodeID] = {}
+
+        for branch_name, coalesce_name in self._branch_to_coalesce.items():
+            coalesce_nid = self._coalesce_id_map[coalesce_name]
+
+            # Check if this is an identity branch (direct COPY edge from gate to coalesce).
+            # Identity branches have a COPY edge labelled with the branch name pointing
+            # at the coalesce node — the token goes straight to coalesce.
+            is_identity = False
+            for _from_id, _to_id, _key, data in self._graph.in_edges(coalesce_nid, keys=True, data=True):
+                if data["mode"] == RoutingMode.COPY and data["label"] == branch_name:
+                    is_identity = True
+                    break
+
+            if is_identity:
+                result[branch_name] = coalesce_nid
+            else:
+                # Transform branch: trace backwards from coalesce through MOVE edges
+                # to find the first node in this branch's transform chain.
+                # The chain is: gate -[branch_name MOVE]-> T1 -[continue MOVE]-> T2 -[... MOVE]-> coalesce
+                # We need T1 (the first transform after the gate).
+                first_node = self._trace_branch_first_node(coalesce_nid, branch_name)
+                result[branch_name] = first_node
+
+        return result
+
+    def _trace_branch_first_node(self, coalesce_nid: NodeID, branch_name: str) -> NodeID:
+        """Trace backwards from coalesce to find the first transform in a branch chain.
+
+        Walks backwards through MOVE edges from the coalesce node to find the
+        start of the transform chain for a given branch. The chain terminates at
+        the gate node (which produces the branch via a MOVE edge labelled with
+        the branch name).
+
+        Args:
+            coalesce_nid: The coalesce node to trace back from
+            branch_name: The branch name to trace
+
+        Returns:
+            NodeID of the first transform in the branch chain
+
+        Raises:
+            GraphValidationError: If the branch chain cannot be traced
+        """
+        # Find the immediate predecessor of the coalesce node for this branch.
+        # For a transform branch, the coalesce's incoming MOVE edges come from
+        # the last transform in each branch chain. We need to identify which
+        # incoming edge belongs to this branch, then walk back to the start.
+
+        # Strategy: Walk backwards from coalesce through the transform chain
+        # until we find the node whose incoming edge is labelled with the branch_name
+        # (that edge comes from the gate).
+        visited: set[NodeID] = set()
+        candidates: list[NodeID] = []
+
+        # Collect MOVE-edge predecessors of coalesce (these are the last transforms in branch chains)
+        for from_id, _to_id, _key, data in self._graph.in_edges(coalesce_nid, keys=True, data=True):
+            if data["mode"] == RoutingMode.MOVE:
+                candidates.append(NodeID(from_id))
+
+        # For each candidate, walk backwards through MOVE "continue" edges
+        # until we find the node whose incoming edge has label == branch_name
+        for candidate in candidates:
+            current = candidate
+            visited.clear()
+
+            while current not in visited:
+                visited.add(current)
+                # Look for incoming MOVE edge with label == branch_name (from gate)
+                found_branch_entry = False
+                for _from_id, _to_id, _key, data in self._graph.in_edges(current, keys=True, data=True):
+                    if data["mode"] == RoutingMode.MOVE and data["label"] == branch_name:
+                        # This node is the first transform in the branch chain
+                        found_branch_entry = True
+                        break
+
+                if found_branch_entry:
+                    # current is the first node — it receives the branch_name MOVE edge from the gate
+                    return current
+
+                # Walk backwards through "continue" MOVE edge to find predecessor
+                predecessor: NodeID | None = None
+                for from_id, _to_id, _key, data in self._graph.in_edges(current, keys=True, data=True):
+                    if data["label"] == "continue" and data["mode"] == RoutingMode.MOVE:
+                        predecessor = NodeID(from_id)
+                        break
+
+                if predecessor is None:
+                    break  # No continue predecessor — try next candidate
+                current = predecessor
+
+        raise GraphValidationError(
+            f"Cannot trace first transform for branch '{branch_name}' leading to "
+            f"coalesce node '{coalesce_nid}'. This indicates a graph construction bug — "
+            f"transform branches must have MOVE edge chains from gate to coalesce."
+        )
+
     def get_branch_to_sink_map(self) -> dict[BranchName, SinkName]:
         """Get fork branches that route directly to sinks (not to coalesce).
 
@@ -840,9 +953,17 @@ class ExecutionGraph:
         if node_info.output_schema is not None:
             return node_info.output_schema
 
-        # Node has no schema - check if it's a pass-through type (gate or coalesce)
-        if node_info.node_type in (NodeType.GATE, NodeType.COALESCE):
-            # Pass-through nodes inherit schema from upstream producers
+        # Coalesce nodes are NOT pass-throughs — they transform data via merge
+        # strategy (nested wraps in {branch: data}, union merges fields, select
+        # picks a branch).  The builder validates schema compatibility in a
+        # strategy-aware manner during graph construction.  Return None here to
+        # indicate dynamic output schema, which correctly bypasses downstream
+        # type validation for outgoing edges.
+        if node_info.node_type == NodeType.COALESCE:
+            return None
+
+        # Gates are true pass-throughs — inherit schema from upstream producers
+        if node_info.node_type == NodeType.GATE:
             incoming = list(self._graph.in_edges(node_id, data=True))
 
             if not incoming:
@@ -972,6 +1093,10 @@ class ExecutionGraph:
     def _validate_coalesce_compatibility(self, coalesce_id: str) -> None:
         """Validate all inputs to coalesce node have compatible schemas.
 
+        Strategy-aware: only ``union`` requires cross-branch schema compatibility.
+        ``nested`` and ``select`` strategies have no cross-branch constraint because
+        branches are keyed separately (nested) or only one branch is used (select).
+
         Args:
             coalesce_id: Coalesce node ID
 
@@ -983,23 +1108,50 @@ class ExecutionGraph:
         if len(incoming) < 2:
             return  # Degenerate case (1 branch) - always compatible
 
-        # Get effective schema from first branch
-        first_edge_source = incoming[0][0]
-        first_schema = self.get_effective_producer_schema(first_edge_source)
+        # Determine merge strategy from node config.
+        # Config is populated by the builder — direct access is correct (Tier 1).
+        node_info = self.get_node_info(coalesce_id)
+        merge_strategy = node_info.config["merge"]
 
-        # Verify all other branches have structurally compatible schemas
-        # Note: Uses structural comparison, not class identity (P2-2026-01-30 fix)
-        for from_id, _, _ in incoming[1:]:
-            other_schema = self.get_effective_producer_schema(from_id)
-            compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
-            if not compatible:
-                first_name = first_schema.__name__ if first_schema else "observed"
-                other_name = other_schema.__name__ if other_schema else "observed"
-                raise GraphValidationError(
-                    f"Coalesce '{coalesce_id}' receives incompatible schemas from "
-                    f"multiple branches: first branch has {first_name}, "
-                    f"branch from '{from_id}' has {other_name}. {error_msg}"
-                )
+        # nested/select strategies have no cross-branch schema constraint
+        if merge_strategy in ("nested", "select"):
+            return
+
+        # union strategy: gather all branch schemas and validate
+        all_schemas: list[tuple[str, type[PluginSchema] | None]] = []
+        for from_id, _, _ in incoming:
+            schema = self.get_effective_producer_schema(from_id)
+            all_schemas.append((from_id, schema))
+
+        # Reject mixed observed/explicit schemas (P2-2026-02-01 fix)
+        observed_branches = [(nid, s) for nid, s in all_schemas if self._is_observed_schema(s)]
+        explicit_branches = [(nid, s) for nid, s in all_schemas if not self._is_observed_schema(s)]
+
+        if observed_branches and explicit_branches:
+            observed_names = [nid for nid, _ in observed_branches]
+            explicit_names = [f"{nid} ({s.__name__})" for nid, s in explicit_branches if s is not None]
+            raise GraphValidationError(
+                f"Coalesce '{coalesce_id}' has mixed observed/explicit schemas - "
+                f"this is not allowed because observed branches may produce rows missing fields "
+                f"expected by downstream consumers. "
+                f"Observed branches: {observed_names}, explicit branches: {explicit_names}. "
+                f"Fix: ensure all branches produce explicit schemas with compatible fields, "
+                f"or all branches produce observed schemas."
+            )
+
+        # All explicit: verify structural compatibility across branches
+        if len(explicit_branches) > 1:
+            _first_id, first_schema = explicit_branches[0]
+            for other_id, other_schema in explicit_branches[1:]:
+                compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
+                if not compatible:
+                    first_name = first_schema.__name__ if first_schema else "observed"
+                    other_name = other_schema.__name__ if other_schema else "observed"
+                    raise GraphValidationError(
+                        f"Coalesce '{coalesce_id}' receives incompatible schemas from "
+                        f"multiple branches: first branch has {first_name}, "
+                        f"branch from '{other_id}' has {other_name}. {error_msg}"
+                    )
 
     # ===== CONTRACT VALIDATION HELPERS =====
 

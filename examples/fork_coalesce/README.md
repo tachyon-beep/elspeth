@@ -15,20 +15,78 @@ source ─(raw)─> truncate ─(preprocessed)─> [fork_gate] ─┬─ path_a 
 
 ## Running
 
+**Basic fork/coalesce (no per-branch transforms):**
 ```bash
 elspeth run --settings examples/fork_coalesce/settings.yaml --execute
 ```
 
-## Output
+**Per-branch transforms variant (ARCH-15):**
+```bash
+elspeth run --settings examples/fork_coalesce/settings_per_branch.yaml --execute
+```
+> **Note:** Per-branch transforms are a new ARCH-15 feature. Validation currently has a schema config bug being fixed in the main implementation.
 
-Results appear in `output/merged_results.json` (JSONL). With the `nested` merge strategy, each output row looks like:
+## Variants
 
+This example has two configuration files demonstrating different fork/coalesce patterns:
+
+### 1. `settings.yaml` — Basic Fork/Coalesce (Direct Wiring)
+
+Uses the **list format** for branches: `branches: [path_a, path_b]`
+
+Both fork paths carry identical data to the coalesce — no transforms run on the branches. This demonstrates the basic merge barrier pattern.
+
+**DAG:**
+```
+source ─> truncate ─> [fork] ─┬─ path_a ─┐
+                               └─ path_b ─┤
+                                          ├─ [coalesce] ─> output
+```
+
+**Use case:** Redundancy (send to 3 LLMs, take quorum) or fan-out pattern setup.
+
+### 2. `settings_per_branch.yaml` — Per-Branch Transforms (ARCH-15)
+
+Uses the **dict format** for branches: `branches: {path_a: truncated_a, path_b: mapped_b}`
+
+Each fork path runs **different transforms** before coalescing. This is the key ARCH-15 innovation — per-branch processing chains.
+
+**DAG:**
+```
+source ─> [fork] ─┬─ path_a ─> truncate ─────> truncated_a ─┐
+                  └─ path_b ─> field_mapper ─> mapped_b ────┤
+                                                             ├─ [coalesce] ─> output
+```
+
+**Transforms:**
+- **path_a**: Truncates `description` field to 20 chars
+- **path_b**: Renames fields (`product` → `product_name`, `id` → `item_id`, `price` → `cost`) and drops `category` and `description`
+
+**Output structure** (nested merge):
 ```json
 {
-  "path_a": {"id": 1, "product": "Widget Pro", "price": 2500, "category": "electronics", "description": "High-performance widget with advan..."},
-  "path_b": {"id": 1, "product": "Widget Pro", "price": 2500, "category": "electronics", "description": "High-performance widget with advan..."}
+  "path_a": {
+    "id": 1,
+    "product": "Widget Pro",
+    "price": 2500,
+    "category": "electronics",
+    "description": "High-performance w..."
+  },
+  "path_b": {
+    "product_name": "Widget Pro",
+    "item_id": 1,
+    "cost": 2500
+  }
 }
 ```
+
+**Use case:** Multi-API enrichment (sentiment API on path_a, entity extraction on path_b), then merge enriched results.
+
+## Output
+
+Results appear in `output/merged_results.json` (basic variant) or `output/per_branch_results.json` (per-branch variant) as JSONL.
+
+See the **Variants** section above for example output structures.
 
 ## Why Fork/Coalesce?
 

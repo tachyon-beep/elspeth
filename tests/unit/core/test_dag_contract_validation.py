@@ -203,7 +203,7 @@ class TestEffectiveGuaranteedFields:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "require_all"},
         )
 
         graph.add_edge("branch_a", "coalesce_1", label="path_a")
@@ -665,7 +665,7 @@ class TestForkCoalesceContracts:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "require_all"},
         )
 
         # Sink requires only 'id' (which is in intersection)
@@ -720,7 +720,7 @@ class TestForkCoalesceContracts:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "require_all"},
         )
 
         # Sink requires 'a_only' - NOT guaranteed by coalesce (only 'common' is)
@@ -782,7 +782,7 @@ class TestForkCoalesceContracts:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "require_all"},
         )
 
         # Sink requires only 'id' (the only field guaranteed by ALL branches)
@@ -837,7 +837,7 @@ class TestForkCoalesceContracts:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"mode": "observed"}},
+            config={"schema": {"mode": "observed"}, "merge": "union", "branches": {}, "policy": "require_all"},
         )
 
         # Sink requires any field - will fail since intersection is empty

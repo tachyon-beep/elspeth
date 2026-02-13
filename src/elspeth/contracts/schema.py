@@ -225,6 +225,14 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
         return spec
 
     if isinstance(spec, dict):
+        # Handle to_dict() round-trip format: {"name": "x", "type": "str", "required": true}
+        # This enables SchemaConfig.from_dict(schema_config.to_dict()) to work.
+        if "name" in spec and "type" in spec:
+            name = spec["name"]
+            type_spec = spec["type"]
+            optional = not spec.get("required", True)
+            return f"{name}: {type_spec}{'?' if optional else ''}"
+
         # YAML `- id: int` parses as {"id": "int"}
         if len(spec) != 1:
             raise ValueError(

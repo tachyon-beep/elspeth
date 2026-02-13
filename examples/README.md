@@ -25,7 +25,7 @@ These examples run locally with no credentials or external services.
 | [`explicit_routing`](explicit_routing/) | Declarative `on_success`/`input` wiring pattern |
 | [`error_routing`](error_routing/) | `on_error` diversion to quarantine sinks |
 | [`deep_routing`](deep_routing/) | 5 chained gates, 3 transforms, 7 sinks — complex decision tree |
-| [`fork_coalesce`](fork_coalesce/) | Fork/join DAG pattern — parallel paths merged with configurable policy |
+| [`fork_coalesce`](fork_coalesce/) | Fork/join DAG pattern — parallel paths merged with configurable policy (includes ARCH-15 per-branch transforms variant) |
 | [`batch_aggregation`](batch_aggregation/) | Count-triggered aggregation with group-by statistics |
 | [`deaggregation`](deaggregation/) | 1-to-N row expansion via `batch_replicate` |
 | [`json_explode`](json_explode/) | Expand nested JSON arrays into individual rows |
