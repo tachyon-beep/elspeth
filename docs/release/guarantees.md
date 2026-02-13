@@ -1,6 +1,6 @@
 # What ELSPETH Guarantees
 
-**Version:** RC-2
+**Version:** RC-3
 **Date:** February 2026
 
 This document defines the promises ELSPETH makes to its users. These are not aspirational features - they are contractual guarantees that the system must uphold.

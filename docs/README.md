@@ -2,7 +2,7 @@
 
 ELSPETH is a domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines. Every decision is traceable to its source data, configuration, and code version.
 
-**Current Status:** RC-2
+**Current Status:** RC-3
 
 ---
 
@@ -37,6 +37,8 @@ ELSPETH is a domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipe
   - [ADR-001: Plugin-Level Concurrency](design/adr/001-plugin-level-concurrency.md)
   - [ADR-002: Routing Copy Mode Limitation](design/adr/002-routing-copy-mode-limitation.md)
   - [ADR-003: Schema Validation Lifecycle](design/adr/003-schema-validation-lifecycle.md)
+  - [ADR-004: Explicit Sink Routing](design/adr/004-adr-explicit-sink-routing.md)
+  - [ADR-005: Declarative DAG Wiring](design/adr/005-adr-declarative-dag-wiring.md)
 - **[Subsystems](design/subsystems/)** - Component deep-dives
   - [Overview](design/subsystems/00-overview.md)
   - [Token Lifecycle](design/subsystems/06-token-lifecycle.md)
@@ -44,11 +46,7 @@ ELSPETH is a domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipe
 ## Quality and Testing
 
 - **[Test System](TEST_SYSTEM.md)** - Testing strategy and conventions
-- **[Quality Audit](quality-audit/)** - Code quality findings
-  - [Audit Plan](quality-audit/audit-plan.md)
-  - [Test Suite Analysis](quality-audit/TEST_SUITE_ANALYSIS_2026-01-22.md)
-  - [Mutation Testing Summary](quality-audit/MUTATION_TESTING_SUMMARY_2026-01-25.md)
-  - [Integration Seam Analysis](quality-audit/INTEGRATION_SEAM_ANALYSIS_REPORT.md)
+- **[Quality Audit](archive/quality-audit-2026-01-22/)** - Code quality findings (archived 2026-01-30)
 
 ## Testing Tools
 
@@ -68,12 +66,12 @@ ELSPETH is a domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipe
 
 - **[Plans](plans/)** - Implementation roadmaps
   - [Plans Index](plans/README.md)
-  - [RC-2 Remediation](plans/RC2-remediation.md)
+  - [RC-3 Remediation](plans/RC3-remediation.md)
 - **[Bug Tracking](bugs/)** - Issue tracking
   - [Bug Index](bugs/README.md)
   - [Active Bugs](bugs/BUGS.md)
-- **[Release](release/)** - RC-2 checklists and guarantees
-  - [RC-2 Checklist](release/rc2-checklist.md)
+- **[Release](release/)** - Release checklists and guarantees
+  - [RC-2 Checklist](release/rc2-checklist.md) (baseline)
   - [Feature Inventory](release/feature-inventory.md)
   - [Guarantees](release/guarantees.md)
 
@@ -84,6 +82,7 @@ Historical analyses and completed work:
 - **[Archived Docs](archive/)** - Completed analyses
   - [Architecture Analysis (2026-01-27)](archive/2026-01-27-arch-analysis/)
   - [Azure Performance Work (2026-01)](archive/2026-01-azure-performance/)
+  - [Quality Audit (2026-01-22)](archive/quality-audit-2026-01-22/)
 
 ---
 

@@ -8,21 +8,22 @@ This directory tracks implementation plans across all development phases.
 docs/plans/
 ├── paused/                      # 2 plans temporarily on hold
 ├── completed/                   # 131 fully implemented plans
-│   └── plugin-refactor/         # 28 plans from the plugin refactor work
-├── cancelled/                   # 1 cancelled plan
+│   ├── plugin-refactor/         # 28 plans from the plugin refactor work
+│   └── cancelled/               # 1 cancelled plan
 ├── superseded/                  # 4 superseded plans
 │   └── schema-validation-attempts-jan24/
 ├── *.md                         # Active plans at root level
 └── README.md                    # This file
 ```
 
-## Active Plans (3)
+## Active Plans (5)
 
 Plans at the root level, either in progress or queued for current sprint:
 
 | Plan | Description | Status |
 |------|-------------|--------|
-| `RC3-remediation.md` | RC-3 remaining remediation (18 items from original 75+) | Active |
+| `RC3-remediation.md` | RC-3 remaining remediation (9 items from original 75+) | Active |
+| `RC3-doc-updates.md` | RC-3 documentation and project layout remediation | In progress |
 | `2026-02-02-whitelist-reduction.md` | Tier model whitelist reduction | In progress |
 | `2026-02-13-contract-propagation-complex-fields.md` | Preserve dict/list fields in propagated contracts | Queued |
 | `2026-02-01-nodeinfo-typed-config.md` | Type NodeInfo.config with discriminated union | Queued |
@@ -62,7 +63,7 @@ Plans replaced by better approaches or overtaken by events:
 
 ## Cancelled Plans (1)
 
-- `cancelled/2026-01-12-phase6-external-calls.md`
+- `completed/cancelled/2026-01-12-phase6-external-calls.md`
 
 ## Plan Lifecycle
 

@@ -160,30 +160,27 @@ for operational dashboards (request rates, error rates, processing latency histo
 
 | Category | Items | Estimated Effort |
 |----------|-------|------------------|
-| Feature Gaps (FEAT-04/05/06) | 3 | 8-15 days |
+| Feature Gaps (FEAT-04/06) | 2 | 5-10 days |
 | LLM Boundary Validation (CRIT-02) | 1 | 0.5-1 day |
 | Architecture (ARCH-06/14) | 2 | 3-5 days |
 | Quality/Docs (QW-10, DOC-01/02, OBS-04) | 4 | 3-6 days |
-| **Total** | **10** | **~15-27 days** |
+| **Total** | **9** | **~12-22 days** |
 
 ---
 
 ## Priority Ordering for RC-3
 
-**Must-have for RC-3 release:**
-1. FEAT-05: Graceful shutdown (data loss risk without it)
-
 **Should-have:**
-2. ARCH-14: Resume schema verification (silent corruption risk)
-3. FEAT-04: CLI surface for export/status/migrate
-4. ARCH-06: AggregationExecutor state consolidation
-5. CRIT-02: LLM boundary validation audit
+1. ARCH-14: Resume schema verification (silent corruption risk)
+2. FEAT-04: CLI surface for export/status/migrate
+3. ARCH-06: AggregationExecutor state consolidation
+4. CRIT-02: LLM boundary validation audit
 
 **Nice-to-have:**
-6. FEAT-06: Circuit breaker (operational improvement, not correctness)
-7. QW-10: CLI event formatter extraction (code quality)
-8. DOC-01/02: Example documentation (user experience)
-9. OBS-04: Prometheus metrics (operational visibility)
+5. FEAT-06: Circuit breaker (operational improvement, not correctness)
+6. QW-10: CLI event formatter extraction (code quality)
+7. DOC-01/02: Example documentation (user experience)
+8. OBS-04: Prometheus metrics (operational visibility)
 
 ---
 

@@ -1,7 +1,6 @@
-# Test Suite v2 Design
+# Test System Design
 
-> Drop-in replacement for `tests/`. Built one file at a time over several weeks.
-> Coexists with `tests/` during migration. Final cutover deletes `tests/` entirely.
+> Architecture and conventions for the ELSPETH test suite (~8,100 tests across 6 tiers).
 
 ## Design Principles
 

@@ -413,4 +413,5 @@ Entry point: `elspeth-mcp`
 ---
 
 *Inventory completed: January 29, 2026*
-*Next update: After RC-2 release*
+*Last reviewed: February 13, 2026 (RC-3 quality sprint)*
+*Note: Features added since Jan 29 (graceful shutdown, DROP-mode sentinel handling, ExecutionGraph public API) are not yet reflected above.*

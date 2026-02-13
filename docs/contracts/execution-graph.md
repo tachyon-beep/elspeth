@@ -474,8 +474,8 @@ While work queue is not empty:
     │   │         If held (waiting): break inner loop
     │   │         If merged: continue with merged token
     │   │
-    │   ├── Is this step a gate (config or plugin)?
-    │   │   YES → GateExecutor.execute_gate() or execute_config_gate()
+    │   ├── Is this step a config gate?
+    │   │   YES → GateExecutor.execute_config_gate()
     │   │         │
     │   │         ├── CONTINUE → continue to next step
     │   │         ├── ROUTE → record sink_name, break inner loop

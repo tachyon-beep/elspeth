@@ -1,9 +1,17 @@
 # ELSPETH RC-3 Documentation & Project Layout Remediation Plan
 
 **Date:** 2026-02-13
-**Status:** Proposed
+**Status:** In Progress
 **Auditor:** Claude Code (RC3-quality-sprint)
 **Scope:** Documentation, project metadata, configuration paths — no runtime code changes.
+
+## Decisions (WI-1, resolved 2026-02-13)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **F-01: Version number** | Bump to `0.3.0` | Reflects RC-3 milestone |
+| **F-05: REQUIREMENTS.md** | Delete — pyproject.toml is single source of truth | Eliminates version drift by removing the duplicate |
+| **F-16: docs/bugs/** | Update markdown tracker for now; retire shortly | Beads is the active tracker; markdown kept temporarily for continuity |
 
 ---
 

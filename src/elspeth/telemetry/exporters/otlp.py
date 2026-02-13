@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from elspeth import __version__ as _elspeth_version
 from elspeth.telemetry.errors import TelemetryExporterError
 
 if TYPE_CHECKING:
@@ -432,7 +433,7 @@ class _SyntheticReadableSpan(_ReadableSpanBase):
             kind=kind,
             instrumentation_scope=InstrumentationScope(
                 name="elspeth.telemetry",
-                version="0.1.0",
+                version=_elspeth_version,
             ),
             status=Status(StatusCode.OK),
             start_time=start_time,
