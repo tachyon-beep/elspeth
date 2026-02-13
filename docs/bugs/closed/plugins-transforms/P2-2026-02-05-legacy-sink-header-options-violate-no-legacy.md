@@ -1,6 +1,20 @@
 # Bug Report: Legacy Sink Header Options Violate No-Legacy Policy
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - Sink path configuration now exposes a single `headers` surface and rejects
+    unknown fields via strict config validation; legacy `display_headers` paths
+    are not accepted in `SinkPathConfig`.
+- Current evidence:
+  - `src/elspeth/plugins/config_base.py:222`
+  - `src/elspeth/plugins/config_base.py:248`
+  - `tests/unit/plugins/test_sink_header_config.py:115`
+- Verification summary:
+  - `.venv/bin/python -m pytest tests/unit/plugins/test_sink_header_config.py::TestSinkHeaderConfigValidation::test_unknown_field_rejected -q` passes.
 
 ## Status Update (2026-02-11)
 

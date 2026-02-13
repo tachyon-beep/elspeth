@@ -444,7 +444,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             if ctx.token is None:
                 raise RuntimeError("Azure LLM transform requires ctx.token. Ensure transform is executed through the engine.")
             token_id = ctx.token.token_id
-            llm_client = self._get_llm_client(ctx.state_id)
+            llm_client = self._get_llm_client(ctx.state_id, token_id=token_id)
 
             # 4. Call LLM (EXTERNAL - wrap)
             # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
@@ -538,7 +538,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 self._azure_api_key = None
             return self._underlying_client
 
-    def _get_llm_client(self, state_id: str) -> AuditedLLMClient:
+    def _get_llm_client(self, state_id: str, *, token_id: str | None = None) -> AuditedLLMClient:
         """Get or create LLM client for a state_id.
 
         Clients are cached to preserve call_index across retries.
@@ -559,6 +559,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                     underlying_client=self._get_underlying_client(),
                     provider="azure",
                     limiter=self._limiter,
+                    token_id=token_id,
                 )
             return self._llm_clients[state_id]
 

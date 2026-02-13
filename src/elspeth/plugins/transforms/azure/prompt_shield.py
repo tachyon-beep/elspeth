@@ -254,13 +254,17 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         """
         if ctx.state_id is None:
             raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
+        token_id = ctx.token.token_id if ctx.token is not None else None
 
         try:
-            return self._process_single_with_state(row, ctx.state_id)
+            return self._process_single_with_state(row, ctx.state_id, token_id=token_id)
         finally:
             # Clean up cached HTTP client for this state_id
             with self._http_clients_lock:
-                client = self._http_clients.pop(ctx.state_id, None)
+                if ctx.state_id in self._http_clients:
+                    client = self._http_clients.pop(ctx.state_id)
+                else:
+                    client = None
             if client is not None:
                 client.close()
 
@@ -268,6 +272,8 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self,
         row: PipelineRow,
         state_id: str,
+        *,
+        token_id: str | None = None,
     ) -> TransformResult:
         """Process a single row with explicit state_id.
 
@@ -311,7 +317,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
             # Call Azure API with state_id for audit trail
             try:
-                analysis = self._analyze_prompt(value, state_id)
+                analysis = self._analyze_prompt(value, state_id, token_id=token_id)
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
                 if is_capacity_error(status_code):
@@ -372,7 +378,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         else:
             return self._fields
 
-    def _get_http_client(self, state_id: str) -> Any:
+    def _get_http_client(self, state_id: str, *, token_id: str | None = None) -> Any:
         """Get or create audited HTTP client for a state_id.
 
         Clients are cached to preserve call_index across retries.
@@ -402,6 +408,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                         "Content-Type": "application/json",
                     },
                     limiter=self._limiter,
+                    token_id=token_id,
                 )
             return self._http_clients[state_id]
 
@@ -409,6 +416,8 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self,
         text: str,
         state_id: str,
+        *,
+        token_id: str | None = None,
     ) -> dict[str, bool]:
         """Call Azure Prompt Shield API.
 
@@ -425,7 +434,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         analysis path is needed.
         """
         # Use AuditedHTTPClient - handles recording and telemetry automatically
-        http_client = self._get_http_client(state_id)
+        http_client = self._get_http_client(state_id, token_id=token_id)
 
         url = f"{self._endpoint}/contentsafety/text:shieldPrompt?api-version={self.API_VERSION}"
 

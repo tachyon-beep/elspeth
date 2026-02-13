@@ -1,6 +1,22 @@
 # Bug Report: Optional Float Fields Lose Type Enforcement in Transform Output Contracts
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - Optional float type extraction is now handled correctly in transform contract
+    type resolution by unwrapping `Annotated` and resolving `Optional`/`Union`
+    members to primitive contract types.
+  - Regression coverage exists for schema-factory optional float behavior and
+    validation enforcement.
+- Current evidence:
+  - `src/elspeth/contracts/transform_contract.py:25`
+  - `src/elspeth/contracts/transform_contract.py:36`
+  - `tests/unit/contracts/test_transform_contract.py:179`
+- Verification summary:
+  - `.venv/bin/python -m pytest tests/unit/contracts/test_transform_contract.py -k "optional_float" -q` passes.
 
 ## Status Update (2026-02-11)
 

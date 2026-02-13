@@ -1,6 +1,21 @@
 # Bug Report: expand_token records EXPANDED outcome before validating output contract lock
 
-**Status: OPEN**
+**Status: CLOSED**
+
+## Status Update (2026-02-13)
+
+- Classification: **Resolved**
+- Resolution summary:
+  - `TokenManager.expand_token()` now validates `output_contract.locked` before
+    recorder expansion writes, preventing child-token and parent-outcome side
+    effects for invalid unlocked contracts.
+  - Unit test coverage exists asserting no expansion side effects occur when
+    contract lock precondition fails.
+- Current evidence:
+  - `src/elspeth/engine/tokens.py:357`
+  - `tests/unit/engine/test_tokens.py:992`
+- Verification summary:
+  - `.venv/bin/python -m pytest tests/unit/engine/test_tokens.py -k "requires_locked_output_contract" -q` passes.
 
 ## Status Update (2026-02-11)
 

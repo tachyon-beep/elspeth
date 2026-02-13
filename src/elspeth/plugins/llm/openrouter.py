@@ -538,7 +538,8 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         try:
             import time
 
-            http_client = self._get_http_client(ctx.state_id)
+            token_id_for_client = ctx.token.token_id if ctx.token is not None else None
+            http_client = self._get_http_client(ctx.state_id, token_id=token_id_for_client)
 
             # 4. Call OpenRouter API (EXTERNAL - wrap)
             token_id = ctx.token.token_id if ctx.token else "unknown"
@@ -675,7 +676,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             if client is not None:
                 client.close()
 
-    def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
+    def _get_http_client(self, state_id: str, *, token_id: str | None = None) -> AuditedHTTPClient:
         """Get or create HTTP client for a state_id.
 
         Clients are cached to preserve call_index across retries.
@@ -697,6 +698,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                     base_url=self._base_url,
                     headers=self._request_headers,
                     limiter=self._limiter,
+                    token_id=token_id,
                 )
             return self._http_clients[state_id]
 

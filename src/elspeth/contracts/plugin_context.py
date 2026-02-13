@@ -334,6 +334,15 @@ class PluginContext:
                 if usage and isinstance(usage, dict):
                     token_usage = usage
 
+            token_id = None
+            if has_state:
+                if self.token is not None:
+                    token_id = self.token.token_id
+                elif self.state_id is not None:
+                    node_state = self.landscape.get_node_state(self.state_id)
+                    if node_state is not None:
+                        token_id = node_state.token_id
+
             self.telemetry_emit(
                 ExternalCallCompleted(
                     timestamp=datetime.now(UTC),
@@ -341,6 +350,7 @@ class PluginContext:
                     # Use correct field based on context type
                     state_id=self.state_id if has_state else None,
                     operation_id=self.operation_id if has_operation else None,
+                    token_id=token_id,
                     call_type=call_type,
                     provider=provider,
                     status=status,

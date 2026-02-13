@@ -207,7 +207,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
         messages.append({"role": "user", "content": rendered.prompt})
 
         # 4. Get LLM client
-        llm_client = self._get_llm_client(state_id)
+        llm_client = self._get_llm_client(state_id, token_id=token_id)
 
         # 5. Call LLM (EXTERNAL - wrap, raise CapacityError for retry)
         effective_max_tokens = spec.max_tokens or self._max_tokens
@@ -403,7 +403,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                 self._azure_api_key = None
             return self._underlying_client
 
-    def _get_llm_client(self, state_id: str) -> AuditedLLMClient:
+    def _get_llm_client(self, state_id: str, *, token_id: str | None = None) -> AuditedLLMClient:
         """Get or create LLM client for a state_id."""
         with self._llm_clients_lock:
             if state_id not in self._llm_clients:
@@ -417,6 +417,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                     underlying_client=self._get_underlying_client(),
                     provider="azure",
                     limiter=self._limiter,
+                    token_id=token_id,
                 )
             return self._llm_clients[state_id]
 

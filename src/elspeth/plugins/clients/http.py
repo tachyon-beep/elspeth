@@ -124,6 +124,7 @@ class AuditedHTTPClient(AuditedClientBase):
         base_url: str | None = None,
         headers: dict[str, str] | None = None,
         limiter: Any = None,  # RateLimiter | NoOpLimiter | None
+        token_id: str | None = None,
     ) -> None:
         """Initialize audited HTTP client.
 
@@ -136,8 +137,9 @@ class AuditedHTTPClient(AuditedClientBase):
             base_url: Optional base URL to prepend to all requests
             headers: Default headers for all requests
             limiter: Optional rate limiter for throttling requests
+            token_id: Optional token identity for telemetry correlation
         """
-        super().__init__(recorder, state_id, run_id, telemetry_emit, limiter=limiter)
+        super().__init__(recorder, state_id, run_id, telemetry_emit, limiter=limiter, token_id=token_id)
         self._timeout = timeout
         self._base_url = base_url
         self._default_headers = headers or {}
@@ -387,6 +389,7 @@ class AuditedHTTPClient(AuditedClientBase):
                     latency_ms=latency_ms,
                     state_id=self._state_id,
                     operation_id=None,
+                    token_id=self._telemetry_token_id(),
                     request_hash=stable_hash(request_data),
                     response_hash=stable_hash(response_data) if response_data else None,
                     request_payload=request_data,
@@ -741,6 +744,7 @@ class AuditedHTTPClient(AuditedClientBase):
                         latency_ms=latency_ms,
                         state_id=self._state_id,
                         operation_id=None,
+                        token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=stable_hash(response_data),
                         request_payload=request_data,
@@ -787,6 +791,7 @@ class AuditedHTTPClient(AuditedClientBase):
                         latency_ms=latency_ms,
                         state_id=self._state_id,
                         operation_id=None,
+                        token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=None,
                         request_payload=request_data,

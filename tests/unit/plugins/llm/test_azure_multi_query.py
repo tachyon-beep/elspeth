@@ -556,9 +556,9 @@ class TestMultiRowPipelining:
         # Patch _get_llm_client to track state_ids
         original_get_client = transform._get_llm_client
 
-        def tracking_get_client(state_id: str) -> Any:
+        def tracking_get_client(state_id: str, *, token_id: str | None = None) -> Any:
             created_state_ids.append(state_id)
-            return original_get_client(state_id)
+            return original_get_client(state_id, token_id=token_id)
 
         transform._get_llm_client = tracking_get_client  # type: ignore[method-assign]
 

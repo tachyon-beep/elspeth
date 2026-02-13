@@ -309,6 +309,7 @@ class ExternalCallCompleted(TelemetryEvent):
     Attributes:
         state_id: Node state that made the call (for transform context)
         operation_id: Operation that made the call (for source/sink context)
+        token_id: Token associated with the transform context, if available
         call_type: Type of external call (llm, http, sql, filesystem)
         provider: Service provider (e.g., "azure-openai", "anthropic")
         status: Call result (success, error)
@@ -330,6 +331,7 @@ class ExternalCallCompleted(TelemetryEvent):
     latency_ms: float
     state_id: str | None = None
     operation_id: str | None = None
+    token_id: str | None = None
     request_hash: str | None = None
     response_hash: str | None = None
     request_payload: dict[str, Any] | None = None

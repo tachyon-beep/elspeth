@@ -165,6 +165,51 @@ class TestAuditedLLMClient:
         assert call_kwargs["response_data"]["content"] == "Hello!"
         assert call_kwargs["latency_ms"] > 0
 
+    def test_telemetry_emits_token_id_when_configured(self) -> None:
+        """Telemetry event should carry token_id when provided."""
+        recorder = self._create_mock_recorder()
+        openai_client = self._create_mock_openai_client()
+        emitted_events: list[object] = []
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: emitted_events.append(event),
+            underlying_client=openai_client,
+            token_id="tok-123",
+        )
+
+        client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        assert len(emitted_events) == 1
+        assert emitted_events[0].token_id == "tok-123"
+
+    def test_telemetry_uses_none_token_id_when_unset(self) -> None:
+        """Telemetry event should allow token_id=None when not provided."""
+        recorder = self._create_mock_recorder()
+        openai_client = self._create_mock_openai_client()
+        emitted_events: list[object] = []
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: emitted_events.append(event),
+            underlying_client=openai_client,
+        )
+
+        client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        assert len(emitted_events) == 1
+        assert emitted_events[0].token_id is None
+
     def test_call_index_increments(self) -> None:
         """Each call gets a unique, incrementing call index."""
         recorder = self._create_mock_recorder()

@@ -242,6 +242,7 @@ class AuditedLLMClient(AuditedClientBase):
         *,
         provider: str = "openai",
         limiter: Any = None,  # RateLimiter | NoOpLimiter | None
+        token_id: str | None = None,
     ) -> None:
         """Initialize audited LLM client.
 
@@ -253,8 +254,9 @@ class AuditedLLMClient(AuditedClientBase):
             underlying_client: OpenAI-compatible client instance
             provider: Provider name for audit trail (default: "openai")
             limiter: Optional rate limiter for throttling requests
+            token_id: Optional token identity for telemetry correlation
         """
-        super().__init__(recorder, state_id, run_id, telemetry_emit, limiter=limiter)
+        super().__init__(recorder, state_id, run_id, telemetry_emit, limiter=limiter, token_id=token_id)
         self._client = underlying_client
         self._provider = provider
 
@@ -364,6 +366,7 @@ class AuditedLLMClient(AuditedClientBase):
                         latency_ms=latency_ms,
                         state_id=self._state_id,  # Transform context
                         operation_id=None,  # Not in source/sink context
+                        token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=stable_hash(response_data),
                         request_payload=request_data,  # Full request for observability
@@ -426,6 +429,7 @@ class AuditedLLMClient(AuditedClientBase):
                         latency_ms=latency_ms,
                         state_id=self._state_id,  # Transform context
                         operation_id=None,  # Not in source/sink context
+                        token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=None,  # No response on error
                         request_payload=request_data,  # Full request for observability

@@ -1,19 +1,24 @@
 # Bug Report: ExternalCallCompleted telemetry lacks token_id for correlation
 
-**Status: OPEN**
+**Status: CLOSED**
 
-## Status Update (2026-02-11)
+## Status Update (2026-02-13)
 
-- Classification: **Still open**
+- Classification: **Fixed**
 - Verification summary:
-  - `ExternalCallCompleted` still has no `token_id` field.
-  - Current emit sites still populate state/operation IDs only, so direct token correlation remains unavailable in the event payload.
+  - `ExternalCallCompleted` now includes `token_id: str | None`.
+  - Transform-context emitters now populate `token_id` when token context is available.
+  - Operation-context emitters remain valid with `token_id=None`.
 - Current evidence:
-  - `CLAUDE.md:526`
-  - `src/elspeth/contracts/events.py:327`
-  - `src/elspeth/plugins/clients/llm.py:350`
-  - `src/elspeth/plugins/clients/http.py:381`
-  - `src/elspeth/contracts/plugin_context.py:333`
+  - `src/elspeth/contracts/events.py`
+  - `src/elspeth/contracts/plugin_context.py`
+  - `src/elspeth/plugins/clients/base.py`
+  - `src/elspeth/plugins/clients/llm.py`
+  - `src/elspeth/plugins/clients/http.py`
+  - `tests/unit/plugins/test_context.py`
+  - `tests/unit/plugins/clients/test_audited_llm_client.py`
+  - `tests/unit/plugins/clients/test_http.py`
+  - Verification run (2026-02-13): `490 passed, 3 xfailed`
 
 ## Summary
 
@@ -63,7 +68,7 @@
 ## Evidence
 
 - Telemetry correlation requirement: `CLAUDE.md:623` states telemetry events include `run_id` and `token_id`.
-- `ExternalCallCompleted` lacks `token_id` in its dataclass definition: `src/elspeth/telemetry/events.py:127-165`.
+- `ExternalCallCompleted` lacked `token_id` in its dataclass definition: `src/elspeth/contracts/events.py`.
 - Emission example shows no token field is available to pass: `src/elspeth/plugins/clients/llm.py:350-364`.
 
 ## Impact
@@ -78,7 +83,7 @@
 
 ## Proposed Fix
 
-- Code changes (modules/files): Add `token_id: str | None` to `ExternalCallCompleted` in `src/elspeth/telemetry/events.py`, and populate it in call sites (e.g., `AuditedLLMClient`, `AuditedHTTPClient`, `PluginContext.record_call`) when `state_id` is set.
+- Code changes (modules/files): Add `token_id: str | None` to `ExternalCallCompleted` in `src/elspeth/contracts/events.py`, and populate it in call sites (e.g., `AuditedLLMClient`, `AuditedHTTPClient`, `PluginContext.record_call`) when `state_id` is set.
 - Config or schema changes: None.
 - Tests to add/update: Add/update telemetry event tests to assert `ExternalCallCompleted` includes `token_id` for transform context and allows `None` for operation context.
 - Risks or migration steps: Requires updating event constructors in audited clients; exporters will include the new field automatically via `asdict`.
@@ -98,7 +103,7 @@
 
 ## Tests
 
-- Suggested tests to run: `.venv/bin/python -m pytest tests/telemetry/ tests/plugins/clients/ tests/plugins/test_context.py`
+- Suggested tests to run: `.venv/bin/python -m pytest tests/unit/telemetry/ tests/unit/plugins/clients/ tests/unit/plugins/test_context.py`
 - New tests required: yes, add a focused test for `ExternalCallCompleted` token_id presence/optional behavior.
 
 ## Notes / Links

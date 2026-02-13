@@ -543,7 +543,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
         )
 
-    def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
+    def _get_http_client(self, state_id: str, *, token_id: str | None = None) -> AuditedHTTPClient:
         """Get or create AuditedHTTPClient for a state_id.
 
         Clients are cached to preserve call_index across retries within the
@@ -564,6 +564,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                     base_url=self._base_url,
                     headers=self._request_headers,
                     limiter=self._limiter,
+                    token_id=token_id,
                 )
             return self._http_clients[state_id]
 
@@ -633,7 +634,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         if state_id is None:
             raise RuntimeError("OpenRouter batch transform requires state_id. Ensure transform is executed through the engine.")
 
-        http_client = self._get_http_client(state_id)
+        token_id = ctx.token.token_id if ctx.token is not None else None
+        http_client = self._get_http_client(state_id, token_id=token_id)
 
         try:
             # AuditedHTTPClient.post() records the call to Landscape and emits

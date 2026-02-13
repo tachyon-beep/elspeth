@@ -174,11 +174,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R9:AzureContentSafety:_process_row:fp=b18b4272385d82ff
-  owner: architecture
-  reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=8404ee8567c3b226
   owner: architecture
   reason: Tier 3 boundary — validates row field is str before sending to Azure API
@@ -203,11 +198,6 @@ allow_hits:
   owner: architecture
   reason: Tier 3 boundary — validates severity type from Azure API response is int
   safety: MalformedResponseError raised if type wrong, caught as non-retryable error
-  expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R9:AzurePromptShield:_process_row:fp=5555041200ea3e5a
-  owner: architecture
-  reason: Cleanup/pop with default — HTTP client cleanup may race with error paths
-  safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=69fe83d9ba6aa6e9
   owner: architecture
