@@ -48,14 +48,15 @@ def propagate_contract(
     for name, value in output_row.items():
         if name not in existing_names:
             # New field - try to infer type
-            # Non-primitive types (dict, list) are skipped rather than crashing
-            # (common with LLM _usage metadata fields)
             try:
                 python_type = normalize_type_for_contract(value)
             except TypeError:
-                # Non-primitive type - skip this field in contract
-                # The field will still exist in the data, just not tracked in contract
-                continue
+                # Preserve common complex JSON structures as "any" while
+                # preserving prior skip behavior for other unsupported types.
+                if type(value) in (dict, list):
+                    python_type = object
+                else:
+                    continue
 
             new_fields.append(
                 FieldContract(
@@ -146,9 +147,21 @@ def narrow_contract_to_output(
 
             try:
                 python_type = normalize_type_for_contract(value)
-            except (TypeError, ValueError) as e:
-                # Skip non-primitive types or invalid values (NaN, Infinity)
-                # B4: Log skipped fields for observability
+            except TypeError as e:
+                if type(value) in (dict, list):
+                    python_type = object
+                else:
+                    # Skip unsupported non-dict/list types to preserve prior behavior.
+                    skipped_fields.append(name)
+                    log.debug(
+                        "contract_field_skipped",
+                        field_name=name,
+                        reason=type(e).__name__,
+                        value_type=type(value).__name__,
+                    )
+                    continue
+            except ValueError as e:
+                # Skip invalid values (NaN, Infinity)
                 skipped_fields.append(name)
                 log.debug(
                     "contract_field_skipped",

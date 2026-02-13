@@ -366,9 +366,9 @@ class BaseLLMTransform(BaseTransform):
             transform_adds_fields=True,  # LLM transforms add response field + metadata
         )
 
-        # propagate_contract() intentionally skips non-primitive types (dict/list),
-        # so _usage would be omitted without explicit registration. LLM plugins
-        # guarantee this field as contract-stable metadata.
+        # Keep an explicit contract-stability guard for _usage metadata.
+        # propagate_contract() should include dict/list fields as object, but
+        # this ensures the guaranteed field remains present across refactors.
         usage_field_name = f"{self._response_field}_usage"
         existing_names = {f.normalized_name for f in output_contract.fields}
         if usage_field_name not in existing_names:
