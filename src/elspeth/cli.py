@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from elspeth import __version__
 from elspeth.contracts import ExecutionResult
+from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.core.config import ElspethSettings, SourceSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
@@ -511,6 +512,24 @@ def run(
             secret_resolutions=secret_resolutions,
             passphrase=passphrase,
         )
+    except GracefulShutdownError as e:
+        if output_format == "json":
+            import json as json_mod
+
+            typer.echo(
+                json_mod.dumps(
+                    {
+                        "event": "interrupted",
+                        "run_id": e.run_id,
+                        "rows_processed": e.rows_processed,
+                        "message": str(e),
+                    }
+                )
+            )
+        else:
+            typer.echo(f"\nPipeline interrupted after {e.rows_processed} rows.")
+            typer.echo(f"Resume with: elspeth resume {e.run_id} --execute")
+        raise typer.Exit(3)  # noqa: B904 -- distinct exit code: 0=success, 1=error, 3=interrupted
     except Exception as e:
         # Emit structured error for JSON mode, human-readable for console
         if output_format == "json":

@@ -501,6 +501,24 @@ class BatchPendingError(Exception):
         super().__init__(f"Batch {batch_id} is {status}, check after {check_after_seconds}s")
 
 
+class GracefulShutdownError(Exception):
+    """Raised when a pipeline run is interrupted by a shutdown signal.
+
+    This is a CONTROL-FLOW SIGNAL, like BatchPendingError. It indicates the
+    orchestrator stopped processing new rows due to SIGINT/SIGTERM but
+    completed all in-flight work (aggregation flush, sink writes, checkpoints).
+
+    The run is marked INTERRUPTED and is resumable via ``elspeth resume``.
+    """
+
+    def __init__(self, rows_processed: int, run_id: str) -> None:
+        self.rows_processed = rows_processed
+        self.run_id = run_id
+        super().__init__(
+            f"Pipeline interrupted after {rows_processed} rows (run_id={run_id}). Resume with: elspeth resume {run_id} --execute"
+        )
+
+
 class AuditIntegrityError(Exception):
     """Raised when audit database operations fail unexpectedly.
 

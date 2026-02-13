@@ -56,6 +56,7 @@ class RunCompletionStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     PARTIAL = "partial"
+    INTERRUPTED = "interrupted"
 
 
 @dataclass(frozen=True, slots=True)

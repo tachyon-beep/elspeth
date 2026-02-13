@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import signal
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -49,6 +52,7 @@ from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.errors import (
     ExecutionError,
+    GracefulShutdownError,
     OrchestrationInvariantError,
     SourceQuarantineReason,
 )
@@ -618,6 +622,33 @@ class Orchestrator:
 
         return processor, coalesce_node_map, coalesce_executor
 
+    @contextmanager
+    def _shutdown_handler_context(self) -> Iterator[threading.Event]:
+        """Install SIGINT/SIGTERM handlers that set a shutdown event.
+
+        On first signal: sets the event, restores default SIGINT handler
+        (so second Ctrl-C force-kills via KeyboardInterrupt).
+
+        Yields the Event for the processing loop to check.
+        Restores original handlers in finally block.
+        """
+        shutdown_event = threading.Event()
+        original_sigint = signal.getsignal(signal.SIGINT)
+        original_sigterm = signal.getsignal(signal.SIGTERM)
+
+        def _handler(signum: int, frame: Any) -> None:
+            shutdown_event.set()
+            # Restore default SIGINT so second Ctrl-C force-kills
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+
+        signal.signal(signal.SIGINT, _handler)
+        signal.signal(signal.SIGTERM, _handler)
+        try:
+            yield shutdown_event
+        finally:
+            signal.signal(signal.SIGINT, original_sigint)
+            signal.signal(signal.SIGTERM, original_sigterm)
+
     def run(
         self,
         config: PipelineConfig,
@@ -627,6 +658,7 @@ class Orchestrator:
         *,
         payload_store: PayloadStore,
         secret_resolutions: list[dict[str, Any]] | None = None,
+        shutdown_event: threading.Event | None = None,
     ) -> RunResult:
         """Execute a pipeline run.
 
@@ -646,6 +678,10 @@ class Orchestrator:
                 in the audit trail after run creation. Each record contains
                 env_var_name, source, vault_url, secret_name, timestamp, latency_ms,
                 and secret_value (for fingerprinting, never stored).
+            shutdown_event: Optional pre-created shutdown event for testing.
+                When provided, signal handler installation is skipped and this
+                event is passed directly to _execute_run(). Production callers
+                should omit this (signal handlers are installed automatically).
 
         Raises:
             ValueError: If graph or payload_store is not provided
@@ -712,7 +748,10 @@ class Orchestrator:
         run_completed = False
         run_start_time = time.perf_counter()
         try:
-            with self._span_factory.run_span(run.run_id):
+            # When shutdown_event is provided (testing), skip signal handler
+            # installation and use the caller's event directly.
+            shutdown_ctx = nullcontext(shutdown_event) if shutdown_event is not None else self._shutdown_handler_context()
+            with self._span_factory.run_span(run.run_id), shutdown_ctx as active_event:
                 result = self._execute_run(
                     recorder,
                     run.run_id,
@@ -721,6 +760,7 @@ class Orchestrator:
                     settings,
                     batch_checkpoints,
                     payload_store=payload_store,
+                    shutdown_event=active_event,
                 )
 
             # Complete run with reproducibility grade computation
@@ -810,6 +850,39 @@ class Orchestrator:
             # DO NOT emit RunSummary - run isn't done yet.
             # Re-raise for caller to schedule retry based on check_after_seconds.
             raise
+        except GracefulShutdownError as shutdown_exc:
+            # Graceful shutdown: all in-flight work flushed, checkpoints created.
+            # Mark run INTERRUPTED (resumable via `elspeth resume`).
+            total_duration = time.perf_counter() - run_start_time
+            recorder.finalize_run(run.run_id, status=RunStatus.INTERRUPTED)
+
+            run_duration_ms = total_duration * 1000
+            self._emit_telemetry(
+                RunFinished(
+                    timestamp=datetime.now(UTC),
+                    run_id=run.run_id,
+                    status=RunStatus.INTERRUPTED,
+                    row_count=shutdown_exc.rows_processed,
+                    duration_ms=run_duration_ms,
+                )
+            )
+
+            self._events.emit(
+                RunSummary(
+                    run_id=run.run_id,
+                    status=RunCompletionStatus.INTERRUPTED,
+                    total_rows=shutdown_exc.rows_processed,
+                    succeeded=0,
+                    failed=0,
+                    quarantined=0,
+                    duration_seconds=total_duration,
+                    exit_code=3,
+                    routed=0,
+                    routed_destinations=(),
+                )
+            )
+
+            raise  # Propagate to CLI
         except Exception:
             # Emit RunSummary with failure status
             total_duration = time.perf_counter() - run_start_time
@@ -898,6 +971,7 @@ class Orchestrator:
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         *,
         payload_store: PayloadStore,
+        shutdown_event: threading.Event | None = None,
     ) -> RunResult:
         """Execute the run using the execution graph.
 
@@ -914,6 +988,9 @@ class Orchestrator:
             settings: Full settings (optional)
             batch_checkpoints: Restored batch checkpoints (maps node_id -> checkpoint_data)
             payload_store: Optional PayloadStore for persisting source row payloads
+            shutdown_event: Optional threading.Event set by signal handler on SIGINT/SIGTERM.
+                When set, the processing loop breaks after the current row completes.
+                All pending work (aggregation flush, sink writes) is still performed.
         """
         # Store graph for checkpointing during execution
         self._current_graph = graph
@@ -1242,6 +1319,7 @@ class Orchestrator:
                 )
 
                 # Nested try for PROCESS phase to catch iteration/processing failures
+                interrupted_by_shutdown = False
                 try:
                     for row_index, source_item in enumerate(source_iterator):
                         counters.rows_processed += 1
@@ -1520,6 +1598,15 @@ class Orchestrator:
                             last_progress_time = current_time
 
                         # ─────────────────────────────────────────────────────────────────
+                        # GRACEFUL SHUTDOWN CHECK
+                        # Check between row iterations — current row is fully
+                        # processed, outcomes recorded, safe to stop here.
+                        # ─────────────────────────────────────────────────────────────────
+                        if shutdown_event is not None and shutdown_event.is_set():
+                            interrupted_by_shutdown = True
+                            break
+
+                        # ─────────────────────────────────────────────────────────────────
                         # CRITICAL: Restore operation_id before next iteration.
                         # Generator-based sources execute during next() calls in the for
                         # loop. Any external calls (blob downloads, API fetches) must be
@@ -1668,6 +1755,14 @@ class Orchestrator:
                 sink_step=processor.resolve_sink_step(),
                 on_token_written_factory=checkpoint_after_sink,
             )
+
+            # If shutdown interrupted the loop, raise after all pending work is flushed.
+            # At this point: aggregation buffers flushed, coalesce flushed, sink writes done.
+            if interrupted_by_shutdown:
+                raise GracefulShutdownError(
+                    rows_processed=counters.rows_processed,
+                    run_id=run_id,
+                )
 
             # Emit final progress if we haven't emitted recently or row count not on interval
             # (RunSummary will show final summary regardless, but progress shows intermediate state)

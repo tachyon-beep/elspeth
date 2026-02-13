@@ -1499,7 +1499,7 @@ class TestEnumExhaustiveness:
 
     def test_run_status_all_values_known(self) -> None:
         """RunStatus enum has exactly the expected values."""
-        expected_values = {"RUNNING", "COMPLETED", "FAILED"}
+        expected_values = {"RUNNING", "COMPLETED", "FAILED", "INTERRUPTED"}
         actual_values = {e.name for e in RunStatus}
         assert actual_values == expected_values
 

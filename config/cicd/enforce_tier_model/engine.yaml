@@ -106,32 +106,32 @@ allow_hits:
   reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get() filters null vs non-null items
   safety: Non-null items fed to recursive resolver which crashes on unrecognized schemas
   expires: null
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=864f8798598aa264
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=faa39c8895409dcf
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=3817cd2e5ac65a61
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=9cea4b0ac8613ba3
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=a300ae0fe73eeee2
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=8dd314c8cb06ec7b
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=ac3b6fcee8eeed57
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=290f6cec737a6720
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=411616af5f2ca497
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=4faf4ee46f696935
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=932619974f1d8566
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=dce6e715e1fbc973
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
@@ -171,22 +171,22 @@ allow_hits:
   reason: Type dispatch on _process_single_token return (RowResult | list[RowResult] | None)
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-11'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=7c5419575b2202aa
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=37f2b01e27bbadea
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=41dd0edfdcabc69e
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=db519e29e1e3386e
   owner: architecture
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_execute_run:fp=c77f343cb78be3af
+- key: engine/orchestrator/core.py:R6:Orchestrator:_execute_run:fp=6dae427ebe4be8dc
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
   expires: '2026-05-12'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=2d1ec064511f75a9
+- key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=aa05bb91d32c9a05
   owner: architecture
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback

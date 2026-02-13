@@ -3,7 +3,7 @@
 **Date:** 2026-02-13
 **Lineage:** Remaining items from RC-2 Comprehensive Remediation Plan (2026-01-27)
 **Source:** Architecture Analysis by 17+ parallel agents (archive/2026-01-27-arch-analysis/)
-**Original Issues:** 75+ | **Resolved Piecemeal:** ~57 | **Remaining:** 18
+**Original Issues:** 75+ | **Resolved Piecemeal:** ~65 | **Remaining:** 10
 
 ---
 
@@ -11,18 +11,31 @@
 
 The RC-2 remediation plan identified 75+ issues across 6 phases. Over the course of the
 RC2.x bug sprints, routing trilogy, test suite v2 migration, telemetry implementation,
-and RC3-quality-sprint, approximately 57 items were resolved piecemeal. This plan
-captures only the items that remain unaddressed.
+and RC3-quality-sprint, approximately 65 items were resolved. This plan captures only
+the items that remain unaddressed.
 
 ### What Was Completed (not repeated here)
 
 **Phase 0 Quick Wins:** 11/12 done (QW-01 through QW-09, QW-11, QW-12)
 **Phase 1 Critical Fixes:** 3/4 done (CRIT-01 rate limiting, CRIT-03 coalesce timeout, CRIT-04 HTTP JSON parse)
 **Phase 2 Core Features:** 3/6 done (FEAT-01 explain command, FEAT-02 TUI widgets, FEAT-03 checkpoints)
-**Phase 3 Production Hardening:** 11/12 done (all PERF items, SAFE-01/02/03/04/06/07/08)
-**Phase 4 Architecture:** 12/18 done (ARCH-03/04/05/08/09/10/11/12/15/16/17/18)
-**Phase 5 Quality:** 7+ done (TEST-02/03/04, OBS-01/02/03, SEC-01)
+**Phase 3 Production Hardening:** 12/12 done (all PERF items, all SAFE items including SAFE-05 call index seeding)
+**Phase 4 Architecture:** 16/18 done (ARCH-02/03/04/05/07/08/09/10/11/12/13/15/16/17/18 + ARCH-01/08 N/A)
+**Phase 5 Quality:** 10+ done (TEST-01/02/03/04, OBS-01/02/03, SEC-01, DOC-03/04/05)
 **N/A by design:** ARCH-01 BaseCoalesce, ARCH-08 gate discovery (gate plugins removed entirely)
+
+### Recently Completed (v2.0 → v2.1)
+
+| Item | Commit | What |
+|------|--------|------|
+| TEST-01 | `1c31869b` | 13 public setters + 5 method renames on ExecutionGraph; 60+ private accesses eliminated |
+| ARCH-02 | `dd7cf9bc` | LLM execution models documented (accept vs process, batch lifecycle) |
+| ARCH-07 | `dd7cf9bc` | Plugin lifecycle hooks documented (on_start/on_complete/close ordering) |
+| ARCH-13 | `b60cdcd9` | Unused session parameter removed from all Repository classes |
+| SAFE-05 | `b60cdcd9` | Call index seeded from MAX(call_index) on resume; prevents UNIQUE violations |
+| DOC-03 | `b60cdcd9` | Access control limitations documented in release guarantees |
+| DOC-04 | `b60cdcd9` | Pre-2026-01-24 checkpoint incompatibility documented |
+| DOC-05 | `b60cdcd9` | Audit export signing recommendation documented |
 
 ---
 
@@ -31,19 +44,20 @@ captures only the items that remain unaddressed.
 ### CRIT-02: Replace `.get()` Chains on External API Responses
 **Source:** TD-002 | **Priority:** MEDIUM (downgraded — partial progress made)
 
-LLM plugins partially cleaned up, but `.get()` chains on external API response structures
-may persist in some files. These are at Tier 3 boundaries (external data), so the risk is
-lower than originally assessed — the pattern is technically correct (defensive on external
-data) but produces silent empty-dict fallbacks instead of actionable error messages.
+LLM plugins partially cleaned up, but `.get("usage") or {}` chains on external API
+response structures persist in 4 files. These are at Tier 3 boundaries (external data),
+so the pattern is technically correct (defensive on external data) but produces silent
+empty-dict fallbacks instead of actionable error messages.
 
-**Files to audit:**
-- `src/elspeth/plugins/llm/azure_multi_query.py`
-- `src/elspeth/plugins/llm/openrouter.py`
-- `src/elspeth/plugins/llm/openrouter_multi_query.py`
-- `src/elspeth/plugins/llm/openrouter_batch.py`
+**Known remaining instances:**
+- `src/elspeth/plugins/llm/openrouter.py:635` — `data.get("usage") or {}`
+- `src/elspeth/plugins/llm/openrouter_batch.py:737` — `data.get("usage") or {}`
+- `src/elspeth/plugins/llm/openrouter_multi_query.py:316` — `data.get("usage") or {}`
+- `src/elspeth/plugins/llm/azure_batch.py:1207` — `body.get("usage", {})`
 
-**Fix:** Replace `.get("key", {})` chains with explicit key checks that return
-`TransformResult.error()` with diagnostic info on unexpected response shapes.
+**Fix:** Replace with explicit key checks that return `TransformResult.error()` with
+diagnostic info on unexpected response shapes, or at minimum log a structured warning
+when usage metadata is absent (since usage is genuinely optional in some API responses).
 
 ---
 
@@ -61,16 +75,16 @@ Current CLI has: `run`, `explain`, `validate`, `plugins list`, `purge`, `resume`
 
 ---
 
-### FEAT-05: Add Graceful Shutdown
+### FEAT-05: Add Graceful Shutdown — DONE
 **Source:** TD-017 | **Priority:** HIGH
 
 No signal handlers (SIGTERM, SIGINT) in orchestrator. Long-running pipelines cannot be
 stopped cleanly.
 
-**Implementation:**
-- Add signal handlers in orchestrator startup
-- On signal: create checkpoint, flush pending aggregations, complete in-flight writes
-- Set run status to INTERRUPTED (not FAILED)
+**Implementation:** Cooperative shutdown via `threading.Event`. Signal handler sets event,
+processing loop checks between rows. On shutdown: flush aggregation buffers, write pending
+tokens to sinks, create checkpoint, mark run INTERRUPTED. Resumable via `elspeth resume`.
+Second Ctrl-C force-kills. CLI exits with code 3. 16 tests (9 unit + 7 integration).
 
 ---
 
@@ -84,29 +98,7 @@ a dead service = hours of retries before all rows fail.
 
 ---
 
-## Remaining Phase 3: Production Hardening
-
-### SAFE-05: Fix Call Index Counter Persistence
-**Source:** TD-018 | **Priority:** LOW
-
-`_call_indices` and `_operation_call_indices` in recorder are in-memory dicts. On recorder
-recreation (resume), counters reset to 0, risking call_index collisions.
-
-**Fix:** Query MAX(call_index) from database on recorder init, or include run_id+node_id
-in the uniqueness constraint.
-
----
-
 ## Remaining Phase 4: Architecture Cleanup
-
-### ARCH-02: Clarify LLM Transform Execution Model
-**Source:** TD-013 | **Priority:** LOW
-
-LLM transforms use `accept()` for streaming batch processing rather than `process()`.
-The inheritance relationship with `BaseTransform` may create confusion about which
-method to call. Verify current state and document the execution model clearly.
-
----
 
 ### ARCH-06: Consolidate AggregationExecutor Parallel Dictionaries
 **Source:** Engine Analysis | **Priority:** MEDIUM
@@ -119,27 +111,15 @@ method to call. Verify current state and document the execution model clearly.
 
 ---
 
-### ARCH-07: Document Lifecycle Hook Contract
-**Source:** Plugin Analysis | **Priority:** LOW
-
-`on_start()`/`on_complete()` ordering undefined. `close()` vs `on_complete()` semantics
-overlap. Document the lifecycle contract clearly in plugin base classes.
-
----
-
-### ARCH-13: Clean Up Repository Session Parameter
-**Source:** TD-022 | **Priority:** LOW
-
-All repositories receive `None` for session and never use it. Remove the parameter or
-implement proper session passing.
-
----
-
 ### ARCH-14: Fix Resume Schema Verification Gap
 **Source:** Core Analysis | **Priority:** MEDIUM
 
 `core/checkpoint/recovery.py` requires `source_schema_class` but cannot verify it matches
 the original run's schema. A schema change between runs could silently corrupt data.
+
+**Fix:** Record a schema fingerprint (canonical hash of field names + types) in the
+checkpoint metadata during the original run. On resume, compare the fingerprint against
+the current `source_schema_class` and fail fast on mismatch.
 
 ---
 
@@ -150,15 +130,6 @@ the original run's schema. A schema change between runs could silently corrupt d
 
 Event handling logic in `cli.py` (~2,000 lines) is monolithic. Extract shared event
 formatting to a helper module to reduce duplication.
-
----
-
-### TEST-01: Reduce Test Path Integrity Violations
-**Source:** TD-015 | **Priority:** LOW (downgraded)
-
-~62 instances of `graph._` private access in tests. Per CLAUDE.md, private access in
-unit tests of isolated algorithms (topo sort, cycle detection) is acceptable. Audit
-remaining instances to confirm they're all in that category.
 
 ---
 
@@ -177,27 +148,6 @@ No working examples demonstrating fork/join DAG patterns.
 
 ---
 
-### DOC-03: Document Access Control Limitations
-**Source:** Security Analysis | **Priority:** LOW
-
-Add note: "ELSPETH is not multi-user. Assumes single-user or fully trusted network."
-
----
-
-### DOC-04: Document Checkpoint Breaking Change
-**Source:** Schema Evolution Analysis | **Priority:** LOW
-
-All checkpoints before 2026-01-24 are invalid due to node ID changes.
-
----
-
-### DOC-05: Document Audit Export Signing
-**Source:** Security Analysis | **Priority:** LOW
-
-Document: Enable `landscape.export.sign = true` for legal-grade integrity.
-
----
-
 ### OBS-04: Add Metrics/Prometheus Integration
 **Source:** Observability Analysis | **Priority:** LOW
 
@@ -211,11 +161,10 @@ for operational dashboards (request rates, error rates, processing latency histo
 | Category | Items | Estimated Effort |
 |----------|-------|------------------|
 | Feature Gaps (FEAT-04/05/06) | 3 | 8-15 days |
-| LLM Boundary Validation (CRIT-02) | 1 | 1-2 days |
-| Production Hardening (SAFE-05) | 1 | 1-2 days |
-| Architecture (ARCH-02/06/07/13/14) | 5 | 5-10 days |
-| Quality/Docs (QW-10, TEST-01, DOC-*, OBS-04) | 8 | 5-10 days |
-| **Total** | **18** | **~20-40 days** |
+| LLM Boundary Validation (CRIT-02) | 1 | 0.5-1 day |
+| Architecture (ARCH-06/14) | 2 | 3-5 days |
+| Quality/Docs (QW-10, DOC-01/02, OBS-04) | 4 | 3-6 days |
+| **Total** | **10** | **~15-27 days** |
 
 ---
 
@@ -225,13 +174,16 @@ for operational dashboards (request rates, error rates, processing latency histo
 1. FEAT-05: Graceful shutdown (data loss risk without it)
 
 **Should-have:**
-2. FEAT-04: CLI surface for export/status/migrate
-3. ARCH-06: AggregationExecutor state consolidation
-4. ARCH-14: Resume schema verification
+2. ARCH-14: Resume schema verification (silent corruption risk)
+3. FEAT-04: CLI surface for export/status/migrate
+4. ARCH-06: AggregationExecutor state consolidation
 5. CRIT-02: LLM boundary validation audit
 
 **Nice-to-have:**
-6. Everything else (LOW priority, quality-of-life improvements)
+6. FEAT-06: Circuit breaker (operational improvement, not correctness)
+7. QW-10: CLI event formatter extraction (code quality)
+8. DOC-01/02: Example documentation (user experience)
+9. OBS-04: Prometheus metrics (operational visibility)
 
 ---
 
@@ -241,3 +193,4 @@ for operational dashboards (request rates, error rates, processing latency histo
 |------|---------|---------|
 | 2026-01-27 | 1.0 | Initial RC-2 plan from 17+ agent analysis (75+ items) |
 | 2026-02-13 | 2.0 | Rebaselined for RC-3: removed ~57 completed items, 18 remain |
+| 2026-02-13 | 2.1 | Updated: 8 more items completed (TEST-01, ARCH-02/07/13, SAFE-05, DOC-03/04/05), 10 remain |
