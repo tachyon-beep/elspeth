@@ -56,7 +56,7 @@ Granularity controls which events are emitted:
 
 | Level | Events Emitted | Typical Volume | Use Case |
 |-------|----------------|----------------|----------|
-| `lifecycle` | `RunStarted`, `RunCompleted`, `PhaseChanged` | ~10-20 per run | Production (minimal overhead) |
+| `lifecycle` | `RunStarted`, `RunFinished`, `PhaseChanged` | ~10-20 per run | Production (minimal overhead) |
 | `rows` | Above + `RowCreated`, `TransformCompleted`, `GateEvaluated`, `TokenCompleted`, `FieldResolutionApplied` | N x M (rows x transforms) | Production (standard) |
 | `full` | Above + `ExternalCallCompleted` with all details | High | Debugging, development |
 
@@ -253,7 +253,7 @@ When an alert fires in your observability platform, follow this workflow to inve
    Datadog example:
    ```
    Alert: ELSPETH pipeline failed
-   Tags: elspeth.run_id:run-abc123, elspeth.event_type:RunCompleted, status:failed
+   Tags: elspeth.run_id:run-abc123, elspeth.event_type:RunFinished, status:failed
    ```
 
 2. **Get failure context with Landscape MCP**
@@ -412,7 +412,7 @@ These metrics are logged at pipeline shutdown and can be monitored via structure
 | Event | When Emitted | Key Fields |
 |-------|--------------|------------|
 | `RunStarted` | Pipeline begins | `config_hash`, `source_plugin` |
-| `RunCompleted` | Pipeline finishes | `status`, `row_count`, `duration_ms` |
+| `RunFinished` | Pipeline finishes | `status`, `row_count`, `duration_ms` |
 | `PhaseChanged` | Phase transition | `phase`, `action` |
 
 ### Row-Level Events
