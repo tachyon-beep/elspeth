@@ -675,12 +675,16 @@ class ExecutionGraph:
 
         Walks backwards through MOVE edges from the coalesce node to find both
         endpoints of the transform chain for a given branch. The chain terminates
-        at the gate node (which produces the branch via a MOVE edge labelled with
-        the branch name).
+        at the fork gate node (which produces the branch via a MOVE edge labelled
+        with the branch name).
 
         The backward walk follows ANY MOVE edge, not just ``"continue"`` edges,
         because branch chains may include intermediate routing gates whose
         outgoing edges carry route-specific labels (e.g., ``"approved"``).
+
+        Branch entry identification requires matching BOTH the edge label AND the
+        edge origin (the fork gate), because intermediate gates within the branch
+        may produce MOVE edges whose labels collide with the branch name.
 
         Args:
             coalesce_nid: The coalesce node to trace back from
@@ -694,6 +698,13 @@ class ExecutionGraph:
         Raises:
             GraphValidationError: If the branch chain cannot be traced
         """
+        # Resolve the fork gate that originates this branch.
+        # coalesce_gate_index maps coalesce_name → pipeline index,
+        # pipeline_nodes[index] → gate node ID.
+        coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
+        gate_pipeline_idx = self._coalesce_gate_index[coalesce_name]
+        fork_gate_nid = self._pipeline_nodes[gate_pipeline_idx]  # type: ignore[index]
+
         visited: set[NodeID] = set()
         candidates: list[NodeID] = []
 
@@ -704,16 +715,17 @@ class ExecutionGraph:
 
         # For each candidate, walk backwards through MOVE edges
         # until we find the node whose incoming edge has label == branch_name
+        # AND originates from the fork gate (not an intermediate gate).
         for candidate in candidates:
             current = candidate
             visited.clear()
 
             while current not in visited:
                 visited.add(current)
-                # Look for incoming MOVE edge with label == branch_name (from gate)
+                # Look for incoming MOVE edge with label == branch_name FROM the fork gate
                 found_branch_entry = False
-                for _from_id, _to_id, _key, data in self._graph.in_edges(current, keys=True, data=True):
-                    if data["mode"] == RoutingMode.MOVE and data["label"] == branch_name:
+                for from_id, _to_id, _key, data in self._graph.in_edges(current, keys=True, data=True):
+                    if data["mode"] == RoutingMode.MOVE and data["label"] == branch_name and NodeID(from_id) == fork_gate_nid:
                         found_branch_entry = True
                         break
 

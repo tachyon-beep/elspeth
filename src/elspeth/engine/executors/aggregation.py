@@ -661,8 +661,7 @@ class AggregationExecutor:
                 f"Buffer contains {total_rows} total rows across {len(state)} nodes. "
                 f"Solutions: (1) Reduce aggregation count trigger to <5000 rows, "
                 f"(2) Reduce row_data payload size, or (3) Implement checkpoint retention "
-                f"policy (see P3-2026-01-21). See capacity planning in "
-                f"docs/plans/2026-01-24-fix-aggregation-checkpoint-restore.md"
+                f"policy"
             )
 
         return state

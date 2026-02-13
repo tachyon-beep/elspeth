@@ -5,8 +5,6 @@ The pattern:
 - Runtime: SchemaContract with Python types
 - Storage: ContractAuditRecord with string type names
 - Restore: to_schema_contract() converts back with integrity check
-
-Design doc: docs/plans/2026-02-02-unified-schema-contracts-design.md
 """
 
 from __future__ import annotations

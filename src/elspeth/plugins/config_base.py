@@ -174,7 +174,6 @@ class TabularSourceDataConfig(SourceDataConfig):
     - normalize_fields: Auto-normalize messy headers to identifiers
     - field_mapping: Override specific normalized names
 
-    See docs/plans/2026-01-29-field-normalization-design.md for full specification.
     """
 
     columns: list[str] | None = None

@@ -2,7 +2,7 @@
 """Tests for COMPLETED outcome timing relative to sink durability.
 
 BUG UNDER TEST: COMPLETED token outcomes are recorded BEFORE sink writes happen.
-This violates the token outcome contract (docs/audit/tokens/00-token-outcome-contract.md):
+This violates the token outcome contract (docs/contracts/token-outcomes/00-token-outcome-contract.md):
 
 - Invariant 3: "COMPLETED implies the token has a completed sink node_state"
 - Invariant 4: "Completed sink node_state implies a COMPLETED token_outcome with sink_name"
@@ -101,7 +101,7 @@ def _build_graph(config: PipelineConfig) -> ExecutionGraph:
 class TestCompletedOutcomeTimingContract:
     """Tests for COMPLETED outcome timing contract.
 
-    Per the token outcome contract (docs/audit/tokens/00-token-outcome-contract.md):
+    Per the token outcome contract (docs/contracts/token-outcomes/00-token-outcome-contract.md):
     - Invariant 3: "COMPLETED implies the token has a completed sink node_state"
     - Invariant 4: "Completed sink node_state implies a COMPLETED token_outcome"
 

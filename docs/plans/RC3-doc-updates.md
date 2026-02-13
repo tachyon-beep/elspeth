@@ -70,7 +70,7 @@ All RC-2 and RC-2.5 references must be updated to RC-3.
 | `docs/README.md` | 5 | `RC-2` | `RC-3` |
 | `docs/release/guarantees.md` | 3-4 | `RC-2` | `RC-3` |
 | `docs/guides/tier2-tracing.md` | 5 | `RC-2` | `RC-3` |
-| `docs/architecture/telemetry-implementation-summary.md` | 3 | `RC-2` | `RC-3` |
+| `docs/architecture/telemetry.md` | 3 | `RC-2` | `RC-3` |
 | `pyproject.toml` | 3 | `0.1.0` | Decision needed (see note) |
 | `src/elspeth/__init__.py` | 8 | `0.1.0` | Must match pyproject.toml |
 

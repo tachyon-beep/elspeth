@@ -335,6 +335,16 @@ class TestGetBranchFirstNodes:
             }
         )
 
+        # Build pipeline_nodes: gate, then all branch transforms, then coalesce
+        pipeline_nodes: list[NodeID] = [NodeID(gate)]
+        for transforms in branches.values():
+            for t_name in transforms:
+                pipeline_nodes.append(NodeID(t_name))
+        pipeline_nodes.append(NodeID(coalesce))
+        graph.set_pipeline_nodes(pipeline_nodes)
+        # Gate is always at index 0 in this helper
+        graph.set_coalesce_gate_index({CoalesceName("coalesce-node"): 0})
+
         return graph
 
     def test_get_branch_first_nodes_identity(self) -> None:
@@ -390,3 +400,51 @@ class TestGetBranchFirstNodes:
 
         assert result["path_a"] == NodeID("coalesce-node")
         assert result["path_b"] == NodeID("enrich")
+
+    def test_get_branch_first_nodes_label_collision_with_intermediate_gate(self) -> None:
+        """Intermediate gate whose MOVE label matches branch name must not confuse trace-back.
+
+        Regression: _trace_branch_endpoints() stops at the first incoming MOVE edge
+        whose label matches branch_name. If an intermediate gate within the branch
+        re-uses the branch name as a route label, the walk stops too early and returns
+        a downstream node instead of the true branch start.
+
+        Graph: fork_gate --(b1 MOVE)--> g1 --(b1 MOVE)--> g2 --(continue MOVE)--> coalesce
+        Expected first node: g1 (receives the b1 MOVE from the fork gate)
+        Bug behavior: returns g2 (matches label b1 on the g1→g2 edge)
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.types import BranchName, CoalesceName
+
+        graph = ExecutionGraph()
+        gate = "fork-gate"
+        coalesce = "coalesce-node"
+
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test-source", config={})
+        graph.add_node(gate, node_type=NodeType.GATE, plugin_name="test-gate", config={})
+        # g1 is the first node in branch "b1" — it's a gate that routes with label "b1"
+        graph.add_node("g1", node_type=NodeType.GATE, plugin_name="inner-gate", config={})
+        # g2 is downstream — it receives a MOVE edge labelled "b1" from g1
+        graph.add_node("g2", node_type=NodeType.TRANSFORM, plugin_name="test-transform", config={})
+        graph.add_node(coalesce, node_type=NodeType.COALESCE, plugin_name="coalesce", config={})
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test-sink", config={})
+
+        # Wiring: source → fork_gate → g1 → g2 → coalesce → sink
+        graph.add_edge("source", gate, label="continue")
+        graph.add_edge(gate, "g1", label="b1", mode=RoutingMode.MOVE)  # fork creates branch b1
+        graph.add_edge("g1", "g2", label="b1", mode=RoutingMode.MOVE)  # intermediate gate re-uses "b1" label
+        graph.add_edge("g2", coalesce, label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge(coalesce, "sink", label="continue")
+
+        # Metadata
+        graph.set_branch_to_coalesce({BranchName("b1"): CoalesceName("coalesce-node")})
+        graph.set_coalesce_id_map({CoalesceName("coalesce-node"): NodeID("coalesce-node")})
+        # Pipeline nodes and coalesce gate index needed by the fix
+        pipeline_nodes = [NodeID("fork-gate"), NodeID("g1"), NodeID("g2"), NodeID("coalesce-node")]
+        graph.set_pipeline_nodes(pipeline_nodes)
+        graph.set_coalesce_gate_index({CoalesceName("coalesce-node"): 0})  # fork-gate is at index 0
+
+        result = graph.get_branch_first_nodes()
+
+        # Must resolve to g1 (the true branch start), NOT g2
+        assert result["b1"] == NodeID("g1")

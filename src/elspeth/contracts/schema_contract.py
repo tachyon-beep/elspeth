@@ -4,8 +4,6 @@ This module implements the Unified Schema Contracts design:
 - FieldContract: Immutable field metadata (normalized name, original name, type)
 - SchemaContract: Per-node schema with O(1) name resolution
 - PipelineRow: Row wrapper enabling dual-name access
-
-Design doc: docs/plans/2026-02-02-unified-schema-contracts-design.md
 """
 
 from __future__ import annotations

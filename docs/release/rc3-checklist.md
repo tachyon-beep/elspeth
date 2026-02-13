@@ -361,8 +361,8 @@ The routing trilogy (ADR-004, ADR-005) replaced implicit pipeline wiring with ex
 
 ### 11.1 Test Suite v2 Migration (Complete)
 
-- [ ] v2 migration complete: `tests_v2/` renamed to `tests/`
-- [ ] Old v1 suite deleted (507 files, 222K lines)
+- [x] v2 migration complete: `tests_v2/` renamed to `tests/`
+- [x] Old v1 suite deleted (507 files, 222K lines)
 - [ ] 8,138+ tests collected
 - [ ] All imports rewritten (204 imports across 123 files)
 - [ ] pyproject.toml test configuration updated
