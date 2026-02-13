@@ -38,6 +38,37 @@ class TestGracefulShutdownError:
         err = GracefulShutdownError(rows_processed=0, run_id="run-0")
         assert isinstance(err, Exception)
 
+    def test_error_carries_outcome_counters(self) -> None:
+        """GracefulShutdownError carries real outcome counters for RunSummary.
+
+        Regression: The graceful-shutdown handler hard-coded succeeded/failed/
+        quarantined/routed to 0 in RunSummary because GracefulShutdownError
+        only carried rows_processed. Now it must carry full counters.
+        """
+        err = GracefulShutdownError(
+            rows_processed=100,
+            run_id="run-abc",
+            rows_succeeded=80,
+            rows_failed=10,
+            rows_quarantined=5,
+            rows_routed=5,
+            routed_destinations={"archive": 3, "review": 2},
+        )
+        assert err.rows_succeeded == 80
+        assert err.rows_failed == 10
+        assert err.rows_quarantined == 5
+        assert err.rows_routed == 5
+        assert err.routed_destinations == {"archive": 3, "review": 2}
+
+    def test_error_counters_default_to_zero(self) -> None:
+        """Backwards-compatible: omitting counters defaults to zero."""
+        err = GracefulShutdownError(rows_processed=42, run_id="run-xyz")
+        assert err.rows_succeeded == 0
+        assert err.rows_failed == 0
+        assert err.rows_quarantined == 0
+        assert err.rows_routed == 0
+        assert err.routed_destinations == {}
+
 
 class TestRunStatusInterrupted:
     """Tests for INTERRUPTED enum values."""

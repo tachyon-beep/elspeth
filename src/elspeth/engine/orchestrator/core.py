@@ -886,13 +886,13 @@ class Orchestrator:
                     run_id=run.run_id,
                     status=RunCompletionStatus.INTERRUPTED,
                     total_rows=shutdown_exc.rows_processed,
-                    succeeded=0,
-                    failed=0,
-                    quarantined=0,
+                    succeeded=shutdown_exc.rows_succeeded,
+                    failed=shutdown_exc.rows_failed,
+                    quarantined=shutdown_exc.rows_quarantined,
                     duration_seconds=total_duration,
                     exit_code=3,
-                    routed=0,
-                    routed_destinations=(),
+                    routed=shutdown_exc.rows_routed,
+                    routed_destinations=tuple(shutdown_exc.routed_destinations.items()),
                 )
             )
 
@@ -1785,6 +1785,11 @@ class Orchestrator:
                 raise GracefulShutdownError(
                     rows_processed=counters.rows_processed,
                     run_id=run_id,
+                    rows_succeeded=counters.rows_succeeded,
+                    rows_failed=counters.rows_failed,
+                    rows_quarantined=counters.rows_quarantined,
+                    rows_routed=counters.rows_routed,
+                    routed_destinations=dict(counters.routed_destinations),
                 )
 
             # Emit final progress if we haven't emitted recently or row count not on interval
@@ -1965,13 +1970,13 @@ class Orchestrator:
                     run_id=run_id,
                     status=RunCompletionStatus.INTERRUPTED,
                     total_rows=shutdown_exc.rows_processed,
-                    succeeded=0,
-                    failed=0,
-                    quarantined=0,
+                    succeeded=shutdown_exc.rows_succeeded,
+                    failed=shutdown_exc.rows_failed,
+                    quarantined=shutdown_exc.rows_quarantined,
                     duration_seconds=total_duration,
                     exit_code=3,
-                    routed=0,
-                    routed_destinations=(),
+                    routed=shutdown_exc.rows_routed,
+                    routed_destinations=tuple(shutdown_exc.routed_destinations.items()),
                 )
             )
 
@@ -2286,6 +2291,11 @@ class Orchestrator:
                 raise GracefulShutdownError(
                     rows_processed=counters.rows_processed,
                     run_id=run_id,
+                    rows_succeeded=counters.rows_succeeded,
+                    rows_failed=counters.rows_failed,
+                    rows_quarantined=counters.rows_quarantined,
+                    rows_routed=counters.rows_routed,
+                    routed_destinations=dict(counters.routed_destinations),
                 )
 
         finally:
