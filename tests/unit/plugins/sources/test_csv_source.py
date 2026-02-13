@@ -453,6 +453,116 @@ class TestCSVSourceQuarantineYielding:
         assert results[0].is_quarantined is False
         assert results[0].row == {"header1": "1", "header2": "2"}
 
+    def test_skip_rows_tolerates_csv_error_in_preamble(self, tmp_path: Path, ctx: PluginContext, monkeypatch: pytest.MonkeyPatch) -> None:
+        """skip_rows should not abort on csv.Error from malformed preamble rows.
+
+        Regression test: skip_rows is designed for non-CSV metadata (comments,
+        version headers) that may contain unmatched quotes or other RFC 4180
+        violations.  A csv.Error during the skip loop must not crash the run.
+
+        Python 3.13's csv module in non-strict mode is extremely lenient and
+        rarely raises csv.Error, so we inject the error via monkeypatch to
+        exercise the defensive code path.
+        """
+        from unittest.mock import patch
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "preamble.csv"
+        csv_file.write_text("preamble\nid,name\n1,alice\n2,bob\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 1,
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        # Wrap csv.reader to inject csv.Error on the first __next__ call (the skip)
+        original_csv_reader = csv.reader
+
+        def patched_reader(*args, **kwargs):
+            real_reader = original_csv_reader(*args, **kwargs)
+            calls = {"count": 0}
+            original_next = real_reader.__next__
+
+            class ErrorInjectingReader:
+                """Proxy that raises csv.Error on the first next() call."""
+
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    calls["count"] += 1
+                    if calls["count"] == 1:
+                        # Consume the real row to keep file position in sync
+                        original_next()
+                        raise csv.Error("injected: unmatched quote in preamble")
+                    return original_next()
+
+                @property
+                def line_num(self):
+                    return real_reader.line_num
+
+            return ErrorInjectingReader()
+
+        with patch("elspeth.plugins.sources.csv_source.csv.reader", side_effect=patched_reader):
+            results = list(source.load(ctx))
+
+        assert len(results) == 2
+        assert results[0].row == {"id": "1", "name": "alice"}
+        assert results[1].row == {"id": "2", "name": "bob"}
+
+    def test_skip_rows_tolerates_csv_error_on_all_skipped_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Multiple csv.Error exceptions during skip_rows should all be handled."""
+        from unittest.mock import patch
+
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "multi_preamble.csv"
+        csv_file.write_text("preamble1\npreamble2\nid,value\n10,hello\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 2,
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        original_csv_reader = csv.reader
+
+        def patched_reader(*args, **kwargs):
+            real_reader = original_csv_reader(*args, **kwargs)
+            calls = {"count": 0}
+            original_next = real_reader.__next__
+
+            class ErrorInjectingReader:
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    calls["count"] += 1
+                    if calls["count"] <= 2:
+                        original_next()
+                        raise csv.Error(f"injected: preamble row {calls['count']}")
+                    return original_next()
+
+                @property
+                def line_num(self):
+                    return real_reader.line_num
+
+            return ErrorInjectingReader()
+
+        with patch("elspeth.plugins.sources.csv_source.csv.reader", side_effect=patched_reader):
+            results = list(source.load(ctx))
+
+        assert len(results) == 1
+        assert results[0].row == {"id": "10", "value": "hello"}
+
     def test_empty_rows_are_skipped(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Empty rows (blank lines) should be skipped without generating errors.
 

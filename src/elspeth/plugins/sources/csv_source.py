@@ -7,6 +7,7 @@ IMPORTANT: Sources use allow_coercion=True to normalize external data.
 This is the ONLY place in the pipeline where coercion is allowed.
 """
 
+import contextlib
 import csv
 from collections.abc import Iterator
 from typing import Any
@@ -134,9 +135,14 @@ class CSVSource(BaseSource):
             # Create csv.reader on file handle for multiline field support
             reader = csv.reader(f, delimiter=self._delimiter)
 
-            # Skip CSV records as configured (not raw lines), preserving multiline alignment
+            # Skip CSV records as configured (not raw lines), preserving multiline alignment.
+            # csv.Error is caught because skip_rows targets non-CSV metadata preamble
+            # (comments, version headers, etc.) that may contain unmatched quotes or
+            # other constructs invalid under RFC 4180.  The user explicitly asked to
+            # discard these rows, so a parse failure is not an error worth surfacing.
             for _ in range(self._skip_rows):
-                next(reader, None)
+                with contextlib.suppress(csv.Error):
+                    next(reader, None)
 
             # Determine headers based on config
             if self._columns is not None:

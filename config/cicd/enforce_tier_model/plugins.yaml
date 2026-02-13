@@ -387,3 +387,8 @@ allow_hits:
   reason: httpx Client.get() method call - ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access
   expires: '2026-05-02'
+- key: plugins/sources/csv_source.py:R7:CSVSource:load:fp=f69de22403a3594b
+  owner: architecture
+  reason: Tier 3 boundary — skip_rows targets non-CSV metadata preamble that may violate RFC 4180
+  safety: User explicitly configured these rows to be discarded; csv.Error during skip is irrelevant
+  expires: null

@@ -440,3 +440,21 @@ class TestExporterDiscoveryRegistry:
         registry = _discover_exporter_registry()
         for name, cls in registry.items():
             assert isinstance(cls, type), f"Registry entry '{name}' is not a type: {cls!r}"
+
+    def test_duplicate_plugin_object_raises_telemetry_error(self):
+        """Registering the same plugin object twice should raise TelemetryExporterError.
+
+        Regression test: pluggy.PluginManager.register() raises ValueError
+        for duplicate plugin objects, which must be wrapped in the function's
+        documented TelemetryExporterError contract.
+        """
+
+        class DuplicatePlugin:
+            @hookimpl
+            def elspeth_get_exporters(self) -> list[type]:
+                return []
+
+        same_instance = DuplicatePlugin()
+
+        with pytest.raises(TelemetryExporterError, match="Invalid telemetry exporter plugin"):
+            _discover_exporter_registry(exporter_plugins=(same_instance, same_instance))

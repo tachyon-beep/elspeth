@@ -6,48 +6,38 @@ This directory tracks implementation plans across all development phases.
 
 ```
 docs/plans/
-├── in-progress/                 # 3 plans currently being worked on
-├── paused/                      # 3 plans temporarily on hold
-├── completed/                   # 127 fully implemented plans
+├── paused/                      # 2 plans temporarily on hold
+├── completed/                   # 131 fully implemented plans
 │   └── plugin-refactor/         # 28 plans from the plugin refactor work
 ├── cancelled/                   # 1 cancelled plan
-├── superseded/                  # 14 superseded plans
+├── superseded/                  # 4 superseded plans
 │   └── schema-validation-attempts-jan24/
-├── *.md                         # 1 plan at root level (various states)
+├── *.md                         # Active plans at root level
 └── README.md                    # This file
 ```
 
-## In-Progress Plans (4)
+## Active Plans (3)
 
-Plans actively being worked on:
+Plans at the root level, either in progress or queued for current sprint:
 
-| Plan | Description |
-|------|-------------|
-| `in-progress/2026-01-26-recorder-refactoring.md` | Landscape recorder refactor into repository modules |
-| `in-progress/2026-01-30-tier2-tracing-implementation.md` | Tier 2 plugin tracing (Azure AI + Langfuse) |
-| `in-progress/RC2-remediation.md` | RC-2 remediation and phased hardening roadmap |
-| `in-progress/2026-02-02-whitelist-reduction.md` | Tier model whitelist reduction - fix bug-hiding patterns |
+| Plan | Description | Status |
+|------|-------------|--------|
+| `RC3-remediation.md` | RC-3 remaining remediation (18 items from original 75+) | Active |
+| `2026-02-02-whitelist-reduction.md` | Tier model whitelist reduction | In progress |
+| `2026-02-13-contract-propagation-complex-fields.md` | Preserve dict/list fields in propagated contracts | Queued |
+| `2026-02-01-nodeinfo-typed-config.md` | Type NodeInfo.config with discriminated union | Queued |
 
-## Root-Level Plans (1)
-
-Plans at the root level in various states:
-
-| Plan | Description |
-|------|-------------|
-| `2026-01-30-chaosllm-design.md` | ChaosLLM fake LLM server design |
-
-## Paused Plans (3)
+## Paused Plans (2)
 
 Plans temporarily on hold:
 
-- `paused/2026-01-12-phase7-advanced-features.md`
-- `paused/2026-01-17-chunk3-refactors-tui.md`
-- `paused/2026-01-20-world-class-test-regime.md`
+- `paused/2026-01-12-phase7-advanced-features.md` — Fork infra done (40%), A/B testing not started (60%)
+- `paused/2026-01-20-world-class-test-regime.md` — Largely superseded by test suite v2, but mutation testing targets not fully met
 
-## Completed Plans (127)
+## Completed Plans (148)
 
 ### Summary
-- **99 plans** directly in `completed/`
+- **120 plans** directly in `completed/`
 - **28 plans** in `completed/plugin-refactor/`
 
 ### Major Phases (All Completed)
@@ -61,11 +51,18 @@ Plans temporarily on hold:
 
 See `completed/` directory for full list.
 
-## Superseded Plans (14)
+## Superseded Plans (4)
 
-Plans replaced by better approaches:
+Plans replaced by better approaches or overtaken by events:
 
-- `superseded/schema-validation-attempts-jan24/` - 14 schema validation attempts that led to the current validation subsystem design
+- `superseded/RC2-remediation.md` — 75+ item plan; ~57 resolved piecemeal, remainder carried to RC3-remediation.md
+- `superseded/2026-01-26-recorder-refactoring.md` — Recorder refactor done via different approach
+- `superseded/2026-02-06-quarantine-sink-dag-exclusion.md` — Replaced by multipath edges approach
+- `superseded/schema-validation-attempts-jan24/` — 14 schema validation attempts that led to current design
+
+## Cancelled Plans (1)
+
+- `cancelled/2026-01-12-phase6-external-calls.md`
 
 ## Plan Lifecycle
 
@@ -77,7 +74,7 @@ Created → In Progress → Paused/Cancelled/Completed/Superseded
 
 | Status | Meaning | Location |
 |--------|---------|----------|
-| **In Progress** | Currently being implemented | `in-progress/` subdirectory |
+| **Active** | Currently being worked on or queued | Root level (`*.md`) |
 | **Paused** | On hold, may resume | `paused/` subdirectory |
 | **Cancelled** | Abandoned, not implemented | `cancelled/` subdirectory |
 | **Superseded** | Replaced by a better approach | `superseded/` subdirectory |

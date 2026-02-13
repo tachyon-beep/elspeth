@@ -106,15 +106,20 @@ allow_hits:
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
   safety: ValueError raised for invalid config - explicit validation failure
   expires: null
-- key: contracts/contract_propagation.py:R6:propagate_contract:fp=8b917cc920b53d77
+- key: contracts/contract_propagation.py:R6:propagate_contract:fp=99175b7151ceac32
   owner: architecture
-  reason: Type narrowing failure is silently skipped - non-primitive types aren't included in contract
-  safety: Field continues in data without contract tracking - intentional behavior
+  reason: TypeError infers python_type=object for complex fields (dict/list); ValueError skips NaN/Infinity
+  safety: Complex fields preserved in contract as object type; non-finite values excluded with debug log
   expires: null
-- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=f11bc8d1585e1aac
+- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=5b154d1481f39116
   owner: architecture
-  reason: Type resolution errors are logged and field is excluded from narrowed contract
-  safety: Contract narrowing continues without failed field - explicit logging
+  reason: TypeError infers python_type=object for complex fields (dict/list) during narrowing
+  safety: Complex fields preserved in narrowed contract; no data loss
+  expires: null
+- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=c44a2a3ac4d47e65
+  owner: architecture
+  reason: ValueError skips NaN/Infinity values during contract narrowing
+  safety: Non-finite values excluded with debug log; consistent with canonical JSON rejection
   expires: null
 - key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=368e4bbac0c4fcec
   owner: architecture

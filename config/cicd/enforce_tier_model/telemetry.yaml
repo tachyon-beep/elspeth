@@ -86,3 +86,8 @@ allow_hits:
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-15'
+- key: telemetry/factory.py:R5:_discover_exporter_registry:fp=1f3cc7f6698cb122
+  owner: architecture
+  reason: isinstance() distinguishes PluginValidationError from ValueError to determine safe unregister
+  safety: Only calls unregister() when plugin was successfully registered; both paths raise TelemetryExporterError
+  expires: null

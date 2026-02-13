@@ -112,8 +112,11 @@ def _discover_exporter_registry(
         try:
             plugin_manager.register(plugin)
             plugin_manager.check_pending()
-        except pluggy.PluginValidationError as e:
-            plugin_manager.unregister(plugin=plugin)
+        except (pluggy.PluginValidationError, ValueError) as e:
+            # PluginValidationError: hook spec mismatch (wrong method names, etc.)
+            # ValueError: duplicate plugin object or plugin name already registered
+            if isinstance(e, pluggy.PluginValidationError):
+                plugin_manager.unregister(plugin=plugin)
             raise TelemetryExporterError(
                 "telemetry_plugins",
                 f"Invalid telemetry exporter plugin {type(plugin).__name__}: {e}",

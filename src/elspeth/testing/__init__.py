@@ -519,7 +519,7 @@ def make_row_result(
     token = make_token_info()
     return RowResult(
         token=token,
-        final_data=data if data is not None else {"_result": True},
+        final_data=make_pipeline_row(data) if data is not None else make_pipeline_row({"_result": True}),
         outcome=resolved_outcome,
         sink_name=resolved_sink_name,
         error=error,
