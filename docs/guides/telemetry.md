@@ -57,7 +57,7 @@ Granularity controls which events are emitted:
 | Level | Events Emitted | Typical Volume | Use Case |
 |-------|----------------|----------------|----------|
 | `lifecycle` | `RunStarted`, `RunCompleted`, `PhaseChanged` | ~10-20 per run | Production (minimal overhead) |
-| `rows` | Above + `RowCreated`, `TransformCompleted`, `GateEvaluated`, `TokenCompleted` | N x M (rows x transforms) | Production (standard) |
+| `rows` | Above + `RowCreated`, `TransformCompleted`, `GateEvaluated`, `TokenCompleted`, `FieldResolutionApplied` | N x M (rows x transforms) | Production (standard) |
 | `full` | Above + `ExternalCallCompleted` with all details | High | Debugging, development |
 
 **Performance guidance:**

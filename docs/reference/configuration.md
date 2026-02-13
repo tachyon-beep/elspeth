@@ -847,7 +847,7 @@ telemetry:
 | Level | Events Emitted | Volume | Use Case |
 |-------|----------------|--------|----------|
 | `lifecycle` | Run start/complete, phase transitions | ~10-20/run | Production monitoring |
-| `rows` | Lifecycle + row creation, transform completion, gate routing | N × M events | Debugging, progress tracking |
+| `rows` | Lifecycle + row creation, transform completion, gate routing, field-resolution mapping | N × M events | Debugging, progress tracking |
 | `full` | Rows + external call details (LLM prompts/responses, HTTP, SQL) | High | Deep debugging, call analysis |
 
 **Choosing a granularity:**
