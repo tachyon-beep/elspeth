@@ -50,9 +50,6 @@ from elspeth.contracts.enums import (
 class RunRepository:
     """Repository for Run records."""
 
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
     def load(self, row: SARow[Any]) -> Run:
         """Load Run from database row.
 
@@ -78,9 +75,6 @@ class RunRepository:
 
 class NodeRepository:
     """Repository for Node records."""
-
-    def __init__(self, session: Any) -> None:
-        self.session = session
 
     def load(self, row: SARow[Any]) -> Node:
         """Load Node from database row.
@@ -121,9 +115,6 @@ class NodeRepository:
 class EdgeRepository:
     """Repository for Edge records."""
 
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
     def load(self, row: SARow[Any]) -> Edge:
         """Load Edge from database row.
 
@@ -143,9 +134,6 @@ class EdgeRepository:
 class RowRepository:
     """Repository for Row records."""
 
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
     def load(self, row: SARow[Any]) -> Row:
         """Load Row from database row.
 
@@ -164,9 +152,6 @@ class RowRepository:
 
 class TokenRepository:
     """Repository for Token records."""
-
-    def __init__(self, session: Any) -> None:
-        self.session = session
 
     def load(self, row: SARow[Any]) -> Token:
         """Load Token from database row.
@@ -188,9 +173,6 @@ class TokenRepository:
 class TokenParentRepository:
     """Repository for TokenParent records."""
 
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
     def load(self, row: SARow[Any]) -> TokenParent:
         """Load TokenParent from database row."""
         return TokenParent(
@@ -202,9 +184,6 @@ class TokenParentRepository:
 
 class CallRepository:
     """Repository for Call records."""
-
-    def __init__(self, session: Any) -> None:
-        self.session = session
 
     def load(self, row: SARow[Any]) -> Call:
         """Load Call from database row.
@@ -232,9 +211,6 @@ class CallRepository:
 class RoutingEventRepository:
     """Repository for RoutingEvent records."""
 
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
     def load(self, row: SARow[Any]) -> RoutingEvent:
         """Load RoutingEvent from database row."""
         return RoutingEvent(
@@ -252,9 +228,6 @@ class RoutingEventRepository:
 
 class BatchRepository:
     """Repository for Batch records."""
-
-    def __init__(self, session: Any) -> None:
-        self.session = session
 
     def load(self, row: SARow[Any]) -> Batch:
         """Load Batch from database row."""
@@ -285,9 +258,6 @@ class NodeStateRepository:
     these invariants per the Tier 1 trust model - if invariants are violated,
     we crash immediately (audit integrity violation).
     """
-
-    def __init__(self, session: Any) -> None:
-        self.session = session
 
     def load(self, row: SARow[Any]) -> NodeState:
         """Load NodeState from database row.
@@ -424,9 +394,6 @@ class ValidationErrorRepository:
     No enum conversion needed - all fields are primitives or strings.
     """
 
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
     def load(self, row: SARow[Any]) -> ValidationErrorRecord:
         """Load ValidationErrorRecord from database row.
 
@@ -456,9 +423,6 @@ class TransformErrorRepository:
     No enum conversion needed - all fields are primitives or strings.
     """
 
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
     def load(self, row: SARow[Any]) -> TransformErrorRecord:
         """Load TransformErrorRecord from database row.
 
@@ -486,9 +450,6 @@ class TokenOutcomeRepository:
 
     Handles terminal token states. Converts outcome string to RowOutcome enum.
     """
-
-    def __init__(self, session: Any) -> None:
-        self.session = session
 
     def load(self, row: SARow[Any]) -> TokenOutcome:
         """Load TokenOutcome from database row.
@@ -544,9 +505,6 @@ class ArtifactRepository:
     No enum conversion needed - artifact_type is user-defined string.
     """
 
-    def __init__(self, session: Any) -> None:
-        self.session = session
-
     def load(self, row: SARow[Any]) -> Artifact:
         """Load Artifact from database row.
 
@@ -576,9 +534,6 @@ class BatchMemberRepository:
     Handles batch membership records for aggregation tracking.
     No enum conversion needed - all fields are primitives.
     """
-
-    def __init__(self, session: Any) -> None:
-        self.session = session
 
     def load(self, row: SARow[Any]) -> BatchMember:
         """Load BatchMember from database row.

@@ -113,6 +113,61 @@ class TestAllocateCallIndex:
 
         assert idx == 0
 
+    def test_seeds_from_database_on_recorder_recreation(self):
+        """Simulate resume: new recorder on same DB continues call indices."""
+        db, recorder, state_id = _setup()
+
+        # Record 3 calls with the first recorder
+        for i in range(3):
+            idx = recorder.allocate_call_index(state_id)
+            recorder.record_call(
+                state_id,
+                idx,
+                CallType.LLM,
+                CallStatus.SUCCESS,
+                request_data={"i": i},
+                response_data={"r": i},
+            )
+
+        # Create a NEW recorder on the same DB (simulates resume)
+        recorder2 = LandscapeRecorder(db)
+
+        # New recorder should seed from DB and continue at index 3
+        idx = recorder2.allocate_call_index(state_id)
+        assert idx == 3
+
+        idx = recorder2.allocate_call_index(state_id)
+        assert idx == 4
+
+    def test_seeds_operation_call_index_on_recorder_recreation(self):
+        """Simulate resume: new recorder seeds operation call indices from DB."""
+        db, recorder, _state_id, operation_id = _setup_with_operation()
+
+        # Record 2 calls via the first recorder
+        for _i in range(2):
+            recorder.record_operation_call(
+                operation_id,
+                CallType.HTTP,
+                CallStatus.SUCCESS,
+                request_data={"url": "https://example.com"},
+                response_data={"status": 200},
+            )
+
+        # Create a NEW recorder on the same DB (simulates resume)
+        recorder2 = LandscapeRecorder(db)
+
+        # New recorder should seed from DB and continue at index 2
+        idx = recorder2.allocate_operation_call_index(operation_id)
+        assert idx == 2
+
+    def test_fresh_state_id_starts_at_zero_with_db_seeding(self):
+        """A state_id with no DB entries still starts at 0."""
+        _db, recorder, _state_id = _setup()
+
+        # Allocate for a state_id that has no recorded calls
+        idx = recorder.allocate_call_index("brand-new-state-id")
+        assert idx == 0
+
 
 class TestRecordCall:
     """Tests for recording external calls linked to a node_state."""

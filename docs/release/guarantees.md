@@ -243,12 +243,15 @@ ELSPETH prioritizes correctness and auditability over throughput. It is not desi
 
 ### 7.2 Access Control
 
-RC-2 does not include:
+**ELSPETH is not multi-user.** It assumes single-user execution or a fully trusted network environment. There is no built-in authentication, authorization, or access control.
+
+Specifically, RC-2 does not include:
 - User authentication
 - Role-based access control
 - Data redaction profiles
+- Network-level access restrictions
 
-**Assumption:** ELSPETH runs in a trusted environment.
+If ELSPETH is exposed on a network, the deployer is responsible for providing access control at the infrastructure level (e.g., VPN, firewall rules, reverse proxy authentication).
 
 ### 7.3 External System Behavior
 

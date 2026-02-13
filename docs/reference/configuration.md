@@ -543,6 +543,8 @@ landscape:
 | `format` | string | `csv` | Export format: `csv`, `json` |
 | `sign` | bool | `false` | HMAC sign each record for integrity |
 
+**Audit export signing:** For legal-grade audit trail integrity, enable export signing by setting `landscape.export.sign = true` in your pipeline settings. This produces cryptographically signed exports (HMAC) that can be independently verified. Requires `ELSPETH_SIGNING_KEY` to be set (see [Environment Variables](environment-variables.md)).
+
 ### JSONL Change Journal
 
 Enable a redundant JSONL change journal for emergency backup. This is **not** the canonical audit record—use when you need a text-based, append-only backup stream.

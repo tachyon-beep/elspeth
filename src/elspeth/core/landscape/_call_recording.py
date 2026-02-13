@@ -7,7 +7,7 @@ import json
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from elspeth.contracts import (
     Call,
@@ -57,8 +57,9 @@ class CallRecordingMixin:
             indices concurrently. Safe for pooled execution scenarios.
 
         Persistence:
-            Counter persists across retries within the same run. The LandscapeRecorder
-            lifecycle matches the run lifecycle, not the execution attempt.
+            Counter seeds from the database on first access per state_id,
+            so it survives recorder recreation (e.g., on resume). Subsequent
+            allocations are pure in-memory for performance.
 
         Args:
             state_id: Node state ID to allocate index for
@@ -77,7 +78,13 @@ class CallRecordingMixin:
         """
         with self._call_index_lock:
             if state_id not in self._call_indices:
-                self._call_indices[state_id] = 0
+                # Seed from database to survive recorder recreation on resume.
+                # Without this, a new recorder would restart indices at 0 for
+                # any state_id that already has recorded calls, causing
+                # UNIQUE(state_id, call_index) violations.
+                row = self._ops.execute_fetchone(select(func.max(calls_table.c.call_index)).where(calls_table.c.state_id == state_id))
+                existing_max = row[0] if row is not None and row[0] is not None else -1
+                self._call_indices[state_id] = existing_max + 1
             idx = self._call_indices[state_id]
             self._call_indices[state_id] += 1
             return idx
@@ -300,7 +307,12 @@ class CallRecordingMixin:
         """
         with self._call_index_lock:  # Reuse existing lock
             if operation_id not in self._operation_call_indices:
-                self._operation_call_indices[operation_id] = 0
+                # Seed from database to survive recorder recreation on resume.
+                row = self._ops.execute_fetchone(
+                    select(func.max(calls_table.c.call_index)).where(calls_table.c.operation_id == operation_id)
+                )
+                existing_max = row[0] if row is not None and row[0] is not None else -1
+                self._operation_call_indices[operation_id] = existing_max + 1
             idx = self._operation_call_indices[operation_id]
             self._operation_call_indices[operation_id] += 1
             return idx

@@ -47,6 +47,8 @@ All tests pass, including critical `test_checkpoint_roundtrip`.
 
 ## Migration Guide
 
+**Breaking change:** All checkpoints created before 2026-01-24 are invalid due to node ID format changes introduced in the routing refactor. Attempting to resume from a pre-2026-01-24 checkpoint will fail. Delete old checkpoint files and re-run affected pipelines.
+
 **For users with existing checkpoints:**
 1. Existing checkpoints from the prior format will fail restoration with clear error message
 2. Solution: Discard old checkpoints and rerun pipelines
