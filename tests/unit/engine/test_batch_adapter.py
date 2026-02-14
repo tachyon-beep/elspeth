@@ -423,3 +423,27 @@ class TestSharedBatchAdapter:
 
         with pytest.raises(OrchestrationInvariantError, match="state_id=None"):
             adapter.emit(token, result, state_id=None)
+
+    def test_emit_with_none_state_id_signals_waiter_instead_of_timeout(self) -> None:
+        """emit() with state_id=None delivers error to registered waiter.
+
+        Regression: When state_id=None and a waiter IS registered for the
+        token, the waiter must receive an OrchestrationInvariantError
+        immediately instead of hanging until batch_wait_timeout (often 3600s).
+        The release loop's catch-and-retry cannot fix state_id=None, so
+        emit() must deliver the error directly to the waiter by scanning
+        for token_id matches.
+        """
+        adapter = SharedBatchAdapter()
+        token = _make_token("token-1", "row-1")
+        result = TransformResult.success(make_pipeline_row({"v": 1}), success_reason={"action": "test"})
+
+        # Register a waiter (as orchestrator thread would)
+        waiter = adapter.register("token-1", "state-abc")
+
+        # emit with state_id=None (executor bug)
+        adapter.emit(token, result, state_id=None)
+
+        # Waiter should be immediately signaled with the error (not timeout)
+        with pytest.raises(OrchestrationInvariantError, match="state_id=None"):
+            waiter.wait(timeout=1.0)

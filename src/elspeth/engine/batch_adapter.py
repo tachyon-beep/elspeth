@@ -203,16 +203,24 @@ class SharedBatchAdapter:
             state_id: State ID for the attempt that produced this result.
 
         Raises:
-            OrchestrationInvariantError: If state_id is None — indicates an
-                executor bug (state_id should always be set by begin_node_state
-                before the batch transform is called).
+            OrchestrationInvariantError: If state_id is None AND no waiter can
+                be found by token_id fallback — indicates an executor bug that
+                cannot be recovered.
         """
         if state_id is None:
-            raise OrchestrationInvariantError(
+            # state_id=None is an executor bug (state_id should be set by
+            # begin_node_state before calling the batch transform). Instead of
+            # raising here (which the release loop would catch, retry with the
+            # same None, and ultimately leave the waiter hanging until timeout),
+            # find the waiter by token_id and deliver the error directly.
+            error = OrchestrationInvariantError(
                 f"SharedBatchAdapter.emit() called with state_id=None for token "
                 f"{token.token_id}. This indicates an executor bug: state_id must "
                 f"be set by begin_node_state() before calling the batch transform."
             )
+            self._signal_waiters_by_token_id(token.token_id, error)
+            return
+
         key: WaiterKey = (token.token_id, state_id)
         with self._lock:
             if key in self._waiters:
@@ -233,3 +241,29 @@ class SharedBatchAdapter:
         with self._lock:
             self._waiters.clear()
             self._results.clear()
+
+    def _signal_waiters_by_token_id(self, token_id: str, error: Exception) -> None:
+        """Signal all waiters for a token_id with an error when state_id is unknown.
+
+        This handles the case where emit() is called with state_id=None (an
+        executor bug). Without state_id we can't construct the exact WaiterKey,
+        so we scan all registered waiters for matching token_id and deliver
+        the error as an ExceptionResult. This ensures waiters fail fast instead
+        of hanging until batch_wait_timeout.
+
+        If no matching waiter is found, the error is raised (no recovery possible).
+        """
+        import traceback as tb_mod
+
+        exception_result = ExceptionResult(
+            exception=error,
+            traceback="".join(tb_mod.format_exception(error)),
+        )
+        with self._lock:
+            matched_keys = [k for k in self._waiters if k[0] == token_id]
+            if not matched_keys:
+                raise error
+            for key in matched_keys:
+                self._results[key] = exception_result
+                self._waiters[key].set()
+                del self._waiters[key]
