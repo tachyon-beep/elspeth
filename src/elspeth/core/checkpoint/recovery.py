@@ -291,10 +291,11 @@ class RecoveryManager:
         if checkpoint is None:
             return []
 
-        # P1-2026-02-05: Extract row IDs from checkpoint aggregation state.
-        # These rows are already buffered and will be restored from checkpoint,
-        # so they must NOT be reprocessed (would cause duplicate buffering/outputs).
-        buffered_row_ids: set[str] = set()
+        # Extract buffered token IDs from checkpoint aggregation state.
+        # These buffered tokens will be restored from checkpoint state and must not
+        # trigger duplicate reprocessing, but row-level exclusion is unsafe when a row
+        # has mixed buffered and non-buffered incomplete tokens.
+        buffered_token_ids: set[str] = set()
         if checkpoint.aggregation_state_json:
             # Use checkpoint_loads for consistency (handles datetime type tags)
             agg_state = checkpoint_loads(checkpoint.aggregation_state_json)
@@ -302,11 +303,11 @@ class RecoveryManager:
                 # Skip metadata keys (e.g., "_version")
                 if node_id.startswith("_"):
                     continue
-                # Extract row_id from each buffered token
-                # Format: {"node_id": {"tokens": [{"row_id": "...", ...}, ...]}}
+                # Extract token_id from each buffered token
+                # Format: {"node_id": {"tokens": [{"token_id": "...", ...}, ...]}}
                 # Tier 1: checkpoint data is ours — crash on corruption, don't mask with defaults
                 for token in node_state["tokens"]:
-                    buffered_row_ids.add(token["row_id"])
+                    buffered_token_ids.add(token["token_id"])
 
         with self._db.engine.connect() as conn:
             # CORRECT SEMANTICS FOR FORK/AGGREGATION/COALESCE RECOVERY:
@@ -417,10 +418,29 @@ class RecoveryManager:
 
             unprocessed = [row.row_id for row in conn.execute(query).fetchall()]
 
-        # P1-2026-02-05: Exclude rows already buffered in checkpoint aggregation state.
-        # These rows will be restored from checkpoint state, not reprocessed.
-        if buffered_row_ids:
-            unprocessed = [row_id for row_id in unprocessed if row_id not in buffered_row_ids]
+        # Exclude rows only when ALL their incomplete leaf tokens are buffered.
+        # This avoids silently dropping rows with mixed-state tokens where one
+        # token is buffered and another incomplete token still needs processing.
+        if buffered_token_ids and unprocessed:
+            with self._db.engine.connect() as conn:
+                incomplete_tokens = conn.execute(
+                    select(tokens_table.c.row_id, tokens_table.c.token_id)
+                    .where(tokens_table.c.row_id.in_(unprocessed))
+                    .where(~tokens_table.c.token_id.in_(delegation_tokens))
+                    .where(~tokens_table.c.token_id.in_(terminal_tokens))
+                ).fetchall()
+
+            row_to_incomplete_tokens: dict[str, set[str]] = {row_id: set() for row_id in unprocessed}
+            for row_id, token_id in incomplete_tokens:
+                row_to_incomplete_tokens[row_id].add(token_id)
+
+            filtered_rows: list[str] = []
+            for row_id in unprocessed:
+                row_incomplete = row_to_incomplete_tokens[row_id]
+                if row_incomplete and row_incomplete.issubset(buffered_token_ids):
+                    continue
+                filtered_rows.append(row_id)
+            unprocessed = filtered_rows
 
         return unprocessed
 

@@ -341,6 +341,13 @@ class TestBeginOperation:
         assert op.input_data_hash is None
         assert op.input_data_ref is None
 
+    def test_operation_with_empty_input_data_records_hash(self):
+        _db, recorder, _state_id = _setup()
+
+        op = recorder.begin_operation("run-1", "source-0", "source_load", input_data={})
+
+        assert op.input_data_hash == stable_hash({})
+
     def test_input_hash_persisted_without_payload_store(self):
         """Hash must be computed even when no payload store is configured."""
         db = LandscapeDB.in_memory()
@@ -413,6 +420,15 @@ class TestCompleteOperation:
         op = recorder.get_operation(op_id)
         assert op.status == "completed"
         assert op.output_data_hash == stable_hash({"rows_loaded": 100})
+
+    def test_completes_with_empty_output_data_records_hash(self):
+        _db, recorder, _state_id, op_id = _setup_with_operation()
+
+        recorder.complete_operation(op_id, "completed", output_data={}, duration_ms=500)
+
+        op = recorder.get_operation(op_id)
+        assert op.status == "completed"
+        assert op.output_data_hash == stable_hash({})
 
     def test_output_hash_none_when_no_output_data(self):
         _db, recorder, _state_id, op_id = _setup_with_operation()
@@ -535,6 +551,30 @@ class TestCompleteOperation:
         assert completed.status == "completed"
         assert completed.output_data_ref is not None, "output_data_ref should be set when payload store is configured"
         assert completed.output_data_hash == stable_hash({"rows_loaded": 42}), "output_data_hash should be set alongside ref"
+
+    def test_empty_output_data_ref_set_with_payload_store(self, tmp_path):
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = LandscapeDB.in_memory()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        op = recorder.begin_operation("run-1", "source-0", "source_load")
+
+        recorder.complete_operation(op.operation_id, "completed", output_data={}, duration_ms=100)
+
+        completed = recorder.get_operation(op.operation_id)
+        assert completed.output_data_ref is not None
+        assert completed.output_data_hash == stable_hash({})
 
 
 class TestAllocateOperationCallIndex:

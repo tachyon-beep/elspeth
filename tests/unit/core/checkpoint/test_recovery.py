@@ -351,9 +351,16 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
         _insert_terminal_outcome(conn, run_id, "tok-child-ok", outcome=RowOutcome.COMPLETED)
         _insert_token(conn, "tok-child-pending", "row-child-pending")
 
-        # row-buffered: appears incomplete but is buffered in checkpoint state -> excluded.
+        # row-buffered: appears incomplete but all incomplete tokens are buffered
+        # in checkpoint state -> excluded.
         _insert_row(conn, run_id, "row-buffered", row_index=3, source_data_ref=None)
         _insert_token(conn, "tok-buffered", "row-buffered")
+
+        # row-mixed-buffering: one incomplete token buffered + one incomplete token
+        # not buffered -> must remain unprocessed.
+        _insert_row(conn, run_id, "row-mixed-buffering", row_index=4, source_data_ref=None)
+        _insert_token(conn, "tok-mixed-buffered", "row-mixed-buffering")
+        _insert_token(conn, "tok-mixed-pending", "row-mixed-buffering")
 
     checkpoint_manager.create_checkpoint(
         run_id=run_id,
@@ -363,12 +370,17 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
         graph=graph,
         aggregation_state={
             "_version": 1,
-            "agg-node": {"tokens": [{"row_id": "row-buffered"}]},
+            "agg-node": {
+                "tokens": [
+                    {"token_id": "tok-buffered", "row_id": "row-buffered"},
+                    {"token_id": "tok-mixed-buffered", "row_id": "row-mixed-buffering"},
+                ]
+            },
         },
     )
 
     unprocessed = recovery_manager.get_unprocessed_rows(run_id)
-    assert unprocessed == ["row-delegation-only", "row-child-pending"]
+    assert unprocessed == ["row-delegation-only", "row-child-pending", "row-mixed-buffering"]
 
 
 class _SimpleSchema(PluginSchema):
