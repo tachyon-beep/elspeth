@@ -146,7 +146,7 @@ allow_hits:
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-05-02'
-- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=dcd7d270154917c7
+- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=03d3a7a8ae0081d4
   owner: P1-2026-02-05-typecheck
   reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
   safety: isinstance() check converts PipelineRow to dict for audit trail consistency
@@ -180,6 +180,16 @@ allow_hits:
   owner: bugfix
   reason: isinstance(GateSettings) distinguishes fork-gate origin from non-fork continuation to prevent backward routing
   safety: Gate nodes route to branch_first_node; non-gate nodes advance forward via resolve_next_node
+  expires: '2026-05-15'
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=ac15baef4e834495
+  owner: bugfix
+  reason: _node_step_map.get() — gate jump target may not be in step map for pseudo-nodes
+  safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
+  expires: '2026-05-15'
+- key: engine/processor.py:R1:RowProcessor:_process_single_token:fp=54de81fe8e42ea2f
+  owner: bugfix
+  reason: _node_step_map.get() — coalesce node may not be in step map for dynamic topologies
+  safety: None result skips coalesce check gracefully; structural invariant enforced elsewhere
   expires: '2026-05-15'
 - key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d9917e18ce071880
   owner: architecture

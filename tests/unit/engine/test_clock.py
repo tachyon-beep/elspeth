@@ -263,27 +263,19 @@ class TestMockClock:
         clock.set(100.0)
         assert clock.monotonic() == 100.0
 
-    def test_set_can_go_backwards(self) -> None:
-        """set() can move time backwards (unlike real monotonic clocks)."""
+    def test_set_forward_is_allowed(self) -> None:
+        """set() can move time forward (monotonic)."""
         from elspeth.engine.clock import MockClock
 
-        clock = MockClock(start=100.0)
-        clock.set(50.0)
-        assert clock.monotonic() == 50.0
+        clock = MockClock(start=50.0)
+        clock.set(100.0)
+        assert clock.monotonic() == 100.0
 
-    def test_set_to_negative_value(self) -> None:
-        """set() allows negative values (it is just a number)."""
+    def test_set_to_zero_from_zero(self) -> None:
+        """set() to zero from zero (same value) works."""
         from elspeth.engine.clock import MockClock
 
-        clock = MockClock(start=10.0)
-        clock.set(-5.0)
-        assert clock.monotonic() == -5.0
-
-    def test_set_to_zero(self) -> None:
-        """set() to zero works."""
-        from elspeth.engine.clock import MockClock
-
-        clock = MockClock(start=99.0)
+        clock = MockClock(start=0.0)
         clock.set(0.0)
         assert clock.monotonic() == 0.0
 
@@ -306,14 +298,14 @@ class TestMockClock:
         clock.advance(5.0)
         assert clock.monotonic() == 15.0
 
-    def test_advance_then_set(self) -> None:
-        """advance() followed by set() overrides to the set value."""
+    def test_advance_then_set_forward(self) -> None:
+        """advance() followed by set() to a higher value works."""
         from elspeth.engine.clock import MockClock
 
         clock = MockClock()
         clock.advance(100.0)
-        clock.set(5.0)
-        assert clock.monotonic() == 5.0
+        clock.set(200.0)
+        assert clock.monotonic() == 200.0
 
     def test_interleaved_set_and_advance(self) -> None:
         """Interleaved set and advance operations produce correct result."""
@@ -321,8 +313,8 @@ class TestMockClock:
 
         clock = MockClock(start=0.0)
         clock.advance(10.0)  # 10.0
-        clock.set(3.0)  # 3.0
-        clock.advance(2.0)  # 5.0
+        clock.set(15.0)  # 15.0
+        clock.advance(2.0)  # 17.0
         clock.set(100.0)  # 100.0
         clock.advance(0.5)  # 100.5
         assert clock.monotonic() == 100.5
@@ -362,21 +354,112 @@ class TestMockClock:
         clock.set(42)
         assert clock.monotonic() == 42.0
 
-    def test_advance_with_inf_value(self) -> None:
-        """advance() with infinity produces infinity."""
+    def test_advance_with_inf_raises(self) -> None:
+        """advance() with infinity raises ValueError."""
         from elspeth.engine.clock import MockClock
 
         clock = MockClock(start=0.0)
-        clock.advance(math.inf)
-        assert clock.monotonic() == math.inf
+        with pytest.raises(ValueError, match="non-finite"):
+            clock.advance(math.inf)
 
-    def test_set_with_inf_value(self) -> None:
-        """set() with infinity is allowed."""
+    def test_set_with_inf_raises(self) -> None:
+        """set() with infinity raises ValueError."""
         from elspeth.engine.clock import MockClock
 
         clock = MockClock()
-        clock.set(math.inf)
-        assert clock.monotonic() == math.inf
+        with pytest.raises(ValueError, match="finite"):
+            clock.set(math.inf)
+
+
+class TestMockClockValidation:
+    """Regression tests: MockClock rejects NaN, Infinity, and non-monotonic values."""
+
+    def test_mock_clock_rejects_nan_init(self) -> None:
+        """MockClock.__init__ rejects NaN start value."""
+        from elspeth.engine.clock import MockClock
+
+        with pytest.raises(ValueError, match="finite"):
+            MockClock(start=math.nan)
+
+    def test_mock_clock_rejects_inf_init(self) -> None:
+        """MockClock.__init__ rejects Infinity start value."""
+        from elspeth.engine.clock import MockClock
+
+        with pytest.raises(ValueError, match="finite"):
+            MockClock(start=math.inf)
+
+    def test_mock_clock_rejects_neg_inf_init(self) -> None:
+        """MockClock.__init__ rejects -Infinity start value."""
+        from elspeth.engine.clock import MockClock
+
+        with pytest.raises(ValueError, match="finite"):
+            MockClock(start=-math.inf)
+
+    def test_mock_clock_rejects_nan_advance(self) -> None:
+        """MockClock.advance() rejects NaN delta."""
+        from elspeth.engine.clock import MockClock
+
+        clock = MockClock(start=0.0)
+        with pytest.raises(ValueError, match="non-finite"):
+            clock.advance(math.nan)
+
+    def test_mock_clock_rejects_negative_advance(self) -> None:
+        """MockClock.advance() rejects negative delta."""
+        from elspeth.engine.clock import MockClock
+
+        clock = MockClock(start=10.0)
+        with pytest.raises(ValueError, match="negative"):
+            clock.advance(-1.0)
+
+    def test_mock_clock_rejects_inf_advance(self) -> None:
+        """MockClock.advance() rejects Infinity delta."""
+        from elspeth.engine.clock import MockClock
+
+        clock = MockClock(start=0.0)
+        with pytest.raises(ValueError, match="non-finite"):
+            clock.advance(math.inf)
+
+    def test_mock_clock_rejects_nan_set(self) -> None:
+        """MockClock.set() rejects NaN value."""
+        from elspeth.engine.clock import MockClock
+
+        clock = MockClock(start=0.0)
+        with pytest.raises(ValueError, match="finite"):
+            clock.set(math.nan)
+
+    def test_mock_clock_rejects_backward_set(self) -> None:
+        """MockClock.set() rejects value less than current time."""
+        from elspeth.engine.clock import MockClock
+
+        clock = MockClock(start=100.0)
+        with pytest.raises(ValueError, match="monotonic"):
+            clock.set(50.0)
+
+    def test_mock_clock_rejects_neg_inf_set(self) -> None:
+        """MockClock.set() rejects -Infinity value."""
+        from elspeth.engine.clock import MockClock
+
+        clock = MockClock(start=0.0)
+        with pytest.raises(ValueError, match="finite"):
+            clock.set(-math.inf)
+
+    def test_mock_clock_advance_nan_preserves_state(self) -> None:
+        """Failed NaN advance does not change internal time."""
+        from elspeth.engine.clock import MockClock
+
+        clock = MockClock(start=10.0)
+        with pytest.raises(ValueError):
+            clock.advance(math.nan)
+        assert clock.monotonic() == 10.0
+
+    def test_mock_clock_set_backward_preserves_state(self) -> None:
+        """Failed backward set does not change internal time."""
+        from elspeth.engine.clock import MockClock
+
+        clock = MockClock(start=100.0)
+        with pytest.raises(ValueError):
+            clock.set(50.0)
+        assert clock.monotonic() == 100.0
 
 
 class TestDefaultClock:

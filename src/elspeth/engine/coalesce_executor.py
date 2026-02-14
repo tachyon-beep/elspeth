@@ -760,17 +760,28 @@ class CoalesceExecutor:
         for key in keys_to_process:
             pending = self._pending[key]
 
-            # For best_effort, always merge on timeout if anything arrived
-            if settings.policy == "best_effort" and len(pending.arrived) > 0:
-                outcome = self._execute_merge(
-                    settings=settings,
-                    node_id=node_id,
-                    pending=pending,
-                    step=step,
-                    key=key,
-                    coalesce_name=coalesce_name,
-                )
-                results.append(outcome)
+            # For best_effort, merge on timeout if anything arrived, or fail if nothing arrived
+            if settings.policy == "best_effort":
+                if len(pending.arrived) > 0:
+                    outcome = self._execute_merge(
+                        settings=settings,
+                        node_id=node_id,
+                        pending=pending,
+                        step=step,
+                        key=key,
+                        coalesce_name=coalesce_name,
+                    )
+                    results.append(outcome)
+                else:
+                    # All branches lost, no arrivals — fail the coalesce
+                    results.append(
+                        self._fail_pending(
+                            settings,
+                            key,
+                            step,
+                            failure_reason="best_effort_timeout_no_arrivals",
+                        )
+                    )
 
             # For quorum, merge on timeout only if quorum met
             elif settings.policy == "quorum":

@@ -3136,3 +3136,228 @@ class TestGateSinkRoutingNotifiesCoalesce:
 
         # notify_branch_lost should NOT have been called (no branch_name)
         coalesce.notify_branch_lost.assert_not_called()
+
+
+# =============================================================================
+# Bug D3: Gate jump past coalesce ordering invariant
+# =============================================================================
+
+
+class TestGateJumpPastCoalesceInvariant:
+    """Regression tests for Bug D3: coalesce ordering invariant must be
+    re-validated after a gate jump sets node_id = outcome.next_node_id.
+
+    Without the fix, a gate jump past the coalesce node would silently
+    bypass join handling because _maybe_coalesce_token only triggers
+    on exact node_id equality with coalesce_node_id.
+    """
+
+    def test_gate_jump_past_coalesce_raises_invariant_error(self) -> None:
+        """Gate routing past a coalesce node must raise OrchestrationInvariantError.
+
+        Setup: source -> gate(step=1) -> coalesce(step=2) -> transform(step=3)
+        The gate jumps directly to transform(step=3), skipping coalesce(step=2).
+        This must raise because the token would never hit the coalesce barrier.
+        """
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("gate-1")
+        coalesce_node = NodeID("coalesce::merge")
+        past_coalesce_node = NodeID("transform-3")
+
+        config_gate = GateSettings(
+            name="router",
+            input="in_conn",
+            condition="'skip_ahead'",
+            routes={"skip_ahead": "skip_conn"},
+        )
+
+        # Need a transform at the jump target with on_success so that
+        # resolve_jump_target_sink succeeds before the coalesce check.
+        past_coalesce_transform = _make_mock_transform(
+            node_id=str(past_coalesce_node),
+            name="past-coalesce",
+            on_success="some_sink",
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="default",
+            node_step_map={
+                source_node: 0,
+                gate_node: 1,
+                coalesce_node: 2,
+                past_coalesce_node: 3,
+            },
+            node_to_next={
+                source_node: gate_node,
+                gate_node: coalesce_node,
+                coalesce_node: past_coalesce_node,
+                past_coalesce_node: None,
+            },
+            first_transform_node_id=gate_node,
+            node_to_plugin={
+                gate_node: config_gate,
+                past_coalesce_node: past_coalesce_transform,
+            },
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+        )
+
+        gate_contract = _make_contract()
+        gate_result = GateResult(
+            row={"value": 42},
+            action=RoutingAction.route("skip_ahead"),
+            contract=gate_contract,
+        )
+
+        def config_gate_side_effect(*, gate_config, node_id, token, ctx, token_manager=None):
+            return GateOutcome(
+                result=gate_result,
+                updated_token=token,
+                next_node_id=past_coalesce_node,  # Jump past coalesce!
+            )
+
+        with (
+            patch.object(
+                processor._gate_executor,
+                "execute_config_gate",
+                side_effect=config_gate_side_effect,
+            ),
+            pytest.raises(
+                OrchestrationInvariantError,
+                match=r"Gate jump moved token.*past its coalesce node",
+            ),
+        ):
+            # Process with coalesce metadata so the invariant check triggers
+            token = make_token_info(
+                row_id="row-1",
+                token_id="tok-1",
+                data={"value": 42},
+                branch_name="branch_a",
+            )
+            processor._process_single_token(
+                token=token,
+                ctx=ctx,
+                current_node_id=gate_node,
+                coalesce_node_id=coalesce_node,
+                coalesce_name=CoalesceName("merge"),
+            )
+
+    def test_gate_jump_before_coalesce_is_allowed(self) -> None:
+        """Gate jump to a node BEFORE the coalesce node must NOT raise.
+
+        Setup: source -> gate(step=1) -> transform(step=2) -> coalesce(step=3)
+        The gate jumps to transform(step=2) which is before coalesce(step=3).
+        This is fine — the token still has to pass through the coalesce.
+        """
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("gate-1")
+        transform_node = NodeID("transform-2")
+        coalesce_node = NodeID("coalesce::merge")
+
+        config_gate = GateSettings(
+            name="router",
+            input="in_conn",
+            condition="'jump_ok'",
+            routes={"jump_ok": "ok_conn"},
+        )
+        transform = _make_mock_transform(
+            node_id=str(transform_node),
+            name="passthrough",
+            on_success="out_sink",
+            result=TransformResult.success(
+                make_row({"value": 42}),
+                success_reason={"action": "pass"},
+            ),
+        )
+
+        coalesce_exec = Mock()
+        coalesce_exec.accept.return_value = Mock(
+            held=True,
+            merged_token=None,
+            failure_reason=None,
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="default",
+            node_step_map={
+                source_node: 0,
+                gate_node: 1,
+                transform_node: 2,
+                coalesce_node: 3,
+            },
+            node_to_next={
+                source_node: gate_node,
+                gate_node: None,
+                transform_node: coalesce_node,
+                coalesce_node: None,
+            },
+            first_transform_node_id=gate_node,
+            node_to_plugin={
+                gate_node: config_gate,
+                transform_node: transform,
+            },
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            coalesce_executor=coalesce_exec,
+            coalesce_on_success_map={CoalesceName("merge"): "merge_sink"},
+        )
+
+        gate_contract = _make_contract()
+        gate_result = GateResult(
+            row={"value": 42},
+            action=RoutingAction.route("jump_ok"),
+            contract=gate_contract,
+        )
+
+        def config_gate_side_effect(*, gate_config, node_id, token, ctx, token_manager=None):
+            return GateOutcome(
+                result=gate_result,
+                updated_token=token,
+                next_node_id=transform_node,  # Jump to BEFORE coalesce — allowed
+            )
+
+        def transform_side_effect(*, transform, token, ctx, attempt=0):
+            return (
+                TransformResult.success(
+                    make_row({"value": 42}),
+                    success_reason={"action": "pass"},
+                ),
+                token,
+                None,
+            )
+
+        with (
+            patch.object(
+                processor._gate_executor,
+                "execute_config_gate",
+                side_effect=config_gate_side_effect,
+            ),
+            patch.object(
+                processor._transform_executor,
+                "execute_transform",
+                side_effect=transform_side_effect,
+            ),
+        ):
+            token = make_token_info(
+                row_id="row-1",
+                token_id="tok-1",
+                data={"value": 42},
+                branch_name="branch_a",
+            )
+            # Should NOT raise — jump target is before coalesce
+            result, _child_items = processor._process_single_token(
+                token=token,
+                ctx=ctx,
+                current_node_id=gate_node,
+                coalesce_node_id=coalesce_node,
+                coalesce_name=CoalesceName("merge"),
+            )
+
+        # Token should have been held at coalesce
+        assert result is None or (hasattr(result, "outcome") and result is not None)

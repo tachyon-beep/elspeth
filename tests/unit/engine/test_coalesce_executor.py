@@ -1440,3 +1440,133 @@ class TestFailPendingDetails:
         # require_all needs c, loss of c -> fail
         result = executor.notify_branch_lost("merge", "row_1", "c", "error")
         assert set(result.coalesce_metadata["branches_arrived"]) == {"a", "b"}
+
+
+# ===========================================================================
+# Bug D3-2: best_effort timeout with zero arrivals
+# ===========================================================================
+
+
+class TestBestEffortTimeoutZeroArrivals:
+    """Regression tests for best_effort coalesce timeout with zero arrivals.
+
+    When a pending coalesce has best_effort policy and all branches are lost
+    via notify_branch_lost (len(pending.arrived) == 0), the timeout check
+    must fail and clean up the entry rather than leaving it in _pending forever.
+    """
+
+    def test_best_effort_timeout_with_zero_arrivals_fails_and_cleans_up(self):
+        """notify_branch_lost only, clock advances past timeout, check_timeouts
+        returns a failure outcome and removes from _pending.
+        """
+        executor, _recorder, _, clock = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            policy="best_effort",
+            merge="union",
+            timeout_seconds=10.0,
+        )
+        executor.register_coalesce(s, "node_1")
+
+        # Lose branch "a" — this creates a pending entry with no arrivals
+        result_a = executor.notify_branch_lost("merge", "row_1", "a", "error_a")
+        # best_effort with 1 lost + 0 arrived < 2 total branches — still waiting
+        assert result_a is None
+
+        # Advance clock past timeout
+        clock.advance(11.0)
+
+        # check_timeouts should now detect the timed-out entry and fail it
+        results = executor.check_timeouts("merge")
+        assert len(results) == 1
+
+        outcome = results[0]
+        assert outcome.held is False
+        assert outcome.merged_token is None
+        assert outcome.failure_reason == "best_effort_timeout_no_arrivals"
+        assert outcome.outcomes_recorded is True
+
+        # The key should be removed from _pending
+        assert ("merge", "row_1") not in executor._pending
+
+        # The key should be marked as completed (for late-arrival detection)
+        assert ("merge", "row_1") in executor._completed_keys
+
+    def test_best_effort_timeout_with_arrivals_still_merges(self):
+        """Confirm the existing behavior: best_effort with arrivals merges on timeout."""
+        executor, _recorder, _, clock = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            policy="best_effort",
+            merge="union",
+            timeout_seconds=10.0,
+        )
+        executor.register_coalesce(s, "node_1")
+
+        # Accept token for branch "a"
+        outcome_a = executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
+        assert outcome_a.held is True
+
+        # Advance clock past timeout (branch "b" never arrives)
+        clock.advance(11.0)
+
+        results = executor.check_timeouts("merge")
+        assert len(results) == 1
+        assert results[0].merged_token is not None
+        assert results[0].failure_reason is None
+
+        # _pending should be cleaned up
+        assert ("merge", "row_1") not in executor._pending
+
+    def test_best_effort_timeout_zero_arrivals_with_all_branches_lost(self):
+        """When all branches are lost and timeout fires, fail cleanly."""
+        executor, _recorder, _, clock = _make_executor()
+        s = _settings(
+            branches=["a", "b", "c"],
+            policy="best_effort",
+            merge="union",
+            timeout_seconds=5.0,
+        )
+        executor.register_coalesce(s, "node_1")
+
+        # Lose branch "a" — creates pending, but _evaluate_after_loss returns None
+        # because only 1/3 branches accounted for
+        result = executor.notify_branch_lost("merge", "row_1", "a", "error_a")
+        assert result is None
+
+        # Lose branch "b" — 2/3 accounted for, still waiting
+        result = executor.notify_branch_lost("merge", "row_1", "b", "error_b")
+        assert result is None
+
+        # Advance past timeout before branch "c" is lost or arrives
+        clock.advance(6.0)
+
+        results = executor.check_timeouts("merge")
+        assert len(results) == 1
+        outcome = results[0]
+        assert outcome.failure_reason == "best_effort_timeout_no_arrivals"
+        assert outcome.outcomes_recorded is True
+        assert ("merge", "row_1") not in executor._pending
+
+    def test_best_effort_timeout_zero_arrivals_does_not_leave_entry_in_pending(self):
+        """The primary regression: ensure the entry is actually removed from _pending."""
+        executor, _, _, clock = _make_executor()
+        s = _settings(
+            branches=["a", "b"],
+            policy="best_effort",
+            merge="union",
+            timeout_seconds=3.0,
+        )
+        executor.register_coalesce(s, "node_1")
+
+        # Lose one branch (creates pending with 0 arrivals, 1 lost)
+        executor.notify_branch_lost("merge", "row_1", "a", "error")
+
+        # Verify it's in _pending before timeout
+        assert ("merge", "row_1") in executor._pending
+
+        clock.advance(4.0)
+        executor.check_timeouts("merge")
+
+        # After timeout, it MUST be gone from _pending (this was the bug)
+        assert ("merge", "row_1") not in executor._pending

@@ -212,6 +212,52 @@ class TestTokenManagerCoalesce:
         assert merged.row_data.to_dict() == {"value": 42, "mean": 10.5, "label": "A"}
 
 
+class TestTokenManagerCoalesceValidation:
+    """Regression tests: coalesce_tokens validates invariants."""
+
+    def test_coalesce_tokens_empty_parents_raises(self) -> None:
+        """Empty parents list raises OrchestrationInvariantError."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        manager, _recorder, _run_id, _source_node_id = _make_manager_context()
+
+        with pytest.raises(OrchestrationInvariantError, match="at least one parent"):
+            manager.coalesce_tokens(
+                parents=[],
+                merged_data=_make_pipeline_row({"value": 1}),
+                node_id=NodeID("coalesce_node"),
+            )
+
+    def test_coalesce_tokens_mismatched_row_ids_raises(self) -> None:
+        """Parents with different row_ids raises OrchestrationInvariantError."""
+        from elspeth.contracts.errors import OrchestrationInvariantError
+
+        manager, _recorder, run_id, source_node_id = _make_manager_context()
+
+        # Create two separate source rows (different row_ids)
+        token_a = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            source_row=_make_source_row({"value": 1}),
+        )
+        token_b = manager.create_initial_token(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=1,
+            source_row=_make_source_row({"value": 2}),
+        )
+
+        assert token_a.row_id != token_b.row_id
+
+        with pytest.raises(OrchestrationInvariantError, match="mismatched token_ids"):
+            manager.coalesce_tokens(
+                parents=[token_a, token_b],
+                merged_data=_make_pipeline_row({"value": 1}),
+                node_id=NodeID("coalesce_node"),
+            )
+
+
 class TestTokenManagerForkIsolation:
     """Test that forked tokens have isolated row_data (no shared mutable objects)."""
 

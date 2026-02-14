@@ -11,6 +11,7 @@ Tests inject MockClock to control time advancement.
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Protocol
 
@@ -73,7 +74,12 @@ class MockClock:
 
         Args:
             start: Initial monotonic time value (default 0.0).
+
+        Raises:
+            ValueError: If start is NaN or Infinity.
         """
+        if not math.isfinite(start):
+            raise ValueError(f"MockClock start must be finite, got {start}")
         self._current = start
 
     def monotonic(self) -> float:
@@ -84,11 +90,13 @@ class MockClock:
         """Advance mock time by specified seconds.
 
         Args:
-            seconds: Amount to advance (must be non-negative).
+            seconds: Amount to advance (must be non-negative and finite).
 
         Raises:
-            ValueError: If seconds is negative.
+            ValueError: If seconds is negative, NaN, or Infinity.
         """
+        if not math.isfinite(seconds):
+            raise ValueError(f"Cannot advance time by non-finite amount: {seconds}")
         if seconds < 0:
             raise ValueError(f"Cannot advance time by negative amount: {seconds}")
         self._current += seconds
@@ -97,13 +105,16 @@ class MockClock:
         """Set mock time to an absolute value.
 
         Args:
-            value: New monotonic time value.
+            value: New monotonic time value (must be finite and >= current time).
 
-        Note:
-            Unlike advance(), this can set time to any value including
-            earlier times. Use with caution - monotonic clocks shouldn't
-            go backwards in production.
+        Raises:
+            ValueError: If value is NaN, Infinity, or less than current time
+                (non-monotonic).
         """
+        if not math.isfinite(value):
+            raise ValueError(f"MockClock.set() requires a finite value, got {value}")
+        if value < self._current:
+            raise ValueError(f"MockClock.set() requires monotonic time: value={value} < current={self._current}")
         self._current = value
 
 

@@ -1181,6 +1181,38 @@ class TestIsBooleanExpression:
         """String literals are not boolean."""
         assert not ExpressionParser("'hello'").is_boolean_expression()
 
+    # =========================================================================
+    # bool() call classification (E1 bug fix)
+    # =========================================================================
+
+    def test_bool_call_classified_as_boolean(self) -> None:
+        """bool(row['x']) is always boolean — bool() returns bool."""
+        parser = ExpressionParser("bool(row['x'])")
+        assert parser.is_boolean_expression()
+        # Verify runtime behavior matches classification
+        assert parser.evaluate({"x": "truthy"}) is True
+        assert parser.evaluate({"x": ""}) is False
+
+    def test_bool_call_with_zero_args_classified_as_boolean(self) -> None:
+        """bool() with zero args is boolean — returns False."""
+        parser = ExpressionParser("bool()")
+        assert parser.is_boolean_expression()
+        assert parser.evaluate({}) is False
+
+    def test_non_bool_call_classified_as_non_boolean(self) -> None:
+        """len(row['x']) is not boolean — len() returns int."""
+        parser = ExpressionParser("len(row['x'])")
+        assert not parser.is_boolean_expression()
+        # Verify it returns int at runtime
+        assert parser.evaluate({"x": [1, 2, 3]}) == 3
+
+    def test_bool_call_in_comparison_classified_as_boolean(self) -> None:
+        """bool(row['x']) == True is boolean — comparison of bool call."""
+        parser = ExpressionParser("bool(row['x']) == True")
+        assert parser.is_boolean_expression()
+        assert parser.evaluate({"x": 1}) is True
+        assert parser.evaluate({"x": 0}) is False
+
 
 class TestExpressionParserBugFixes:
     """Tests for expression parser bug fixes."""

@@ -1822,6 +1822,21 @@ class RowProcessor:
                     if resolved_sink is not None:
                         last_on_success_sink = resolved_sink
                     node_id = outcome.next_node_id
+
+                    # Re-validate coalesce ordering invariant after gate jump.
+                    # The initial check at entry only validates the starting node.
+                    # A gate jump can move the token past its coalesce node,
+                    # which would silently bypass join handling.
+                    if coalesce_node_id is not None:
+                        jump_target_step = self._node_step_map.get(node_id)
+                        coalesce_barrier_step = self._node_step_map.get(coalesce_node_id)
+                        if jump_target_step is not None and coalesce_barrier_step is not None and jump_target_step > coalesce_barrier_step:
+                            raise OrchestrationInvariantError(
+                                f"Gate jump moved token '{current_token.token_id}' to node '{node_id}' "
+                                f"(step {jump_target_step}) which is past its coalesce node '{coalesce_node_id}' "
+                                f"(step {coalesce_barrier_step}). This would bypass join handling."
+                            )
+
                     continue
                 else:
                     # CONTINUE: config gate says "proceed to next structural node."
