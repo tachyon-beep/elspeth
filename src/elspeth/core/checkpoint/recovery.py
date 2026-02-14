@@ -422,13 +422,18 @@ class RecoveryManager:
         # This avoids silently dropping rows with mixed-state tokens where one
         # token is buffered and another incomplete token still needs processing.
         if buffered_token_ids and unprocessed:
+            incomplete_tokens: list[Row[Any]] = []
             with self._db.engine.connect() as conn:
-                incomplete_tokens = conn.execute(
-                    select(tokens_table.c.row_id, tokens_table.c.token_id)
-                    .where(tokens_table.c.row_id.in_(unprocessed))
-                    .where(~tokens_table.c.token_id.in_(delegation_tokens))
-                    .where(~tokens_table.c.token_id.in_(terminal_tokens))
-                ).fetchall()
+                for i in range(0, len(unprocessed), _METADATA_CHUNK_SIZE):
+                    chunk = unprocessed[i : i + _METADATA_CHUNK_SIZE]
+                    incomplete_tokens.extend(
+                        conn.execute(
+                            select(tokens_table.c.row_id, tokens_table.c.token_id)
+                            .where(tokens_table.c.row_id.in_(chunk))
+                            .where(~tokens_table.c.token_id.in_(delegation_tokens))
+                            .where(~tokens_table.c.token_id.in_(terminal_tokens))
+                        ).fetchall()
+                    )
 
             row_to_incomplete_tokens: dict[str, set[str]] = {row_id: set() for row_id in unprocessed}
             for row_id, token_id in incomplete_tokens:

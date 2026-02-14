@@ -383,6 +383,61 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
     assert unprocessed == ["row-delegation-only", "row-child-pending", "row-mixed-buffering"]
 
 
+def test_get_unprocessed_rows_chunks_buffered_token_query(
+    db: LandscapeDB,
+    checkpoint_manager: CheckpointManager,
+    recovery_manager: RecoveryManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: buffered-token filtering must chunk the row_id IN clause
+    to avoid exceeding SQLite's SQLITE_MAX_VARIABLE_NUMBER bind limit.
+
+    By setting _METADATA_CHUNK_SIZE=1, each row_id gets its own query.
+    The filtering logic must still produce correct results across chunks.
+    """
+    monkeypatch.setattr("elspeth.core.checkpoint.recovery._METADATA_CHUNK_SIZE", 1)
+
+    run_id = "run-chunk-buffered"
+    graph = _create_graph(node_id="checkpoint-node")
+    with db.connection() as conn:
+        _insert_run(conn, run_id, status=RunStatus.FAILED, with_contract=True)
+        _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
+        _insert_node(conn, run_id, "checkpoint-node")
+
+        # row-a: incomplete token is buffered -> excluded
+        _insert_row(conn, run_id, "row-a", row_index=0, source_data_ref=None)
+        _insert_token(conn, "tok-a", "row-a")
+
+        # row-b: incomplete token is NOT buffered -> included
+        _insert_row(conn, run_id, "row-b", row_index=1, source_data_ref=None)
+        _insert_token(conn, "tok-b", "row-b")
+
+        # row-c: incomplete token is buffered -> excluded
+        _insert_row(conn, run_id, "row-c", row_index=2, source_data_ref=None)
+        _insert_token(conn, "tok-c", "row-c")
+
+    checkpoint_manager.create_checkpoint(
+        run_id=run_id,
+        token_id="tok-a",
+        node_id="checkpoint-node",
+        sequence_number=1,
+        graph=graph,
+        aggregation_state={
+            "_version": 1,
+            "agg-node": {
+                "tokens": [
+                    {"token_id": "tok-a", "row_id": "row-a"},
+                    {"token_id": "tok-c", "row_id": "row-c"},
+                ]
+            },
+        },
+    )
+
+    unprocessed = recovery_manager.get_unprocessed_rows(run_id)
+    # row-a and row-c excluded (buffered), row-b included
+    assert unprocessed == ["row-b"]
+
+
 class _SimpleSchema(PluginSchema):
     model_config = ConfigDict(strict=False)
     id: int
