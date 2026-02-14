@@ -99,6 +99,16 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilterConfig:validate_fields_not_empty:fp=0c59e7d52c6bd5d8
+  owner: bugfix
+  reason: Config boundary — isinstance(v, str) to distinguish str vs list[str] fields config
+  safety: Rejects empty fields at config time; security transforms must scan at least one field
+  expires: '2026-05-13'
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilterConfig:validate_fields_not_empty:fp=f6cb81ae5829c500
+  owner: bugfix
+  reason: Config boundary — isinstance(name, str) validates each entry in fields list
+  safety: Rejects non-string or empty entries; prevents silent no-op security transform
+  expires: '2026-05-13'
 - key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=0bd8dc8dca329b8b
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -194,11 +204,36 @@ allow_hits:
   reason: Tier 3 boundary — .get() on Azure API response to check unknown categories
   safety: Unknown categories logged, only mapped categories used. MalformedResponseError raised if expected categories missing.
   expires: '2026-05-02'
-- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_analyze_content:fp=132e9c8653a9a14b
-  owner: architecture
-  reason: Tier 3 boundary — validates severity type from Azure API response is int
-  safety: MalformedResponseError raised if type wrong, caught as non-retryable error
-  expires: '2026-05-02'
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafetyConfig:validate_fields_not_empty:fp=315d4252d1f7df81
+  owner: bugfix
+  reason: Config boundary — isinstance(v, str) to distinguish str vs list[str] fields config
+  safety: Rejects empty fields at config time; security transforms must scan at least one field
+  expires: '2026-05-13'
+- key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafetyConfig:validate_fields_not_empty:fp=1b288bd1d554657b
+  owner: bugfix
+  reason: Config boundary — isinstance(name, str) validates each entry in fields list
+  safety: Rejects non-string or empty entries; prevents silent no-op security transform
+  expires: '2026-05-13'
+- key: plugins/transforms/azure/content_safety.py:R9:AzureContentSafety:_process_row:fp=4d56ed321651cfa7
+  owner: bugfix
+  reason: Cleanup with .pop(key, None) — state_id may not be in cache if client creation was skipped
+  safety: Returns None on missing key instead of KeyError; client was never created
+  expires: '2026-05-13'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShieldConfig:validate_fields_not_empty:fp=90457b7825f11da7
+  owner: bugfix
+  reason: Config boundary — isinstance(v, str) to distinguish str vs list[str] fields config
+  safety: Rejects empty fields at config time; security transforms must scan at least one field
+  expires: '2026-05-13'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShieldConfig:validate_fields_not_empty:fp=04dd3966444c70eb
+  owner: bugfix
+  reason: Config boundary — isinstance(name, str) validates each entry in fields list
+  safety: Rejects non-string or empty entries; prevents silent no-op security transform
+  expires: '2026-05-13'
+- key: plugins/transforms/azure/prompt_shield.py:R9:AzurePromptShield:_process_row:fp=8b8907931148cb70
+  owner: bugfix
+  reason: Cleanup with .pop(key, None) — state_id may not be in cache if client creation was skipped
+  safety: Returns None on missing key instead of KeyError; client was never created
+  expires: '2026-05-13'
 - key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_process_single_with_state:fp=69fe83d9ba6aa6e9
   owner: architecture
   reason: Tier 3 boundary — validates row field is str before sending to Azure API
@@ -256,21 +291,21 @@ allow_hits:
   reason: Tier 3 boundary — validates documentsAnalysis is list from Azure response
   safety: MalformedResponseError raised on wrong type
   expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=86268888f61bf825
-  owner: architecture
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=781ee0a35475ed23
+  owner: bugfix
   reason: Tier 3 boundary — validates each document entry is dict from Azure response
   safety: MalformedResponseError raised on wrong type
-  expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=8a246f87b27c5cb7
-  owner: architecture
+  expires: '2026-05-13'
+- key: plugins/transforms/azure/prompt_shield.py:R1:AzurePromptShield:_analyze_prompt:fp=3a290fa1ba8b3216
+  owner: bugfix
   reason: Tier 3 boundary — .get() on document dict to extract attackDetected
   safety: MalformedResponseError raised if field missing or wrong type
-  expires: '2026-05-02'
-- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=4ab43fcbe8760d53
-  owner: architecture
+  expires: '2026-05-13'
+- key: plugins/transforms/azure/prompt_shield.py:R5:AzurePromptShield:_analyze_prompt:fp=6f07f4b516d57eea
+  owner: bugfix
   reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
   safety: MalformedResponseError raised on wrong type
-  expires: '2026-05-02'
+  expires: '2026-05-13'
 - key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=bf79975bdf2ede4c
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow

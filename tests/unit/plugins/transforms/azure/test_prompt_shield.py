@@ -888,8 +888,8 @@ class TestPromptShieldBatchProcessing:
         finally:
             transform.close()
 
-    def test_multiple_documents_analysis(self, mock_httpx_client: MagicMock) -> None:
-        """Document attack is detected if any document shows attack."""
+    def test_multiple_documents_analysis_rejected_as_malformed(self, mock_httpx_client: MagicMock) -> None:
+        """Response with multiple document analyses is rejected (we submit exactly 1 document)."""
         from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 
         mock_response = _create_mock_http_response(
@@ -929,7 +929,9 @@ class TestPromptShieldBatchProcessing:
             assert isinstance(result, TransformResult)
             assert result.status == "error"
             assert result.reason is not None
-            assert result.reason["attacks"]["document_attack"] is True
+            # Cardinality mismatch is now rejected as malformed (fail-closed)
+            assert result.reason["error_type"] == "malformed_response"
+            assert "exactly 1 entry" in result.reason["message"]
         finally:
             transform.close()
 
@@ -1300,3 +1302,373 @@ class TestResourceCleanup:
         # After on_start, recorder should be captured
         transform.on_start(ctx)
         assert transform._recorder is mock_recorder
+
+
+class TestPromptShieldEmptyDocumentsAnalysis:
+    """Regression: Bug 2 — Empty documentsAnalysis treated as clean.
+
+    When analysis_type="both" or "document", Azure should return exactly 1
+    document analysis entry (matching the 1 document we submitted). An empty
+    documentsAnalysis=[] was silently accepted as "no attack detected" which
+    is a fail-OPEN vulnerability — the document was never analyzed.
+
+    The fix raises MalformedResponseError when len(documentsAnalysis) != 1,
+    which surfaces as TransformResult.error with error_type="malformed_response".
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_httpx_client(self):
+        """Patch httpx.Client to prevent real HTTP calls."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_instance = MagicMock()
+            mock_client_class.return_value = mock_instance
+            yield mock_instance
+
+    def _make_transform(self, analysis_type: str = "both"):
+        """Create a Prompt Shield transform with specified analysis_type."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt"],
+                "analysis_type": analysis_type,
+                "schema": {"mode": "observed"},
+            }
+        )
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+        return transform
+
+    def test_empty_documents_analysis_both_mode_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Empty documentsAnalysis=[] with analysis_type="both" must fail CLOSED.
+
+        Before the fix, empty list was iterated over (no items = no attacks),
+        silently passing content as safe without any document analysis.
+        """
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                "documentsAnalysis": [],  # Empty — no document was analyzed
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform(analysis_type="both")
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"prompt": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+            assert "exactly 1 entry" in result.reason["message"]
+            assert result.retryable is False
+        finally:
+            transform.close()
+
+    def test_empty_documents_analysis_document_mode_fails_closed(self, mock_httpx_client: MagicMock) -> None:
+        """Empty documentsAnalysis=[] with analysis_type="document" must fail CLOSED."""
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                "documentsAnalysis": [],
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform(analysis_type="document")
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"prompt": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason["error_type"] == "malformed_response"
+            assert "exactly 1 entry" in result.reason["message"]
+        finally:
+            transform.close()
+
+    def test_empty_documents_analysis_user_prompt_mode_irrelevant(self, mock_httpx_client: MagicMock) -> None:
+        """With analysis_type="user_prompt", documentsAnalysis is not checked.
+
+        In user_prompt mode, the code skips document analysis validation
+        entirely, so an empty list (or missing key) does not matter.
+        """
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                # documentsAnalysis not needed in user_prompt mode
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform(analysis_type="user_prompt")
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"prompt": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "success"
+        finally:
+            transform.close()
+
+    def test_single_document_analysis_accepted(self, mock_httpx_client: MagicMock) -> None:
+        """documentsAnalysis with exactly 1 entry is valid (matching our 1 submitted doc)."""
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                "documentsAnalysis": [{"attackDetected": False}],
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = self._make_transform(analysis_type="both")
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            row = make_pipeline_row({"prompt": "test", "id": 1})
+            ctx = make_mock_context()
+            transform.accept(row, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "success"
+        finally:
+            transform.close()
+
+
+class TestPromptShieldConfigFieldsValidation:
+    """Regression: Bug 3 — Prompt Shield empty fields accepted at config level.
+
+    Security transforms must scan at least one field. Empty fields config
+    means the transform does nothing (fail-OPEN). The fix adds a
+    field_validator that rejects empty strings, empty lists, and lists
+    containing empty strings.
+    """
+
+    def test_empty_list_rejected(self) -> None:
+        """fields=[] must raise ValidationError."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            AzurePromptShieldConfig.from_dict(
+                {
+                    "endpoint": "https://test.cognitiveservices.azure.com",
+                    "api_key": "test-key",
+                    "fields": [],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_empty_string_rejected(self) -> None:
+        """fields="" must raise ValidationError."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            AzurePromptShieldConfig.from_dict(
+                {
+                    "endpoint": "https://test.cognitiveservices.azure.com",
+                    "api_key": "test-key",
+                    "fields": "",
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_whitespace_only_string_rejected(self) -> None:
+        """fields="  " must raise ValidationError (whitespace-only)."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            AzurePromptShieldConfig.from_dict(
+                {
+                    "endpoint": "https://test.cognitiveservices.azure.com",
+                    "api_key": "test-key",
+                    "fields": "   ",
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_list_containing_empty_string_rejected(self) -> None:
+        """fields=[""] must raise ValidationError."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            AzurePromptShieldConfig.from_dict(
+                {
+                    "endpoint": "https://test.cognitiveservices.azure.com",
+                    "api_key": "test-key",
+                    "fields": [""],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_list_with_empty_string_among_valid_rejected(self) -> None:
+        """fields=["valid", ""] must raise ValidationError."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            AzurePromptShieldConfig.from_dict(
+                {
+                    "endpoint": "https://test.cognitiveservices.azure.com",
+                    "api_key": "test-key",
+                    "fields": ["valid", ""],
+                    "schema": {"mode": "observed"},
+                }
+            )
+        assert "fields" in str(exc_info.value).lower()
+
+    def test_valid_single_field_accepted(self) -> None:
+        """fields=["valid"] must be accepted."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+        cfg = AzurePromptShieldConfig.from_dict(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["valid"],
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert cfg.fields == ["valid"]
+
+    def test_valid_multiple_fields_accepted(self) -> None:
+        """fields=["prompt", "context"] must be accepted."""
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+        cfg = AzurePromptShieldConfig.from_dict(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt", "context"],
+                "schema": {"mode": "observed"},
+            }
+        )
+        assert cfg.fields == ["prompt", "context"]
+
+
+class TestPromptShieldRetryRaceCondition:
+    """Regression: Bug 5 — state_id captured at method entry for retry safety.
+
+    In _process_row(), ctx.state_id is captured into a local variable at method
+    entry. The finally block uses this local variable (not ctx.state_id) to
+    clean up the cached HTTP client. This prevents a race condition where
+    ctx.state_id changes between try and finally during retry.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_httpx_client(self):
+        """Patch httpx.Client to prevent real HTTP calls."""
+        with patch("httpx.Client") as mock_client_class:
+            mock_instance = MagicMock()
+            mock_client_class.return_value = mock_instance
+            yield mock_instance
+
+    def test_cleanup_uses_captured_state_id_not_ctx(self, mock_httpx_client: MagicMock) -> None:
+        """Cleanup uses the local state_id captured at method entry, not ctx.state_id.
+
+        If ctx.state_id changes during processing (e.g., retry with new state),
+        the finally block must clean up the original state_id's HTTP client.
+        """
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                "documentsAnalysis": [{"attackDetected": False}],
+            }
+        )
+        mock_httpx_client.post.return_value = mock_response
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        ctx = make_mock_context(state_id="original-state-id")
+        transform.on_start(ctx)
+
+        original_state_id = "original-state-id"
+        row = make_pipeline_row({"prompt": "test", "id": 1})
+
+        # Call _process_row, which captures state_id at entry
+        result = transform._process_row(row, ctx)
+        assert result.status == "success"
+
+        # Verify the original state_id was cleaned up (popped from cache)
+        assert original_state_id not in transform._http_clients
+
+    def test_mutated_ctx_state_id_does_not_affect_cleanup(self, mock_httpx_client: MagicMock) -> None:
+        """Even if ctx.state_id is mutated mid-flight, cleanup targets original state_id.
+
+        This simulates the retry race: ctx.state_id changes after _process_row starts
+        but before the finally block runs.
+        """
+        from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
+
+        mock_response = _create_mock_http_response(
+            {
+                "userPromptAnalysis": {"attackDetected": False},
+                "documentsAnalysis": [{"attackDetected": False}],
+            }
+        )
+
+        original_state_id = "original-state-id"
+        mutated_state_id = "mutated-state-id"
+
+        # Mutate ctx.state_id when the API is called (simulating mid-flight mutation)
+        def side_effect_mutate_ctx(*args, **kwargs):
+            ctx.state_id = mutated_state_id
+            return mock_response
+
+        mock_httpx_client.post.side_effect = side_effect_mutate_ctx
+
+        transform = AzurePromptShield(
+            {
+                "endpoint": "https://test.cognitiveservices.azure.com",
+                "api_key": "test-key",
+                "fields": ["prompt"],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        ctx = make_mock_context(state_id=original_state_id)
+        transform.on_start(ctx)
+
+        row = make_pipeline_row({"prompt": "test", "id": 1})
+        result = transform._process_row(row, ctx)
+        assert result.status == "success"
+
+        # The original state_id's client should have been cleaned up
+        assert original_state_id not in transform._http_clients
+        # The mutated state_id should NOT have a client (it was never created)
+        assert mutated_state_id not in transform._http_clients

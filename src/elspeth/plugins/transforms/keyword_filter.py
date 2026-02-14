@@ -71,12 +71,30 @@ class KeywordFilterConfig(TransformDataConfig):
         description="Regex patterns that trigger blocking",
     )
 
+    @field_validator("fields")
+    @classmethod
+    def validate_fields_not_empty(cls, v: str | list[str]) -> str | list[str]:
+        """Reject empty fields — security transform must scan at least one field."""
+        if isinstance(v, str):
+            if not v.strip():
+                raise ValueError("fields cannot be empty")
+            return v
+        if len(v) == 0:
+            raise ValueError("fields list cannot be empty — security transform must scan at least one field")
+        for i, name in enumerate(v):
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"fields[{i}] cannot be empty")
+        return v
+
     @field_validator("blocked_patterns")
     @classmethod
     def validate_patterns_not_empty(cls, v: list[str]) -> list[str]:
-        """Ensure at least one pattern is provided."""
+        """Ensure at least one non-empty pattern is provided."""
         if not v:
             raise ValueError("blocked_patterns cannot be empty")
+        for i, pattern in enumerate(v):
+            if pattern == "":
+                raise ValueError(f"blocked_patterns[{i}] cannot be empty (empty regex matches everything)")
         return v
 
 

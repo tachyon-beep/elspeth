@@ -20,7 +20,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from elspeth.contracts import Determinism
 from elspeth.contracts.plugin_context import PluginContext
@@ -91,6 +91,22 @@ class AzureContentSafetyConfig(TransformDataConfig):
         ...,
         description="Field name(s) to analyze, or 'all' for all string fields",
     )
+
+    @field_validator("fields")
+    @classmethod
+    def validate_fields_not_empty(cls, v: str | list[str]) -> str | list[str]:
+        """Reject empty fields — security transform must scan at least one field."""
+        if isinstance(v, str):
+            if not v.strip():
+                raise ValueError("fields cannot be empty")
+            return v
+        if len(v) == 0:
+            raise ValueError("fields list cannot be empty — security transform must scan at least one field")
+        for i, name in enumerate(v):
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"fields[{i}] cannot be empty")
+        return v
+
     thresholds: ContentSafetyThresholds = Field(
         ...,
         description="Per-category severity thresholds (0-6)",
@@ -280,19 +296,20 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         Returns:
             TransformResult indicating success or content violation
         """
-        if ctx.state_id is None:
+        # Capture state_id at entry — ctx is mutable and shared across retry
+        # attempts, so ctx.state_id can change between try and finally if a
+        # timeout triggers a retry with a new state_id.
+        state_id = ctx.state_id
+        if state_id is None:
             raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
         token_id = ctx.token.token_id if ctx.token is not None else None
 
         try:
-            return self._process_single_with_state(row, ctx.state_id, token_id=token_id)
+            return self._process_single_with_state(row, state_id, token_id=token_id)
         finally:
             # Clean up cached HTTP client for this state_id
             with self._http_clients_lock:
-                if ctx.state_id in self._http_clients:
-                    client = self._http_clients.pop(ctx.state_id)
-                else:
-                    client = None
+                client = self._http_clients.pop(state_id, None)
             if client is not None:
                 client.close()
 
@@ -504,9 +521,10 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                         f"Known categories: {sorted(_AZURE_CATEGORY_MAP.keys())}. "
                         f"Update _AZURE_CATEGORY_MAP to handle this category."
                     )
-                if not isinstance(item["severity"], int):
-                    raise MalformedResponseError(f"severity for {azure_category!r} must be int, got {type(item['severity']).__name__}")
-                result[internal_name] = item["severity"]
+                severity = item["severity"]
+                if type(severity) is not int or not (0 <= severity <= 6):
+                    raise MalformedResponseError(f"severity for {azure_category!r} must be int in [0, 6], got {severity!r}")
+                result[internal_name] = severity
 
             # Fail CLOSED: verify all expected categories were returned by Azure.
             # If Azure changes to only returning flagged categories, absent ones
