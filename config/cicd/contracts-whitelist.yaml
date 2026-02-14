@@ -30,6 +30,9 @@ allowed_dict_patterns:
   - "src/elspeth/engine/expression_parser.py:ExpressionParser.evaluate:row"
   - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
 
+  # Node state guard - input_data is row data (Tier 2 pipeline data)
+  - "src/elspeth/engine/executors/state_guard.py:NodeStateGuard.__init__:input_data"
+
   # Aggregation executor - checkpoint and state methods
   - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_buffered_rows:return (list)"
   - "src/elspeth/engine/executors/aggregation.py:AggregationExecutor.get_checkpoint_state:return"

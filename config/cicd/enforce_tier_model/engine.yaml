@@ -36,71 +36,81 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=7d6caeafa644ce8a
+- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=b0a2d2bb02a45a77
+  owner: architecture
+  reason: Guard auto-completes node_state as FAILED on unhandled exception — structural audit integrity guarantee
+  safety: Wraps complete_node_state in try/except; logs failure but never masks original exception
+  expires: null
+- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=494f5113c48cd952
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
   expires: '2026-05-02'
-- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=7a7fb1c0cf22d8b1
+- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=b48314307bcfa4c1
   owner: architecture
   reason: isinstance(e, TimeoutError) for retry timeout handling in batch transform path
   safety: Exception type discrimination for retry logic - required for correct timeout eviction
   expires: '2026-05-02'
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_rows:fp=06051363f1310248
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_rows:fp=6a775e3ebf45bfaa
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_tokens:fp=b2b3cfd9c4ff464d
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_tokens:fp=ada1420cb7dcbd06
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=512df894a2f21f11
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=bd3fc2b4036fec8a
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=5216f215c86ea14f
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=23ef82de5a10b716
   owner: P2-2026-02-02
   reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffer_count:fp=2af69943d496dd91
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:execute_flush:fp=0ecfec5ff2cea2f3
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:execute_flush:fp=1f141c1d28d20b1a
   owner: P2-2026-02-02
   reason: Pattern is .get() followed by explicit None check raising RuntimeError
   safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:restore_from_checkpoint:fp=6442d020c984a254
+- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=50f2fb3109b169f8
+  owner: architecture
+  reason: Outer exception handler ensures batch lifecycle cleanup when inner guard auto-fails
+  safety: Batch marked FAILED, buffers cleared, ctx.batch_token_ids reset; exception re-raised
+  expires: null
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffer_count:fp=bdb4bb4eb56e7c92
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
+    yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:restore_from_checkpoint:fp=00fa3251cc588b79
   owner: P2-2026-02-02
   reason: Version check for checkpoint format - None from missing key triggers ValueError
   safety: ValueError raised for missing or wrong version - explicit validation pattern
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_batch_id:fp=922eeb56835282e5
-  owner: P2-2026-02-02
-  reason: Testing/inspection method that needs to work with partial setups; returns None if no batch exists
-  safety: Documented as "primarily for testing" - production uses checkpoint state
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_restored_state:fp=f3d90467a9f6a7c8
-  owner: P2-2026-02-02
-  reason: Checkpoint recovery lookup - returns None if no state was restored for node
-  safety: Designed API contract - None is valid return for nodes without restored state
-  expires: null
-- key: engine/executors/aggregation.py:R5:AggregationExecutor:restore_from_checkpoint:fp=ea867007e8071a7b
+- key: engine/executors/aggregation.py:R5:AggregationExecutor:restore_from_checkpoint:fp=b01014406109b8ae
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_batch_id:fp=6d70119fe626e6c5
+  owner: P2-2026-02-02
+  reason: Testing/inspection method that needs to work with partial setups; returns None if no batch exists
+  safety: Documented as "primarily for testing" - production uses checkpoint state
+  expires: null
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_restored_state:fp=b0ec433219414183
+  owner: P2-2026-02-02
+  reason: Checkpoint recovery lookup - returns None if no state was restored for node
+  safety: Designed API contract - None is valid return for nodes without restored state
+  expires: null
 - key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=ff8235b7d923ad65
   owner: bugfix
   reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get() filters null vs non-null items

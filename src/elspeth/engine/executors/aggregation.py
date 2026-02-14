@@ -26,6 +26,7 @@ from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.clock import DEFAULT_CLOCK
+from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
 from elspeth.plugins.protocols import BatchTransformProtocol
@@ -318,7 +319,7 @@ class AggregationExecutor:
             trigger_type=trigger_type,
         )
 
-        # Step 2: Begin node state for flush operation
+        # Step 2: Prepare node state inputs
         # Wrap batch rows in a dict for node_state recording
         batch_input: dict[str, Any] = {"batch_rows": buffered_rows}
 
@@ -329,173 +330,197 @@ class AggregationExecutor:
         # Resolve step position from node_id (injected StepResolver)
         step = self._step_resolver(node_id)
 
-        state = self._recorder.begin_node_state(
+        # NodeStateGuard guarantees the node state reaches terminal status.
+        # If any post-processing step (output hashing, batch completion) raises
+        # before the state is explicitly completed, the guard auto-completes
+        # it as FAILED.  Batch lifecycle cleanup is handled separately below.
+        with NodeStateGuard(
+            self._recorder,
             token_id=representative_token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
             step_index=step,
             input_data=batch_input,
             attempt=0,
-        )
+        ) as guard:
+            # Set state_id and node_id on context for external call recording
+            # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
+            ctx.state_id = guard.state_id
+            ctx.node_id = node_id
+            # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
 
-        # Set state_id and node_id on context for external call recording
-        # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
-        ctx.state_id = state.state_id
-        ctx.node_id = node_id
-        # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
+            # Expose per-row token identity for batch transforms. This allows transforms
+            # like OpenRouterBatchLLMTransform to pass the correct token_id to audited
+            # clients, ensuring per-token telemetry correlation in multi-token batches.
+            batch_token_ids = [t.token_id for t in buffered_tokens]
+            ctx.batch_token_ids = batch_token_ids
 
-        # Expose per-row token identity for batch transforms. This allows transforms
-        # like OpenRouterBatchLLMTransform to pass the correct token_id to audited
-        # clients, ensuring per-token telemetry correlation in multi-token batches.
-        batch_token_ids = [t.token_id for t in buffered_tokens]
-        ctx.batch_token_ids = batch_token_ids
-        with self._spans.aggregation_span(
-            transform.name,
-            node_id=node_id,
-            input_hash=input_hash,
-            batch_id=batch_id,
-            token_ids=batch_token_ids,
-        ):
-            start = time.perf_counter()
+            # Track whether the batch was finalized (COMPLETED or FAILED).
+            # Used by the outer except to decide whether to fail the batch.
+            batch_finalized = False
+
             try:
-                # Pass reconstructed PipelineRow objects to batch-aware transform
-                result = transform.process(pipeline_rows, ctx)
-                duration_ms = (time.perf_counter() - start) * 1000
+                with self._spans.aggregation_span(
+                    transform.name,
+                    node_id=node_id,
+                    input_hash=input_hash,
+                    batch_id=batch_id,
+                    token_ids=batch_token_ids,
+                ):
+                    start = time.perf_counter()
+                    try:
+                        # Pass reconstructed PipelineRow objects to batch-aware transform
+                        result = transform.process(pipeline_rows, ctx)
+                        duration_ms = (time.perf_counter() - start) * 1000
+                    except BatchPendingError:
+                        # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
+                        # The batch has been submitted but isn't complete yet.
+                        # Complete node_state with PENDING status and link batch for audit trail, then re-raise.
+                        duration_ms = (time.perf_counter() - start) * 1000
+
+                        # Close node_state with "pending" status - the submission succeeded
+                        # but the result isn't available yet. This prevents orphaned OPEN states.
+                        guard.complete(
+                            NodeStateStatus.PENDING,
+                            duration_ms=duration_ms,
+                        )
+
+                        # Link batch to the aggregation state for traceability.
+                        # Keep status as "executing" but set aggregation_state_id.
+                        self._recorder.update_batch_status(
+                            batch_id=batch_id,
+                            status=BatchStatus.EXECUTING,
+                            state_id=guard.state_id,
+                        )
+
+                        # Clear batch_token_ids before re-raise to prevent stale IDs
+                        # leaking to subsequent calls (PluginContext is reused).
+                        ctx.batch_token_ids = None
+
+                        # Re-raise for orchestrator to schedule retry.
+                        # The batch remains in "executing" status, checkpoint is preserved.
+                        raise
+                    except Exception as e:
+                        duration_ms = (time.perf_counter() - start) * 1000
+
+                        # Record failure in node_state
+                        error: ExecutionError = {
+                            "exception": str(e),
+                            "type": type(e).__name__,
+                        }
+                        guard.complete(
+                            NodeStateStatus.FAILED,
+                            duration_ms=duration_ms,
+                            error=error,
+                        )
+                        raise  # Batch cleanup in outer except
+
+                # -- Post-processing (GUARDED by NodeStateGuard) --
+                # If any of the following steps raise before guard.complete()
+                # is called, the guard auto-completes the state as FAILED.
+
+                # Populate audit fields on result
+                # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.
+                # stable_hash calls canonical_json which rejects NaN, Infinity, non-serializable types.
+                # Per CLAUDE.md: plugin bugs must crash with clear error messages.
+                result.input_hash = input_hash
+                try:
+                    if result.row is not None:
+                        result.output_hash = stable_hash(result.row)
+                    elif result.rows is not None:
+                        result.output_hash = stable_hash(result.rows)
+                    else:
+                        result.output_hash = None
+                except (TypeError, ValueError) as e:
+                    raise PluginContractViolation(
+                        f"Aggregation transform '{transform.name}' emitted non-canonical data: {e}. "
+                        f"Ensure output contains only JSON-serializable types. "
+                        f"Use None instead of NaN for missing values."
+                    ) from e
+                result.duration_ms = duration_ms
+
+                # Complete node state and batch
+                if result.status == "success":
+                    # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
+                    output_data: dict[str, Any] | list[dict[str, Any]]
+                    if result.row is not None:
+                        output_data = result.row.to_dict()
+                    elif result.rows is not None:
+                        output_data = [r.to_dict() for r in result.rows]
+                    else:
+                        # Contract violation: success status requires output data
+                        raise RuntimeError(
+                            f"Aggregation transform '{transform.name}' returned success status but "
+                            f"neither row nor rows contains data. Batch-aware transforms must return "
+                            f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
+                            f"This is a plugin bug."
+                        )
+
+                    guard.complete(
+                        NodeStateStatus.COMPLETED,
+                        output_data=output_data,
+                        duration_ms=duration_ms,
+                        success_reason=result.success_reason,
+                    )
+
+                    # Transition batch to completed
+                    self._recorder.complete_batch(
+                        batch_id=batch_id,
+                        status=BatchStatus.COMPLETED,
+                        trigger_type=trigger_type,
+                        state_id=guard.state_id,
+                    )
+                    batch_finalized = True
+                else:
+                    # Transform returned error status
+                    error_info: ExecutionError = {
+                        "exception": str(result.reason) if result.reason else "Transform returned error",
+                        "type": "TransformError",
+                    }
+                    guard.complete(
+                        NodeStateStatus.FAILED,
+                        duration_ms=duration_ms,
+                        error=error_info,
+                    )
+
+                    # Transition batch to failed
+                    self._recorder.complete_batch(
+                        batch_id=batch_id,
+                        status=BatchStatus.FAILED,
+                        trigger_type=trigger_type,
+                        state_id=guard.state_id,
+                    )
+                    batch_finalized = True
+
             except BatchPendingError:
-                # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
-                # The batch has been submitted but isn't complete yet.
-                # Complete node_state with PENDING status and link batch for audit trail, then re-raise.
-                duration_ms = (time.perf_counter() - start) * 1000
-
-                # Close node_state with "pending" status - the submission succeeded
-                # but the result isn't available yet. This prevents orphaned OPEN states.
-                self._recorder.complete_node_state(
-                    state_id=state.state_id,
-                    status=NodeStateStatus.PENDING,
-                    duration_ms=duration_ms,
-                )
-
-                # Link batch to the aggregation state for traceability.
-                # Keep status as "executing" but set aggregation_state_id.
-                self._recorder.update_batch_status(
-                    batch_id=batch_id,
-                    status=BatchStatus.EXECUTING,
-                    state_id=state.state_id,
-                )
-
-                # Clear batch_token_ids before re-raise to prevent stale IDs
-                # leaking to subsequent calls (PluginContext is reused).
-                ctx.batch_token_ids = None
-
-                # Re-raise for orchestrator to schedule retry.
-                # The batch remains in "executing" status, checkpoint is preserved.
-                raise
-            except Exception as e:
-                duration_ms = (time.perf_counter() - start) * 1000
-
-                # Record failure in node_state
-                error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                }
-                self._recorder.complete_node_state(
-                    state_id=state.state_id,
-                    status=NodeStateStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=error,
-                )
-
-                # Transition batch to failed
-                self._recorder.complete_batch(
-                    batch_id=batch_id,
-                    status=BatchStatus.FAILED,
-                    trigger_type=trigger_type,
-                    state_id=state.state_id,
-                )
-
-                # Reset for next batch
+                raise  # Already handled above, just propagate
+            except Exception:
+                # Batch cleanup on ANY failure (guard handles node state).
+                # Only attempt to fail the batch if it wasn't already finalized
+                # (avoids double-write if complete_batch itself raised).
+                if not batch_finalized:
+                    try:
+                        self._recorder.complete_batch(
+                            batch_id=batch_id,
+                            status=BatchStatus.FAILED,
+                            trigger_type=trigger_type,
+                            state_id=guard.state_id,
+                        )
+                    except Exception:
+                        logger.error(
+                            "Failed to mark batch %s as FAILED during error cleanup",
+                            batch_id,
+                            exc_info=True,
+                        )
+                # Full cleanup: reset batch state, clear buffers, reset trigger
                 self._reset_batch_state(node_id)
-
-                # Clear batch_token_ids before re-raise to prevent stale IDs
-                # leaking to subsequent calls (PluginContext is reused).
+                self._buffers[node_id] = []
+                self._buffer_tokens[node_id] = []
+                self._trigger_evaluators[node_id].reset()
                 ctx.batch_token_ids = None
                 raise
 
-        # Step 4: Populate audit fields on result
-        # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.
-        # stable_hash calls canonical_json which rejects NaN, Infinity, non-serializable types.
-        # Per CLAUDE.md: plugin bugs must crash with clear error messages.
-        result.input_hash = input_hash
-        try:
-            if result.row is not None:
-                result.output_hash = stable_hash(result.row)
-            elif result.rows is not None:
-                result.output_hash = stable_hash(result.rows)
-            else:
-                result.output_hash = None
-        except (TypeError, ValueError) as e:
-            raise PluginContractViolation(
-                f"Aggregation transform '{transform.name}' emitted non-canonical data: {e}. "
-                f"Ensure output contains only JSON-serializable types. "
-                f"Use None instead of NaN for missing values."
-            ) from e
-        result.duration_ms = duration_ms
-
-        # Step 5: Complete node state
-        if result.status == "success":
-            # Extract dicts for audit trail (Tier 1: full trust - store plain dicts)
-            output_data: dict[str, Any] | list[dict[str, Any]]
-            if result.row is not None:
-                output_data = result.row.to_dict()
-            elif result.rows is not None:
-                output_data = [r.to_dict() for r in result.rows]
-            else:
-                # Contract violation: success status requires output data
-                raise RuntimeError(
-                    f"Aggregation transform '{transform.name}' returned success status but "
-                    f"neither row nor rows contains data. Batch-aware transforms must return "
-                    f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
-                    f"This is a plugin bug."
-                )
-
-            self._recorder.complete_node_state(
-                state_id=state.state_id,
-                status=NodeStateStatus.COMPLETED,
-                output_data=output_data,
-                duration_ms=duration_ms,
-                success_reason=result.success_reason,
-            )
-
-            # Transition batch to completed
-            self._recorder.complete_batch(
-                batch_id=batch_id,
-                status=BatchStatus.COMPLETED,
-                trigger_type=trigger_type,
-                state_id=state.state_id,
-            )
-        else:
-            # Transform returned error status
-            error_info: ExecutionError = {
-                "exception": str(result.reason) if result.reason else "Transform returned error",
-                "type": "TransformError",
-            }
-            self._recorder.complete_node_state(
-                state_id=state.state_id,
-                status=NodeStateStatus.FAILED,
-                duration_ms=duration_ms,
-                error=error_info,
-            )
-
-            # Transition batch to failed
-            self._recorder.complete_batch(
-                batch_id=batch_id,
-                status=BatchStatus.FAILED,
-                trigger_type=trigger_type,
-                state_id=state.state_id,
-            )
-
-        # Step 6: Save batch_id before reset (needed by caller for CONSUMED_IN_BATCH)
-        # Note: batch_id was validated at the start of this method
+        # Success cleanup: save batch_id before reset (needed by caller for CONSUMED_IN_BATCH)
         flushed_batch_id = batch_id
 
         # Reset for next batch and clear buffers

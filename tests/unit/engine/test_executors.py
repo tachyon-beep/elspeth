@@ -69,7 +69,7 @@ from elspeth.contracts.enums import (
     RowOutcome,
     TriggerType,
 )
-from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError
+from elspeth.contracts.errors import ContractMergeError, OrchestrationInvariantError, PluginContractViolation
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RouteDestination, RoutingAction
 from elspeth.contracts.schema_contract import SchemaContract
@@ -1946,3 +1946,557 @@ class TestAggregationCheckpointVersion:
 
         with pytest.raises(ValueError, match="Incompatible checkpoint version"):
             executor.restore_from_checkpoint({"agg_1": {"tokens": []}})
+
+
+# =============================================================================
+# TestNodeStateGuard
+# =============================================================================
+
+
+class TestNodeStateGuard:
+    """Unit tests for NodeStateGuard context manager.
+
+    The guard encodes a structural invariant: every opened node_state reaches
+    exactly one terminal status (COMPLETED or FAILED).  These tests verify
+    the guard's behavior in isolation from executor logic.
+
+    Regression: B1/B2 — executor terminality bugs where post-processing
+    failures left node_states permanently OPEN in the audit trail.
+    """
+
+    def test_normal_exit_without_complete_does_not_auto_fail(self) -> None:
+        """If __exit__ sees no exception, guard does NOT auto-complete.
+
+        The caller is responsible for calling complete() before the block
+        exits normally.  If they forget, that's a programming error that
+        the guard deliberately does NOT mask.
+        """
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with guard:
+            pass  # Don't call complete()
+
+        # begin_node_state was called (in __enter__)
+        recorder.begin_node_state.assert_called_once()
+        # complete_node_state was NOT called (no exception, caller didn't complete)
+        recorder.complete_node_state.assert_not_called()
+
+    def test_exception_auto_completes_as_failed(self) -> None:
+        """Unhandled exception triggers auto-complete as FAILED."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(ValueError, match="test crash"), guard:
+            raise ValueError("test crash")
+
+        # Auto-completed as FAILED
+        recorder.complete_node_state.assert_called_once()
+        kwargs = recorder.complete_node_state.call_args[1]
+        assert kwargs["status"] == NodeStateStatus.FAILED
+        assert kwargs["state_id"] == "state_001"
+        assert "test crash" in kwargs["error"]["exception"]
+        assert kwargs["error"]["type"] == "ValueError"
+        assert kwargs["error"]["phase"] == "executor_post_process"
+        assert kwargs["duration_ms"] >= 0
+
+    def test_explicit_complete_prevents_auto_fail(self) -> None:
+        """If caller calls complete() before exception, guard is no-op."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(RuntimeError, match="post-complete crash"), guard:
+            guard.complete(NodeStateStatus.COMPLETED, duration_ms=10.0)
+            raise RuntimeError("post-complete crash")
+
+        # Only one complete_node_state call (the explicit one)
+        recorder.complete_node_state.assert_called_once()
+        kwargs = recorder.complete_node_state.call_args[1]
+        assert kwargs["status"] == NodeStateStatus.COMPLETED
+
+    def test_state_id_accessible_inside_block(self) -> None:
+        """guard.state_id is available after __enter__."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with guard:
+            assert guard.state_id == "state_001"
+            assert guard.state.state_id == "state_001"
+            assert guard.completed is False
+
+    def test_state_id_before_enter_raises(self) -> None:
+        """Accessing state_id before __enter__ raises OrchestrationInvariantError."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        guard = NodeStateGuard(
+            _make_recorder(),
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(OrchestrationInvariantError, match="before __enter__"):
+            _ = guard.state_id
+
+    def test_auto_fail_when_recorder_down_logs_and_propagates(self) -> None:
+        """If recorder.complete_node_state fails during auto-fail, original exception propagates."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        recorder.complete_node_state.side_effect = RuntimeError("DB is down")
+        guard = NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        # Original exception must propagate, not the recorder error
+        with pytest.raises(ValueError, match="original error"), guard:
+            raise ValueError("original error")
+
+    def test_attempt_passed_to_begin_node_state(self) -> None:
+        """attempt parameter is forwarded to begin_node_state."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        recorder = _make_recorder()
+        with NodeStateGuard(
+            recorder,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=2,
+            input_data={"v": 1},
+            attempt=3,
+        ) as guard:
+            guard.complete(NodeStateStatus.COMPLETED, duration_ms=1.0)
+
+        kwargs = recorder.begin_node_state.call_args[1]
+        assert kwargs["attempt"] == 3
+        assert kwargs["step_index"] == 2
+
+
+# =============================================================================
+# Regression: B1 — TransformExecutor post-processing terminality
+# =============================================================================
+
+
+class TestTransformExecutorTerminality:
+    """Regression tests for B1: TransformExecutor post-processing failures.
+
+    Before the NodeStateGuard fix, failures in output hashing or contract
+    evolution occurred OUTSIDE the try/except block, leaving node_states
+    permanently OPEN in the audit trail.
+
+    These tests verify that post-processing failures are caught by the guard
+    and result in FAILED node_states, not orphan OPEN states.
+    """
+
+    def test_output_hash_failure_marks_state_failed(self) -> None:
+        """Output hash failure (non-canonical data) → state FAILED, not OPEN.
+
+        Regression: B1 — stable_hash raises PluginContractViolation for
+        NaN/Infinity output, but this happened after the old try/except,
+        leaving the state OPEN.
+        """
+        from elspeth.core.canonical import stable_hash
+
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform()
+
+        # Make transform return a row that will fail hashing
+        # (inject side effect: process succeeds but output_hash computation raises)
+        contract = _make_contract()
+        good_row = make_row({"value": "test"}, contract=contract)
+        transform.process.return_value = TransformResult.success(
+            good_row,
+            success_reason={"action": "tested"},
+        )
+
+        token = _make_token()
+        ctx = _make_ctx()
+
+        # Monkey-patch stable_hash to fail on the second call (output hash)
+        # First call is input_hash (succeeds), second is output_hash (fails)
+        original_stable_hash = stable_hash
+        call_count = 0
+
+        def failing_hash(data: Any) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return original_stable_hash(data)  # input hash succeeds
+            raise ValueError("NaN detected in output")
+
+        import elspeth.engine.executors.transform as transform_mod
+
+        original_ref = transform_mod.stable_hash
+        transform_mod.stable_hash = failing_hash
+        try:
+            with pytest.raises(PluginContractViolation, match="non-canonical data"):
+                executor.execute_transform(transform, token, ctx)
+        finally:
+            transform_mod.stable_hash = original_ref
+
+        # State must be FAILED (auto-completed by guard), not OPEN
+        recorder.complete_node_state.assert_called_once()
+        kwargs = recorder.complete_node_state.call_args[1]
+        assert kwargs["status"] == NodeStateStatus.FAILED
+        assert "executor_post_process" in kwargs["error"]["phase"]
+
+    def test_contract_evolution_failure_marks_state_failed(self) -> None:
+        """Contract evolution failure → state FAILED, not COMPLETED-then-crash.
+
+        Regression: B1 — before the fix, contract evolution happened AFTER
+        complete(COMPLETED), so a failure left a misleading COMPLETED state.
+        Now evolution happens BEFORE complete(), so the guard catches it.
+        """
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform(adds_fields=True)
+
+        contract = _make_contract()
+        # Return a row with a new field (triggers contract evolution)
+        output_row = make_row({"value": "test", "new_field": "added"}, contract=contract)
+        transform.process.return_value = TransformResult.success(
+            output_row,
+            success_reason={"action": "tested"},
+        )
+
+        token = _make_token()
+        ctx = _make_ctx()
+
+        # Make contract propagation fail
+        recorder.update_node_output_contract.side_effect = RuntimeError("contract evolution failed")
+
+        with pytest.raises(RuntimeError, match="contract evolution failed"):
+            executor.execute_transform(transform, token, ctx)
+
+        # State must be FAILED (guard auto-complete), NOT COMPLETED
+        recorder.complete_node_state.assert_called_once()
+        kwargs = recorder.complete_node_state.call_args[1]
+        assert kwargs["status"] == NodeStateStatus.FAILED
+        assert kwargs["error"]["phase"] == "executor_post_process"
+
+    def test_successful_transform_still_completes_normally(self) -> None:
+        """Sanity: guard does not interfere with normal success path."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform()
+        contract = _make_contract()
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "test"}, contract=contract),
+            success_reason={"action": "tested"},
+        )
+        token = _make_token()
+        ctx = _make_ctx()
+
+        result, _updated_token, error_sink = executor.execute_transform(transform, token, ctx)
+
+        assert result.status == "success"
+        assert error_sink is None
+        recorder.complete_node_state.assert_called_once()
+        kwargs = recorder.complete_node_state.call_args[1]
+        assert kwargs["status"] == NodeStateStatus.COMPLETED
+
+
+# =============================================================================
+# Regression: B2 — AggregationExecutor post-processing terminality
+# =============================================================================
+
+
+class TestAggregationExecutorTerminality:
+    """Regression tests for B2: AggregationExecutor post-processing failures.
+
+    Before the NodeStateGuard fix, output hashing failure in execute_flush()
+    left the node_state OPEN and the batch in EXECUTING state permanently.
+
+    These tests verify that post-processing failures are caught by the guard,
+    the batch is marked FAILED, and buffers are cleared for recovery.
+    """
+
+    @staticmethod
+    def _make_agg_executor(
+        count: int = 2,
+    ) -> tuple[AggregationExecutor, MagicMock, NodeID]:
+        """Create executor + mock recorder + node_id."""
+        nid = NodeID("agg_1")
+        recorder = _make_recorder()
+        settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_stats",
+            input="default",
+            trigger=TriggerConfig(count=count),
+        )
+        executor = AggregationExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            run_id="test-run",
+            aggregation_settings={nid: settings},
+        )
+        return executor, recorder, nid
+
+    def test_output_hash_failure_marks_state_and_batch_failed(self) -> None:
+        """Output hash failure → state FAILED (guard) AND batch FAILED, buffers cleared.
+
+        Regression: B2 — stable_hash raises for non-canonical data after
+        transform.process() succeeds, but this was outside the old try/except.
+        """
+        executor, recorder, nid = self._make_agg_executor(count=2)
+        contract = _make_contract()
+
+        executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
+        executor.buffer_row(nid, _make_token(data={"value": "b"}, token_id="t2", contract=contract))
+
+        transform = MagicMock()
+        transform.name = "agg_transform"
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "aggregated"}, contract=contract),
+            success_reason={"action": "aggregated"},
+        )
+        ctx = _make_ctx()
+
+        # Make output hash fail (simulating NaN in transform output)
+        import elspeth.engine.executors.aggregation as agg_mod
+
+        original_hash = agg_mod.stable_hash
+        call_count = 0
+
+        def failing_hash(data: Any) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return original_hash(data)  # input hash succeeds
+            raise ValueError("NaN detected in output")
+
+        agg_mod.stable_hash = failing_hash
+        try:
+            with pytest.raises(PluginContractViolation, match="non-canonical data"):
+                executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
+        finally:
+            agg_mod.stable_hash = original_hash
+
+        # Node state: FAILED (auto-completed by guard)
+        # Find the FAILED call — guard auto-completes with phase="executor_post_process"
+        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) >= 1
+        # At least one FAILED call should have the guard's phase tag
+        guard_fail = [c for c in failed_calls if c[1].get("error", {}).get("phase") == "executor_post_process"]
+        assert len(guard_fail) == 1
+
+        # Batch: FAILED (outer except handler)
+        batch_failed = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.FAILED]
+        assert len(batch_failed) >= 1
+
+        # Buffers cleared for recovery
+        assert executor.get_buffer_count(nid) == 0
+
+    def test_batch_complete_failure_still_clears_buffers(self) -> None:
+        """If complete_batch itself fails, buffers are still cleared.
+
+        Edge case: guard completes the node state, but complete_batch
+        raises (e.g., DB write failure). The outer except must still
+        clean up buffers so the executor isn't stuck.
+        """
+        executor, recorder, nid = self._make_agg_executor(count=1)
+        contract = _make_contract()
+
+        executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
+
+        transform = MagicMock()
+        transform.name = "agg_transform"
+        # Transform crashes — inner except completes guard, then outer except cleans up
+        transform.process.side_effect = RuntimeError("plugin crash")
+        ctx = _make_ctx()
+
+        # Make complete_batch fail (DB is down during cleanup)
+        recorder.complete_batch.side_effect = RuntimeError("DB down")
+
+        with pytest.raises(RuntimeError, match="plugin crash"):
+            executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
+
+        # Despite complete_batch failing, buffers must be cleared
+        assert executor.get_buffer_count(nid) == 0
+        assert ctx.batch_token_ids is None
+
+    def test_successful_flush_still_completes_normally(self) -> None:
+        """Sanity: guard does not interfere with normal flush success path."""
+        executor, recorder, nid = self._make_agg_executor(count=1)
+        contract = _make_contract()
+
+        executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
+
+        transform = MagicMock()
+        transform.name = "agg_transform"
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "aggregated"}, contract=contract),
+            success_reason={"action": "aggregated"},
+        )
+        ctx = _make_ctx()
+
+        result, tokens, _batch_id = executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
+
+        assert result.status == "success"
+        assert len(tokens) == 1
+
+        # Verify batch completed (not failed)
+        completed_calls = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.COMPLETED]
+        assert len(completed_calls) == 1
+
+
+# =============================================================================
+# Regression: B3 — SinkExecutor begin_node_state mid-batch failure
+# =============================================================================
+
+
+class TestSinkExecutorTerminality:
+    """Regression tests for B3: SinkExecutor begin_node_state failures.
+
+    Before the fix, if begin_node_state failed partway through the token
+    loop, previously opened states were left permanently OPEN.  The fix
+    wraps the loop in try/except to complete opened states as FAILED.
+    """
+
+    def test_begin_node_state_mid_batch_failure_completes_opened_states(self) -> None:
+        """begin_node_state failing on 2nd token → 1st state completed as FAILED.
+
+        Regression: B3 — the state-opening loop had no try/except, so a
+        failure after opening some states left them orphaned OPEN.
+        """
+        recorder = _make_recorder()
+
+        # First call succeeds, second raises
+        state_1 = Mock(state_id="state_001")
+        recorder.begin_node_state.side_effect = [state_1, RuntimeError("DB connection lost")]
+
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        tokens = [
+            _make_token(data={"value": "a"}, token_id="t1", contract=contract),
+            _make_token(data={"value": "b"}, token_id="t2", contract=contract),
+        ]
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(RuntimeError, match="DB connection lost"):
+            executor.write(
+                sink,
+                tokens,
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        # First state must be completed as FAILED (not left OPEN)
+        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 1
+        assert failed_calls[0][1]["state_id"] == "state_001"
+        assert failed_calls[0][1]["error"]["phase"] == "begin_node_state"
+
+        # Sink write should NOT have been called (failure happened before write)
+        sink.write.assert_not_called()
+
+    def test_begin_node_state_first_token_failure_no_states_to_clean(self) -> None:
+        """begin_node_state failing on 1st token → no states to clean up.
+
+        When the first begin_node_state fails, there are no opened states
+        to complete.  The exception should propagate cleanly.
+        """
+        recorder = _make_recorder()
+        recorder.begin_node_state.side_effect = RuntimeError("DB down from start")
+
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        token = _make_token()
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(RuntimeError, match="DB down from start"):
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        # No states were opened, so no cleanup needed
+        recorder.complete_node_state.assert_not_called()
+        sink.write.assert_not_called()
+
+    def test_begin_node_state_third_of_three_fails(self) -> None:
+        """begin_node_state failing on 3rd of 3 tokens → first 2 states FAILED.
+
+        Verifies correct handling when multiple states need cleanup.
+        """
+        recorder = _make_recorder()
+
+        state_1 = Mock(state_id="state_001")
+        state_2 = Mock(state_id="state_002")
+        recorder.begin_node_state.side_effect = [state_1, state_2, RuntimeError("out of IDs")]
+
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        tokens = [
+            _make_token(data={"value": "a"}, token_id="t1", contract=contract),
+            _make_token(data={"value": "b"}, token_id="t2", contract=contract),
+            _make_token(data={"value": "c"}, token_id="t3", contract=contract),
+        ]
+        sink = _make_sink()
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(RuntimeError, match="out of IDs"):
+            executor.write(
+                sink,
+                tokens,
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        # Both opened states must be FAILED
+        failed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 2
+        failed_state_ids = {c[1]["state_id"] for c in failed_calls}
+        assert failed_state_ids == {"state_001", "state_002"}

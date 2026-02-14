@@ -146,18 +146,35 @@ class SinkExecutor:
         sink_node_id: str = sink.node_id
 
         states: list[tuple[TokenInfo, NodeStateOpen]] = []
-        for token in tokens:
-            # Extract dict from PipelineRow for Landscape recording
-            # Landscape stores raw dicts, not PipelineRow objects
-            input_dict = token.row_data.to_dict()
-            state = self._recorder.begin_node_state(
-                token_id=token.token_id,
-                node_id=sink_node_id,
-                run_id=ctx.run_id,
-                step_index=step_in_pipeline,
-                input_data=input_dict,
-            )
-            states.append((token, state))
+        try:
+            for token in tokens:
+                # Extract dict from PipelineRow for Landscape recording
+                # Landscape stores raw dicts, not PipelineRow objects
+                input_dict = token.row_data.to_dict()
+                state = self._recorder.begin_node_state(
+                    token_id=token.token_id,
+                    node_id=sink_node_id,
+                    run_id=ctx.run_id,
+                    step_index=step_in_pipeline,
+                    input_data=input_dict,
+                )
+                states.append((token, state))
+        except Exception as e:
+            # If begin_node_state fails mid-batch, previously opened states
+            # are left OPEN.  Complete them as FAILED before re-raising.
+            # Fix for B3: sink state-opening loop terminality.
+            if states:
+                begin_error: ExecutionError = {
+                    "exception": str(e),
+                    "type": type(e).__name__,
+                    "phase": "begin_node_state",
+                }
+                self._complete_states_failed(
+                    states=states,
+                    duration_ms=0.0,
+                    error=begin_error,
+                )
+            raise
         # Synchronize context contract to the sink-bound tokens.
         # Sinks (e.g., headers: original) lazily capture ctx.contract during write().
         # For mixed batches, merge contracts to preserve all available header lineage.
