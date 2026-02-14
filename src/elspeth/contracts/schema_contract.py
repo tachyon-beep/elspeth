@@ -519,10 +519,23 @@ class PipelineRow:
         Args:
             data: Row data with normalized field names as keys
             contract: Schema contract for name resolution and validation
+
+        Raises:
+            TypeError: If data is not exactly a dict (Tier 1 enforcement).
+                Non-dict inputs (e.g., list of tuples) would be silently coerced
+                by dict(), masking data corruption on audit restore paths.
         """
+        # Tier 1 enforcement: row data is system-owned after ingestion.
+        # Coercing non-dict types (e.g., list of tuples via dict()) would mask
+        # corruption in checkpoint restore and audit replay paths.
+        if type(data) is not dict:
+            raise TypeError(
+                f"PipelineRow requires exactly dict, got {type(data).__name__}. "
+                f"Non-dict input suggests data corruption on a Tier 1 restore path."
+            )
         # Store as immutable view to prevent mutation after audit recording
         # Per CLAUDE.md Tier 1: audit data must not be modified
-        self._data = types.MappingProxyType(dict(data))
+        self._data = types.MappingProxyType(data.copy())
         self._contract = contract
 
     def __setitem__(self, key: str, value: Any) -> None:

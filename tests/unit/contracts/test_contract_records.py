@@ -459,6 +459,162 @@ class TestContractRecordsIntegration:
         violations = restored_contract.validate({"customer_id": "C123", "amount": 100})
         assert violations == []
 
+    def test_from_json_rejects_invalid_mode(self) -> None:
+        """from_json() rejects invalid mode values (Tier 1 audit integrity).
+
+        Regression test for P1-2026-02-14: ContractAuditRecord accepted invalid
+        mode strings like "BROKEN" because Literal type hints are static-only.
+        Invalid modes silently change enforcement semantics (e.g., mode="BROKEN"
+        would skip FIXED-mode extra-field rejection).
+        """
+        from elspeth.contracts.contract_records import ContractAuditRecord
+
+        # Build valid JSON with invalid mode
+        valid_record = ContractAuditRecord.from_contract(
+            SchemaContract(
+                mode="FIXED",
+                fields=(make_field("x", int, original_name="X", required=True, source="declared"),),
+                locked=True,
+            )
+        )
+        json_str = valid_record.to_json()
+        # Tamper with mode
+        tampered = json_str.replace('"FIXED"', '"BROKEN"')
+
+        with pytest.raises(ValueError, match="Invalid contract mode 'BROKEN'"):
+            ContractAuditRecord.from_json(tampered)
+
+    def test_from_json_rejects_invalid_source(self) -> None:
+        """from_json() rejects invalid field source values (Tier 1 audit integrity).
+
+        Regression test for P1-2026-02-14: Invalid source values like "mystery"
+        were accepted without error, silently corrupting field provenance.
+        """
+        from elspeth.contracts.contract_records import ContractAuditRecord
+
+        valid_record = ContractAuditRecord.from_contract(
+            SchemaContract(
+                mode="OBSERVED",
+                fields=(make_field("x", int, original_name="X", required=False, source="inferred"),),
+                locked=True,
+            )
+        )
+        json_str = valid_record.to_json()
+        tampered = json_str.replace('"inferred"', '"mystery"')
+
+        with pytest.raises(ValueError, match="Invalid field source 'mystery'"):
+            ContractAuditRecord.from_json(tampered)
+
+    def test_from_json_rejects_invalid_python_type(self) -> None:
+        """from_json() rejects invalid python_type values (Tier 1 audit integrity).
+
+        Regression test for P1-2026-02-14: Unknown python_type values would
+        propagate to to_schema_contract() and cause a KeyError without a clear
+        corruption message.
+        """
+        from elspeth.contracts.contract_records import ContractAuditRecord
+
+        valid_record = ContractAuditRecord.from_contract(
+            SchemaContract(
+                mode="FIXED",
+                fields=(make_field("x", int, original_name="X", required=True, source="declared"),),
+                locked=True,
+            )
+        )
+        json_str = valid_record.to_json()
+        tampered = json_str.replace('"int"', '"vector"')
+
+        with pytest.raises(ValueError, match="Invalid python_type 'vector'"):
+            ContractAuditRecord.from_json(tampered)
+
+    def test_to_schema_contract_rejects_invalid_mode(self) -> None:
+        """to_schema_contract() rejects records with invalid mode.
+
+        Regression test for P1-2026-02-14: Manually constructed records with
+        invalid mode could be converted to live SchemaContract objects that
+        silently change enforcement behavior.
+        """
+        from elspeth.contracts.contract_records import (
+            ContractAuditRecord,
+            FieldAuditRecord,
+        )
+
+        record = ContractAuditRecord(
+            mode="BROKEN",  # type: ignore[arg-type]
+            locked=True,
+            version_hash="anything",
+            fields=(
+                FieldAuditRecord(
+                    normalized_name="x",
+                    original_name="X",
+                    python_type="int",
+                    required=True,
+                    source="declared",
+                ),
+            ),
+        )
+
+        with pytest.raises(ValueError, match="Invalid contract mode 'BROKEN'"):
+            record.to_schema_contract()
+
+    def test_to_schema_contract_rejects_invalid_source(self) -> None:
+        """to_schema_contract() rejects records with invalid field source.
+
+        Regression test for P1-2026-02-14: Invalid source values like "mystery"
+        were silently accepted and passed through to live FieldContract objects.
+        """
+        from elspeth.contracts.contract_records import (
+            ContractAuditRecord,
+            FieldAuditRecord,
+        )
+
+        record = ContractAuditRecord(
+            mode="FIXED",
+            locked=True,
+            version_hash="anything",
+            fields=(
+                FieldAuditRecord(
+                    normalized_name="x",
+                    original_name="X",
+                    python_type="int",
+                    required=True,
+                    source="mystery",  # type: ignore[arg-type]
+                ),
+            ),
+        )
+
+        with pytest.raises(ValueError, match="Invalid field source 'mystery'"):
+            record.to_schema_contract()
+
+    def test_to_schema_contract_rejects_invalid_python_type(self) -> None:
+        """to_schema_contract() rejects records with invalid python_type.
+
+        Regression test for P1-2026-02-14: Unknown python_type values would
+        produce a KeyError instead of a clear corruption message.
+        """
+        from elspeth.contracts.contract_records import (
+            ContractAuditRecord,
+            FieldAuditRecord,
+        )
+
+        record = ContractAuditRecord(
+            mode="FIXED",
+            locked=True,
+            version_hash="anything",
+            fields=(
+                FieldAuditRecord(
+                    normalized_name="x",
+                    original_name="X",
+                    python_type="tensor",
+                    required=True,
+                    source="declared",
+                ),
+            ),
+        )
+
+        with pytest.raises(ValueError, match="Invalid python_type 'tensor'"):
+            record.to_schema_contract()
+
     def test_audit_record_with_validation_errors(self, sample_schema_contract: SchemaContract) -> None:
         """Audit record can capture validation errors."""
         from elspeth.contracts.contract_records import ValidationErrorWithContract

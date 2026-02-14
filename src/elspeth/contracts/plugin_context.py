@@ -175,13 +175,17 @@ class PluginContext:
     def update_checkpoint(self, data: dict[str, Any]) -> None:
         """Update checkpoint state with new data.
 
-        Merges the provided data into the existing checkpoint.
-        Used by batch transforms to save progress after submission.
+        Merges the provided data into whichever checkpoint is currently
+        authoritative: the restored batch checkpoint (if present for this
+        node), or the local checkpoint otherwise.
 
         Args:
             data: Checkpoint data to merge (batch_id, row_mapping, etc.)
         """
-        self._checkpoint.update(data)
+        if self.node_id and self.node_id in self._batch_checkpoints and self._batch_checkpoints[self.node_id]:
+            self._batch_checkpoints[self.node_id].update(data)
+        else:
+            self._checkpoint.update(data)
 
     def clear_checkpoint(self) -> None:
         """Clear checkpoint state after batch completion.

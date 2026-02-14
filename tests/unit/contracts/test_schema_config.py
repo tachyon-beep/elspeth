@@ -537,3 +537,140 @@ class TestContractFieldSubsetValidation:
                     "guaranteed_fields": ["typo_field"],
                 }
             )
+
+
+class TestSchemaConfigRequiredBoolValidation:
+    """Regression tests for P1: SchemaConfig.from_dict coerces non-boolean required values.
+
+    Bug: P1-2026-02-14-schemaconfig-from-dict-silently-coerces-non-boolean-required-values-with
+
+    The dict-form field spec branch (name/type/required) must strictly
+    validate that 'required' is a bool if present. Truthiness coercion
+    causes "false" (string) to become required=True, inverting user intent.
+    """
+
+    def test_string_false_required_raises_valueerror(self) -> None:
+        """String 'false' in required field raises ValueError, not coerced to True."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"'required' must be a bool.*got str"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "fixed",
+                    "fields": [{"name": "score", "type": "float", "required": "false"}],
+                }
+            )
+
+    def test_string_true_required_raises_valueerror(self) -> None:
+        """String 'true' in required field raises ValueError."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"'required' must be a bool.*got str"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "fixed",
+                    "fields": [{"name": "score", "type": "float", "required": "true"}],
+                }
+            )
+
+    def test_int_required_raises_valueerror(self) -> None:
+        """Integer in required field raises ValueError."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"'required' must be a bool.*got int"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "fixed",
+                    "fields": [{"name": "score", "type": "float", "required": 1}],
+                }
+            )
+
+    def test_zero_required_raises_valueerror(self) -> None:
+        """Zero in required field raises ValueError (would coerce to True via `not 0`)."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"'required' must be a bool.*got int"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "fixed",
+                    "fields": [{"name": "score", "type": "float", "required": 0}],
+                }
+            )
+
+    def test_none_required_raises_valueerror(self) -> None:
+        """None in required field raises ValueError."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"'required' must be a bool.*got NoneType"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "fixed",
+                    "fields": [{"name": "score", "type": "float", "required": None}],
+                }
+            )
+
+    def test_bool_true_required_accepted(self) -> None:
+        """Boolean True in required field is accepted."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        config = SchemaConfig.from_dict(
+            {
+                "mode": "fixed",
+                "fields": [{"name": "score", "type": "float", "required": True}],
+            }
+        )
+        assert config.fields is not None
+        assert config.fields[0].required is True
+
+    def test_bool_false_required_accepted(self) -> None:
+        """Boolean False in required field is accepted (makes field optional)."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        config = SchemaConfig.from_dict(
+            {
+                "mode": "fixed",
+                "fields": [{"name": "score", "type": "float", "required": False}],
+            }
+        )
+        assert config.fields is not None
+        assert config.fields[0].required is False
+
+    def test_roundtrip_preserves_required_semantics(self) -> None:
+        """to_dict/from_dict round-trip preserves required=False correctly."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        original = SchemaConfig.from_dict(
+            {
+                "mode": "fixed",
+                "fields": ["id: int", "score: float?"],
+            }
+        )
+        serialized = original.to_dict()
+        roundtrip = SchemaConfig.from_dict(serialized)
+        assert roundtrip.fields is not None
+        assert roundtrip.fields[0].required is True
+        assert roundtrip.fields[1].required is False
+
+    def test_non_string_name_in_dict_form_raises(self) -> None:
+        """Non-string 'name' in dict-form field spec raises ValueError."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"'name' must be a string.*got int"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "fixed",
+                    "fields": [{"name": 123, "type": "int"}],
+                }
+            )
+
+    def test_non_string_type_in_dict_form_raises(self) -> None:
+        """Non-string 'type' in dict-form field spec raises ValueError."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"'type' must be a string.*got int"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "fixed",
+                    "fields": [{"name": "score", "type": 42}],
+                }
+            )

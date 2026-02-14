@@ -526,15 +526,18 @@ class TestPropagateContractNonPrimitiveTypes:
         metadata_field = output_contract.get_field("metadata")
         assert metadata_field.python_type is object
 
-    def test_unsupported_non_dict_list_type_is_still_skipped(self, input_contract: SchemaContract) -> None:
-        """Unsupported non-dict/list values preserve existing skip behavior."""
+    def test_unsupported_type_preserved_as_object(self, input_contract: SchemaContract) -> None:
+        """Unsupported types are preserved as object in contract (not silently dropped).
 
-        class _CustomUnsupported:
-            pass
+        Regression test for P1 bug: propagate_contract silently dropped fields
+        with unsupported types (e.g., Decimal, tuple, custom classes), causing
+        contract/data divergence and FIXED mode access failures.
+        """
+        from decimal import Decimal
 
         output_row = {
             "id": 1,
-            "custom": _CustomUnsupported(),
+            "price": Decimal("12.34"),
         }
 
         output_contract = propagate_contract(
@@ -545,7 +548,52 @@ class TestPropagateContractNonPrimitiveTypes:
 
         field_names = {f.normalized_name for f in output_contract.fields}
         assert "id" in field_names
-        assert "custom" not in field_names
+        assert "price" in field_names
+        price_field = output_contract.get_field("price")
+        assert price_field.python_type is object
+        assert price_field.source == "inferred"
+        assert price_field.required is False
+
+    def test_custom_class_preserved_as_object(self, input_contract: SchemaContract) -> None:
+        """Custom class values are preserved as object in contract."""
+
+        class _CustomClass:
+            pass
+
+        output_row = {
+            "id": 1,
+            "custom": _CustomClass(),
+        }
+
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=True,
+        )
+
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "id" in field_names
+        assert "custom" in field_names
+        custom_field = output_contract.get_field("custom")
+        assert custom_field.python_type is object
+
+    def test_tuple_preserved_as_object(self, input_contract: SchemaContract) -> None:
+        """Tuple values are preserved as object in contract."""
+        output_row = {
+            "id": 1,
+            "coords": (1.0, 2.0),
+        }
+
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=True,
+        )
+
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "coords" in field_names
+        coords_field = output_contract.get_field("coords")
+        assert coords_field.python_type is object
 
     def test_non_finite_float_still_raises_value_error(self, input_contract: SchemaContract) -> None:
         """Non-finite floats remain invalid for contract inference."""

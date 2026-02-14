@@ -124,7 +124,7 @@ class TransformResult:
     context_after: dict[str, Any] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Validate invariants - success results MUST have success_reason and output data."""
+        """Validate invariants - success and error results MUST satisfy their contracts."""
         if self.status == "success" and self.success_reason is None:
             raise ValueError(
                 "TransformResult with status='success' MUST provide success_reason. "
@@ -136,6 +136,22 @@ class TransformResult:
                 "TransformResult with status='success' MUST have output data (row or rows). "
                 "Use TransformResult.success(row, ...) or TransformResult.success_multi(rows, ...) "
                 "to create success results. Missing output data is a plugin bug."
+            )
+        if self.status == "error" and self.reason is None:
+            raise ValueError(
+                "TransformResult with status='error' MUST provide reason. "
+                "Use TransformResult.error({'reason': '...'}) to create error results. "
+                "Missing reason is a plugin bug."
+            )
+        if self.status == "error" and (self.row is not None or self.rows is not None):
+            raise ValueError(
+                "TransformResult with status='error' MUST NOT include output data (row or rows). "
+                "Error results carry reason only, not data. This is a plugin bug."
+            )
+        if self.status == "error" and self.success_reason is not None:
+            raise ValueError(
+                "TransformResult with status='error' MUST NOT include success_reason. "
+                "Error results carry reason only. This is a plugin bug."
             )
 
     @property

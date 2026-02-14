@@ -230,7 +230,17 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
         if "name" in spec and "type" in spec:
             name = spec["name"]
             type_spec = spec["type"]
-            optional = not spec.get("required", True)
+            if not isinstance(name, str):
+                raise ValueError(f"Field spec at index {index}: 'name' must be a string, got {type(name).__name__}.")
+            if not isinstance(type_spec, str):
+                raise ValueError(f"Field spec at index {index}: 'type' must be a string, got {type(type_spec).__name__}.")
+            if "required" in spec and type(spec["required"]) is not bool:
+                raise ValueError(
+                    f"Field spec at index {index}: 'required' must be a bool, "
+                    f"got {type(spec['required']).__name__} ({spec['required']!r}). "
+                    f"Use true/false (YAML) or True/False (Python), not strings."
+                )
+            optional = "required" in spec and spec["required"] is False
             return f"{name}: {type_spec}{'?' if optional else ''}"
 
         # YAML `- id: int` parses as {"id": "int"}

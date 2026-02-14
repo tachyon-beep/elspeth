@@ -16,11 +16,16 @@ per_file_rules:
   reason: Type normalization requires isinstance() for polymorphic serialization of numeric types
   expires: null
 allow_hits:
-- key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=0fe7a31adc9f24b3
+- key: contracts/schema_contract_factory.py:R1:create_contract_from_config:fp=c6546fd479ceedee
   owner: feature
   reason: Intentional identity fallback - fields without resolution mapping use normalized name as original name
   safety: Fallback to same value is correct behavior, not silent coercion
   expires: null
+- key: contracts/contract_builder.py:R6:ContractBuilder:process_first_row:fp=8af4cf358aa1f676
+  owner: bugfix
+  reason: TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) — maps to object
+  safety: Preserves field in contract as 'any' type; no data loss or silent skip
+  expires: '2026-05-14'
 - key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=d1d4c7a6b6f8a842
   owner: architecture
   reason: Silent recovery with explicit error handling path
@@ -106,16 +111,16 @@ allow_hits:
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
   safety: ValueError raised for invalid config - explicit validation failure
   expires: null
-- key: contracts/contract_propagation.py:R6:propagate_contract:fp=99175b7151ceac32
-  owner: architecture
-  reason: TypeError infers python_type=object for complex fields (dict/list); ValueError skips NaN/Infinity
-  safety: Complex fields preserved in contract as object type; non-finite values excluded with debug log
-  expires: null
-- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=5b154d1481f39116
-  owner: architecture
-  reason: TypeError infers python_type=object for complex fields (dict/list) during narrowing
-  safety: Complex fields preserved in narrowed contract; no data loss
-  expires: null
+- key: contracts/contract_propagation.py:R6:propagate_contract:fp=8b818d57d7a1b90a
+  owner: bugfix
+  reason: TypeError from normalize_type_for_contract for ALL unsupported types — maps to object (was dict/list only)
+  safety: Preserves field in contract as 'any' type; no data loss or silent skip
+  expires: '2026-05-14'
+- key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=17d3f4491f707761
+  owner: bugfix
+  reason: TypeError from normalize_type_for_contract for ALL unsupported types during narrowing — maps to object
+  safety: Preserves field in narrowed contract as 'any' type; no data loss
+  expires: '2026-05-14'
 - key: contracts/contract_propagation.py:R6:narrow_contract_to_output:fp=c44a2a3ac4d47e65
   owner: architecture
   reason: ValueError skips NaN/Infinity values during contract narrowing

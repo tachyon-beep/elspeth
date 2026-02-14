@@ -24,6 +24,10 @@ from elspeth.contracts.type_normalization import CONTRACT_TYPE_MAP
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
+# Valid enum-like values for runtime validation (Literal types are static-only)
+_VALID_MODES = frozenset({"FIXED", "FLEXIBLE", "OBSERVED"})
+_VALID_SOURCES = frozenset({"declared", "inferred"})
+
 
 @dataclass(frozen=True, slots=True)
 class FieldAuditRecord:
@@ -151,20 +155,46 @@ class ContractAuditRecord:
             Restored ContractAuditRecord
         """
         data = json.loads(json_str)
-        return cls(
-            mode=data["mode"],
-            locked=data["locked"],
-            version_hash=data["version_hash"],
-            fields=tuple(
+
+        # Tier 1 audit data: crash on invalid enum-like values.
+        # Literal type hints are static-only; runtime validation is required
+        # to reject corrupted/tampered records that would silently change
+        # schema enforcement behavior.
+        mode = data["mode"]
+        if mode not in _VALID_MODES:
+            raise ValueError(f"Invalid contract mode '{mode}' in audit record. Valid modes: {', '.join(sorted(_VALID_MODES))}")
+
+        fields: list[FieldAuditRecord] = []
+        for f in data["fields"]:
+            source = f["source"]
+            if source not in _VALID_SOURCES:
+                raise ValueError(
+                    f"Invalid field source '{source}' for field "
+                    f"'{f['normalized_name']}' in audit record. "
+                    f"Valid sources: {', '.join(sorted(_VALID_SOURCES))}"
+                )
+            python_type = f["python_type"]
+            if python_type not in CONTRACT_TYPE_MAP:
+                raise ValueError(
+                    f"Invalid python_type '{python_type}' for field "
+                    f"'{f['normalized_name']}' in audit record. "
+                    f"Valid types: {', '.join(sorted(CONTRACT_TYPE_MAP.keys()))}"
+                )
+            fields.append(
                 FieldAuditRecord(
                     normalized_name=f["normalized_name"],
                     original_name=f["original_name"],
-                    python_type=f["python_type"],
+                    python_type=python_type,
                     required=f["required"],
-                    source=f["source"],
+                    source=source,
                 )
-                for f in data["fields"]
-            ),
+            )
+
+        return cls(
+            mode=mode,
+            locked=data["locked"],
+            version_hash=data["version_hash"],
+            fields=tuple(fields),
         )
 
     def to_schema_contract(self) -> SchemaContract:
@@ -177,16 +207,36 @@ class ContractAuditRecord:
             Restored SchemaContract
 
         Raises:
-            KeyError: If a field has an unknown python_type
-            ValueError: If hash verification fails (integrity violation)
+            ValueError: If mode, source, or python_type is invalid,
+                or if hash verification fails (integrity violation)
         """
         from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        # Tier 1 audit data: validate enum-like values before constructing
+        # a live SchemaContract. Invalid values would silently change
+        # enforcement semantics (e.g., mode="BROKEN" skips extra-field rejection).
+        if self.mode not in _VALID_MODES:
+            raise ValueError(f"Invalid contract mode '{self.mode}' in audit record. Valid modes: {', '.join(sorted(_VALID_MODES))}")
+
+        for f in self.fields:
+            if f.source not in _VALID_SOURCES:
+                raise ValueError(
+                    f"Invalid field source '{f.source}' for field "
+                    f"'{f.normalized_name}' in audit record. "
+                    f"Valid sources: {', '.join(sorted(_VALID_SOURCES))}"
+                )
+            if f.python_type not in CONTRACT_TYPE_MAP:
+                raise ValueError(
+                    f"Invalid python_type '{f.python_type}' for field "
+                    f"'{f.normalized_name}' in audit record. "
+                    f"Valid types: {', '.join(sorted(CONTRACT_TYPE_MAP.keys()))}"
+                )
 
         fields = tuple(
             FieldContract(
                 normalized_name=f.normalized_name,
                 original_name=f.original_name,
-                python_type=CONTRACT_TYPE_MAP[f.python_type],  # KeyError on unknown = correct!
+                python_type=CONTRACT_TYPE_MAP[f.python_type],
                 required=f.required,
                 source=f.source,
             )

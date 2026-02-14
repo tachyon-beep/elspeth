@@ -262,6 +262,77 @@ class TestTransformResult:
         assert "duration_ms" not in repr_str
 
 
+class TestTransformResultErrorInvariants:
+    """Regression tests for P1: TransformResult error-path invariant enforcement.
+
+    Bug: P1-2026-02-14-transformresult-does-not-enforce-error-path-invariants
+
+    Error results MUST satisfy symmetric invariants:
+    - status="error" requires reason is not None
+    - status="error" forbids row/rows (no output data)
+    - status="error" forbids success_reason
+    """
+
+    def test_error_without_reason_raises(self) -> None:
+        """status='error' with reason=None raises ValueError."""
+        with pytest.raises(ValueError, match="MUST provide reason"):
+            TransformResult(status="error", row=None, reason=None)
+
+    def test_error_with_row_raises(self) -> None:
+        """status='error' with row set raises ValueError."""
+        with pytest.raises(ValueError, match="MUST NOT include output data"):
+            TransformResult(
+                status="error",
+                row=make_pipeline_row({"x": 1}),
+                reason={"reason": "test_error"},
+            )
+
+    def test_error_with_rows_raises(self) -> None:
+        """status='error' with rows set raises ValueError."""
+        with pytest.raises(ValueError, match="MUST NOT include output data"):
+            TransformResult(
+                status="error",
+                row=None,
+                reason={"reason": "test_error"},
+                rows=[make_pipeline_row({"x": 1})],
+            )
+
+    def test_error_with_success_reason_raises(self) -> None:
+        """status='error' with success_reason set raises ValueError."""
+        with pytest.raises(ValueError, match="MUST NOT include success_reason"):
+            TransformResult(
+                status="error",
+                row=None,
+                reason={"reason": "test_error"},
+                success_reason={"action": "processed"},
+            )
+
+    def test_error_factory_passes_invariants(self) -> None:
+        """TransformResult.error() factory produces valid error results."""
+        result = TransformResult.error({"reason": "test_error"})
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.row is None
+        assert result.rows is None
+        assert result.success_reason is None
+
+    def test_error_factory_with_retryable_passes_invariants(self) -> None:
+        """TransformResult.error() with retryable=True passes invariants."""
+        result = TransformResult.error({"reason": "api_error"}, retryable=True)
+        assert result.status == "error"
+        assert result.retryable is True
+        assert result.reason is not None
+
+    def test_error_factory_with_context_after_passes_invariants(self) -> None:
+        """TransformResult.error() with context_after passes invariants."""
+        result = TransformResult.error(
+            {"reason": "retry_timeout"},
+            context_after={"pool_stats": {"capacity_retries": 5}},
+        )
+        assert result.status == "error"
+        assert result.context_after is not None
+
+
 class TestGateResult:
     """Tests for GateResult."""
 

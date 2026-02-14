@@ -743,15 +743,15 @@ class TypeMismatchViolation(ContractViolation):
 
         Returns:
             Dict with 'reason' key and type-specific fields suitable for
-            TransformResult.error(). Includes expected, actual, and value
-            (as repr for safe string representation).
+            TransformResult.error(). Includes expected and actual type names
+            only. Raw values are intentionally excluded to prevent sensitive
+            or unbounded data from reaching the audit trail.
         """
         base = super().to_error_reason()
         base.update(
             {
                 "expected": self.expected_type.__name__,
                 "actual": self.actual_type.__name__,
-                "value": repr(self.actual_value),
             }
         )
         return base

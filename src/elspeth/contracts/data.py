@@ -18,7 +18,7 @@ settings (extra="ignore", strict=False, frozen=False) per the Data Manifesto.
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from types import UnionType
-from typing import Any, TypeVar, Union, get_args, get_origin
+from typing import Annotated, Any, TypeVar, Union, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -232,6 +232,26 @@ def _is_union_type(t: Any) -> bool:
     return origin is Union or isinstance(t, UnionType)
 
 
+def _unwrap_annotated(annotation: Any) -> Any:
+    """Unwrap typing.Annotated recursively to its underlying type.
+
+    Annotated[T, ...] wraps a type with metadata (e.g., Pydantic constraints).
+    For compatibility checking we only care about the base type T, not metadata.
+
+    Examples:
+        Annotated[float, FieldInfo(allow_inf_nan=False)] -> float
+        Annotated[Annotated[int, ...], ...] -> int  (nested unwrap)
+        float -> float  (no-op for non-Annotated)
+    """
+    current = annotation
+    while get_origin(current) is Annotated:
+        args = get_args(current)
+        if not args:
+            return current
+        current = args[0]
+    return current
+
+
 def _types_compatible(
     actual: Any,
     expected: Any,
@@ -246,6 +266,7 @@ def _types_compatible(
     - Numeric compatibility (int -> float) - ONLY when consumer_strict=False
     - Optional[X] on consumer side (producer can send X or X | None)
     - Union types with coercion (int compatible with float | None when not strict)
+    - Annotated[T, ...] unwrapping (metadata stripped before comparison)
 
     Args:
         actual: The producer's output type annotation
@@ -253,6 +274,12 @@ def _types_compatible(
         consumer_strict: If True, no type coercion allowed (int->float rejected).
                         Respects Data Manifesto: transforms/sinks must NOT coerce.
     """
+    # Unwrap Annotated metadata before any comparisons.
+    # Config-generated schemas may wrap types (e.g., FiniteFloat -> Annotated[float, ...]).
+    # We need the semantic base type for compatibility, not the constraint metadata.
+    actual = _unwrap_annotated(actual)
+    expected = _unwrap_annotated(expected)
+
     # Exact match
     if actual == expected:
         return True

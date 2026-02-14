@@ -131,6 +131,126 @@ class TestCheckpointAPI:
         assert ctx.get_checkpoint() is None
 
 
+class TestCheckpointRestoredUpdateBug:
+    """Regression tests for P1: update_checkpoint not updating restored checkpoint.
+
+    Bug: P1-2026-02-14-update-checkpoint-does-not-actually-update-the-active-restored-checkpoint
+
+    When a restored batch checkpoint exists for the current node_id,
+    update_checkpoint() must update that restored checkpoint (since
+    get_checkpoint() reads from it first). Otherwise updates are lost.
+    """
+
+    def test_update_checkpoint_updates_restored_batch_checkpoint(self) -> None:
+        """update_checkpoint writes to restored batch checkpoint when it is active."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        ctx = PluginContext(
+            run_id="run-001",
+            config={},
+            node_id="batch_transform_1",
+            _batch_checkpoints={
+                "batch_transform_1": {"batch_id": "batch-original", "status": "submitted"},
+            },
+        )
+
+        # Verify restored checkpoint is active
+        assert ctx.get_checkpoint() == {"batch_id": "batch-original", "status": "submitted"}
+
+        # Update should modify the restored checkpoint
+        ctx.update_checkpoint({"status": "in_progress", "checked_at": "2026-02-14T00:00:00Z"})
+
+        checkpoint = ctx.get_checkpoint()
+        assert checkpoint is not None
+        assert checkpoint["batch_id"] == "batch-original"  # Original key preserved
+        assert checkpoint["status"] == "in_progress"  # Updated
+        assert checkpoint["checked_at"] == "2026-02-14T00:00:00Z"  # New key added
+
+    def test_update_checkpoint_falls_back_to_local_without_restored(self) -> None:
+        """update_checkpoint writes to local checkpoint when no restored exists."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        ctx = PluginContext(
+            run_id="run-001",
+            config={},
+            node_id="batch_transform_1",
+        )
+
+        ctx.update_checkpoint({"batch_id": "batch-new"})
+        checkpoint = ctx.get_checkpoint()
+        assert checkpoint is not None
+        assert checkpoint["batch_id"] == "batch-new"
+
+    def test_update_checkpoint_falls_back_when_restored_is_empty(self) -> None:
+        """update_checkpoint writes to local checkpoint when restored is empty dict."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        ctx = PluginContext(
+            run_id="run-001",
+            config={},
+            node_id="batch_transform_1",
+            _batch_checkpoints={"batch_transform_1": {}},
+        )
+
+        # Empty restored checkpoint => get_checkpoint falls through to local
+        assert ctx.get_checkpoint() is None
+
+        ctx.update_checkpoint({"batch_id": "batch-new"})
+        checkpoint = ctx.get_checkpoint()
+        assert checkpoint is not None
+        assert checkpoint["batch_id"] == "batch-new"
+
+    def test_update_then_get_is_consistent(self) -> None:
+        """get_checkpoint returns data written by update_checkpoint in all scenarios."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        # Scenario 1: With restored checkpoint
+        ctx = PluginContext(
+            run_id="run-001",
+            config={},
+            node_id="node_1",
+            _batch_checkpoints={"node_1": {"original": True}},
+        )
+
+        ctx.update_checkpoint({"updated": True})
+        result = ctx.get_checkpoint()
+        assert result is not None
+        assert result["original"] is True
+        assert result["updated"] is True
+
+    def test_update_checkpoint_without_node_id_uses_local(self) -> None:
+        """update_checkpoint uses local checkpoint when node_id is None."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        ctx = PluginContext(
+            run_id="run-001",
+            config={},
+            node_id=None,
+        )
+
+        ctx.update_checkpoint({"key": "value"})
+        checkpoint = ctx.get_checkpoint()
+        assert checkpoint is not None
+        assert checkpoint["key"] == "value"
+
+    def test_clear_after_update_on_restored_clears_both(self) -> None:
+        """clear_checkpoint after updating restored checkpoint clears everything."""
+        from elspeth.contracts.plugin_context import PluginContext
+
+        ctx = PluginContext(
+            run_id="run-001",
+            config={},
+            node_id="node_1",
+            _batch_checkpoints={"node_1": {"batch_id": "batch-old"}},
+        )
+
+        ctx.update_checkpoint({"status": "completed"})
+        assert ctx.get_checkpoint() is not None
+
+        ctx.clear_checkpoint()
+        assert ctx.get_checkpoint() is None
+
+
 class TestValidationErrorRecording:
     """Tests for recording validation errors from sources."""
 
