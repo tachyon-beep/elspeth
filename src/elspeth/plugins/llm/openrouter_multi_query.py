@@ -34,6 +34,7 @@ from elspeth.plugins.llm.tracing import (
     LangfuseTracingConfig,
     validate_tracing_config,
 )
+from elspeth.plugins.llm.validation import _reject_nonfinite_constant
 from elspeth.plugins.pooling import CapacityError, is_capacity_error
 
 if TYPE_CHECKING:
@@ -347,8 +348,8 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                 content_str = content_str[:-3].strip()
 
         try:
-            parsed = json.loads(content_str)
-        except json.JSONDecodeError as e:
+            parsed = json.loads(content_str, parse_constant=_reject_nonfinite_constant)
+        except (json.JSONDecodeError, ValueError) as e:
             parse_error: TransformErrorReason = {
                 "reason": "json_parse_failed",
                 "error": str(e),

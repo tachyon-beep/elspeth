@@ -1168,3 +1168,125 @@ class TestResourceCleanup:
 
         # Verify recorder was captured
         assert transform._recorder is mock_recorder
+
+
+class TestValidateFieldTypeNonFinite:
+    """Regression: _validate_field_type must reject NaN/Infinity for NUMBER fields.
+
+    Non-finite floats from LLM JSON responses pass isinstance(value, float)
+    but crash canonical hashing downstream. The boundary validator must catch
+    them before they enter pipeline data.
+    """
+
+    def test_nan_rejected_for_number_field(self) -> None:
+        """NaN float is rejected for NUMBER output fields."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        error = transform._validate_field_type("score", float("nan"), field_config)
+        assert error is not None
+        assert "non-finite" in error
+
+    def test_infinity_rejected_for_number_field(self) -> None:
+        """Infinity float is rejected for NUMBER output fields."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        error = transform._validate_field_type("score", float("inf"), field_config)
+        assert error is not None
+        assert "non-finite" in error
+
+    def test_neg_infinity_rejected_for_number_field(self) -> None:
+        """Negative Infinity is rejected for NUMBER output fields."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        error = transform._validate_field_type("score", float("-inf"), field_config)
+        assert error is not None
+        assert "non-finite" in error
+
+    def test_nan_rejected_for_integer_field(self) -> None:
+        """NaN float is rejected for INTEGER output fields."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="count", type=OutputFieldType.INTEGER)
+
+        error = transform._validate_field_type("count", float("nan"), field_config)
+        assert error is not None
+        assert "non-finite" in error
+
+    def test_finite_number_still_accepted(self) -> None:
+        """Normal finite floats still pass NUMBER validation."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        assert transform._validate_field_type("score", 3.14, field_config) is None
+        assert transform._validate_field_type("score", 0.0, field_config) is None
+        assert transform._validate_field_type("score", -1.5, field_config) is None
+
+    def test_integer_still_accepted_for_number(self) -> None:
+        """Integers still pass NUMBER validation."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig, OutputFieldType
+
+        transform = OpenRouterMultiQueryLLMTransform(make_config())
+        field_config = OutputFieldConfig(suffix="score", type=OutputFieldType.NUMBER)
+
+        assert transform._validate_field_type("score", 42, field_config) is None
+
+
+class TestNanInJsonParsing:
+    """Regression: json.loads must reject NaN/Infinity in LLM response content.
+
+    Python's json.loads accepts non-standard NaN/Infinity tokens by default.
+    parse_constant=_reject_nonfinite_constant must be used to reject them.
+    """
+
+    def test_nan_in_response_json_returns_error(self, chaosllm_server) -> None:
+        """LLM response containing NaN in JSON returns TransformResult.error."""
+        # NaN is a non-standard JSON token that Python's json.loads accepts by default
+        nan_content = '{"score": NaN, "rationale": "test"}'
+        responses = [make_openrouter_response(nan_content)]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "json_parse_failed"
+
+    def test_infinity_in_response_json_returns_error(self, chaosllm_server) -> None:
+        """LLM response containing Infinity in JSON returns TransformResult.error."""
+        inf_content = '{"score": Infinity, "rationale": "test"}'
+        responses = [make_openrouter_response(inf_content)]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "json_parse_failed"

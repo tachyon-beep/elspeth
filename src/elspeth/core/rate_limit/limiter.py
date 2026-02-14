@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 import threading
@@ -199,6 +200,14 @@ class RateLimiter:
         Raises:
             TimeoutError: If timeout expires before tokens are acquired
         """
+        if timeout is not None:
+            if not isinstance(timeout, (int, float)):
+                raise ValueError(f"timeout must be a finite non-negative number, got {timeout!r}")
+            if isinstance(timeout, float) and not math.isfinite(timeout):
+                raise ValueError(f"timeout must be finite, got {timeout!r}")
+            if timeout < 0:
+                raise ValueError(f"timeout must be non-negative, got {timeout!r}")
+
         deadline = None if timeout is None else (time.monotonic() + timeout)
 
         while True:

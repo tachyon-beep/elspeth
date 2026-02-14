@@ -237,6 +237,7 @@ TransformErrorCategory = Literal[
     "multiple_contract_violations",
     # Numeric/computation errors
     "float_overflow",  # Arithmetic overflow producing inf (e.g., sum of large floats)
+    "non_finite_usage",  # LLM API returned NaN/Infinity in usage metadata
     # Executor lifecycle
     "shutdown_requested",  # Worker stopped mid-retry due to executor shutdown
     # Generic (for tests and edge cases)

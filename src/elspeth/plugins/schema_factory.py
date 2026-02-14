@@ -167,9 +167,14 @@ def _create_explicit_schema(
     # allow_coercion=False -> strict=True  (reject wrong types)
     use_strict = not allow_coercion
 
+    # At source boundary (allow_coercion=True), use _ObservedPluginSchema base
+    # to reject NaN/Infinity in 'any' fields and flexible-mode extras.
+    # FiniteFloat handles typed float fields; the model validator catches the rest.
+    base_class = _ObservedPluginSchema if allow_coercion else PluginSchema
+
     return create_model(
         name,
-        __base__=PluginSchema,
+        __base__=base_class,
         __module__=__name__,
         __config__=ConfigDict(
             extra=extra_mode,

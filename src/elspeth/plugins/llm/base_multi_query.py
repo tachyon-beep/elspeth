@@ -9,6 +9,7 @@ and implement the abstract methods for their respective API protocols.
 
 from __future__ import annotations
 
+import math
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -513,6 +514,8 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         elif expected_type == OutputFieldType.INTEGER:
             if isinstance(value, bool):
                 return "expected integer, got boolean"
+            if isinstance(value, float) and not math.isfinite(value):
+                return "expected finite integer, got non-finite float"
             if isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
                 pass
             else:
@@ -523,6 +526,8 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
                 return "expected number, got boolean"
             if not isinstance(value, (int, float)):
                 return f"expected number, got {type(value).__name__}"
+            if isinstance(value, float) and not math.isfinite(value):
+                return "expected finite number, got non-finite float"
 
         elif expected_type == OutputFieldType.BOOLEAN:
             if not isinstance(value, bool):

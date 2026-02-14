@@ -503,6 +503,70 @@ class TestNonFiniteFloatRejection:
         with pytest.raises(ValidationError):
             Schema.model_validate({"outer": {"inner": [1.0, float("inf")]}})
 
+    def test_explicit_any_field_rejects_nan_at_source_boundary(self) -> None:
+        """Explicit schema with 'any' field rejects NaN at source boundary.
+
+        Regression: Non-finite values bypassed source validation for explicit
+        schemas because only observed schemas had the non-finite validator.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["data: any"]})
+        Schema = create_schema_from_config(config, "SourceSchema", allow_coercion=True)
+
+        with pytest.raises(ValidationError, match=r"[Nn]on-finite"):
+            Schema(data=float("nan"))
+
+    def test_explicit_any_field_rejects_infinity_at_source_boundary(self) -> None:
+        """Explicit schema with 'any' field rejects Infinity at source boundary."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["data: any"]})
+        Schema = create_schema_from_config(config, "SourceSchema", allow_coercion=True)
+
+        with pytest.raises(ValidationError, match=r"[Nn]on-finite"):
+            Schema(data=float("inf"))
+
+    def test_flexible_extras_reject_nan_at_source_boundary(self) -> None:
+        """Flexible schema rejects NaN in extra fields at source boundary."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        config = SchemaConfig.from_dict({"mode": "flexible", "fields": ["id: int"]})
+        Schema = create_schema_from_config(config, "SourceSchema", allow_coercion=True)
+
+        with pytest.raises(ValidationError, match=r"[Nn]on-finite"):
+            Schema(id=1, extra_score=float("nan"))
+
+    def test_explicit_any_nested_nan_rejected_at_source_boundary(self) -> None:
+        """Nested NaN in any-typed field is rejected at source boundary."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["data: any"]})
+        Schema = create_schema_from_config(config, "SourceSchema", allow_coercion=True)
+
+        with pytest.raises(ValidationError, match=r"[Nn]on-finite"):
+            Schema(data={"nested": [1.0, float("inf")]})
+
+    def test_explicit_schema_no_validator_at_transform_boundary(self) -> None:
+        """Transform boundary (allow_coercion=False) does not add non-finite validator.
+
+        Transforms should never see NaN — if they do, it's an upstream bug
+        and should crash downstream (per trust model), not silently validate.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["data: any"]})
+        Schema = create_schema_from_config(config, "TransformSchema", allow_coercion=False)
+
+        # NaN passes schema validation at transform boundary — crash happens downstream
+        instance = Schema(data=float("nan"))
+        assert instance.data != instance.data  # NaN != NaN
+
 
 class TestSchemaPluginSchemaCompliance:
     """Tests for PluginSchema compliance and conversion methods."""

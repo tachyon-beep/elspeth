@@ -1731,3 +1731,102 @@ class TestOpenRouterConcurrency:
         transform.close()
 
         assert transform._recorder is None
+
+
+class TestOpenRouterNanRejection:
+    """Regression: OpenRouter response parsing must reject NaN/Infinity.
+
+    response.json() accepts NaN/Infinity by default. Using json.loads
+    with parse_constant rejects them. Usage values must also be validated
+    for finiteness (overflow literals like 1e309 produce float('inf')).
+    """
+
+    @pytest.fixture
+    def mock_recorder(self) -> Mock:
+        recorder = Mock()
+        recorder.record_call = Mock()
+        return recorder
+
+    @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        return CollectorOutputPort()
+
+    def test_nan_in_response_body_returns_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """NaN token in API response body is rejected at parse boundary."""
+        nan_body = '{"choices": [{"message": {"content": "ok"}}], "usage": {"prompt_tokens": NaN}, "model": "test"}'
+        response = _create_mock_response(chaosllm_server, raw_body=nan_body, status_code=200, headers={"content-type": "application/json"})
+
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "openai/gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state",
+            token=token,
+        )
+
+        try:
+            with mock_httpx_client(chaosllm_server, response=response):
+                transform.accept(make_pipeline_row({"text": "hello"}), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "invalid_json_response"
+        finally:
+            transform.close()
+
+    def test_non_finite_usage_value_returns_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """Usage field with overflow float (inf from 1e309) is rejected."""
+        inf_body = '{"choices": [{"message": {"content": "ok"}}], "usage": {"prompt_tokens": 1e309}, "model": "test"}'
+        response = _create_mock_response(chaosllm_server, raw_body=inf_body, status_code=200, headers={"content-type": "application/json"})
+
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "openai/gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state",
+            token=token,
+        )
+
+        try:
+            with mock_httpx_client(chaosllm_server, response=response):
+                transform.accept(make_pipeline_row({"text": "hello"}), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "non_finite_usage"
+        finally:
+            transform.close()

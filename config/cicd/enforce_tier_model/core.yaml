@@ -32,16 +32,26 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/rate_limit/limiter.py:R6:RateLimiter:try_acquire:fp=52fa4ef5a66f8245
+- key: core/rate_limit/limiter.py:R6:RateLimiter:try_acquire:fp=860b9a4a7e64c817
   owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
+  reason: Silent recovery with explicit error handling path — returns False when bucket full
+  safety: Caller checks return value; no silent data loss
   expires: '2026-05-02'
-- key: core/rate_limit/limiter.py:R6:RateLimiter:close:fp=f514b4ec0ac7c76f
+- key: core/rate_limit/limiter.py:R6:RateLimiter:close:fp=35b37e8f13a03454
   owner: architecture
   reason: Framework boundary — pyrate-limiter _leaker attribute may not exist across library versions
   safety: Graceful degradation to no cleanup if attribute missing; thread dies naturally
   expires: '2026-05-02'
+- key: core/rate_limit/limiter.py:R5:RateLimiter:acquire:fp=b59694fcd2b5dc22
+  owner: bugfix
+  reason: Tier-3 boundary — timeout parameter comes from user config, needs type validation
+  safety: Raises ValueError on invalid input — explicit failure, not masking
+  expires: '2026-05-14'
+- key: core/rate_limit/limiter.py:R5:RateLimiter:acquire:fp=991146473f7a2c64
+  owner: bugfix
+  reason: Tier-3 boundary — float-specific finiteness check after type validation
+  safety: Raises ValueError on NaN/Infinity — explicit failure, prevents infinite hang
+  expires: '2026-05-14'
 - key: core/events.py:R1:EventBus:emit:fp=9291c1b6dd51107b
   owner: architecture
   reason: Optional field access at trust boundary
@@ -423,11 +433,11 @@ allow_hits:
   reason: Tier-3 boundary — isinstance required for recursive dict/list/float traversal to sanitize quarantine data
   safety: Replaces NaN/Infinity with None; audit trail records original error separately
   expires: '2026-05-12'
-- key: core/canonical.py:R5:sanitize_for_canonical:fp=a62e82dede848bc4
+- key: core/canonical.py:R5:sanitize_for_canonical:fp=16c7271c89cdd944
   owner: bugfix
-  reason: Tier-3 boundary — isinstance required for recursive dict/list/float traversal to sanitize quarantine data
+  reason: Tier-3 boundary — isinstance required for recursive dict/list/tuple/float traversal to sanitize quarantine data
   safety: Replaces NaN/Infinity with None; audit trail records original error separately
-  expires: '2026-05-12'
+  expires: '2026-05-14'
 - key: core/canonical.py:R5:sanitize_for_canonical:fp=2b4757edad0f464c
   owner: bugfix
   reason: Tier-3 boundary — isinstance required for float type check before math.isnan/isinf

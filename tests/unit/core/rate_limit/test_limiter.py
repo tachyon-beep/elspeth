@@ -628,3 +628,54 @@ class TestAcquireThreadSafety:
 
             # Should also work without explicit timeout parameter
             limiter.acquire(weight=1)
+
+
+class TestAcquireTimeoutValidation:
+    """Regression: acquire() must reject NaN/Infinity/negative timeouts.
+
+    NaN timeout causes infinite hang because NaN comparison always returns False,
+    so `remaining <= 0` never triggers and the loop never exits.
+    """
+
+    def test_nan_timeout_raises_value_error(self) -> None:
+        """NaN timeout raises ValueError instead of hanging forever."""
+        from elspeth.core.rate_limit import RateLimiter
+
+        with RateLimiter(name="nan_test", requests_per_minute=60) as limiter, pytest.raises(ValueError, match="finite"):
+            limiter.acquire(timeout=float("nan"))
+
+    def test_infinity_timeout_raises_value_error(self) -> None:
+        """Infinity timeout raises ValueError."""
+        from elspeth.core.rate_limit import RateLimiter
+
+        with RateLimiter(name="inf_test", requests_per_minute=60) as limiter, pytest.raises(ValueError, match="finite"):
+            limiter.acquire(timeout=float("inf"))
+
+    def test_negative_infinity_timeout_raises_value_error(self) -> None:
+        """Negative Infinity timeout raises ValueError."""
+        from elspeth.core.rate_limit import RateLimiter
+
+        with RateLimiter(name="neginf_test", requests_per_minute=60) as limiter, pytest.raises(ValueError, match="finite"):
+            limiter.acquire(timeout=float("-inf"))
+
+    def test_negative_timeout_raises_value_error(self) -> None:
+        """Negative timeout raises ValueError."""
+        from elspeth.core.rate_limit import RateLimiter
+
+        with RateLimiter(name="neg_test", requests_per_minute=60) as limiter, pytest.raises(ValueError, match="non-negative"):
+            limiter.acquire(timeout=-1.0)
+
+    def test_zero_timeout_accepted(self) -> None:
+        """Zero timeout is valid (means try once, fail immediately if blocked)."""
+        from elspeth.core.rate_limit import RateLimiter
+
+        with RateLimiter(name="zero_test", requests_per_minute=60) as limiter:
+            # Should succeed (capacity available)
+            limiter.acquire(timeout=0.0)
+
+    def test_positive_finite_timeout_accepted(self) -> None:
+        """Normal positive timeout still works."""
+        from elspeth.core.rate_limit import RateLimiter
+
+        with RateLimiter(name="pos_test", requests_per_minute=60) as limiter:
+            limiter.acquire(timeout=1.0)

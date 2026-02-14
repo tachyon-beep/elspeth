@@ -7,6 +7,8 @@ Uses BatchTransformMixin for concurrent row processing with FIFO output ordering
 
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any
@@ -31,6 +33,7 @@ from elspeth.plugins.llm.tracing import (
     parse_tracing_config,
     validate_tracing_config,
 )
+from elspeth.plugins.llm.validation import _reject_nonfinite_constant
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -588,9 +591,9 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 # Network errors (timeout, connection refused) are retryable
                 raise NetworkError(f"Network error: {e}") from e
 
-            # 5. Parse JSON response (EXTERNAL DATA - wrap)
+            # 5. Parse JSON response (EXTERNAL DATA - wrap, reject NaN/Infinity)
             try:
-                data = response.json()
+                data = json.loads(response.text, parse_constant=_reject_nonfinite_constant)
             except (ValueError, TypeError) as e:
                 error_reason_json: TransformErrorReason = {
                     "reason": "invalid_json_response",
@@ -633,6 +636,21 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             # OpenRouter can return {"usage": null} or omit usage entirely.
             # Use `or {}` to handle both missing AND null cases.
             usage = data.get("usage") or {}
+
+            # Validate usage is dict with finite numeric values (Tier 3 boundary)
+            if not isinstance(usage, dict):
+                usage = {}
+            else:
+                for usage_key, usage_val in usage.items():
+                    if isinstance(usage_val, float) and not math.isfinite(usage_val):
+                        return TransformResult.error(
+                            {
+                                "reason": "non_finite_usage",
+                                "field": usage_key,
+                                "value": str(usage_val),
+                            },
+                            retryable=False,
+                        )
 
             # Record in Langfuse using v3 nested context managers (after successful call)
             latency_ms = (time.monotonic() - start_time) * 1000

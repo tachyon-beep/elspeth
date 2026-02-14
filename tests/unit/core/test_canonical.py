@@ -453,6 +453,74 @@ class TestPublicAPI:
         assert isinstance(CANONICAL_VERSION, str)
 
 
+class TestSanitizeForCanonical:
+    """Regression: sanitize_for_canonical must handle tuples and numpy floats.
+
+    The sanitizer is used at Tier-3 quarantine boundaries to replace non-finite
+    floats with None so quarantined data can still be hashed.
+    """
+
+    def test_sanitize_tuple_with_nan(self) -> None:
+        """Tuples containing NaN are sanitized (NaN replaced with None)."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": (1.0, float("nan"), 3.0)})
+        assert result == {"x": [1.0, None, 3.0]}
+
+    def test_sanitize_tuple_with_infinity(self) -> None:
+        """Tuples containing Infinity are sanitized."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": (float("inf"),)})
+        assert result == {"x": [None]}
+
+    def test_sanitize_nested_tuple(self) -> None:
+        """Nested tuples are recursively sanitized."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"outer": (1.0, (float("-inf"), 2.0))})
+        assert result == {"outer": [1.0, [None, 2.0]]}
+
+    def test_sanitize_numpy_float_nan(self) -> None:
+        """numpy float32/64 NaN values are replaced with None."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": np.float32("nan")})
+        assert result == {"x": None}
+
+        result = sanitize_for_canonical({"x": np.float64("inf")})
+        assert result == {"x": None}
+
+    def test_sanitize_numpy_finite_unchanged(self) -> None:
+        """Finite numpy floats are NOT replaced."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": np.float64(3.14)})
+        assert result == {"x": np.float64(3.14)}
+
+    def test_sanitize_dict_with_mixed_nan(self) -> None:
+        """Mixed dict values are sanitized correctly."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        data = {"a": 1, "b": float("nan"), "c": "ok", "d": None}
+        result = sanitize_for_canonical(data)
+        assert result == {"a": 1, "b": None, "c": "ok", "d": None}
+
+    def test_sanitize_list_with_nan(self) -> None:
+        """Lists containing NaN are sanitized."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical([1.0, float("nan"), 3.0])
+        assert result == [1.0, None, 3.0]
+
+    def test_sanitize_finite_floats_unchanged(self) -> None:
+        """Finite floats pass through unchanged."""
+        from elspeth.core.canonical import sanitize_for_canonical
+
+        result = sanitize_for_canonical({"x": 3.14, "y": 0.0, "z": -1.5})
+        assert result == {"x": 3.14, "y": 0.0, "z": -1.5}
+
+
 class TestCoreIntegration:
     """Core module integration - all Phase 1 components exportable."""
 
