@@ -111,7 +111,7 @@ allow_hits:
   reason: Checkpoint recovery lookup - returns None if no state was restored for node
   safety: Designed API contract - None is valid return for nodes without restored state
   expires: null
-- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=ff8235b7d923ad65
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=9f87dd7733f3ecc3
   owner: bugfix
   reason: Framework boundary - Pydantic JSON schema anyOf entries may be $ref (no "type" key) or typed (has "type" key); .get() filters null vs non-null items
   safety: Non-null items fed to recursive resolver which crashes on unrecognized schemas
@@ -171,6 +171,16 @@ allow_hits:
   reason: Protocol dispatch to detect transforms with on_success during jump-target sink resolution
   safety: Traversal map invariants are enforced; raises on cycles or when no sink and no gate found
   expires: '2026-03-11'
+- key: engine/dag_navigator.py:R1:DAGNavigator:create_continuation_work_item:fp=ff169983eb391d6b
+  owner: bugfix
+  reason: _node_to_plugin.get() needed — not all node IDs are in plugin map (source nodes, coalesce pseudo-nodes)
+  safety: None return from .get() is the correct signal for non-gate nodes; isinstance(None, GateSettings) → False
+  expires: '2026-05-15'
+- key: engine/dag_navigator.py:R5:DAGNavigator:create_continuation_work_item:fp=9cc1f86c748ddbac
+  owner: bugfix
+  reason: isinstance(GateSettings) distinguishes fork-gate origin from non-fork continuation to prevent backward routing
+  safety: Gate nodes route to branch_first_node; non-gate nodes advance forward via resolve_next_node
+  expires: '2026-05-15'
 - key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=d9917e18ce071880
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping

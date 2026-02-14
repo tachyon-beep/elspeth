@@ -1766,15 +1766,21 @@ class RowProcessor:
                 if outcome.sink_name is not None:
                     # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
                     # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
-                    return (
-                        RowResult(
-                            token=current_token,
-                            final_data=current_token.row_data,
-                            outcome=RowOutcome.ROUTED,
-                            sink_name=outcome.sink_name,
-                        ),
+                    # Notify coalesce if this is a forked branch
+                    sibling_results = self._notify_coalesce_of_lost_branch(
+                        current_token,
+                        f"gate_routed_to_sink:{outcome.sink_name}",
                         child_items,
                     )
+                    current_result = RowResult(
+                        token=current_token,
+                        final_data=current_token.row_data,
+                        outcome=RowOutcome.ROUTED,
+                        sink_name=outcome.sink_name,
+                    )
+                    if sibling_results:
+                        return ([current_result, *sibling_results], child_items)
+                    return (current_result, child_items)
                 elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
                     for child_token in outcome.child_tokens:
                         # Look up coalesce info for this branch

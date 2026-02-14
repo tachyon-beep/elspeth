@@ -643,6 +643,49 @@ class TestReconstructSchemaAnyOf:
         instance_none = model(ts=None)
         assert instance_none.ts is None
 
+    def test_nullable_decimal_anyof_pattern(self) -> None:
+        """anyOf with number+string+null maps to Optional[Decimal].
+
+        Regression: P1-2026-02-14 — Pydantic generates a 3-branch anyOf for
+        Decimal | None: [{"type":"number"}, {"type":"string"}, {"type":"null"}].
+        The old code only handled Decimal (2-branch, no null) and nullable
+        (2-branch, one non-null), so this 3-branch pattern raised ValueError.
+        """
+        schema = {
+            "properties": {
+                "amount": {
+                    "anyOf": [
+                        {"type": "number"},
+                        {"type": "string"},
+                        {"type": "null"},
+                    ]
+                },
+            },
+            "required": ["amount"],
+        }
+        model = reconstruct_schema_from_json(schema)
+        # Must accept Decimal values
+        instance = model(amount=Decimal("99.99"))
+        assert instance.amount == Decimal("99.99")
+        # Must accept None (nullable)
+        instance_none = model(amount=None)
+        assert instance_none.amount is None
+
+    def test_nullable_decimal_from_pydantic_model_json_schema(self) -> None:
+        """Round-trip: Pydantic model with Decimal | None survives JSON schema reconstruction."""
+        from pydantic import BaseModel
+
+        class InvoiceRow(BaseModel):
+            invoice_id: str
+            amount: Decimal | None
+
+        schema_dict = InvoiceRow.model_json_schema()
+        model = reconstruct_schema_from_json(schema_dict)
+        instance = model(invoice_id="INV-001", amount=Decimal("42.50"))
+        assert instance.amount == Decimal("42.50")
+        instance_none = model(invoice_id="INV-002", amount=None)
+        assert instance_none.amount is None
+
     def test_unsupported_anyof_raises(self) -> None:
         """Unsupported anyOf pattern (e.g., Union[str, int]) raises."""
         schema = {

@@ -2867,3 +2867,272 @@ class TestTerminalWorkItemInvariant:
         assert not isinstance(result, list)
         assert result.outcome == RowOutcome.COMPLETED
         assert result.sink_name == "terminal_sink"
+
+
+# =============================================================================
+# Regression: P1-2026-02-14 — Gate sink routing notifies coalesce of lost branch
+# =============================================================================
+
+
+class TestGateSinkRoutingNotifiesCoalesce:
+    """Regression tests for P1-2026-02-14: gate-routed-to-sink tokens on fork
+    branches must notify coalesce of the lost branch, same as transform error
+    paths (max retries, quarantine, error-routed)."""
+
+    def test_gate_sink_route_notifies_coalesce_of_lost_branch(self) -> None:
+        """Gate routing a fork-branch token to a sink must call _notify_coalesce_of_lost_branch.
+
+        Before fix: gate sink routing returned immediately without notifying coalesce,
+        causing sibling branches to remain held until timeout/end-of-source.
+        After fix: coalesce is notified with reason 'gate_routed_to_sink:<sink_name>'.
+        """
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("gate-1")
+
+        recorder.register_node(
+            run_id="test-run",
+            plugin_name="router-gate",
+            node_type=NodeType.GATE,
+            plugin_version="1.0",
+            config={},
+            node_id="gate-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        gate_config = GateSettings(
+            name="router-gate",
+            input="default",
+            condition="True",
+            routes={"true": "error_sink", "false": "default"},
+        )
+
+        coalesce = Mock()
+        # notify_branch_lost returns None = no immediate consequence
+        coalesce.notify_branch_lost.return_value = None
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="default",
+            node_step_map={source_node: 0, gate_node: 1},
+            node_to_next={source_node: gate_node, gate_node: None},
+            first_transform_node_id=gate_node,
+            node_to_plugin={gate_node: gate_config},
+            coalesce_executor=coalesce,
+            branch_to_coalesce={BranchName("path_a"): CoalesceName("merge")},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+        )
+
+        # Create a fork-branch token
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok-branch-a",
+            row_data=make_row({"value": 42}),
+            branch_name="path_a",
+        )
+
+        # Mock gate executor to return a sink routing outcome
+        sink_outcome = GateOutcome(
+            result=GateResult(
+                row={"value": 42},
+                action=RoutingAction.route("true"),
+                contract=_make_contract(),
+            ),
+            updated_token=token,
+            sink_name="error_sink",
+        )
+
+        with patch.object(
+            processor._gate_executor,
+            "execute_config_gate",
+            return_value=sink_outcome,
+        ):
+            result, _child_items = processor._process_single_token(
+                token=token,
+                ctx=ctx,
+                current_node_id=gate_node,
+                coalesce_node_id=NodeID("coalesce::merge"),
+                coalesce_name=CoalesceName("merge"),
+            )
+
+        # Gate should produce ROUTED result
+        if isinstance(result, list):
+            routed = [r for r in result if r.outcome == RowOutcome.ROUTED]
+            assert len(routed) == 1
+            assert routed[0].sink_name == "error_sink"
+        else:
+            assert result is not None
+            assert result.outcome == RowOutcome.ROUTED
+            assert result.sink_name == "error_sink"
+
+        # Coalesce must have been notified of the lost branch
+        coalesce.notify_branch_lost.assert_called_once_with(
+            coalesce_name=CoalesceName("merge"),
+            row_id="row-1",
+            lost_branch="path_a",
+            reason="gate_routed_to_sink:error_sink",
+        )
+
+    def test_gate_sink_route_with_coalesce_failure_returns_sibling_results(self) -> None:
+        """Gate sink routing that triggers coalesce failure returns sibling FAILED results."""
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("gate-1")
+
+        recorder.register_node(
+            run_id="test-run",
+            plugin_name="router-gate",
+            node_type=NodeType.GATE,
+            plugin_version="1.0",
+            config={},
+            node_id="gate-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        gate_config = GateSettings(
+            name="router-gate",
+            input="default",
+            condition="True",
+            routes={"true": "error_sink", "false": "default"},
+        )
+
+        sibling_token = make_token_info(data={"value": 99})
+        coalesce = Mock()
+        coalesce.notify_branch_lost.return_value = Mock(
+            merged_token=None,
+            failure_reason="require_all policy violated",
+            consumed_tokens=[sibling_token],
+        )
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="default",
+            node_step_map={source_node: 0, gate_node: 1},
+            node_to_next={source_node: gate_node, gate_node: None},
+            first_transform_node_id=gate_node,
+            node_to_plugin={gate_node: gate_config},
+            coalesce_executor=coalesce,
+            branch_to_coalesce={BranchName("path_a"): CoalesceName("merge")},
+            coalesce_node_ids={CoalesceName("merge"): NodeID("coalesce::merge")},
+        )
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok-branch-a",
+            row_data=make_row({"value": 42}),
+            branch_name="path_a",
+        )
+
+        sink_outcome = GateOutcome(
+            result=GateResult(
+                row={"value": 42},
+                action=RoutingAction.route("true"),
+                contract=_make_contract(),
+            ),
+            updated_token=token,
+            sink_name="error_sink",
+        )
+
+        with patch.object(
+            processor._gate_executor,
+            "execute_config_gate",
+            return_value=sink_outcome,
+        ):
+            result, _child_items = processor._process_single_token(
+                token=token,
+                ctx=ctx,
+                current_node_id=gate_node,
+                coalesce_node_id=NodeID("coalesce::merge"),
+                coalesce_name=CoalesceName("merge"),
+            )
+
+        # Result must be a list: ROUTED (current) + FAILED (sibling)
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+        routed = [r for r in result if r.outcome == RowOutcome.ROUTED]
+        failed = [r for r in result if r.outcome == RowOutcome.FAILED]
+        assert len(routed) == 1
+        assert routed[0].sink_name == "error_sink"
+        assert len(failed) == 1
+        assert failed[0].error is not None
+        assert "require_all" in failed[0].error.message
+
+    def test_gate_sink_route_without_branch_skips_coalesce(self) -> None:
+        """Gate sink routing a non-fork token does not attempt coalesce notification."""
+        _db, recorder = _make_recorder()
+        ctx = PluginContext(run_id="test-run", config={})
+
+        source_node = NodeID("source-0")
+        gate_node = NodeID("gate-1")
+
+        recorder.register_node(
+            run_id="test-run",
+            plugin_name="router-gate",
+            node_type=NodeType.GATE,
+            plugin_version="1.0",
+            config={},
+            node_id="gate-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        gate_config = GateSettings(
+            name="router-gate",
+            input="default",
+            condition="True",
+            routes={"true": "error_sink", "false": "default"},
+        )
+
+        coalesce = Mock()
+
+        processor = _make_processor(
+            recorder,
+            source_on_success="default",
+            node_step_map={source_node: 0, gate_node: 1},
+            node_to_next={source_node: gate_node, gate_node: None},
+            first_transform_node_id=gate_node,
+            node_to_plugin={gate_node: gate_config},
+            coalesce_executor=coalesce,
+        )
+
+        # Non-fork token: branch_name is None
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok-1",
+            row_data=make_row({"value": 42}),
+            branch_name=None,
+        )
+
+        sink_outcome = GateOutcome(
+            result=GateResult(
+                row={"value": 42},
+                action=RoutingAction.route("true"),
+                contract=_make_contract(),
+            ),
+            updated_token=token,
+            sink_name="error_sink",
+        )
+
+        with patch.object(
+            processor._gate_executor,
+            "execute_config_gate",
+            return_value=sink_outcome,
+        ):
+            result, _child_items = processor._process_single_token(
+                token=token,
+                ctx=ctx,
+                current_node_id=gate_node,
+            )
+
+        # Should still route correctly
+        assert result is not None
+        assert not isinstance(result, list)
+        assert result.outcome == RowOutcome.ROUTED
+        assert result.sink_name == "error_sink"
+
+        # notify_branch_lost should NOT have been called (no branch_name)
+        coalesce.notify_branch_lost.assert_not_called()

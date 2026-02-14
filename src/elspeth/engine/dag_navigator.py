@@ -250,25 +250,46 @@ class DAGNavigator:
     ) -> WorkItem:
         """Create child work item that continues after current node or resumes at coalesce.
 
-        For fork children (coalesce_name is set), routes the token to the first
-        processing node for its branch:
+        For fresh fork children (coalesce_name is set AND current_node_id is a
+        gate node), routes the token to the first processing node for its branch:
         - Identity branches: first_node == coalesce_node_id (same as before)
         - Transform branches: first_node is the first transform in the chain
+
+        For non-fork continuations (deaggregation, aggregation flush) where the
+        token is already mid-branch, advances to the next node via
+        resolve_next_node while preserving coalesce metadata for eventual
+        coalesce handling.
         """
         if coalesce_name is not None:
             coalesce_node_id = self._coalesce_node_ids[coalesce_name]
-            # Direct access — all coalesce branches are populated in _branch_first_node.
-            # branch_name is always set on fork children; None here is an invariant violation.
-            branch_name = token.branch_name
-            if branch_name is None:
-                raise OrchestrationInvariantError(
-                    f"Token '{token.token_id}' has coalesce_name='{coalesce_name}' but branch_name is None. "
-                    "Fork children must have branch_name set."
+
+            # Only route to branch-start when the continuation originates from
+            # a fork gate (the node that created the fork children). Non-fork
+            # continuations (deaggregation, aggregation flush) are already
+            # mid-branch and must advance forward via resolve_next_node.
+            is_fork_origin = isinstance(self._node_to_plugin.get(current_node_id), GateSettings)
+
+            if is_fork_origin:
+                # Fresh fork child — route to the first node in the branch.
+                branch_name = token.branch_name
+                if branch_name is None:
+                    raise OrchestrationInvariantError(
+                        f"Token '{token.token_id}' has coalesce_name='{coalesce_name}' but branch_name is None. "
+                        "Fork children must have branch_name set."
+                    )
+                first_node = self._branch_first_node[branch_name]
+                return self.create_work_item(
+                    token=token,
+                    current_node_id=first_node,
+                    coalesce_name=coalesce_name,
+                    coalesce_node_id=coalesce_node_id,
+                    on_success_sink=on_success_sink,
                 )
-            first_node = self._branch_first_node[branch_name]
+
+            # Non-fork continuation — advance forward, preserving coalesce metadata.
             return self.create_work_item(
                 token=token,
-                current_node_id=first_node,
+                current_node_id=self.resolve_next_node(current_node_id),
                 coalesce_name=coalesce_name,
                 coalesce_node_id=coalesce_node_id,
                 on_success_sink=on_success_sink,

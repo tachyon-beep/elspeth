@@ -310,38 +310,40 @@ def _json_schema_to_python_type(
     from uuid import UUID
 
     # Handle anyOf patterns FIRST (before checking for "type" key)
-    # anyOf is used for: Decimal, nullable types (T | None)
+    # anyOf is used for: Decimal, nullable types (T | None), nullable Decimal
     if "anyOf" in field_info:
         any_of_items = cast(list[Mapping[str, object]], field_info["anyOf"])
-
-        # Pattern 1: Decimal - {"anyOf": [{"type": "number"}, {"type": "string", ...}]}
         type_strs = {cast(str, item["type"]) for item in any_of_items if "type" in item}
-        if {"number", "string"}.issubset(type_strs) and "null" not in type_strs:
-            return Decimal
+        has_null = "null" in type_strs
+        non_null_items = [item for item in any_of_items if item.get("type") != "null"]
+        non_null_types = {cast(str, item["type"]) for item in non_null_items if "type" in item}
+
+        # Pattern 1: Decimal or Optional[Decimal]
+        # Decimal: {"anyOf": [{"type": "number"}, {"type": "string"}]}
+        # Optional[Decimal]: {"anyOf": [{"type": "number"}, {"type": "string"}, {"type": "null"}]}
+        if {"number", "string"}.issubset(non_null_types) and len(non_null_items) == 2:
+            return Decimal | None if has_null else Decimal
 
         # Pattern 2: Nullable - {"anyOf": [{"type": "T", ...}, {"type": "null"}]}
         #   or with $ref:  {"anyOf": [{"$ref": "#/$defs/M"}, {"type": "null"}]}
         # Extract the non-null type and recursively resolve it
-        if "null" in type_strs:
-            # Items without "type" key (e.g. $ref entries) are non-null by definition
-            non_null_items = [item for item in any_of_items if item.get("type") != "null"]
-            if len(non_null_items) == 1:
-                # Recursively resolve the non-null type, then wrap as Optional.
-                # Returning T | None (not bare T) is critical: Pydantic model types
-                # reject None unless the type annotation explicitly includes it.
-                inner_type = _json_schema_to_python_type(
-                    field_name,
-                    non_null_items[0],
-                    schema_defs=schema_defs,
-                    create_model=create_model,
-                    schema_base=schema_base,
-                )
-                return inner_type | None
+        if has_null and len(non_null_items) == 1:
+            # Recursively resolve the non-null type, then wrap as Optional.
+            # Returning T | None (not bare T) is critical: Pydantic model types
+            # reject None unless the type annotation explicitly includes it.
+            inner_type = _json_schema_to_python_type(
+                field_name,
+                non_null_items[0],
+                schema_defs=schema_defs,
+                create_model=create_model,
+                schema_base=schema_base,
+            )
+            return inner_type | None
 
         # Unsupported anyOf pattern (e.g., Union[str, int] without null)
         raise ValueError(
             f"Resume failed: Field '{field_name}' has unsupported anyOf pattern. "
-            f"Supported patterns: Decimal (number|string), nullable (T|null). "
+            f"Supported patterns: Decimal (number|string), nullable (T|null), nullable Decimal (number|string|null). "
             f"Schema definition: {field_info}. "
             f"This is a bug in schema reconstruction - please report this."
         )

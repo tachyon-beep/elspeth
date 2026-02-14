@@ -340,18 +340,21 @@ class TestCreateContinuationWorkItem:
         )
         assert item.current_node_id == NodeID("t-2")
 
-    def test_jumps_to_coalesce_when_name_provided(self) -> None:
-        """With coalesce name, routes to branch first node (identity → coalesce node)."""
+    def test_jumps_to_branch_start_when_fork_gate_origin(self) -> None:
+        """With coalesce name from a gate node, routes to branch first node."""
+        gate = GateSettings(name="fork_gate", input="in", condition="True", routes={"true": "out", "false": "err"})
+        gate_node = NodeID("gate-1")
         token = make_token_info(data={"v": 1}, branch_name="path_a")
         coalesce_node = NodeID("coalesce::merge")
         nav = _make_nav(
+            node_to_plugin={gate_node: gate},
             coalesce_node_ids={CoalesceName("merge"): coalesce_node},
-            node_to_next={NodeID("t-1"): NodeID("t-2"), coalesce_node: None},
+            node_to_next={gate_node: None, coalesce_node: None},
             branch_first_node={"path_a": coalesce_node},
         )
         item = nav.create_continuation_work_item(
             token=token,
-            current_node_id=NodeID("t-1"),
+            current_node_id=gate_node,
             coalesce_name=CoalesceName("merge"),
         )
         assert item.current_node_id == coalesce_node
@@ -458,13 +461,16 @@ class TestBranchTransformRouting:
         When branch_first_node maps a branch to a transform node (not the
         coalesce), the fork child should be routed to that transform first.
         """
+        gate = GateSettings(name="fork_gate", input="in", condition="True", routes={"true": "out", "false": "err"})
+        gate_node = NodeID("gate-1")
         transform = _make_mock_transform(node_id="branch-t1", name="enrich")
         coalesce_node = NodeID("coalesce::merge")
         branch_t1 = NodeID("branch-t1")
 
         nav = _make_nav(
-            node_to_plugin={branch_t1: transform},
+            node_to_plugin={gate_node: gate, branch_t1: transform},
             node_to_next={
+                gate_node: None,
                 branch_t1: coalesce_node,
                 coalesce_node: None,
             },
@@ -476,7 +482,7 @@ class TestBranchTransformRouting:
         token = make_token_info(data={"v": 1}, branch_name="path_a")
         item = nav.create_continuation_work_item(
             token=token,
-            current_node_id=NodeID("gate-1"),
+            current_node_id=gate_node,
             coalesce_name=CoalesceName("merge"),
         )
 
@@ -491,11 +497,14 @@ class TestBranchTransformRouting:
         When branch_first_node maps a branch to the coalesce node itself,
         the fork child goes straight there (preserving pre-ARCH-15 behavior).
         """
+        gate = GateSettings(name="fork_gate", input="in", condition="True", routes={"true": "out", "false": "err"})
+        gate_node = NodeID("gate-1")
         coalesce_node = NodeID("coalesce::merge")
 
         nav = _make_nav(
+            node_to_plugin={gate_node: gate},
             node_to_next={
-                NodeID("gate-1"): None,
+                gate_node: None,
                 coalesce_node: None,
             },
             coalesce_node_ids={CoalesceName("merge"): coalesce_node},
@@ -506,7 +515,7 @@ class TestBranchTransformRouting:
         token = make_token_info(data={"v": 1}, branch_name="path_a")
         item = nav.create_continuation_work_item(
             token=token,
-            current_node_id=NodeID("gate-1"),
+            current_node_id=gate_node,
             coalesce_name=CoalesceName("merge"),
         )
 
@@ -520,14 +529,17 @@ class TestBranchTransformRouting:
         and coalesce_node_id must be carried forward so the processor knows
         to route to the coalesce node after the branch chain completes.
         """
+        gate = GateSettings(name="fork_gate", input="in", condition="True", routes={"true": "out", "false": "err"})
+        gate_node = NodeID("gate-1")
         transform = _make_mock_transform(node_id="branch-t1", name="enrich")
         coalesce_node = NodeID("coalesce::merge")
         branch_t1 = NodeID("branch-t1")
         branch_t2 = NodeID("branch-t2")
 
         nav = _make_nav(
-            node_to_plugin={branch_t1: transform},
+            node_to_plugin={gate_node: gate, branch_t1: transform},
             node_to_next={
+                gate_node: None,
                 branch_t1: branch_t2,
                 branch_t2: coalesce_node,
                 coalesce_node: None,
@@ -542,7 +554,7 @@ class TestBranchTransformRouting:
         # First: fork creates work item at branch start
         item1 = nav.create_continuation_work_item(
             token=token,
-            current_node_id=NodeID("gate-1"),
+            current_node_id=gate_node,
             coalesce_name=CoalesceName("merge"),
         )
         assert item1.current_node_id == branch_t1
@@ -556,3 +568,197 @@ class TestBranchTransformRouting:
             current_node_id=branch_t1,
         )
         assert item2.current_node_id == branch_t2
+
+
+# =============================================================================
+# Regression: P1-2026-02-14 — coalesce_name misroutes non-fork continuations
+# =============================================================================
+
+
+class TestContinuationCoalesceNonForkRegression:
+    """Regression tests for P1-2026-02-14.
+
+    Bug: create_continuation_work_item() treated ANY token with coalesce_name
+    as a fresh fork child and routed it to branch_first_node. This caused
+    backward jumps for non-fork continuations (deaggregation, aggregation flush)
+    that are already mid-branch.
+
+    Fix: Only route to branch_first_node when current_node_id is a gate node
+    (fork origin). Non-fork continuations advance via resolve_next_node while
+    preserving coalesce metadata.
+    """
+
+    def test_deaggregation_child_advances_forward_not_to_branch_start(self) -> None:
+        """Deaggregation child in a branch must advance to next node, not jump back.
+
+        Simulates: fork gate -> branch_t1 (deagg transform) -> branch_t2 -> coalesce
+        A child token from expand_token at branch_t1 should continue to branch_t2,
+        not jump back to branch_t1.
+        """
+        gate = GateSettings(name="fork_gate", input="in", condition="True", routes={"true": "out", "false": "err"})
+        gate_node = NodeID("gate-1")
+        deagg_transform = _make_mock_transform(node_id="branch-t1", name="deagg")
+        next_transform = _make_mock_transform(node_id="branch-t2", name="next_step")
+        coalesce_node = NodeID("coalesce::merge")
+        branch_t1 = NodeID("branch-t1")
+        branch_t2 = NodeID("branch-t2")
+
+        nav = _make_nav(
+            node_to_plugin={gate_node: gate, branch_t1: deagg_transform, branch_t2: next_transform},
+            node_to_next={
+                gate_node: None,
+                branch_t1: branch_t2,
+                branch_t2: coalesce_node,
+                coalesce_node: None,
+            },
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            structural_node_ids=frozenset({coalesce_node}),
+            branch_first_node={"path_a": branch_t1},
+        )
+
+        # Expanded child token inherits branch_name from parent
+        child_token = make_token_info(data={"v": 1}, branch_name="path_a")
+
+        # Deaggregation continuation: current_node_id is the deagg transform (NOT the gate)
+        item = nav.create_continuation_work_item(
+            token=child_token,
+            current_node_id=branch_t1,
+            coalesce_name=CoalesceName("merge"),
+        )
+
+        # Must advance to branch_t2 (next node), NOT jump back to branch_t1
+        assert item.current_node_id == branch_t2
+        # Coalesce metadata must be preserved for eventual coalesce handling
+        assert item.coalesce_name == CoalesceName("merge")
+        assert item.coalesce_node_id == coalesce_node
+
+    def test_aggregation_flush_advances_forward_not_to_branch_start(self) -> None:
+        """Aggregation flush continuation in a branch must advance forward.
+
+        Simulates: fork gate -> branch_t1 (agg transform) -> branch_t2 -> coalesce
+        After aggregation flush at branch_t1, tokens should continue to branch_t2.
+        """
+        gate = GateSettings(name="fork_gate", input="in", condition="True", routes={"true": "out", "false": "err"})
+        gate_node = NodeID("gate-1")
+        agg_transform = _make_mock_transform(node_id="branch-t1", name="batch_agg")
+        post_agg = _make_mock_transform(node_id="branch-t2", name="post_agg")
+        coalesce_node = NodeID("coalesce::merge")
+        branch_t1 = NodeID("branch-t1")
+        branch_t2 = NodeID("branch-t2")
+
+        nav = _make_nav(
+            node_to_plugin={gate_node: gate, branch_t1: agg_transform, branch_t2: post_agg},
+            node_to_next={
+                gate_node: None,
+                branch_t1: branch_t2,
+                branch_t2: coalesce_node,
+                coalesce_node: None,
+            },
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            structural_node_ids=frozenset({coalesce_node}),
+            branch_first_node={"path_a": branch_t1},
+        )
+
+        # Token from aggregation flush (passthrough or transform mode)
+        flush_token = make_token_info(data={"v": 1}, branch_name="path_a")
+
+        # Aggregation flush continuation: current_node_id is the agg transform
+        item = nav.create_continuation_work_item(
+            token=flush_token,
+            current_node_id=branch_t1,
+            coalesce_name=CoalesceName("merge"),
+        )
+
+        # Must advance to branch_t2, NOT jump back to branch_t1
+        assert item.current_node_id == branch_t2
+        assert item.coalesce_name == CoalesceName("merge")
+        assert item.coalesce_node_id == coalesce_node
+
+    def test_fork_gate_origin_still_routes_to_branch_start(self) -> None:
+        """Fork gate origin must still route to branch_first_node (not regressed).
+
+        The fix must not break the fork-origin path: when the continuation
+        originates from a gate node, fresh fork children should still be
+        routed to the branch's first processing node.
+        """
+        gate = GateSettings(name="fork_gate", input="in", condition="True", routes={"true": "out", "false": "err"})
+        gate_node = NodeID("gate-1")
+        branch_t1 = _make_mock_transform(node_id="branch-t1", name="enrich")
+        coalesce_node = NodeID("coalesce::merge")
+
+        nav = _make_nav(
+            node_to_plugin={gate_node: gate, NodeID("branch-t1"): branch_t1},
+            node_to_next={
+                gate_node: None,
+                NodeID("branch-t1"): coalesce_node,
+                coalesce_node: None,
+            },
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            structural_node_ids=frozenset({coalesce_node}),
+            branch_first_node={"path_a": NodeID("branch-t1")},
+        )
+
+        fork_child = make_token_info(data={"v": 1}, branch_name="path_a")
+        item = nav.create_continuation_work_item(
+            token=fork_child,
+            current_node_id=gate_node,
+            coalesce_name=CoalesceName("merge"),
+        )
+
+        # Fork gate origin: must route to branch_first_node
+        assert item.current_node_id == NodeID("branch-t1")
+        assert item.coalesce_name == CoalesceName("merge")
+
+    def test_non_fork_continuation_preserves_on_success_sink(self) -> None:
+        """Non-fork continuation with coalesce_name must preserve on_success_sink.
+
+        Deaggregation children inherit on_success_sink from their parent.
+        This must survive the coalesce-aware continuation routing.
+        """
+        gate = GateSettings(name="fork_gate", input="in", condition="True", routes={"true": "out", "false": "err"})
+        gate_node = NodeID("gate-1")
+        deagg_transform = _make_mock_transform(node_id="branch-t1", name="deagg")
+        coalesce_node = NodeID("coalesce::merge")
+        branch_t1 = NodeID("branch-t1")
+
+        nav = _make_nav(
+            node_to_plugin={gate_node: gate, branch_t1: deagg_transform},
+            node_to_next={
+                gate_node: None,
+                branch_t1: coalesce_node,
+                coalesce_node: None,
+            },
+            coalesce_node_ids={CoalesceName("merge"): coalesce_node},
+            structural_node_ids=frozenset({coalesce_node}),
+            branch_first_node={"path_a": branch_t1},
+        )
+
+        child_token = make_token_info(data={"v": 1}, branch_name="path_a")
+        item = nav.create_continuation_work_item(
+            token=child_token,
+            current_node_id=branch_t1,
+            coalesce_name=CoalesceName("merge"),
+            on_success_sink="inherited_sink",
+        )
+
+        assert item.current_node_id == coalesce_node  # next node after branch_t1
+        assert item.on_success_sink == "inherited_sink"
+        assert item.coalesce_name == CoalesceName("merge")
+
+    def test_non_fork_continuation_without_coalesce_still_works(self) -> None:
+        """Non-fork continuation without coalesce_name (linear pipeline) is unaffected."""
+        transform = _make_mock_transform(node_id="t-1", name="step1")
+        nav = _make_nav(
+            node_to_plugin={NodeID("t-1"): transform},
+            node_to_next={NodeID("t-1"): NodeID("t-2"), NodeID("t-2"): None},
+        )
+
+        token = make_token_info(data={"v": 1})
+        item = nav.create_continuation_work_item(
+            token=token,
+            current_node_id=NodeID("t-1"),
+        )
+
+        assert item.current_node_id == NodeID("t-2")
+        assert item.coalesce_name is None
+        assert item.coalesce_node_id is None
