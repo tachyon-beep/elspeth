@@ -4,8 +4,8 @@
 
 ## Severity
 
-- Severity: major
-- Priority: P1
+- Severity: minor
+- Priority: P3 (downgraded from P1 — MockClock is test-only infrastructure, never used in production; SystemClock delegates to time.monotonic() which is guaranteed monotonic and finite; minor test hardening improvement)
 
 ## Location
 

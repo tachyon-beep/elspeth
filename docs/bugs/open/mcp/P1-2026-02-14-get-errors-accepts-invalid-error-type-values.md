@@ -4,8 +4,8 @@
 
 ## Severity
 
-- Severity: major
-- Priority: P1
+- Severity: minor
+- Priority: P2 (downgraded from P1 — MCP SDK validates error_type against tool schema enum before reaching handler; defense-in-depth gap only, not reachable via MCP protocol)
 
 ## Location
 

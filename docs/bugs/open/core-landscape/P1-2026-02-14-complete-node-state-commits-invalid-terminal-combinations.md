@@ -5,7 +5,7 @@
 ## Severity
 
 - Severity: major
-- Priority: P1
+- Priority: P2 (downgraded from P1 — write-then-read pattern catches violations before transaction commits)
 
 ## Location
 
@@ -34,3 +34,5 @@ Tier-1 audit state can be durably corrupted before crash, reducing trust in term
 - Status: open
 - Source report: `docs/bugs/generated/core/landscape/_node_state_recording.py.md`
 - Beads: elspeth-rapid-5rom
+
+Triage: Downgraded P1→P2. Immediate read-back via get_node_state() catches invalid combinations. Defense-in-depth gap (pre-validation would be cleaner) but not active data corruption in practice.

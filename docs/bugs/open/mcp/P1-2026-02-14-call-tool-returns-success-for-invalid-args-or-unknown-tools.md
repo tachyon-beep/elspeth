@@ -4,8 +4,8 @@
 
 ## Severity
 
-- Severity: major
-- Priority: P1
+- Severity: minor
+- Priority: P2 (downgraded from P1 — MCP SDK validates tool inputs against jsonschema before handler runs, catching most issues; error text is clearly prefixed with "Invalid arguments:" making it identifiable; read-only diagnostic tool)
 
 ## Location
 
