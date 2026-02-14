@@ -123,6 +123,47 @@ sinks:
         assert "Settings file not found: ~/settings.yaml" not in result.output
 
 
+class TestResumeDbValidation:
+    """Regression tests for resume database validation.
+
+    Regression test for ti23: resume with settings-derived database URL
+    that points to a non-existent SQLite file should fail with a clear
+    "Database file not found" error, not silently create an empty DB
+    and report "run not found".
+    """
+
+    def test_resume_rejects_nonexistent_settings_db(self, tmp_path: Path) -> None:
+        """resume exits with error when settings landscape.url points to missing file."""
+        from elspeth.cli import app
+
+        # Create a settings file whose landscape.url points to a non-existent DB
+        nonexistent_db = tmp_path / "does_not_exist.db"
+        settings_content = f"""
+source:
+  plugin: csv
+  on_success: default
+  options:
+    path: input.csv
+    on_validation_failure: discard
+sinks:
+  default:
+    plugin: json
+    options:
+      path: output.json
+landscape:
+  url: "sqlite:///{nonexistent_db}"
+"""
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(settings_content)
+
+        result = runner.invoke(app, ["resume", "fake-run-id", "-s", str(settings_file)])
+
+        assert result.exit_code == 1, f"Expected exit code 1, got {result.exit_code}. Output: {result.output}"
+        assert "Database file not found" in result.output, f"Expected 'Database file not found' error, got: {result.output}"
+        # Must NOT have created the file
+        assert not nonexistent_db.exists(), "resume should not create a new database file"
+
+
 class TestBuildResumeGraphs:
     """Test _build_resume_graphs accepts connection-valued on_success.
 

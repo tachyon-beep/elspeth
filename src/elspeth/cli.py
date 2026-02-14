@@ -1615,6 +1615,7 @@ def resume(
         db_url = f"sqlite:///{db_path}"
     else:
         db_url = settings_config.landscape.url
+        _validate_existing_sqlite_db_url(db_url, source="settings.yaml")
         typer.echo(f"Using database from settings.yaml: {db_url}")
 
     # Resolve SQLCipher passphrase
@@ -1628,7 +1629,7 @@ def resume(
 
     # Initialize database and recovery manager
     try:
-        db = LandscapeDB.from_url(db_url, passphrase=passphrase)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase, create_tables=False)
     except Exception as e:
         typer.echo(f"Error connecting to database: {e}", err=True)
         raise typer.Exit(1) from None
