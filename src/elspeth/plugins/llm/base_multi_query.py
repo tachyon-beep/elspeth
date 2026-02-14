@@ -318,6 +318,27 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         Returns:
             TransformResult with all query results merged, or error
         """
+        # Check for field collisions before dispatching any external queries.
+        # The output field names are deterministic (derived from query_specs and
+        # output_mapping), so we can short-circuit here and avoid wasting LLM API
+        # calls on rows that are guaranteed to fail.
+        all_fields_added = [
+            f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
+        ]
+        input_field_names = set(row_data.keys())
+        collisions = detect_field_collisions(input_field_names, all_fields_added)
+        if collisions is not None:
+            return TransformResult.error(
+                {
+                    "reason": "field_collision",
+                    "collisions": collisions,
+                    "message": (
+                        f"Multi-query output fields {collisions} already exist in input row. This would silently overwrite source data."
+                    ),
+                },
+                retryable=False,
+            )
+
         pool_context: dict[str, Any] | None = None
         if self._executor is not None:
             results, pool_context = self._execute_queries_parallel(row_for_queries, state_id, token_id, input_contract)
@@ -348,28 +369,9 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
         # Merge all results into output row
         output = row_data.copy()
-        input_field_names = set(row_data.keys())
         for result in results:
             if result.row is not None:
-                collisions = detect_field_collisions(input_field_names, result.row.keys())
-                if collisions is not None:
-                    return TransformResult.error(
-                        {
-                            "reason": "field_collision",
-                            "collisions": collisions,
-                            "message": (
-                                f"Multi-query output fields {collisions} already exist in input row. "
-                                "This would silently overwrite source data."
-                            ),
-                        },
-                        retryable=False,
-                        context_after=pool_context,
-                    )
                 output.update(result.row)
-
-        all_fields_added = [
-            f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
-        ]
         observed = SchemaContract(
             mode="OBSERVED",
             fields=tuple(

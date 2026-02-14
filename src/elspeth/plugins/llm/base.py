@@ -318,16 +318,37 @@ class BaseLLMTransform(BaseTransform):
                 }
             )
 
-        # 2. Build messages
+        # 2. Check for field collisions before any external calls.
+        # The output field list is deterministic (derived from self._response_field),
+        # so we can short-circuit here and avoid wasting LLM API calls on rows
+        # that are guaranteed to fail.
+        added_fields = [
+            *get_llm_guaranteed_fields(self._response_field),
+            *get_llm_audit_fields(self._response_field),
+        ]
+        collisions = detect_field_collisions(set(row_data.keys()), added_fields)
+        if collisions is not None:
+            return TransformResult.error(
+                {
+                    "reason": "field_collision",
+                    "collisions": collisions,
+                    "message": (
+                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
+                    ),
+                },
+                retryable=False,
+            )
+
+        # 3. Build messages
         messages: list[dict[str, str]] = []
         if self._system_prompt:
             messages.append({"role": "system", "content": self._system_prompt})
         messages.append({"role": "user", "content": rendered.prompt})
 
-        # 3. Get LLM client from subclass (self-contained pattern)
+        # 4. Get LLM client from subclass (self-contained pattern)
         llm_client = self._get_llm_client(ctx)
 
-        # 4. Call LLM via audited client
+        # 5. Call LLM via audited client
         # This is an EXTERNAL SYSTEM - wrap in try/catch
         # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
         # to let the engine's RetryManager handle them. Non-retryable errors
@@ -349,31 +370,13 @@ class BaseLLMTransform(BaseTransform):
                 retryable=False,
             )
 
-        # 4.5 Check for field collisions before writing output
-        added_fields = [
-            *get_llm_guaranteed_fields(self._response_field),
-            *get_llm_audit_fields(self._response_field),
-        ]
-        collisions = detect_field_collisions(set(row_data.keys()), added_fields)
-        if collisions is not None:
-            return TransformResult.error(
-                {
-                    "reason": "field_collision",
-                    "collisions": collisions,
-                    "message": (
-                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
-                    ),
-                },
-                retryable=False,
-            )
-
-        # 5. Build output row (OUR CODE - let exceptions crash)
+        # 6. Build output row (OUR CODE - let exceptions crash)
         output = row_data.copy()
         output[self._response_field] = response.content
         output[f"{self._response_field}_model"] = response.model
         output[f"{self._response_field}_usage"] = response.usage
 
-        # 6. Add audit metadata for template traceability
+        # 7. Add audit metadata for template traceability
         output[f"{self._response_field}_template_hash"] = rendered.template_hash
         output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
         output[f"{self._response_field}_template_source"] = rendered.template_source
@@ -381,7 +384,7 @@ class BaseLLMTransform(BaseTransform):
         output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
         output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
 
-        # 7. Propagate contract (always present in PipelineRow)
+        # 8. Propagate contract (always present in PipelineRow)
         output_contract = propagate_contract(
             input_contract=input_contract,
             output_row=output,

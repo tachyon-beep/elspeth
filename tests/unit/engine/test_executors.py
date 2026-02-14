@@ -1393,8 +1393,10 @@ class TestAggregationExecutor:
         from elspeth.contracts.errors import BatchPendingError
 
         recorder = _make_recorder()
-        # Make update_batch_status fail AFTER BatchPendingError is caught
-        recorder.update_batch_status.side_effect = RuntimeError("DB write failed")
+        # Make update_batch_status succeed on the first call (EXECUTING transition)
+        # but fail on the second call (post-BatchPendingError status link).
+        # This exercises the actual post-submission failure path.
+        recorder.update_batch_status.side_effect = [None, RuntimeError("DB write failed")]
         executor, _, nid = self._make_agg_executor(recorder=recorder, count=2)
         contract = _make_contract()
 
