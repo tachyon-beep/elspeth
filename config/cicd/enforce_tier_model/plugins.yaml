@@ -109,7 +109,7 @@ allow_hits:
   reason: Config boundary — isinstance(name, str) validates each entry in fields list
   safety: Rejects non-string or empty entries; prevents silent no-op security transform
   expires: '2026-05-13'
-- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=0bd8dc8dca329b8b
+- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=9d38e247fd754d8c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

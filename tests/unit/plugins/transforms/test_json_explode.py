@@ -610,3 +610,92 @@ class TestJSONExplodeCopyIsolation:
         # Second row must NOT see the mutation
         row_1_dict = result.rows[1].to_dict()
         assert row_1_dict["tags"] == ["original"]
+
+
+class TestJSONExplodeFieldCollision:
+    """Tests for field collision detection in JSONExplode."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_output_field_collision_returns_error(self, ctx: PluginContext) -> None:
+        """JSONExplode returns error when output_field collides with existing field."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "output_field": "name",  # Will collide with existing "name" field!
+            }
+        )
+
+        # Row has "name" which collides with output_field
+        row = make_pipeline_row({"id": 1, "name": "existing", "items": [{"a": 1}]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "name" in result.reason["collisions"]
+
+    def test_item_index_collision_returns_error(self, ctx: PluginContext) -> None:
+        """JSONExplode returns error when item_index collides with existing field."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "include_index": True,
+            }
+        )
+
+        # Row has "item_index" which collides with hardcoded field
+        row = make_pipeline_row({"id": 1, "item_index": 99, "items": [{"a": 1}]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "item_index" in result.reason["collisions"]
+
+    def test_no_collision_when_index_disabled(self, ctx: PluginContext) -> None:
+        """No collision on item_index when include_index is False."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+                "include_index": False,  # item_index won't be added
+            }
+        )
+
+        # Row has "item_index" but since include_index=False, no collision
+        row = make_pipeline_row({"id": 1, "item_index": 99, "items": [{"a": 1}]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+
+    def test_no_collision_succeeds(self, ctx: PluginContext) -> None:
+        """JSONExplode succeeds when no field collision exists."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+            }
+        )
+
+        # Row has no colliding fields
+        row = make_pipeline_row({"id": 1, "items": [{"a": 1}, {"a": 2}]})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.is_multi_row
+        assert result.rows is not None
+        assert len(result.rows) == 2
