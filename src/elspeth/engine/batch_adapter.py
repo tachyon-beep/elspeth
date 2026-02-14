@@ -39,6 +39,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from elspeth.contracts import ExceptionResult
+from elspeth.contracts.errors import OrchestrationInvariantError
 
 if TYPE_CHECKING:
     from elspeth.contracts import TransformResult
@@ -200,11 +201,18 @@ class SharedBatchAdapter:
             token: Token for this row
             result: Transform result or wrapped exception
             state_id: State ID for the attempt that produced this result.
-                     If None, result is discarded (no waiter can be matched).
+
+        Raises:
+            OrchestrationInvariantError: If state_id is None — indicates an
+                executor bug (state_id should always be set by begin_node_state
+                before the batch transform is called).
         """
         if state_id is None:
-            # Cannot match a waiter without state_id - discard result
-            return
+            raise OrchestrationInvariantError(
+                f"SharedBatchAdapter.emit() called with state_id=None for token "
+                f"{token.token_id}. This indicates an executor bug: state_id must "
+                f"be set by begin_node_state() before calling the batch transform."
+            )
         key: WaiterKey = (token.token_id, state_id)
         with self._lock:
             if key in self._waiters:

@@ -21,20 +21,20 @@ allow_hits:
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
   expires: null
-- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=c5f4c4f695cabe87
+- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=3db9fa60f995541a
   owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
+  reason: Cleanup/pop with default - key may not exist due to race between timeout and emit
+  safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent keys
   expires: '2026-05-02'
-- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=3125065ec11fe578
+- key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=c57e133e3c474ce1
   owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
+  reason: Cleanup/pop with default - late result may have been stored during race window
+  safety: Documented TOCTOU race pattern - prevents memory leak from orphaned results
   expires: '2026-05-02'
-- key: engine/batch_adapter.py:R5:RowWaiter:wait:fp=98c907e643e5e178
+- key: engine/batch_adapter.py:R5:RowWaiter:wait:fp=9fe7dc4c214e2704
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
+  reason: isinstance(result, ExceptionResult) - discriminated union for worker exception propagation
+  safety: Plugin bugs must crash; isinstance re-raises original exception from worker thread
   expires: '2026-05-02'
 - key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=b0a2d2bb02a45a77
   owner: architecture

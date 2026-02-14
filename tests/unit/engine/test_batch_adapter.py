@@ -16,6 +16,7 @@ import time
 import pytest
 
 from elspeth.contracts import TokenInfo, TransformResult
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.engine.batch_adapter import SharedBatchAdapter
 from elspeth.testing import make_pipeline_row
 
@@ -407,3 +408,18 @@ class TestSharedBatchAdapter:
             "The race between timeout and emit can store a result that "
             "no one will ever retrieve."
         )
+
+    def test_emit_with_none_state_id_raises_invariant_error(self) -> None:
+        """emit() with state_id=None raises OrchestrationInvariantError.
+
+        Regression: C1 — state_id=None means the executor failed to set up
+        node state via begin_node_state() before calling the batch transform.
+        Previously this was a silent drop, masking the real bug behind a
+        3600s timeout.
+        """
+        adapter = SharedBatchAdapter()
+        token = _make_token("token-1", "row-1")
+        result = TransformResult.success(make_pipeline_row({"v": 1}), success_reason={"action": "test"})
+
+        with pytest.raises(OrchestrationInvariantError, match="state_id=None"):
+            adapter.emit(token, result, state_id=None)
