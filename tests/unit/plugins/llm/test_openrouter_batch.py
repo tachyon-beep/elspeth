@@ -828,3 +828,84 @@ class TestOpenRouterBatchFieldCollision:
         # Row 1 should have collision error
         assert result.rows[1]["llm_response"] is None
         assert result.rows[1]["llm_response_error"]["reason"] == "field_collision"
+
+
+class TestOpenRouterBatchErrorKeyCollision:
+    """Regression tests for ydk4: source rows with an 'error' field.
+
+    Before the fix, _process_batch used key-presence detection
+    ("error" in result) to distinguish success from error dicts. If a
+    source row had a field named "error", the success output dict
+    contained that key, triggering the error branch and silently
+    dropping the LLM response.
+
+    The fix replaces raw dict sentinels with a typed _RowOutcome
+    dataclass that branches on an explicit .ok flag.
+    """
+
+    def test_success_row_with_error_field_not_misclassified(self, chaosllm_server) -> None:
+        """Source row with 'error' field is processed as SUCCESS, not misclassified."""
+        transform, ctx = _create_transform_with_context()
+        row = {"text": "Hello world", "error": "previous_pipeline_error_value"}
+
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server, content="Analyzed!")):
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        # LLM response must be populated, NOT None
+        assert result.row["llm_response"] == "Analyzed!"
+        # Original 'error' field must be preserved
+        assert result.row["error"] == "previous_pipeline_error_value"
+        # No error marker should be present
+        assert result.row.get("llm_response_error") is None
+
+    def test_batch_with_error_field_rows_all_succeed(self, chaosllm_server) -> None:
+        """Batch where every row has an 'error' field — all should succeed."""
+        transform, ctx = _create_transform_with_context({"pool_size": 2})
+        rows = [
+            {"text": "Row 1", "error": "err_a"},
+            {"text": "Row 2", "error": "err_b"},
+            {"text": "Row 3", "error": "err_c"},
+        ]
+
+        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(3)]
+
+        with mock_httpx_client(chaosllm_server, responses):
+            result = transform.process([make_pipeline_row(r) for r in rows], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 3
+
+        for i, output_row in enumerate(result.rows):
+            # LLM response populated
+            assert output_row["llm_response"] is not None
+            # Original error field preserved
+            assert output_row["error"] == f"err_{'abc'[i]}"
+            # No error marker
+            assert output_row.get("llm_response_error") is None
+
+    def test_error_row_with_error_field_still_captured_correctly(self, chaosllm_server) -> None:
+        """Source row with 'error' field + failed LLM call captures the error correctly."""
+        transform, ctx = _create_transform_with_context()
+        row = {"text": "Hello", "error": "pre-existing"}
+
+        error_response = Mock(spec=httpx.Response)
+        error_response.status_code = 500
+        error = httpx.HTTPStatusError(
+            "Server Error",
+            request=Mock(),
+            response=error_response,
+        )
+
+        with mock_httpx_client(chaosllm_server, side_effect=error):
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        # LLM response should be None (error)
+        assert result.row["llm_response"] is None
+        # Error should be from the API failure, not from the source row's "error" field
+        assert result.row["llm_response_error"]["reason"] == "api_call_failed"
+        assert result.row["llm_response_error"]["status_code"] == 500

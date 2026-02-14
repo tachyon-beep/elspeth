@@ -476,4 +476,3 @@ allowed_dict_patterns:
 
   # OpenRouter batch LLM (async batch API)
   - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform._process_single_row:return"

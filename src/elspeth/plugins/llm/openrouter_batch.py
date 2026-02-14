@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +46,19 @@ from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
+
+
+@dataclass(frozen=True, slots=True)
+class _RowOutcome:
+    """Internal result type for single-row processing in OpenRouter batch.
+
+    Uses an explicit boolean flag instead of key-presence detection to avoid
+    collisions with user data fields (e.g., a source row with an 'error' field).
+    """
+
+    ok: bool
+    row: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 class OpenRouterBatchConfig(LLMConfig):
@@ -455,7 +469,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Process rows in parallel using AuditedHTTPClient (one per state_id).
         # Each worker thread gets a cached client via _get_http_client().
-        results: dict[int, dict[str, Any] | Exception] = {}
+        results: dict[int, _RowOutcome | Exception] = {}
 
         with ThreadPoolExecutor(max_workers=self._pool_size) as executor:
             futures = {executor.submit(self._process_single_row, idx, row, ctx): idx for idx, row in enumerate(rows)}
@@ -508,16 +522,17 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 }
                 output_rows.append(output_row)
 
-            elif "error" in result:
+            elif not result.ok:
                 # Row-level error from _process_single_row
                 output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
-                output_row[f"{self._response_field}_error"] = result["error"]
+                output_row[f"{self._response_field}_error"] = result.error
                 output_rows.append(output_row)
 
             else:
-                # Success
-                output_rows.append(result)
+                # Success — result.row is always set when ok=True
+                assert result.row is not None
+                output_rows.append(result.row)
 
         # Create OBSERVED contract from union of ALL output row keys (not just first)
         # Error rows may have extra fields (e.g. _error) that the first row lacks
@@ -574,11 +589,12 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         idx: int,
         row: PipelineRow,
         ctx: PluginContext,
-    ) -> dict[str, Any]:
+    ) -> _RowOutcome:
         """Process a single row through OpenRouter API.
 
-        Called by worker threads. Returns either the processed row dict
-        or a dict with an "error" key.
+        Called by worker threads. Returns a _RowOutcome with ok=True and
+        the processed row dict on success, or ok=False with error details
+        on failure.
 
         Uses AuditedHTTPClient which automatically records HTTP calls to the
         Landscape audit trail and emits telemetry events. Manual ctx.record_call()
@@ -590,7 +606,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             ctx: Plugin context
 
         Returns:
-            Processed row dict or {"error": {...}} on failure
+            _RowOutcome with ok=True/row on success, ok=False/error on failure
         """
         # 1. Render template (THEIR DATA - wrap)
         try:
@@ -614,7 +630,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 latency_ms=None,
                 provider="openrouter",
             )
-            return {"error": {"reason": "template_rendering_failed", "error": str(e)}}
+            return _RowOutcome(ok=False, error={"reason": "template_rendering_failed", "error": str(e)})
 
         # 2. Build request body (OUR CODE - let exceptions crash)
         messages: list[dict[str, str]] = []
@@ -669,14 +685,15 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 model=self._model,
                 error=f"HTTP {e.response.status_code}: {e}",
             )
-            return {
-                "error": {
+            return _RowOutcome(
+                ok=False,
+                error={
                     "reason": "api_call_failed",
                     "error": str(e),
                     "status_code": e.response.status_code,
                     "retryable": is_capacity_error(e.response.status_code),
-                }
-            }
+                },
+            )
         except httpx.RequestError as e:
             # Network error already recorded by AuditedHTTPClient — just trace and return
             self._record_langfuse_trace(
@@ -686,51 +703,55 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 model=self._model,
                 error=f"Request error: {e}",
             )
-            return {
-                "error": {
+            return _RowOutcome(
+                ok=False,
+                error={
                     "reason": "api_call_failed",
                     "error": str(e),
                     "retryable": False,
-                }
-            }
+                },
+            )
 
         # 4. Parse JSON response (EXTERNAL DATA - wrap)
         try:
             data = response.json()
         except (ValueError, TypeError) as e:
-            return {
-                "error": {
+            return _RowOutcome(
+                ok=False,
+                error={
                     "reason": "invalid_json_response",
                     "error": str(e),
                     **({"body_preview": response.text[:500]} if response.text else {}),
-                }
-            }
+                },
+            )
 
         # 5. Validate response structure (EXTERNAL DATA - validate at boundary)
         if not isinstance(data, dict):
-            return {
-                "error": {
+            return _RowOutcome(
+                ok=False,
+                error={
                     "reason": "invalid_json_type",
                     "expected": "object",
                     "actual": type(data).__name__,
-                }
-            }
+                },
+            )
 
         # 6. Extract content (EXTERNAL DATA - wrap)
         try:
             choices = data["choices"]
             if not choices:
-                return {"error": {"reason": "empty_choices", "response": data}}
+                return _RowOutcome(ok=False, error={"reason": "empty_choices", "response": data})
 
             content = choices[0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:
-            return {
-                "error": {
+            return _RowOutcome(
+                ok=False,
+                error={
                     "reason": "malformed_response",
                     "error": f"{type(e).__name__}: {e}",
                     "response_keys": list(data.keys()) if isinstance(data, dict) else None,
-                }
-            }
+                },
+            )
 
         # Note: "usage" and "model" are optional in OpenAI/OpenRouter API responses
         # (e.g., streaming responses may omit usage). The .get() here handles a valid
@@ -754,15 +775,16 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         ]
         collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
         if collisions is not None:
-            return {
-                "error": {
+            return _RowOutcome(
+                ok=False,
+                error={
                     "reason": "field_collision",
                     "collisions": collisions,
                     "message": (
                         f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
                     ),
-                }
-            }
+                },
+            )
 
         # 7. Build output row (OUR CODE - let exceptions crash)
         output = row.to_dict()
@@ -776,7 +798,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
         output[f"{self._response_field}_model"] = response_model
 
-        return output
+        return _RowOutcome(ok=True, row=output)
 
     def close(self) -> None:
         """Release resources and flush tracing."""
