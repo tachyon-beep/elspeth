@@ -314,8 +314,10 @@ class GateExecutor:
             sink_name = dispatch.sink_name
             next_node_id = dispatch.next_node_id
 
-        except MissingEdgeError as e:
-            # Record failure before re-raising - ensures node_state is never left OPEN
+        except Exception as e:
+            # Record failure before re-raising - ensures node_state is never left OPEN.
+            # Catches MissingEdgeError, OrchestrationInvariantError, and any other
+            # dispatch/routing errors that would leave the state as non-terminal OPEN.
             routing_error: ExecutionError = {
                 "exception": str(e),
                 "type": type(e).__name__,

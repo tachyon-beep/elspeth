@@ -624,6 +624,35 @@ class TestBaseLLMTransformProcess:
         transform.close()
 
 
+class TestBaseLLMTransformAddsFields:
+    """Regression test for Phase 0 fix #12: BaseLLM adds_fields.
+
+    Bug: BaseLLMTransform did not set transforms_adds_fields = True.
+    This caused DAG schema validation to incorrectly assume LLM transforms
+    don't add fields (like llm_response, llm_response_model, etc.),
+    leading to spurious validation warnings or errors.
+
+    Fix: Set transforms_adds_fields = True on BaseLLMTransform class.
+    """
+
+    def test_base_llm_transform_has_adds_fields_true(self) -> None:
+        """BaseLLMTransform.transforms_adds_fields must be True."""
+        assert BaseLLMTransform.transforms_adds_fields is True
+
+    def test_concrete_subclass_inherits_adds_fields(self) -> None:
+        """Concrete subclass inherits transforms_adds_fields = True."""
+        TestLLMTransform = create_test_transform_class()
+        transform = TestLLMTransform(
+            {
+                "model": "gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        assert transform.transforms_adds_fields is True
+
+
 class TestBaseLLMTransformSchemaHandling:
     """Tests for schema configuration handling."""
 

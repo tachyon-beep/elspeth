@@ -677,3 +677,113 @@ class TestPurgePayloads:
         assert result.failed_refs == []
         assert result.bytes_freed == 0
         assert result.duration_seconds >= 0
+
+
+class TestInterruptedRunNotPurgeEligible:
+    """Regression test for Phase 0 fix #5: Interrupted run purge.
+
+    Bug: The purge query used `status != "running"`, which included
+    "interrupted" runs. Interrupted runs need their payloads preserved
+    for resume, so purging them would break resume functionality.
+
+    Fix: Changed to `status.in_(("completed", "failed"))` — only terminal
+    statuses are purge-eligible. "interrupted" and "running" are excluded.
+    """
+
+    def test_interrupted_run_payloads_not_in_expired_row_payloads(self, db: LandscapeDB) -> None:
+        """Interrupted runs must NOT appear in find_expired_row_payloads results."""
+        manager = PurgeManager(db, MockPayloadStore())
+        now = datetime(2026, 2, 14, tzinfo=UTC)
+        old = now - timedelta(days=60)
+
+        with db.connection() as conn:
+            _create_run(conn, "run-interrupted", status=RunStatus.INTERRUPTED, completed_at=old)
+            _create_node(conn, "run-interrupted", "node-interrupted")
+            _create_row(
+                conn,
+                "run-interrupted",
+                "node-interrupted",
+                "row-interrupted",
+                row_index=0,
+                source_data_ref="ref-interrupted",
+            )
+
+            # Control: a completed run IS eligible
+            _create_run(conn, "run-completed", status=RunStatus.COMPLETED, completed_at=old)
+            _create_node(conn, "run-completed", "node-completed")
+            _create_row(
+                conn,
+                "run-completed",
+                "node-completed",
+                "row-completed",
+                row_index=0,
+                source_data_ref="ref-completed",
+            )
+
+        refs = set(manager.find_expired_row_payloads(retention_days=30, as_of=now))
+        assert "ref-interrupted" not in refs, "Interrupted run payloads should be preserved for resume"
+        assert "ref-completed" in refs
+
+    def test_interrupted_run_payloads_not_in_expired_payload_refs(self, db: LandscapeDB) -> None:
+        """Interrupted runs must NOT appear in find_expired_payload_refs results."""
+        manager = PurgeManager(db, MockPayloadStore())
+        now = datetime(2026, 2, 14, tzinfo=UTC)
+        old = now - timedelta(days=60)
+
+        with db.connection() as conn:
+            _create_run(conn, "run-interrupted-all", status=RunStatus.INTERRUPTED, completed_at=old)
+            _create_node(conn, "run-interrupted-all", "node-interrupted-all")
+            _create_row(
+                conn,
+                "run-interrupted-all",
+                "node-interrupted-all",
+                "row-interrupted-all",
+                row_index=0,
+                source_data_ref="ref-interrupted-all",
+            )
+
+        refs = set(manager.find_expired_payload_refs(retention_days=30, as_of=now))
+        assert "ref-interrupted-all" not in refs
+
+
+class TestPurgeUnboundedIN:
+    """Regression test for Phase 0 fix #11: Purge unbounded IN clause.
+
+    Bug: _find_affected_run_ids built a single IN clause with all refs,
+    which could exceed SQLite's SQLITE_MAX_VARIABLE_NUMBER limit (999).
+
+    Fix: Chunked refs into _PURGE_CHUNK_SIZE=100 batches before building
+    IN clauses.
+    """
+
+    def test_find_affected_run_ids_with_many_refs(self, db: LandscapeDB) -> None:
+        """_find_affected_run_ids handles >999 refs without SQLite error.
+
+        Creates a real in-memory SQLite database with enough rows, then
+        queries with >999 refs to verify the chunking works.
+        """
+        manager = PurgeManager(db, MockPayloadStore())
+        now = datetime(2026, 2, 14, tzinfo=UTC)
+        old = now - timedelta(days=60)
+
+        with db.connection() as conn:
+            _create_run(conn, "run-chunk-test", status=RunStatus.COMPLETED, completed_at=old)
+            _create_node(conn, "run-chunk-test", "node-chunk-test")
+
+            # Create one real ref that exists in the database
+            _create_row(
+                conn,
+                "run-chunk-test",
+                "node-chunk-test",
+                "row-chunk-test",
+                row_index=0,
+                source_data_ref="ref-known",
+            )
+
+        # Build a list of >999 refs (most won't match anything)
+        refs = [f"ref-fake-{i}" for i in range(1050)]
+        refs.append("ref-known")  # This one should match
+
+        # This would fail with sqlite3.OperationalError before the fix
+        affected = manager._find_affected_run_ids(refs)
+        assert "run-chunk-test" in affected

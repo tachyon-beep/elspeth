@@ -203,6 +203,55 @@ Analyze these entries:
         assert template.lookup_source is None  # No source file specified
 
 
+class TestImmutableSandboxPreventsLookupMutation:
+    """Regression tests for Phase 0 fix: template mutation via lookup.update().
+
+    Bug: SandboxedEnvironment allowed dict mutation methods like .update()
+    on lookup data passed to templates. This meant templates could silently
+    mutate audit-tracked lookup data, breaking hash integrity.
+
+    Fix: Changed SandboxedEnvironment to ImmutableSandboxedEnvironment,
+    which blocks all mutation methods on containers.
+    """
+
+    def test_lookup_update_raises_template_error(self) -> None:
+        """Calling lookup.update() in template raises TemplateError.
+
+        Before the fix, this would silently succeed, mutating the lookup dict
+        and invalidating the lookup_hash recorded at template init.
+        """
+        template = PromptTemplate(
+            "{{ lookup.update({'injected': true}) }}",
+            lookup_data={"safe_key": "safe_value"},
+        )
+        with pytest.raises(TemplateError):
+            template.render({})
+
+    def test_lookup_pop_raises_template_error(self) -> None:
+        """Calling lookup.pop() in template raises TemplateError."""
+        template = PromptTemplate(
+            "{{ lookup.pop('key') }}",
+            lookup_data={"key": "value"},
+        )
+        with pytest.raises(TemplateError):
+            template.render({})
+
+    def test_lookup_setdefault_raises_template_error(self) -> None:
+        """Calling lookup.setdefault() in template raises TemplateError."""
+        template = PromptTemplate(
+            "{{ lookup.setdefault('new_key', 'injected') }}",
+            lookup_data={"key": "value"},
+        )
+        with pytest.raises(TemplateError):
+            template.render({})
+
+    def test_row_dict_mutation_blocked(self) -> None:
+        """Calling update on row data dict is also blocked by immutable sandbox."""
+        template = PromptTemplate("{{ row.update({'injected': true}) }}")
+        with pytest.raises(TemplateError):
+            template.render({"safe": "data"})
+
+
 class TestPromptTemplateCanonicalSafety:
     """Tests for canonicalization error handling in render_with_metadata().
 

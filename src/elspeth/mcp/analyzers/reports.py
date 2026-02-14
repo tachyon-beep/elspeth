@@ -208,18 +208,25 @@ def get_dag_structure(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str)
             terminal_sink_map[e.from_node_id] = sink_id_to_name[e.to_node_id]
 
     # Generate mermaid diagram
+    # Use sequential aliases (N0, N1, ...) for unique Mermaid node IDs.
+    # Truncating node_id to 8 chars caused collisions (e.g. all transforms
+    # shared the "transfor" prefix).
+    node_alias = {n.node_id: f"N{i}" for i, n in enumerate(nodes)}
     lines = ["graph TD"]
     for n in nodes:
+        alias = node_alias[n.node_id]
         label = f"{n.plugin_name}[{n.node_type.value}]"
-        lines.append(f'    {n.node_id[:8]}["{label}"]')
+        lines.append(f'    {alias}["{label}"]')
     for e in edges:
+        from_alias = node_alias.get(e.from_node_id, e.from_node_id[:8])
+        to_alias = node_alias.get(e.to_node_id, e.to_node_id[:8])
         if e.default_mode == RoutingMode.DIVERT:
             arrow = f"-.->|{e.label}|"
         elif e.label == "continue":
             arrow = "-->"
         else:
             arrow = f"-->|{e.label}|"
-        lines.append(f"    {e.from_node_id[:8]} {arrow} {e.to_node_id[:8]}")
+        lines.append(f"    {from_alias} {arrow} {to_alias}")
 
     return {
         "run_id": run_id,

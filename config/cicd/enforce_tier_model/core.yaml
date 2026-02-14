@@ -187,12 +187,12 @@ allow_hits:
   reason: Sentinel class definition in except ImportError — not a runtime error handler
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
   expires: null
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=2c0f051f0c37248d
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=81f62ecfa4ba8da4
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.exists() is external I/O (filesystem/blob storage)
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
   expires: null
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=e172162bc1808ed8
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=d88bb51d780df606
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
@@ -343,11 +343,6 @@ allow_hits:
   owner: ARCH-15
   reason: Edge mode/label lookup to identify identity branch's COPY edge
   safety: Falls through to transform-branch trace if no match — no silent fallback
-  expires: '2026-05-13'
-- key: core/dag/graph.py:R6:ExecutionGraph:get_effective_producer_schema:fp=6f04b07a1f9c377c
-  owner: ARCH-15
-  reason: GraphValidationError catch during transform-branch trace-back for select merge
-  safety: Falls through to return None — conservative (skips type validation rather than crashing)
   expires: '2026-05-13'
 # Coalesce optionality fix: _field_required isinstance checks for polymorphic field spec parsing
 - key: core/dag/builder.py:R5:_field_required:fp=1b28cb82858d9ed5

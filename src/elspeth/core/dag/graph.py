@@ -1085,11 +1085,8 @@ class ExecutionGraph:
                             return self.get_effective_producer_schema(from_id)
                     # Transform branch: last transform's edge has label "continue", not
                     # the branch name. Trace backward to find the last transform node.
-                    try:
-                        _first, last = self._trace_branch_endpoints(NodeID(node_id), select_branch)
-                        return self.get_effective_producer_schema(last)
-                    except GraphValidationError:
-                        pass  # Fall through to None if trace fails
+                    _first, last = self._trace_branch_endpoints(NodeID(node_id), select_branch)
+                    return self.get_effective_producer_schema(last)
             return None
 
         # Gates are true pass-throughs — inherit schema from upstream producers

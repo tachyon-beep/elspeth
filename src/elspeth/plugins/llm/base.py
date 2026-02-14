@@ -219,6 +219,9 @@ class BaseLLMTransform(BaseTransform):
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
 
+    # LLM transforms add response field + metadata fields to the output row
+    transforms_adds_fields: bool = True
+
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
 

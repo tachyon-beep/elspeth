@@ -1219,19 +1219,26 @@ class Orchestrator:
         for sink in config.sinks.values():
             sink.on_start(ctx)
 
-        processor, coalesce_node_map, coalesce_executor = self._build_processor(
-            graph=graph,
-            config=config,
-            settings=settings,
-            recorder=recorder,
-            run_id=run_id,
-            source_id=source_id,
-            edge_map=edge_map,
-            route_resolution_map=route_resolution_map,
-            config_gate_id_map=config_gate_id_map,
-            coalesce_id_map=coalesce_id_map,
-            payload_store=payload_store,
-        )
+        # Wrap _build_processor so that if it fails after successful on_start,
+        # plugin cleanup still runs (prevents resource leaks: DB connections,
+        # file handles, thread pools).
+        try:
+            processor, coalesce_node_map, coalesce_executor = self._build_processor(
+                graph=graph,
+                config=config,
+                settings=settings,
+                recorder=recorder,
+                run_id=run_id,
+                source_id=source_id,
+                edge_map=edge_map,
+                route_resolution_map=route_resolution_map,
+                config_gate_id_map=config_gate_id_map,
+                coalesce_id_map=coalesce_id_map,
+                payload_store=payload_store,
+            )
+        except Exception:
+            self._cleanup_plugins(config, ctx, include_source=True)
+            raise
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
         counters = ExecutionCounters()
@@ -1981,6 +1988,39 @@ class Orchestrator:
             )
 
             raise  # Propagate to CLI
+        except Exception:
+            # Non-shutdown exception during resume — finalize as FAILED to prevent
+            # the run from being stuck in RUNNING permanently (which blocks future
+            # resume attempts since recovery rejects RUNNING status).
+            total_duration = time.perf_counter() - resume_start_time
+            recorder.finalize_run(run_id, status=RunStatus.FAILED)
+
+            self._emit_telemetry(
+                RunFinished(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    status=RunStatus.FAILED,
+                    row_count=0,
+                    duration_ms=total_duration * 1000,
+                )
+            )
+
+            self._events.emit(
+                RunSummary(
+                    run_id=run_id,
+                    status=RunCompletionStatus.FAILED,
+                    total_rows=0,
+                    succeeded=0,
+                    failed=0,
+                    quarantined=0,
+                    duration_seconds=total_duration,
+                    exit_code=2,
+                    routed=0,
+                    routed_destinations=(),
+                )
+            )
+
+            raise
 
         # 6. Complete the run with reproducibility grade
         recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
@@ -2148,20 +2188,26 @@ class Orchestrator:
         for sink in config.sinks.values():
             sink.on_start(ctx)
 
-        processor, coalesce_node_map, coalesce_executor = self._build_processor(
-            graph=graph,
-            config=config,
-            settings=settings,
-            recorder=recorder,
-            run_id=run_id,
-            source_id=source_id,
-            edge_map=edge_map,
-            route_resolution_map=route_resolution_map,
-            config_gate_id_map=config_gate_id_map,
-            coalesce_id_map=coalesce_id_map,
-            payload_store=payload_store,
-            restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()},
-        )
+        # Wrap _build_processor so that if it fails after successful on_start,
+        # plugin cleanup still runs (same pattern as _execute_run).
+        try:
+            processor, coalesce_node_map, coalesce_executor = self._build_processor(
+                graph=graph,
+                config=config,
+                settings=settings,
+                recorder=recorder,
+                run_id=run_id,
+                source_id=source_id,
+                edge_map=edge_map,
+                route_resolution_map=route_resolution_map,
+                config_gate_id_map=config_gate_id_map,
+                coalesce_id_map=coalesce_id_map,
+                payload_store=payload_store,
+                restored_aggregation_state={NodeID(k): v for k, v in restored_aggregation_state.items()},
+            )
+        except Exception:
+            self._cleanup_plugins(config, ctx, include_source=False)
+            raise
 
         # Process rows - Buffer TOKENS
         counters = ExecutionCounters()

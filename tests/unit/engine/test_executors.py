@@ -845,8 +845,12 @@ class TestGateExecutor:
         assert len(outcome.child_tokens) == 2
         token_manager.fork_token.assert_called_once()
 
-    def test_config_gate_missing_token_manager_raises_without_failed_record(self) -> None:
-        """Routing-construction invariant should not be recorded as FAILED row state."""
+    def test_config_gate_missing_token_manager_records_failed_state(self) -> None:
+        """Dispatch errors (including invariant violations) must close node state as FAILED.
+
+        All exceptions during dispatch/routing close the node state to prevent
+        non-terminal OPEN states in the audit trail.
+        """
         recorder = _make_recorder()
         edge_map = {
             (NodeID("cg_1"), "path_a"): "edge_a",
@@ -881,7 +885,7 @@ class TestGateExecutor:
             )
 
         statuses = [call.kwargs.get("status") for call in recorder.complete_node_state.call_args_list]
-        assert NodeStateStatus.FAILED not in statuses
+        assert NodeStateStatus.FAILED in statuses
 
     def test_config_gate_missing_route_resolution_fails_closed(self) -> None:
         """Missing route resolution mapping raises MissingEdgeError (no fallback)."""
@@ -943,6 +947,61 @@ class TestGateExecutor:
         assert recorder.complete_node_state.call_count >= 1
         last_call = recorder.complete_node_state.call_args_list[-1]
         assert last_call[1]["status"] == NodeStateStatus.FAILED
+
+    def test_config_gate_runtime_error_in_dispatch_records_failed_state(self) -> None:
+        """RuntimeError during dispatch records FAILED state (Phase 0 fix #8).
+
+        Bug: The except clause only caught MissingEdgeError, so other exception
+        types (RuntimeError, TypeError, etc.) from _dispatch_resolved_destination
+        left node_state as non-terminal OPEN in the audit trail.
+
+        Fix: Widened except from MissingEdgeError to Exception.
+        """
+        recorder = _make_recorder()
+        # Create a route_resolution_map that resolves to a fork destination
+        # but provide NO token_manager — this triggers OrchestrationInvariantError
+        # We also test with a completely custom RuntimeError via mock
+        edge_map = {
+            (NodeID("cg_1"), "path_a"): "edge_a",
+            (NodeID("cg_1"), "path_b"): "edge_b",
+            (NodeID("cg_1"), "continue"): "edge_cont",
+        }
+        route_map = {(NodeID("cg_1"), "true"): RouteDestination.fork()}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="True",
+            routes={"true": "fork", "false": "error_sink"},
+            fork_to=["path_a", "path_b"],
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        # This raises OrchestrationInvariantError (a subclass of Exception but
+        # NOT MissingEdgeError). Before the fix, this would NOT be caught by
+        # the except clause, leaving node_state OPEN.
+        with pytest.raises(OrchestrationInvariantError):
+            executor.execute_config_gate(
+                config,
+                "cg_1",
+                token,
+                ctx,
+                token_manager=None,  # Triggers OrchestrationInvariantError in dispatch
+            )
+
+        # Verify FAILED status was recorded (the fix ensures this)
+        statuses = [call.kwargs.get("status") for call in recorder.complete_node_state.call_args_list]
+        assert NodeStateStatus.FAILED in statuses, (
+            "Node state should be FAILED when dispatch raises any Exception, not just MissingEdgeError"
+        )
 
     # --- Error routing edge cases (exd audit) ---
 
