@@ -3539,3 +3539,132 @@ class TestPluginConfigSchemaValidation:
         config = PluginConfig.from_dict({"schema": {"mode": "observed"}})
         assert config.schema_config is not None
         assert config.schema_config.is_observed
+
+
+class TestUnknownKeyRejection:
+    """Regression tests for jkmk: load_settings must reject unknown top-level keys.
+
+    Previously, load_settings() silently dropped unknown keys via a positive
+    allowlist before Pydantic's extra='forbid' could reject them. This meant
+    typos like 'trnasforms' were silently ignored and the pipeline ran with
+    no transforms configured.
+    """
+
+    def test_typo_key_raises_value_error(self, tmp_path: Path) -> None:
+        """A typo like 'trnasforms' instead of 'transforms' must be rejected."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+trnasforms:
+  - plugin: passthrough
+    name: test
+    input: source_out
+    on_success: output
+    on_error: discard
+""")
+        with pytest.raises(ValueError, match="trnasforms") as exc_info:
+            load_settings(config_file)
+        # Error message should also include valid keys for diagnosis
+        assert "Valid top-level keys" in str(exc_info.value)
+
+    def test_multiple_typo_keys_all_reported(self, tmp_path: Path) -> None:
+        """Multiple unknown keys should all appear in the error message."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+trnasforms:
+  - plugin: passthrough
+retrry:
+  max_attempts: 5
+""")
+        with pytest.raises(ValueError, match="trnasforms") as exc_info:
+            load_settings(config_file)
+        assert "retrry" in str(exc_info.value)
+
+    def test_valid_config_still_loads(self, tmp_path: Path) -> None:
+        """A config with only valid keys must load without error (no regression)."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+  options:
+    path: input.csv
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+transforms:
+  - plugin: passthrough
+    name: test
+    input: source_out
+    on_success: output
+    on_error: discard
+retry:
+  max_attempts: 5
+""")
+        settings = load_settings(config_file)
+        assert settings.source.plugin == "csv"
+        assert settings.retry.max_attempts == 5
+        assert len(settings.transforms) == 1
+
+    def test_dynaconf_internal_keys_not_rejected(self, tmp_path: Path) -> None:
+        """Dynaconf internal keys (e.g., load_dotenv) must not trigger an error.
+
+        Dynaconf injects keys like LOAD_DOTENV into the settings dict.
+        These are filtered by the allowlist but must not be treated as user errors.
+        """
+        from elspeth.core.config import load_settings
+
+        # A minimal valid config — Dynaconf will inject LOAD_DOTENV automatically
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+""")
+        # Should load without error (Dynaconf injects LOAD_DOTENV internally)
+        settings = load_settings(config_file)
+        assert settings.source.plugin == "csv"
+
+    def test_secrets_key_not_rejected(self, tmp_path: Path) -> None:
+        """The 'secrets' YAML key is handled by SecretsConfig, not ElspethSettings.
+
+        It must not be rejected as an unknown key even though it's not in
+        ElspethSettings.model_fields.
+        """
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+secrets:
+  source: env
+""")
+        settings = load_settings(config_file)
+        assert settings.source.plugin == "csv"

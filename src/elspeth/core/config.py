@@ -36,6 +36,53 @@ _MAX_NODE_NAME_LENGTH = 38
 _MAX_CONNECTION_NAME_LENGTH = 64
 _MAX_ROUTE_LABEL_LENGTH = 64
 
+# Known Dynaconf internal keys that are injected into settings and must be
+# filtered before passing to Pydantic. These appear as lowercase after
+# _lowercase_schema_keys(). Also includes "secrets" which is a valid
+# user YAML key handled separately by the CLI (SecretsConfig) before
+# load_settings() is called — it is not an ElspethSettings field.
+#
+# Any key in raw_config that is NEITHER in ElspethSettings.model_fields
+# NOR in this set is treated as a user error (e.g., typo) and rejected.
+_DYNACONF_INTERNAL_KEYS = frozenset(
+    {
+        # --- Dynaconf framework injections ---
+        # These are settings that Dynaconf injects into its dict output based on
+        # constructor parameters and internal state.
+        "load_dotenv",
+        "environments",
+        "settings_files",
+        "settings_file",
+        "settings_module",
+        "merge_enabled",
+        "envvar_prefix",
+        "envvar_prefix_for_dynaconf",
+        "includes",
+        "preload",
+        "force_env",
+        "env",
+        "core_loaders",
+        "loaders",
+        "root_path",
+        "validators",
+        "encoding",
+        # --- ELSPETH env vars that Dynaconf captures ---
+        # Dynaconf's envvar_prefix="ELSPETH" captures ALL env vars matching
+        # ELSPETH_* and strips the prefix. These are system env vars used
+        # directly by various subsystems (security, landscape, etc.) but are
+        # NOT ElspethSettings fields.
+        "fingerprint_key",  # ELSPETH_FINGERPRINT_KEY — secret fingerprinting
+        "allow_raw_secrets",  # ELSPETH_ALLOW_RAW_SECRETS — dev mode flag
+        "audit_key",  # ELSPETH_AUDIT_KEY — SQLCipher passphrase
+        "signing_key",  # ELSPETH_SIGNING_KEY — export signing
+        "database_url",  # ELSPETH_DATABASE_URL — MCP server default URL
+        # --- YAML keys handled outside ElspethSettings ---
+        # "secrets" is handled by SecretsConfig in the CLI, not by ElspethSettings.
+        # It passes through Dynaconf but is consumed before Pydantic validation.
+        "secrets",
+    }
+)
+
 
 def _validate_max_length(value: str, *, field_label: str, max_length: int) -> str:
     """Enforce bounded identifier length for routing/node names."""
@@ -1981,11 +2028,16 @@ def load_settings(config_path: Path) -> ElspethSettings:
             "Then remove the 'default_sink' line from your pipeline YAML."
         )
 
-    # Positive allowlist: only pass keys that ElspethSettings knows about.
-    # Dynaconf injects internal settings (LOAD_DOTENV, ENVIRONMENTS, SETTINGS_FILES,
-    # MERGE_ENABLED, ALLOW_RAW_SECRETS, etc.) which must be excluded. A positive
-    # allowlist is robust against Dynaconf version changes — no whack-a-mole.
+    # Reject unknown user keys before filtering. Any key that isn't a known
+    # Pydantic field AND isn't a known Dynaconf internal is a user error (typo).
+    # This replaces the old silent allowlist that dropped typos before Pydantic's
+    # extra="forbid" could catch them.
     known_fields = set(ElspethSettings.model_fields.keys())
+    unknown_user_keys = sorted(k for k in raw_config if k not in known_fields and k not in _DYNACONF_INTERNAL_KEYS)
+    if unknown_user_keys:
+        raise ValueError(f"Unknown configuration keys: {unknown_user_keys}. Check for typos. Valid top-level keys: {sorted(known_fields)}")
+
+    # Filter Dynaconf internals (now safe — all non-known keys are Dynaconf's)
     raw_config = {k: v for k, v in raw_config.items() if k in known_fields}
 
     # Expand ${VAR} and ${VAR:-default} patterns in config values
