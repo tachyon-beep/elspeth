@@ -1830,3 +1830,69 @@ class TestOpenRouterNanRejection:
             assert result.reason["reason"] == "non_finite_usage"
         finally:
             transform.close()
+
+
+class TestOpenRouterMalformedUtf8:
+    """Regression: Invalid UTF-8 in API response must fail, not silently mutate.
+
+    Parsing via response.text uses lossy decoding (replacement characters),
+    which can let corrupted external data pass as valid JSON instead of
+    failing at the boundary. Parsing from response.content (raw bytes)
+    ensures decode errors surface as invalid_json_response.
+    """
+
+    @pytest.fixture
+    def mock_recorder(self) -> Mock:
+        recorder = Mock()
+        recorder.record_call = Mock()
+        return recorder
+
+    @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        return CollectorOutputPort()
+
+    def test_invalid_utf8_response_returns_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """Response with invalid UTF-8 bytes must be rejected, not silently decoded."""
+        # Valid JSON prefix with invalid UTF-8 continuation byte embedded
+        invalid_utf8 = b'{"choices": [{"message": {"content": "hello \x80\x81 world"}}]}'
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=invalid_utf8,
+            status_code=200,
+            headers={"content-type": "application/json"},
+        )
+
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "openai/gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state",
+            token=token,
+        )
+
+        try:
+            with mock_httpx_client(chaosllm_server, response=response):
+                transform.accept(make_pipeline_row({"text": "hello"}), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+
+            assert len(collector.results) == 1
+            _, result, _ = collector.results[0]
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "invalid_json_response"
+        finally:
+            transform.close()

@@ -358,6 +358,10 @@ class AggregationExecutor:
             # Track whether the batch was finalized (COMPLETED or FAILED).
             # Used by the outer except to decide whether to fail the batch.
             batch_finalized = False
+            # Track whether the batch reached PENDING state (submitted to external service).
+            # If True, the outer except must NOT wipe in-memory batch state because the
+            # external batch is already submitted and needs to be polled/reconciled later.
+            batch_pending = False
 
             try:
                 with self._spans.aggregation_span(
@@ -377,6 +381,7 @@ class AggregationExecutor:
                         # The batch has been submitted but isn't complete yet.
                         # Complete node_state with PENDING status and link batch for audit trail, then re-raise.
                         duration_ms = (time.perf_counter() - start) * 1000
+                        batch_pending = True
 
                         # Close node_state with "pending" status - the submission succeeded
                         # but the result isn't available yet. This prevents orphaned OPEN states.
@@ -495,6 +500,15 @@ class AggregationExecutor:
             except BatchPendingError:
                 raise  # Already handled above, just propagate
             except Exception:
+                if batch_pending:
+                    # Batch was already submitted to external service. Post-submission
+                    # bookkeeping failed (e.g., update_batch_status DB write error), but
+                    # the external batch exists and must be polled/reconciled on retry.
+                    # Do NOT wipe in-memory batch state — it's the only link to the
+                    # externally-submitted batch. Let the exception propagate so the
+                    # orchestrator can schedule a retry that picks up the pending batch.
+                    ctx.batch_token_ids = None
+                    raise
                 # Batch cleanup on ANY failure (guard handles node state).
                 # Only attempt to fail the batch if it wasn't already finalized
                 # (avoids double-write if complete_batch itself raised).

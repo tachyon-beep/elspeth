@@ -80,10 +80,10 @@ allow_hits:
   reason: Pattern is .get() followed by explicit None check raising RuntimeError
   safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
   expires: null
-- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=50f2fb3109b169f8
-  owner: architecture
-  reason: Outer exception handler ensures batch lifecycle cleanup when inner guard auto-fails
-  safety: Batch marked FAILED, buffers cleared, ctx.batch_token_ids reset; exception re-raised
+- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=65e66896445e1dcb
+  owner: bugfix
+  reason: Outer exception handler ensures batch lifecycle cleanup; skips cleanup if batch already submitted (pending)
+  safety: Pending batches preserve state for retry; non-pending batches marked FAILED with buffers cleared; exception re-raised
   expires: null
 - key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffer_count:fp=bdb4bb4eb56e7c92
   owner: P2-2026-02-02

@@ -593,7 +593,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
             # 5. Parse JSON response (EXTERNAL DATA - wrap, reject NaN/Infinity)
             try:
-                data = json.loads(response.text, parse_constant=_reject_nonfinite_constant)
+                data = json.loads(response.content, parse_constant=_reject_nonfinite_constant)
             except (ValueError, TypeError) as e:
                 error_reason_json: TransformErrorReason = {
                     "reason": "invalid_json_response",
