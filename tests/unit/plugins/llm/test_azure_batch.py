@@ -1557,3 +1557,111 @@ class TestAzureBatchLLMTransformMissingResults:
         # No ERROR LLM calls when all results present
         error_llm_calls = [call for call in llm_calls if call.kwargs.get("status") == CallStatus.ERROR]
         assert len(error_llm_calls) == 0, "Should have no ERROR LLM calls when all results present"
+
+
+class TestAzureBatchLLMTransformFieldCollision:
+    """Tests for field collision detection during result assembly.
+
+    When input rows already contain fields that the LLM transform would write
+    (e.g., llm_response), processing must fail with a field_collision error
+    rather than silently overwriting source data.
+    """
+
+    @pytest.fixture
+    def transform(self) -> AzureBatchLLMTransform:
+        """Create a basic transform."""
+        return AzureBatchLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-batch",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "Analyze: {{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+    def test_field_collision_detected_in_result_assembly(self, transform: AzureBatchLLMTransform) -> None:
+        """Row with colliding field gets field_collision error during result assembly."""
+        from datetime import UTC, datetime
+
+        ctx = PluginContext(run_id="test-run", config={})
+        recent_timestamp = datetime.now(UTC).isoformat()
+
+        # Two rows: row-0 is clean, row-1 has a colliding field
+        ctx._checkpoint.update(
+            {
+                "batch_id": "batch-456",
+                "input_file_id": "file-123",
+                "row_mapping": {
+                    "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
+                    "row-1-bbb": {"index": 1, "variables_hash": "hash1"},
+                },
+                "template_errors": [],
+                "submitted_at": recent_timestamp,
+                "row_count": 2,
+                "requests": {
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
+                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
+                },
+            }
+        )
+
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-456"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-789"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+
+        # Both rows succeed in Azure batch output
+        output_lines = [
+            json.dumps(
+                {
+                    "custom_id": "row-0-aaa",
+                    "response": {
+                        "body": {
+                            "choices": [{"message": {"content": "Result A"}}],
+                            "usage": {"prompt_tokens": 5, "completion_tokens": 10},
+                        }
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "custom_id": "row-1-bbb",
+                    "response": {
+                        "body": {
+                            "choices": [{"message": {"content": "Result B"}}],
+                            "usage": {"prompt_tokens": 5, "completion_tokens": 10},
+                        }
+                    },
+                }
+            ),
+        ]
+        output_content = Mock()
+        output_content.text = "\n".join(output_lines)
+        mock_client.files.content.return_value = output_content
+
+        transform._client = mock_client
+
+        # Row 1 already has "llm_response" — collision!
+        rows = [
+            {"text": "clean row"},
+            {"text": "colliding row", "llm_response": "pre-existing value"},
+        ]
+
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2
+
+        # Row 0 should succeed normally
+        assert result.rows[0]["llm_response"] == "Result A"
+
+        # Row 1 should have field_collision error
+        assert result.rows[1]["llm_response"] is None
+        assert result.rows[1]["llm_response_error"]["reason"] == "field_collision"
+        assert "llm_response" in result.rows[1]["llm_response_error"]["collisions"]

@@ -41,6 +41,7 @@ from elspeth.plugins.llm.tracing import (
     validate_tracing_config,
 )
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 
 class AzureBatchConfig(TransformDataConfig):
@@ -1205,6 +1206,23 @@ class AzureBatchLLMTransform(BaseTransform):
                 # Boundary validation passed - now we trust these fields
                 content = message.get("content", "")  # content can be empty string, that's valid
                 usage = body.get("usage", {})  # usage is optional in Azure API
+
+                # Check for field collisions before writing output
+                added_fields = [
+                    *get_llm_guaranteed_fields(self._response_field),
+                    *get_llm_audit_fields(self._response_field),
+                ]
+                collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
+                if collisions is not None:
+                    output_row = row.to_dict()
+                    output_row[self._response_field] = None
+                    output_row[f"{self._response_field}_error"] = {
+                        "reason": "field_collision",
+                        "collisions": collisions,
+                    }
+                    output_rows.append(output_row)
+                    row_errors.append({"row_index": idx, "reason": "field_collision"})
+                    continue
 
                 output_row = row.to_dict()
                 output_row[self._response_field] = content

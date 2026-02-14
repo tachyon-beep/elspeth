@@ -773,3 +773,58 @@ class TestOpenRouterBatchTelemetryAttribution:
             result = transform.process(make_pipeline_row(row), ctx)
 
         assert result.status == "success"
+
+
+class TestOpenRouterBatchFieldCollision:
+    """Tests for field collision detection in batch processing.
+
+    When input rows already contain fields that the LLM transform would write
+    (e.g., llm_response), processing must fail with a field_collision error
+    rather than silently overwriting source data.
+    """
+
+    def test_single_row_field_collision_detected(self, chaosllm_server) -> None:
+        """Single row with colliding field returns error with field_collision reason."""
+        transform, ctx = _create_transform_with_context()
+
+        # Input row already has the field the transform will write
+        row = {"text": "Hello", "llm_response": "pre-existing value"}
+
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        # The row should have the collision error, not the overwritten value
+        assert result.row["llm_response"] is None
+        assert result.row["llm_response_error"]["reason"] == "field_collision"
+        assert "llm_response" in result.row["llm_response_error"]["collisions"]
+
+    def test_batch_field_collision_only_affects_colliding_rows(self, chaosllm_server) -> None:
+        """In a batch, only rows with colliding fields get errors; others succeed."""
+        transform, ctx = _create_transform_with_context({"pool_size": 2})
+
+        rows = [
+            {"text": "Row 1"},  # No collision
+            {"text": "Row 2", "llm_response": "existing"},  # Collision!
+            {"text": "Row 3"},  # No collision
+        ]
+
+        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(3)]
+
+        with mock_httpx_client(chaosllm_server, responses):
+            result = transform.process([make_pipeline_row(r) for r in rows], ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 3
+
+        # Row 0 and 2 should succeed
+        assert result.rows[0]["llm_response"] is not None
+        assert result.rows[0].get("llm_response_error") is None
+        assert result.rows[2]["llm_response"] is not None
+        assert result.rows[2].get("llm_response_error") is None
+
+        # Row 1 should have collision error
+        assert result.rows[1]["llm_response"] is None
+        assert result.rows[1]["llm_response_error"]["reason"] == "field_collision"
