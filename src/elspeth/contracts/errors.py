@@ -232,6 +232,8 @@ TransformErrorCategory = Literal[
     "prompt_injection_detected",
     "unknown_category",  # Unknown category from external API (fail-closed)
     "non_string_field",  # Explicitly-configured field is non-string (security fail-closed)
+    # Field collision (output would overwrite input fields)
+    "field_collision",
     # Contract violations (schema validation)
     "contract_violation",
     "multiple_contract_violations",
@@ -347,6 +349,9 @@ class TransformErrorReason(TypedDict):
     error_type: NotRequired[str]
     message: NotRequired[str]
     url: NotRequired[str]
+
+    # Field collision context
+    collisions: NotRequired[list[str]]  # Field names that would be overwritten
 
     # Multi-query/template context
     query: NotRequired[str]

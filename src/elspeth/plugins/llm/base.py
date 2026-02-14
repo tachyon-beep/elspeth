@@ -26,6 +26,7 @@ from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import PoolConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 if TYPE_CHECKING:
     from elspeth.plugins.clients.llm import AuditedLLMClient
@@ -345,6 +346,24 @@ class BaseLLMTransform(BaseTransform):
             # Non-retryable error - return error result
             return TransformResult.error(
                 {"reason": "llm_call_failed", "error": str(e)},
+                retryable=False,
+            )
+
+        # 4.5 Check for field collisions before writing output
+        added_fields = [
+            *get_llm_guaranteed_fields(self._response_field),
+            *get_llm_audit_fields(self._response_field),
+        ]
+        collisions = detect_field_collisions(set(row_data.keys()), added_fields)
+        if collisions is not None:
+            return TransformResult.error(
+                {
+                    "reason": "field_collision",
+                    "collisions": collisions,
+                    "message": (
+                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
+                    ),
+                },
                 retryable=False,
             )
 

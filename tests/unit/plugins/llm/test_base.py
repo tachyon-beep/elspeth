@@ -695,3 +695,82 @@ class TestBaseLLMTransformSchemaHandling:
             }
         )
         assert validated.anything == "goes"  # type: ignore[attr-defined]
+
+
+class TestBaseLLMTransformFieldCollision:
+    """Tests for field collision detection in LLM transforms."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        return PluginContext(run_id="test-run", config={})
+
+    def test_response_field_collision_returns_error(self, ctx: PluginContext) -> None:
+        """LLM transform returns error when response_field collides with input row field."""
+        mock_client = Mock(spec=AuditedLLMClient)
+        mock_client.chat_completion.return_value = LLMResponse(content="test", model="gpt-4", usage={"total_tokens": 10})
+
+        TransformClass = create_test_transform_class(mock_client=mock_client)
+        transform = TransformClass(
+            {
+                "model": "gpt-4",
+                "template": "Classify: {{ row.text }}",
+                "response_field": "llm_response",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        # Row already has "llm_response" — collision!
+        row = wrap_in_pipeline_row({"text": "hello", "llm_response": "pre-existing"})
+        result = transform.process(row, ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "llm_response" in result.reason["collisions"]
+
+    def test_suffixed_field_collision_returns_error(self, ctx: PluginContext) -> None:
+        """LLM transform detects collision on suffixed metadata fields too."""
+        mock_client = Mock(spec=AuditedLLMClient)
+        mock_client.chat_completion.return_value = LLMResponse(content="test", model="gpt-4", usage={"total_tokens": 10})
+
+        TransformClass = create_test_transform_class(mock_client=mock_client)
+        transform = TransformClass(
+            {
+                "model": "gpt-4",
+                "template": "Classify: {{ row.text }}",
+                "response_field": "llm_response",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        # Row has a suffixed field that collides with LLM metadata
+        row = wrap_in_pipeline_row({"text": "hello", "llm_response_usage": {"old": True}})
+        result = transform.process(row, ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "llm_response_usage" in result.reason["collisions"]
+
+    def test_no_collision_succeeds(self, ctx: PluginContext) -> None:
+        """LLM transform succeeds normally when no field collision exists."""
+        mock_client = Mock(spec=AuditedLLMClient)
+        mock_client.chat_completion.return_value = LLMResponse(content="classified", model="gpt-4", usage={"total_tokens": 10})
+
+        TransformClass = create_test_transform_class(mock_client=mock_client)
+        transform = TransformClass(
+            {
+                "model": "gpt-4",
+                "template": "Classify: {{ row.text }}",
+                "response_field": "llm_response",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        row = wrap_in_pipeline_row({"text": "hello"})
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
