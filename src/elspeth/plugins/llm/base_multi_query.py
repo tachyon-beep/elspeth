@@ -29,6 +29,7 @@ from elspeth.plugins.llm.templates import PromptTemplate
 from elspeth.plugins.llm.tracing import LangfuseTracingConfig, TracingConfig, parse_tracing_config
 from elspeth.plugins.pooling import CapacityError, PooledExecutor
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -347,8 +348,23 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
         # Merge all results into output row
         output = row_data.copy()
+        input_field_names = set(row_data.keys())
         for result in results:
             if result.row is not None:
+                collisions = detect_field_collisions(input_field_names, result.row.keys())
+                if collisions is not None:
+                    return TransformResult.error(
+                        {
+                            "reason": "field_collision",
+                            "collisions": collisions,
+                            "message": (
+                                f"Multi-query output fields {collisions} already exist in input row. "
+                                "This would silently overwrite source data."
+                            ),
+                        },
+                        retryable=False,
+                        context_after=pool_context,
+                    )
                 output.update(result.row)
 
         all_fields_added = [

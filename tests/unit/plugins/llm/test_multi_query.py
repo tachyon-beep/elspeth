@@ -1,9 +1,28 @@
 """Tests for multi-query LLM support."""
 
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import Mock
+
 import pytest
 
+from elspeth.contracts import TransformResult
+from elspeth.contracts.plugin_context import PluginContext
+from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
+from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 from elspeth.plugins.llm.multi_query import QuerySpec
+from elspeth.testing import make_pipeline_row
+
+# Re-export chaosllm_server fixture for field collision tests
+from tests.fixtures.chaosllm import chaosllm_server  # noqa: F401
+
+from .conftest import (
+    chaosllm_azure_openai_responses,
+    make_azure_multi_query_config,
+    make_token,
+)
 
 
 class TestQuerySpec:
@@ -700,3 +719,137 @@ class TestResponseFormatBuilding:
 
         assert config.response_format == ResponseFormat.STANDARD
         assert config.build_response_format() == {"type": "json_object"}
+
+
+class TestMultiQueryFieldCollisionDetection:
+    """Tests for field collision detection during multi-query result merging.
+
+    Regression tests for silent data loss: when LLM query output fields
+    collide with existing input row fields, the merge must detect the
+    collision and return an error instead of silently overwriting.
+
+    The collision check is in BaseMultiQueryTransform._process_single_row_internal().
+    We test via AzureMultiQueryLLMTransform as a concrete subclass.
+    """
+
+    @pytest.fixture
+    def mock_recorder(self) -> Mock:
+        recorder = Mock()
+        recorder.record_call = Mock()
+        return recorder
+
+    @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        return CollectorOutputPort()
+
+    def test_field_collision_returns_error(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,  # noqa: F811
+    ) -> None:
+        """Input row field matching LLM output field triggers collision error.
+
+        With case_study 'cs1' and criterion 'diagnosis', output fields include
+        'cs1_diagnosis_score'. If the input row already has 'cs1_diagnosis_score',
+        merging would silently overwrite the input data. The collision detection
+        must catch this and return an error result.
+        """
+        # Use a single case_study + single criterion for clarity
+        config = make_azure_multi_query_config(
+            case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
+            criteria=[{"name": "diagnosis", "code": "DIAG"}],
+            pool_size=1,
+        )
+
+        transform = AzureMultiQueryLLMTransform(config)
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        # LLM returns score=85 => output field "cs1_diagnosis_score"
+        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "Good"}]
+
+        try:
+            with chaosllm_azure_openai_responses(chaosllm_server, responses):
+                # Input row already has "cs1_diagnosis_score" -- collision!
+                row_data = {
+                    "cs1_bg": "45yo male",
+                    "cs1_diagnosis_score": 99,  # Collides with LLM output field
+                }
+                token = make_token("row-collision")
+                ctx = PluginContext(
+                    run_id="run-123",
+                    config={},
+                    landscape=mock_recorder,
+                    state_id="state-collision-001",
+                    token=token,
+                )
+                transform.accept(make_pipeline_row(row_data), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "cs1_diagnosis_score" in result.reason["collisions"]
+
+    def test_no_collision_succeeds_normally(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,  # noqa: F811
+    ) -> None:
+        """Input row without colliding fields merges successfully.
+
+        Verifies that collision detection does not interfere with normal
+        operation when input fields are distinct from LLM output fields.
+        """
+        config = make_azure_multi_query_config(
+            case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
+            criteria=[{"name": "diagnosis", "code": "DIAG"}],
+            pool_size=1,
+        )
+
+        transform = AzureMultiQueryLLMTransform(config)
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        responses: list[dict[str, Any] | str] = [{"score": 85, "rationale": "Good"}]
+
+        try:
+            with chaosllm_azure_openai_responses(chaosllm_server, responses):
+                # Input row fields are distinct from output fields -- no collision
+                row_data = {
+                    "cs1_bg": "45yo male",
+                    "patient_id": "P001",
+                }
+                token = make_token("row-no-collision")
+                ctx = PluginContext(
+                    run_id="run-123",
+                    config={},
+                    landscape=mock_recorder,
+                    state_id="state-no-collision-001",
+                    token=token,
+                )
+                transform.accept(make_pipeline_row(row_data), ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
+        assert result.status == "success"
+        assert result.row is not None
+        # Original fields preserved
+        assert result.row["cs1_bg"] == "45yo male"
+        assert result.row["patient_id"] == "P001"
+        # LLM output fields present
+        assert result.row["cs1_diagnosis_score"] == 85
+        assert result.row["cs1_diagnosis_rationale"] == "Good"
