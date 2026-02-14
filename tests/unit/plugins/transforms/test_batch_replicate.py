@@ -358,3 +358,116 @@ class TestBatchReplicateDeepCopy:
 
         second = result.rows[1].to_dict()
         assert "injected" not in second["meta"]
+
+
+class TestBatchReplicateFieldCollision:
+    """Tests for field collision detection in BatchReplicate."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_copy_index_collision_quarantines_row(self, ctx: PluginContext) -> None:
+        """BatchReplicate quarantines row when copy_index collides with existing field."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": True,
+            }
+        )
+
+        rows = [
+            make_pipeline_row({"id": 1, "copy_index": 99, "copies": 2}),  # Collision!
+        ]
+
+        result = transform.process(rows, ctx)
+
+        # All rows quarantined → error
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "all_rows_failed"
+        assert result.reason["row_errors"][0]["reason"] == "field_collision"
+
+    def test_copy_index_collision_alongside_valid_rows(self, ctx: PluginContext) -> None:
+        """Colliding row is quarantined but valid rows still replicated."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": True,
+            }
+        )
+
+        rows = [
+            make_pipeline_row({"id": 1, "copy_index": 99, "copies": 2}),  # Collision!
+            make_pipeline_row({"id": 2, "copies": 2}),  # No collision - OK
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2  # Only row 2's copies
+        assert result.rows[0]["id"] == 2
+        assert result.rows[0]["copy_index"] == 0
+        assert result.rows[1]["id"] == 2
+        assert result.rows[1]["copy_index"] == 1
+        # Quarantine info in success_reason.metadata
+        assert result.success_reason is not None
+        assert result.success_reason["metadata"]["quarantined_count"] == 1
+        assert result.success_reason["metadata"]["quarantined"][0]["reason"] == "field_collision"
+
+    def test_no_collision_when_include_copy_index_false(self, ctx: PluginContext) -> None:
+        """No collision check when include_copy_index is False."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": False,
+            }
+        )
+
+        rows = [
+            make_pipeline_row({"id": 1, "copy_index": 99, "copies": 2}),  # Has copy_index but won't collide
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2
+        # copy_index is preserved from input (not overwritten since include_copy_index=False)
+        assert result.rows[0]["copy_index"] == 99
+        assert result.rows[1]["copy_index"] == 99
+
+    def test_no_collision_succeeds(self, ctx: PluginContext) -> None:
+        """BatchReplicate succeeds when no field collision exists."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+                "include_copy_index": True,
+            }
+        )
+
+        rows = [
+            make_pipeline_row({"id": 1, "copies": 2}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2
+        assert result.rows[0]["copy_index"] == 0
+        assert result.rows[1]["copy_index"] == 1

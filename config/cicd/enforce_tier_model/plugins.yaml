@@ -79,7 +79,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=7d0ded8e77f9f3ac
+- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=9aa59db3311c5947
   owner: architecture
   reason: Tier 2 contract enforcement - isinstance validates copies_field type before arithmetic
   safety: Wrong types crash (upstream bug); wrong values quarantined via error result
