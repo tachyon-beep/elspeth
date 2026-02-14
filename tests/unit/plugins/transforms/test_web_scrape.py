@@ -833,3 +833,97 @@ def test_http_config_timeout_custom() -> None:
         )
     )
     assert transform._timeout == 60
+
+
+class TestWebScrapeFieldCollision:
+    """Tests for field collision detection in WebScrapeTransform."""
+
+    @respx.mock
+    def test_hardcoded_field_collision_returns_error(self, mock_ctx):
+        """WebScrapeTransform returns error when hardcoded output field collides with input."""
+        html_content = "<html><body><h1>Title</h1></body></html>"
+        respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
+
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing collision detection",
+                },
+            }
+        )
+
+        # Row already has "fetch_status" — collision with hardcoded field!
+        row = make_pipeline_row({"url": "https://example.com/page", "fetch_status": 999})
+
+        with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+            result = transform.process(row, mock_ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "fetch_status" in result.reason["collisions"]
+
+    @respx.mock
+    def test_configurable_field_collision_returns_error(self, mock_ctx):
+        """WebScrapeTransform returns error when configurable output field collides with input."""
+        html_content = "<html><body><h1>Title</h1></body></html>"
+        respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
+
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing collision detection",
+                },
+            }
+        )
+
+        # Row already has "page_content" — collision with configurable content_field!
+        row = make_pipeline_row({"url": "https://example.com/page", "page_content": "pre-existing content"})
+
+        with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+            result = transform.process(row, mock_ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "page_content" in result.reason["collisions"]
+
+    @respx.mock
+    def test_no_collision_succeeds(self, mock_ctx):
+        """WebScrapeTransform succeeds when no field collision exists."""
+        html_content = "<html><body><h1>Title</h1></body></html>"
+        respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
+
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing no collision",
+                },
+            }
+        )
+
+        # Row has no colliding fields
+        row = make_pipeline_row({"url": "https://example.com/page"})
+
+        with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+            result = transform.process(row, mock_ctx)
+
+        assert result.status == "success"
+        assert result.row["page_content"] is not None
+        assert result.row["page_fingerprint"] is not None
+        assert result.row["fetch_status"] == 200

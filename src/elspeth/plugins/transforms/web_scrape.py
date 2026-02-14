@@ -37,6 +37,7 @@ from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.transforms.field_collision import detect_field_collisions
 from elspeth.plugins.transforms.web_scrape_errors import (
     ForbiddenError,
     InvalidURLError,
@@ -229,6 +230,29 @@ class WebScrapeTransform(BaseTransform):
 
         # Compute fingerprint
         fingerprint = compute_fingerprint(content, mode=self._fingerprint_mode)
+
+        # Check for field collisions before writing output
+        added_fields = [
+            self._content_field,
+            self._fingerprint_field,
+            "fetch_status",
+            "fetch_url_final",
+            "fetch_request_hash",
+            "fetch_response_raw_hash",
+            "fetch_response_processed_hash",
+        ]
+        collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
+        if collisions is not None:
+            return TransformResult.error(
+                {
+                    "reason": "field_collision",
+                    "collisions": collisions,
+                    "message": (
+                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
+                    ),
+                },
+                retryable=False,
+            )
 
         # Store payloads for forensic recovery
         # Context is guaranteed to have these - executor sets them

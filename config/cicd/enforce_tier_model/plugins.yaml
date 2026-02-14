@@ -371,7 +371,7 @@ allow_hits:
   reason: isinstance() on list for recursive NaN/Infinity scan - type discrimination for serialization
   safety: Traverses JSON structure to find non-finite floats before audit recording
   expires: '2026-05-02'
-- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=ba13e0d9177595d6
+- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=a7cb85258e0710c5
   owner: architecture
   reason: Tier 3 boundary - response.text is external data, extract_content() can fail unpredictably
   safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL
