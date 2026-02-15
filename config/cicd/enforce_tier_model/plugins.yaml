@@ -306,16 +306,16 @@ allow_hits:
   reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
   safety: MalformedResponseError raised on wrong type
   expires: '2026-05-13'
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=bf79975bdf2ede4c
-  owner: architecture
-  reason: Telemetry emission failure - must not crash main LLM call flow
-  safety: Logged and continues - telemetry is non-critical to LLM processing
-  expires: '2026-05-02'
 - key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=3979cd7bedc550ef
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
+# llm.py — telemetry emission in narrowed try/except
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=989e23991ba094b5
+  owner: architecture
+  reason: Telemetry emission failure — must not crash main LLM call flow
+  safety: Logged and continues — telemetry is non-critical to LLM processing
 - key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=5513c655d6bb1799
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
@@ -361,11 +361,11 @@ allow_hits:
   reason: isinstance() on list for recursive NaN/Infinity scan - type discrimination for serialization
   safety: Traverses JSON structure to find non-finite floats before audit recording
   expires: '2026-05-02'
-- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=a7cb85258e0710c5
+# web_scrape.py — Tier 3 boundary: extract_content can fail on external HTML
+- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=70bdc541b8309880
   owner: architecture
-  reason: Tier 3 boundary - response.text is external data, extract_content() can fail unpredictably
+  reason: Tier 3 boundary — response.text is external data, extract_content() can fail unpredictably
   safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL
-  expires: '2026-05-02'
 # Refactored: post()/get() shared logic now in _execute_request/_parse_response_body/_record_and_emit
 - key: plugins/clients/http.py:R1:AuditedHTTPClient:_parse_response_body:fp=1b8441ef483bc723
   owner: architecture
@@ -407,11 +407,11 @@ allow_hits:
   reason: HTTP redirect Location header - external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally (no redirect target)
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=567e1ce1b3e22c2c
+# http.py — redirect hop client.get() method call
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=b7098a23eee21356
   owner: architecture
-  reason: httpx Client.get() method call - ephemeral client per redirect hop for TLS isolation
+  reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access
-  expires: '2026-05-02'
 - key: plugins/sources/csv_source.py:R7:CSVSource:load:fp=f69de22403a3594b
   owner: architecture
   reason: Tier 3 boundary — skip_rows targets non-CSV metadata preamble that may violate RFC 4180

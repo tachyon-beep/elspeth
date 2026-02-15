@@ -740,3 +740,61 @@ class TestAuditedLLMClient:
         assert call_kwargs["status"] == CallStatus.SUCCESS
         assert call_kwargs["response_data"]["content"] == "Hello, I'm working!"
         assert call_kwargs["response_data"]["usage"] == {}
+
+
+class TestBug4_6_SuccessPathOutsideTryExcept:
+    """Bug 4.6: Internal processing errors in success path crash directly.
+
+    Previously, the success path (content extraction, usage building,
+    audit recording) was inside the same try/except that caught SDK errors.
+    This meant an AttributeError in our code would be misclassified as an
+    LLMClientError. Now the success path is OUTSIDE the try/except block.
+    """
+
+    @staticmethod
+    def _create_mock_recorder() -> Mock:
+        recorder = Mock()
+        recorder.allocate_call_index = Mock(return_value=0)
+        recorder.record_call = Mock()
+        return recorder
+
+    def test_internal_error_in_success_path_crashes_directly(self) -> None:
+        """Bug in success processing crashes as AttributeError, not LLMClientError.
+
+        If response.choices[0].message has no 'content' attribute (simulating
+        an internal processing bug), it should raise AttributeError directly,
+        NOT get caught and wrapped as LLMClientError.
+        """
+        recorder = self._create_mock_recorder()
+
+        # Create a response where .choices[0].message.content raises AttributeError
+        # This simulates a bug in our success path processing
+        message = Mock(spec=[])  # Empty spec means no attributes at all
+        choice = Mock()
+        choice.message = message  # message.content will raise AttributeError
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = Mock()
+        response.usage.prompt_tokens = 10
+        response.usage.completion_tokens = 5
+        response.model_dump = Mock(return_value={"id": "resp_test"})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_bug46",
+            run_id="run_bug46",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        # Should raise AttributeError directly (not LLMClientError)
+        with pytest.raises(AttributeError):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )

@@ -195,6 +195,30 @@ class WebScrapeTransform(BaseTransform):
                 }
             )
 
+        # Check for field collisions BEFORE making HTTP request to avoid wasting
+        # an expensive external call that would be discarded anyway
+        added_fields = [
+            self._content_field,
+            self._fingerprint_field,
+            "fetch_status",
+            "fetch_url_final",
+            "fetch_request_hash",
+            "fetch_response_raw_hash",
+            "fetch_response_processed_hash",
+        ]
+        collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
+        if collisions is not None:
+            return TransformResult.error(
+                {
+                    "reason": "field_collision",
+                    "collisions": collisions,
+                    "message": (
+                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
+                    ),
+                },
+                retryable=False,
+            )
+
         # Fetch URL using pinned IP (prevents DNS rebinding between validation and fetch)
         try:
             response = self._fetch_url(safe_request, ctx)
@@ -231,28 +255,7 @@ class WebScrapeTransform(BaseTransform):
         # Compute fingerprint
         fingerprint = compute_fingerprint(content, mode=self._fingerprint_mode)
 
-        # Check for field collisions before writing output
-        added_fields = [
-            self._content_field,
-            self._fingerprint_field,
-            "fetch_status",
-            "fetch_url_final",
-            "fetch_request_hash",
-            "fetch_response_raw_hash",
-            "fetch_response_processed_hash",
-        ]
-        collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
-        if collisions is not None:
-            return TransformResult.error(
-                {
-                    "reason": "field_collision",
-                    "collisions": collisions,
-                    "message": (
-                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
-                    ),
-                },
-                retryable=False,
-            )
+        # Field collision check already done before fetch — no need to re-check here.
 
         # Store payloads for forensic recovery
         # Context is guaranteed to have these - executor sets them

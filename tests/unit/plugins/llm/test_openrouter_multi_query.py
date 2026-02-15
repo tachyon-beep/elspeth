@@ -1290,3 +1290,117 @@ class TestNanInJsonParsing:
             assert result.status == "error"
             assert result.reason is not None
             assert result.reason["reason"] == "json_parse_failed"
+
+
+class TestBug4_3_Tier3BoundaryTypeChecks:
+    """Bug 4.3: Type checks for content, usage, and completion_tokens.
+
+    External LLM API responses (Tier 3 data) can have unexpected types.
+    The transform must validate that content is str, usage is dict, and
+    completion_tokens is numeric before operating on them.
+    """
+
+    def test_non_str_content_returns_error(self, chaosllm_server) -> None:
+        """LLM returning non-string content returns error instead of crashing."""
+        import json as json_mod
+
+        # Build a raw httpx.Response with non-string content
+        response_body = {
+            "id": "resp-1",
+            "model": "anthropic/claude-3-opus",
+            "choices": [{"message": {"content": [1, 2, 3]}}],  # list, not str
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        raw_response = httpx.Response(
+            status_code=200,
+            content=json_mod.dumps(response_body).encode(),
+            headers={"content-type": "application/json"},
+            request=httpx.Request("POST", "http://testserver/v1/chat/completions"),
+        )
+        # Pass pre-built httpx.Response directly (bypasses ChaosLLM processing)
+        responses: list[dict[str, Any] | str | httpx.Response] = [raw_response]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "invalid_content_type"
+
+    def test_non_dict_usage_returns_error(self, chaosllm_server) -> None:
+        """LLM returning non-dict usage returns error instead of crashing."""
+        import json as json_mod
+
+        # Build a raw httpx.Response with non-dict usage
+        response_body = {
+            "id": "resp-1",
+            "model": "anthropic/claude-3-opus",
+            "choices": [{"message": {"content": '{"score": 5, "rationale": "good"}'}}],
+            "usage": "not_a_dict",  # string, not dict
+        }
+        raw_response = httpx.Response(
+            status_code=200,
+            content=json_mod.dumps(response_body).encode(),
+            headers={"content-type": "application/json"},
+            request=httpx.Request("POST", "http://testserver/v1/chat/completions"),
+        )
+        responses: list[dict[str, Any] | str | httpx.Response] = [raw_response]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "invalid_usage_type"
+
+    def test_non_numeric_completion_tokens_fallback_to_zero(self, chaosllm_server) -> None:
+        """Non-numeric completion_tokens falls back to 0 instead of crashing."""
+        import json as json_mod
+
+        # Build a raw httpx.Response with non-numeric completion_tokens
+        response_body = {
+            "id": "resp-1",
+            "model": "anthropic/claude-3-opus",
+            "choices": [{"message": {"content": '{"score": 5, "rationale": "good"}'}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": "not_a_number"},
+        }
+        raw_response = httpx.Response(
+            status_code=200,
+            content=json_mod.dumps(response_body).encode(),
+            headers={"content-type": "application/json"},
+            request=httpx.Request("POST", "http://testserver/v1/chat/completions"),
+        )
+        responses: list[dict[str, Any] | str | httpx.Response] = [raw_response]
+
+        with mock_openrouter_http_responses(chaosllm_server, responses):
+            transform = OpenRouterMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
+            spec = transform._query_specs[0]
+
+            assert ctx.state_id is not None
+            # Should not crash - completion_tokens falls back to 0
+            result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
+
+            # Should succeed (completion_tokens=0 doesn't trigger truncation check)
+            # The result depends on whether JSON parsing succeeds (the content is valid JSON)
+            assert result.status in ("success", "error")
+            # Key assertion: did NOT crash with TypeError

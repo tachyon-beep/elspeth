@@ -938,3 +938,39 @@ class TestPoolMetadataAuditIntegration:
 
 # Removed test_azure_multi_query_with_pipeline_row - duplicate of existing accept() API tests
 # The transform raises NotImplementedError for process() and directs to accept() API
+
+
+class TestBug4_1_KeyErrorInBuildTemplateContext:
+    """Bug 4.1: KeyError in build_template_context returns error, not crash.
+
+    When a row is missing fields required by build_template_context(),
+    a KeyError is raised. Previously this was uncaught and crashed the transform.
+    Now it's caught and returns TransformResult.error() with reason
+    "template_context_failed".
+    """
+
+    def test_missing_input_field_returns_error(self, chaosllm_server) -> None:
+        """Row missing required input field returns error instead of crashing."""
+        with chaosllm_azure_openai_client(chaosllm_server):
+            transform = AzureMultiQueryLLMTransform(make_config())
+            ctx = make_plugin_context()
+            transform.on_start(ctx)
+
+            # Row is missing cs1_bg, cs1_sym, cs1_hist — required by case study "cs1"
+            row = {"cs2_bg": "bg", "cs2_sym": "sym", "cs2_hist": "hist"}
+            spec = transform._query_specs[0]  # cs1_diagnosis — needs cs1_bg, cs1_sym, cs1_hist
+
+            assert ctx.state_id is not None
+            result = transform._process_single_query(
+                row,
+                spec,
+                ctx.state_id,
+                "test-token-id",
+                make_pipeline_row(row).contract,
+            )
+
+            assert result.status == "error"
+            assert result.reason is not None
+            assert result.reason["reason"] == "template_context_failed"
+            # Error should mention one of the missing fields
+            assert "cs1_bg" in result.reason["error"] or "cs1_sym" in result.reason["error"] or "cs1_hist" in result.reason["error"]

@@ -311,14 +311,39 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                 retryable=False,
             )
 
+        # Tier 3 boundary: validate content is str before .strip()
+        if not isinstance(content, str):
+            return TransformResult.error(
+                {
+                    "reason": "type_mismatch",
+                    "error": f"Expected content to be str, got {type(content).__name__}",
+                    "query": spec.output_prefix,
+                },
+                retryable=False,
+            )
+
         # OpenRouter can return {"usage": null} or omit usage entirely.
         # dict.get("usage", {}) only returns {} when key is MISSING, not when value is null.
         # The `or {}` ensures we get an empty dict for both missing AND null cases.
         usage = data.get("usage") or {}
 
+        # Tier 3 boundary: validate usage is dict
+        if not isinstance(usage, dict):
+            return TransformResult.error(
+                {
+                    "reason": "type_mismatch",
+                    "error": f"Expected usage to be dict, got {type(usage).__name__}",
+                    "query": spec.output_prefix,
+                },
+                retryable=False,
+            )
+
         # 8b. Check for response truncation BEFORE parsing
         # usage is Tier 3 external data - use .get() for optional fields
         completion_tokens = usage.get("completion_tokens", 0)
+        # Tier 3 boundary: validate completion_tokens is numeric
+        if not isinstance(completion_tokens, (int, float)):
+            completion_tokens = 0
         if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
             truncation_error: TransformErrorReason = {
                 "reason": "response_truncated",

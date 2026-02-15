@@ -909,3 +909,39 @@ class TestOpenRouterBatchErrorKeyCollision:
         # Error should be from the API failure, not from the source row's "error" field
         assert result.row["llm_response_error"]["reason"] == "api_call_failed"
         assert result.row["llm_response_error"]["status_code"] == 500
+
+
+class TestBug4_8_FieldCollisionBeforeAPICall:
+    """Bug 4.8: Field collision detected before making API call.
+
+    Previously, the field collision check happened after the API call,
+    meaning an expensive HTTP request was wasted when the result would be
+    discarded anyway. Now the check happens before the API call in
+    _process_single_row() (step 2.5).
+    """
+
+    def test_collision_detected_without_http_call(self, chaosllm_server) -> None:
+        """Field collision returns error without making any HTTP call."""
+        transform, ctx = _create_transform_with_context()
+
+        # Row already has "llm_response" — collision with output field!
+        row = {"text": "test data", "llm_response": "pre-existing value"}
+
+        # Mock the HTTP client to track if any calls are made
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch("httpx.Client") as mock_client_class:
+            mock_client = mock_client_class.return_value
+            mock_client.__enter__ = Mock(return_value=mock_client)
+            mock_client.__exit__ = Mock(return_value=False)
+
+            result = transform.process(make_pipeline_row(row), ctx)
+
+        assert result.status == "success"  # Individual row processing wraps in success
+        assert result.row is not None
+        assert result.row["llm_response"] is None  # Error marker
+        assert result.row["llm_response_error"]["reason"] == "field_collision"
+        assert "llm_response" in result.row["llm_response_error"]["collisions"]
+
+        # No HTTP calls should have been made
+        mock_client.post.assert_not_called()

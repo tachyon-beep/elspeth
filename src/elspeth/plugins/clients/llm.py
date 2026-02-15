@@ -317,83 +317,6 @@ class AuditedLLMClient(AuditedClientBase):
 
         try:
             response = self._client.chat.completions.create(**sdk_kwargs)
-            latency_ms = (time.perf_counter() - start) * 1000
-
-            content = response.choices[0].message.content or ""
-            # Guard against providers that omit usage data (streaming, certain configs)
-            if response.usage is not None:
-                usage = {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                }
-            else:
-                usage = {}
-
-            # Capture full raw response for audit completeness
-            # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
-            # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
-            raw_response = response.model_dump()
-
-            response_data = {
-                # Summary fields for convenience
-                "content": content,
-                "model": response.model,
-                "usage": usage,
-                # Full response for audit completeness (tool_calls, multiple choices, etc.)
-                "raw_response": raw_response,
-            }
-
-            self._recorder.record_call(
-                state_id=self._state_id,
-                call_index=call_index,
-                call_type=CallType.LLM,
-                status=CallStatus.SUCCESS,
-                request_data=request_data,
-                response_data=response_data,
-                latency_ms=latency_ms,
-            )
-
-            # Telemetry emitted AFTER successful Landscape recording
-            # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
-            try:
-                self._telemetry_emit(
-                    ExternalCallCompleted(
-                        timestamp=datetime.now(UTC),
-                        run_id=self._run_id,
-                        call_type=CallType.LLM,
-                        provider=self._provider,
-                        status=CallStatus.SUCCESS,
-                        latency_ms=latency_ms,
-                        state_id=self._state_id,  # Transform context
-                        operation_id=None,  # Not in source/sink context
-                        token_id=self._telemetry_token_id(),
-                        request_hash=stable_hash(request_data),
-                        response_hash=stable_hash(response_data),
-                        request_payload=request_data,  # Full request for observability
-                        response_payload=response_data,  # Full response for observability
-                        token_usage=usage if usage else None,
-                    )
-                )
-            except Exception as tel_err:
-                # Telemetry failure must not corrupt the successful call
-                # Landscape has the record - telemetry is operational visibility only
-                logger.warning(
-                    "telemetry_emit_failed",
-                    error=str(tel_err),
-                    error_type=type(tel_err).__name__,
-                    run_id=self._run_id,
-                    state_id=self._state_id,
-                    call_type="llm",
-                )
-
-            return LLMResponse(
-                content=content,
-                model=response.model,
-                usage=usage,
-                latency_ms=latency_ms,
-                raw_response=raw_response,  # Reuse captured response from audit recording
-            )
-
         except Exception as e:
             latency_ms = (time.perf_counter() - start) * 1000
             error_type = type(e).__name__
@@ -462,3 +385,82 @@ class AuditedLLMClient(AuditedClientBase):
             else:
                 # Client error or unknown - not retryable
                 raise LLMClientError(str(e), retryable=False) from e
+
+        # Success path — OUTSIDE try/except so internal processing bugs crash
+        # instead of being misclassified as LLM errors
+        latency_ms = (time.perf_counter() - start) * 1000
+
+        content = response.choices[0].message.content or ""
+        # Guard against providers that omit usage data (streaming, certain configs)
+        if response.usage is not None:
+            usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+            }
+        else:
+            usage = {}
+
+        # Capture full raw response for audit completeness
+        # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
+        # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
+        raw_response = response.model_dump()
+
+        response_data = {
+            # Summary fields for convenience
+            "content": content,
+            "model": response.model,
+            "usage": usage,
+            # Full response for audit completeness (tool_calls, multiple choices, etc.)
+            "raw_response": raw_response,
+        }
+
+        self._recorder.record_call(
+            state_id=self._state_id,
+            call_index=call_index,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_data=request_data,
+            response_data=response_data,
+            latency_ms=latency_ms,
+        )
+
+        # Telemetry emitted AFTER successful Landscape recording
+        # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
+        try:
+            self._telemetry_emit(
+                ExternalCallCompleted(
+                    timestamp=datetime.now(UTC),
+                    run_id=self._run_id,
+                    call_type=CallType.LLM,
+                    provider=self._provider,
+                    status=CallStatus.SUCCESS,
+                    latency_ms=latency_ms,
+                    state_id=self._state_id,  # Transform context
+                    operation_id=None,  # Not in source/sink context
+                    token_id=self._telemetry_token_id(),
+                    request_hash=stable_hash(request_data),
+                    response_hash=stable_hash(response_data),
+                    request_payload=request_data,  # Full request for observability
+                    response_payload=response_data,  # Full response for observability
+                    token_usage=usage if usage else None,
+                )
+            )
+        except Exception as tel_err:
+            # Telemetry failure must not corrupt the successful call
+            # Landscape has the record - telemetry is operational visibility only
+            logger.warning(
+                "telemetry_emit_failed",
+                error=str(tel_err),
+                error_type=type(tel_err).__name__,
+                run_id=self._run_id,
+                state_id=self._state_id,
+                call_type="llm",
+            )
+
+        return LLMResponse(
+            content=content,
+            model=response.model,
+            usage=usage,
+            latency_ms=latency_ms,
+            raw_response=raw_response,  # Reuse captured response from audit recording
+        )

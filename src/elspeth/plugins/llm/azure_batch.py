@@ -516,6 +516,26 @@ class AzureBatchLLMTransform(BaseTransform):
         Raises:
             BatchPendingError: After successful submission
         """
+        # 0. Check for field collisions BEFORE submitting batch to avoid wasting
+        # an expensive batch API call that would be discarded anyway.
+        # Input keys are the same regardless of API response, so check up-front.
+        added_fields = [
+            *get_llm_guaranteed_fields(self._response_field),
+            *get_llm_audit_fields(self._response_field),
+        ]
+        # Check against first row — all rows share the same schema contract
+        collisions = detect_field_collisions(set(rows[0].to_dict().keys()), added_fields)
+        if collisions is not None:
+            return TransformResult.error(
+                {
+                    "reason": "field_collision",
+                    "collisions": collisions,
+                    "message": (
+                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
+                    ),
+                }
+            )
+
         # 1. Render templates for all rows, track failures
         requests: list[dict[str, Any]] = []
         row_mapping: dict[str, dict[str, Any]] = {}  # custom_id -> {index, variables_hash}
@@ -1031,6 +1051,9 @@ class AzureBatchLLMTransform(BaseTransform):
                 if "body" not in response:
                     malformed_lines.append(f"Line {line_num}: Missing 'response.body'")
                     continue
+                if not isinstance(response["body"], dict):
+                    malformed_lines.append(f"Line {line_num}: 'response.body' is not a dict, got {type(response['body']).__name__}")
+                    continue
 
             # Now validated - store as Tier 2 data
             results_by_id[custom_id] = result
@@ -1207,22 +1230,8 @@ class AzureBatchLLMTransform(BaseTransform):
                 content = message.get("content", "")  # content can be empty string, that's valid
                 usage = body.get("usage", {})  # usage is optional in Azure API
 
-                # Check for field collisions before writing output
-                added_fields = [
-                    *get_llm_guaranteed_fields(self._response_field),
-                    *get_llm_audit_fields(self._response_field),
-                ]
-                collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
-                if collisions is not None:
-                    output_row = row.to_dict()
-                    output_row[self._response_field] = None
-                    output_row[f"{self._response_field}_error"] = {
-                        "reason": "field_collision",
-                        "collisions": collisions,
-                    }
-                    output_rows.append(output_row)
-                    row_errors.append({"row_index": idx, "reason": "field_collision"})
-                    continue
+                # Field collision check already done in _submit_batch() before
+                # submitting the batch — no need to re-check here.
 
                 output_row = row.to_dict()
                 output_row[self._response_field] = content

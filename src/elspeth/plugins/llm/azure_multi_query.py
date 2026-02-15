@@ -185,7 +185,16 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
 
         start_time = time.monotonic()
         # 1. Build synthetic row for PromptTemplate
-        synthetic_row = spec.build_template_context(row)
+        try:
+            synthetic_row = spec.build_template_context(row)
+        except KeyError as e:
+            return TransformResult.error(
+                {
+                    "reason": "missing_field",
+                    "error": str(e),
+                    "query": spec.output_prefix,
+                }
+            )
 
         # 2. Render template using PromptTemplate (preserves audit metadata)
         try:

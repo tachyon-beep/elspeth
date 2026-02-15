@@ -646,6 +646,25 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         if self._max_tokens:
             request_body["max_tokens"] = self._max_tokens
 
+        # 2.5 Check for field collisions BEFORE making API call to avoid wasting
+        # an expensive external call that would be discarded anyway
+        added_fields = [
+            *get_llm_guaranteed_fields(self._response_field),
+            *get_llm_audit_fields(self._response_field),
+        ]
+        collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
+        if collisions is not None:
+            return _RowOutcome(
+                ok=False,
+                error={
+                    "reason": "field_collision",
+                    "collisions": collisions,
+                    "message": (
+                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
+                    ),
+                },
+            )
+
         # 3. Make API call via AuditedHTTPClient (automatically records to audit trail)
         state_id = ctx.state_id
         if state_id is None:
@@ -767,24 +786,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             model=response_model,
             usage=usage,
         )
-
-        # 6.5 Check for field collisions before writing output
-        added_fields = [
-            *get_llm_guaranteed_fields(self._response_field),
-            *get_llm_audit_fields(self._response_field),
-        ]
-        collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
-        if collisions is not None:
-            return _RowOutcome(
-                ok=False,
-                error={
-                    "reason": "field_collision",
-                    "collisions": collisions,
-                    "message": (
-                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
-                    ),
-                },
-            )
 
         # 7. Build output row (OUR CODE - let exceptions crash)
         output = row.to_dict()

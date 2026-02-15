@@ -1560,11 +1560,11 @@ class TestAzureBatchLLMTransformMissingResults:
 
 
 class TestAzureBatchLLMTransformFieldCollision:
-    """Tests for field collision detection during result assembly.
+    """Tests for field collision detection before batch submission.
 
     When input rows already contain fields that the LLM transform would write
-    (e.g., llm_response), processing must fail with a field_collision error
-    rather than silently overwriting source data.
+    (e.g., llm_response), _submit_batch must return TransformResult.error()
+    BEFORE any API calls are made.
     """
 
     @pytest.fixture
@@ -1581,28 +1581,84 @@ class TestAzureBatchLLMTransformFieldCollision:
             }
         )
 
-    def test_field_collision_detected_in_result_assembly(self, transform: AzureBatchLLMTransform) -> None:
-        """Row with colliding field gets field_collision error during result assembly."""
+    def test_field_collision_detected_before_batch_submission(self, transform: AzureBatchLLMTransform) -> None:
+        """Bug 4.9: Collision detected at batch level BEFORE any API call is made.
+
+        The collision check uses the first row's keys (all rows share the same
+        schema contract), so if any row has colliding fields, the entire batch
+        is rejected immediately without wasting an expensive API call.
+        """
+        ctx = PluginContext(run_id="test-run", config={})
+
+        # Track whether any API calls were made
+        mock_client = Mock()
+        transform._client = mock_client
+
+        # All rows have "llm_response" — collision with output field!
+        rows = [
+            {"text": "row 1", "llm_response": "pre-existing value"},
+            {"text": "row 2", "llm_response": "another pre-existing"},
+        ]
+
+        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
+
+        # Should return error (not success with per-row errors)
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "llm_response" in result.reason["collisions"]
+
+        # No API calls should have been made (collision detected before submission)
+        mock_client.batches.create.assert_not_called()
+        mock_client.files.create.assert_not_called()
+
+
+class TestBug4_2_NonDictResponseBody:
+    """Bug 4.2: Non-dict response.body is caught as malformed.
+
+    Azure Batch API responses should have response.body as a dict. If external
+    data returns a non-dict body (e.g., string, list, null), it must be caught
+    during result parsing rather than crashing with a TypeError/KeyError.
+    """
+
+    @pytest.fixture
+    def transform(self) -> AzureBatchLLMTransform:
+        """Create a basic transform."""
+        return AzureBatchLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-batch",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "Analyze: {{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+    def test_string_response_body_treated_as_malformed(self, transform: AzureBatchLLMTransform) -> None:
+        """Response with body as a string instead of dict is treated as malformed.
+
+        When response.body is not a dict, the line is treated as malformed.
+        If ALL lines are malformed, the entire batch returns
+        TransformResult.error() with reason "all_output_lines_malformed".
+        """
         from datetime import UTC, datetime
 
         ctx = PluginContext(run_id="test-run", config={})
         recent_timestamp = datetime.now(UTC).isoformat()
 
-        # Two rows: row-0 is clean, row-1 has a colliding field
         ctx._checkpoint.update(
             {
                 "batch_id": "batch-456",
                 "input_file_id": "file-123",
                 "row_mapping": {
                     "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
-                    "row-1-bbb": {"index": 1, "variables_hash": "hash1"},
                 },
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
-                "row_count": 2,
+                "row_count": 1,
                 "requests": {
                     "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
-                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
                 },
             }
         )
@@ -1615,28 +1671,12 @@ class TestAzureBatchLLMTransformFieldCollision:
         mock_batch.error_file_id = None
         mock_client.batches.retrieve.return_value = mock_batch
 
-        # Both rows succeed in Azure batch output
+        # Response body is a string instead of a dict
         output_lines = [
             json.dumps(
                 {
                     "custom_id": "row-0-aaa",
-                    "response": {
-                        "body": {
-                            "choices": [{"message": {"content": "Result A"}}],
-                            "usage": {"prompt_tokens": 5, "completion_tokens": 10},
-                        }
-                    },
-                }
-            ),
-            json.dumps(
-                {
-                    "custom_id": "row-1-bbb",
-                    "response": {
-                        "body": {
-                            "choices": [{"message": {"content": "Result B"}}],
-                            "usage": {"prompt_tokens": 5, "completion_tokens": 10},
-                        }
-                    },
+                    "response": {"body": "This is not a dict"},
                 }
             ),
         ]
@@ -1646,22 +1686,13 @@ class TestAzureBatchLLMTransformFieldCollision:
 
         transform._client = mock_client
 
-        # Row 1 already has "llm_response" — collision!
-        rows = [
-            {"text": "clean row"},
-            {"text": "colliding row", "llm_response": "pre-existing value"},
-        ]
-
+        rows = [{"text": "test row"}]
         result = transform.process([make_pipeline_row(d) for d in rows], ctx)
 
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 2
-
-        # Row 0 should succeed normally
-        assert result.rows[0]["llm_response"] == "Result A"
-
-        # Row 1 should have field_collision error
-        assert result.rows[1]["llm_response"] is None
-        assert result.rows[1]["llm_response_error"]["reason"] == "field_collision"
-        assert "llm_response" in result.rows[1]["llm_response_error"]["collisions"]
+        # Should not crash — line is malformed, so when ALL lines are malformed,
+        # the entire batch fails with a structured error
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "all_output_lines_malformed"
+        # Error details should mention the non-dict body
+        assert any("not a dict" in err for err in result.reason["errors"])

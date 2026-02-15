@@ -927,3 +927,41 @@ class TestWebScrapeFieldCollision:
         assert result.row["page_content"] is not None
         assert result.row["page_fingerprint"] is not None
         assert result.row["fetch_status"] == 200
+
+
+class TestBug4_10_FieldCollisionBeforeHTTPRequest:
+    """Bug 4.10: Field collision detected before making HTTP request.
+
+    Previously, the field collision check happened after the HTTP fetch and
+    content extraction, meaning an expensive network request was wasted when
+    the result would be discarded anyway. Now the check happens BEFORE
+    _fetch_url() is called.
+    """
+
+    def test_collision_detected_without_fetch(self, mock_ctx):
+        """Field collision returns error without making any HTTP request."""
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing collision check ordering",
+                },
+            }
+        )
+
+        # Row already has "page_content" — collision with content_field!
+        row = make_pipeline_row({"url": "https://example.com/page", "page_content": "pre-existing"})
+
+        with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+            # Do NOT mock respx — if an HTTP request is made, it should fail
+            # because there's no mock server. The test verifies no request is made.
+            result = transform.process(row, mock_ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "field_collision"
+        assert "page_content" in result.reason["collisions"]

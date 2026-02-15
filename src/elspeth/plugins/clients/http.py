@@ -899,25 +899,10 @@ class AuditedHTTPClient(AuditedClientBase):
 
             hop_start = time.perf_counter()
 
-            # Ephemeral client per redirect hop: same TLS/SNI isolation rationale
-            # as the initial SSRF-safe request — IP-based connection_url would
-            # cause the pool to reuse connections across different hostnames.
-            with httpx.Client(
-                timeout=timeout,
-                follow_redirects=False,
-            ) as hop_client:
-                response = hop_client.get(
-                    redirect_request.connection_url,
-                    headers=hop_headers,
-                    extensions=extensions if extensions else None,
-                )
-
-            hop_latency_ms = (time.perf_counter() - hop_start) * 1000
-            redirects_followed += 1
-
-            # Record this redirect hop in the audit trail.
-            # Each hop is a real network call — it may hit a different server.
+            # Pre-allocate call index and request data BEFORE the hop so that
+            # both success and failure paths can record the hop in the audit trail.
             hop_call_index = self._next_call_index()
+            redirects_followed += 1
             hop_request_data = {
                 "method": "GET",
                 "url": redirect_url,
@@ -926,6 +911,41 @@ class AuditedHTTPClient(AuditedClientBase):
                 "redirect_from": redirect_from,
                 "headers": self._filter_request_headers(hop_headers),
             }
+
+            # Ephemeral client per redirect hop: same TLS/SNI isolation rationale
+            # as the initial SSRF-safe request — IP-based connection_url would
+            # cause the pool to reuse connections across different hostnames.
+            try:
+                with httpx.Client(
+                    timeout=timeout,
+                    follow_redirects=False,
+                ) as hop_client:
+                    response = hop_client.get(
+                        redirect_request.connection_url,
+                        headers=hop_headers,
+                        extensions=extensions if extensions else None,
+                    )
+            except Exception as hop_err:
+                hop_latency_ms = (time.perf_counter() - hop_start) * 1000
+                # Record the failed hop in the audit trail so lineage is complete
+                self._recorder.record_call(
+                    state_id=self._state_id,
+                    call_index=hop_call_index,
+                    call_type=CallType.HTTP_REDIRECT,
+                    status=CallStatus.ERROR,
+                    request_data=hop_request_data,
+                    error={
+                        "type": type(hop_err).__name__,
+                        "message": str(hop_err),
+                    },
+                    latency_ms=hop_latency_ms,
+                )
+                raise
+
+            hop_latency_ms = (time.perf_counter() - hop_start) * 1000
+
+            # Record this redirect hop in the audit trail.
+            # Each hop is a real network call — it may hit a different server.
             hop_response_data = {
                 "status_code": response.status_code,
                 "headers": self._filter_response_headers(dict(response.headers)),

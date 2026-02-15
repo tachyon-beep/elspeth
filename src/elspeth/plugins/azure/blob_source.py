@@ -443,7 +443,7 @@ class AzureBlobSource(BaseSource):
 
             # Azure SDK errors (ResourceNotFoundError, ClientAuthenticationError, etc.)
             # are external system errors - propagate with context
-            raise type(e)(f"Failed to download blob '{self._blob_path}' from container '{self._container}': {e}") from e
+            raise RuntimeError(f"Failed to download blob '{self._blob_path}' from container '{self._container}': {e}") from e
 
         # Log blob download for operator visibility
         blob_size_kb = len(blob_data) / 1024
@@ -670,7 +670,25 @@ class AzureBlobSource(BaseSource):
         try:
             text_data = blob_data.decode(encoding)
         except UnicodeDecodeError as e:
-            raise ValueError(f"Failed to decode blob as {encoding}: {e}") from e
+            error_msg = f"Failed to decode JSONL blob as {encoding}: {e}"
+            raw_row = {
+                "container": self._container,
+                "blob_path": self._blob_path,
+                "error": error_msg,
+            }
+            ctx.record_validation_error(
+                row=raw_row,
+                error=error_msg,
+                schema_mode="parse",
+                destination=self._on_validation_failure,
+            )
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=raw_row,
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+            return
 
         # Split lines and count non-empty for logging
         lines = text_data.splitlines()
@@ -688,7 +706,7 @@ class AzureBlobSource(BaseSource):
             except (json.JSONDecodeError, ValueError) as e:
                 # External data parse failure - quarantine, don't crash
                 # Store raw line + metadata for audit traceability
-                raw_row = {"__raw_line__": line, "__line_number__": line_num}
+                raw_row = {"__raw_line__": line, "__line_number__": str(line_num)}
                 error_msg = f"JSON parse error at line {line_num}: {e}"
 
                 ctx.record_validation_error(
