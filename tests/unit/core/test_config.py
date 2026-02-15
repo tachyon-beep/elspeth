@@ -3719,3 +3719,92 @@ secrets:
 """)
         settings = load_settings(config_file)
         assert settings.source.plugin == "csv"
+
+
+class TestLowercaseSchemaKeysBranchPreservation:
+    """Bug 7.8: _lowercase_schema_keys must preserve coalesce branch names.
+
+    Coalesce branch names are user-defined identifiers that may contain
+    mixed-case. Lowercasing them would cause lookup failures during
+    coalesce execution.
+    """
+
+    def test_branches_keys_are_preserved(self) -> None:
+        from elspeth.core.config import _lowercase_schema_keys
+
+        config = {
+            "COALESCE": [
+                {
+                    "NAME": "merge_results",
+                    "BRANCHES": {
+                        "SentimentPath": "sentiment_out",
+                        "EntityPath": "entity_out",
+                    },
+                    "POLICY": "require_all",
+                    "MERGE": "union",
+                }
+            ]
+        }
+        result = _lowercase_schema_keys(config)
+
+        # Schema keys should be lowercased
+        assert "coalesce" in result
+        coalesce = result["coalesce"][0]
+        assert "name" in coalesce
+        assert "branches" in coalesce
+
+        # Branch names (keys inside branches) must be PRESERVED
+        branches = coalesce["branches"]
+        assert "SentimentPath" in branches
+        assert "EntityPath" in branches
+        # Values inside branches must also be preserved
+        assert branches["SentimentPath"] == "sentiment_out"
+        assert branches["EntityPath"] == "entity_out"
+
+    def test_load_settings_preserves_coalesce_branch_names(self, tmp_path: Path) -> None:
+        """Full config loading preserves mixed-case coalesce branch names."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: quality_gate
+sinks:
+  output:
+    plugin: csv
+gates:
+  - name: quality_gate
+    input: quality_gate
+    condition: "True"
+    routes:
+      "true": fork
+      "false": output
+    fork_to:
+      - sentiment_path
+      - entity_path
+transforms:
+  - name: sentiment_transform
+    plugin: passthrough
+    input: sentiment_path
+    on_success: sentiment_out
+    on_error: discard
+  - name: entity_transform
+    plugin: passthrough
+    input: entity_path
+    on_success: entity_out
+    on_error: discard
+coalesce:
+  - name: merge_results
+    branches:
+      sentiment_path: sentiment_out
+      entity_path: entity_out
+    policy: require_all
+    merge: union
+    on_success: output
+""")
+        settings = load_settings(config_file)
+        assert len(settings.coalesce) == 1
+        branches = settings.coalesce[0].branches
+        assert "sentiment_path" in branches
+        assert "entity_path" in branches

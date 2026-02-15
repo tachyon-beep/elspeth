@@ -27,6 +27,18 @@ allow_hits:
   reason: Tier-3 boundary - row_data may contain NaN/Infinity which are not canonically serializable
   safety: Falls back to repr() with logging - audit trail preserved with metadata
   expires: null
+# _query_methods.py explain_row — payload lookup with purge-tolerant exception handling
+- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=18caaa73816a8f05
+  owner: architecture
+  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
+- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=da3401c41179ef38
+  owner: architecture
+  reason: OSError from PayloadStore filesystem — purged or inaccessible payload is expected, not corruption
+# _error_recording.py — NaN-safe canonical_json fallback
+- key: core/landscape/_error_recording.py:R6:ErrorRecordingMixin:record_transform_error:fp=25ae75d0ef31d8f4
+  owner: bugfix
+  reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that canonical_json rejects
+  safety: Falls back to repr() with logging — audit trail preserved with metadata
 - key: core/canonical.py:R6:_normalize_value:fp=923db5911422d223
   owner: architecture
   reason: Silent recovery with explicit error handling path
@@ -227,72 +239,41 @@ allow_hits:
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: ValueError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: core/checkpoint/serialization.py:R5:CheckpointEncoder:default:fp=72cffac7b9b4f871
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=d35d4e11d243b198
-  owner: bugfix
-  reason: Tier-3 boundary validation - rejects NaN/Infinity for audit integrity
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=6bbc05c2197b1800
-  owner: bugfix
-  reason: Tier-3 boundary validation - rejects NaN/Infinity for audit integrity
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=346fe02f62559967
-  owner: bugfix
-  reason: Tier-3 boundary validation - rejects NaN/Infinity for audit integrity
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/checkpoint/serialization.py:R5:_restore_types:fp=69bdc2211c2b6e0e
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/checkpoint/serialization.py:R5:_restore_types:fp=4d05c5da68423665
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=90299392a195cce0
-  owner: architecture
-  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
-- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=90b2556ec80e61dd
-  owner: architecture
-  reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9ca89eaa0e651dcf
   owner: P2-2026-02-02-76r
   reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=36c3f58b638f1aff
+# exporter.py _iter_records — sparse dict lookups for batch export
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=ad14558587e5d32c
   owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=443894e5bdda8a78
+  reason: Sparse lookup — not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=368adce6e5682b91
   owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=36096d44e6d8c088
+  reason: Sparse lookup — not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=5e17f770a8ce33f7
   owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=e7368fdf9fa869f8
+  reason: Sparse lookup — not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=8e8d0f96dfb4d623
   owner: P2-2026-02-02-76r
-  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=c3e2f9d2af522c9d
+  reason: Sparse lookup — not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=75777caa3f46bfdc
   owner: P2-2026-02-02-76r
-  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=47946a8ab829df41
+  reason: Sparse lookup — not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=1e2ec0c73e9932b9
   owner: P2-2026-02-02-76r
-  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=dfa86502fc245865
+  reason: Sparse lookup — not all rows have tokens (batch export uses pre-loaded dicts)
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=8dbe46fc52cd3ed3
   owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=a49774aca3191658
+  reason: Sparse lookup — not all rows have tokens (batch export uses pre-loaded dicts)
+# exporter.py _iter_records — NodeState discriminated union isinstance checks
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=18f376a79aca94ec
   owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
-- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=e6d0c8334783f7db
+  reason: Discriminated union — NodeState is union of Open/Pending/Completed/Failed with different fields
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=279a9028ee919f7f
   owner: P2-2026-02-02-76r
-  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+  reason: Discriminated union — NodeState is union of Open/Pending/Completed/Failed with different fields
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=eb69593d0ee95c0e
+  owner: P2-2026-02-02-76r
+  reason: Discriminated union — NodeState is union of Open/Pending/Completed/Failed with different fields
 - key: core/landscape/journal.py:R5:LandscapeJournal:_normalize_parameters:fp=cd7ae9f783e16f59
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -422,11 +403,48 @@ allow_hits:
   reason: Framework boundary — urllib.parse query values can be str or list[str] depending on parameter multiplicity
   safety: Disambiguates URL query parsing output before type coercion; no silent data loss
   expires: '2026-05-02'
-- key: core/checkpoint/serialization.py:R5:_restore_types:fp=4af58e44b9e1dded
+# checkpoint/serialization.py — CheckpointEncoder and type restoration
+- key: core/checkpoint/serialization.py:R5:CheckpointEncoder:default:fp=de954fffb13dae8d
   owner: architecture
-  reason: Tier 1 type restoration — isinstance on our own serialized checkpoint format to detect datetime type tags
+  reason: AST/type checking — isinstance for datetime in JSON encoder
+  safety: Code reviewed — fundamental to checkpoint serialization
+- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=e34a4da180f55c2b
+  owner: bugfix
+  reason: Tier-3 boundary validation — rejects NaN/Infinity for audit integrity
+- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=c00acf54c07e2cf3
+  owner: bugfix
+  reason: Tier-3 boundary validation — rejects NaN/Infinity for audit integrity
+- key: core/checkpoint/serialization.py:R5:_reject_nan_infinity:fp=b095285189bde87e
+  owner: bugfix
+  reason: Tier-3 boundary validation — rejects NaN/Infinity for audit integrity
+- key: core/checkpoint/serialization.py:R5:_escape_reserved_keys:fp=7a8b938c69c4e480
+  owner: bugfix
+  reason: Tier 1 type restoration — isinstance checks for datetime/dict/list during key escaping
+  safety: Required for collision-safe checkpoint envelope format
+- key: core/checkpoint/serialization.py:R5:_escape_reserved_keys:fp=9d080103616bd634
+  owner: bugfix
+  reason: Tier 1 type restoration — isinstance checks for dict during recursive key escaping
+  safety: Required for collision-safe checkpoint envelope format
+- key: core/checkpoint/serialization.py:R5:_escape_reserved_keys:fp=11c9465169b40618
+  owner: bugfix
+  reason: Tier 1 type restoration — isinstance checks for list during recursive key escaping
+  safety: Required for collision-safe checkpoint envelope format
+- key: core/checkpoint/serialization.py:R5:_restore_types:fp=c7cf8377505104e7
+  owner: architecture
+  reason: AST/type checking — isinstance for dict during recursive type restoration
+  safety: Code reviewed — fundamental to checkpoint deserialization
+- key: core/checkpoint/serialization.py:R5:_restore_types:fp=8787dcdce4eb9dee
+  owner: architecture
+  reason: Tier 1 type restoration — isinstance check for envelope value type validation
   safety: Non-str values fall through without coercion — no silent wrong behavior
-  expires: '2026-03-13'
+- key: core/checkpoint/serialization.py:R5:_restore_types:fp=b15ca2e7cdaa296e
+  owner: architecture
+  reason: Tier 1 type restoration — isinstance check for escaped_dict envelope value type
+  safety: Non-dict values fall through without coercion — no silent wrong behavior
+- key: core/checkpoint/serialization.py:R5:_restore_types:fp=ceab8dbd1f6b628f
+  owner: architecture
+  reason: AST/type checking — isinstance for list during recursive type restoration
+  safety: Code reviewed — fundamental to checkpoint deserialization
 # sanitize_for_canonical — Tier-3 boundary function that replaces non-finite floats with None
 - key: core/canonical.py:R5:sanitize_for_canonical:fp=fa2c9e77fb483e64
   owner: bugfix

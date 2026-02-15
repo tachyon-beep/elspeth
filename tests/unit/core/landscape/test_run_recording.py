@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from elspeth.contracts import ExportStatus, NodeType, RunStatus
+from elspeth.contracts import ExportStatus, FieldContract, NodeType, RunStatus, SchemaContract
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -316,3 +316,61 @@ class TestFinalizeRun:
         assert run.status == RunStatus.COMPLETED
         assert run.reproducibility_grade == "full_reproducible"
         assert run.completed_at is not None
+
+
+# ===========================================================================
+# Bug 7.3: Run contract hash verification
+# ===========================================================================
+
+
+class TestGetRunContractHashVerification:
+    """Tests for get_run_contract hash verification (Bug 7.3)."""
+
+    def _make_contract(self) -> SchemaContract:
+        return SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+    def test_get_run_contract_returns_contract(self) -> None:
+        """get_run_contract() round-trips a valid contract."""
+        _db, recorder = _setup()
+        contract = self._make_contract()
+        recorder.update_run_contract("run-1", contract)
+        restored = recorder.get_run_contract("run-1")
+        assert restored is not None
+        assert restored.mode == "FIXED"
+        assert len(restored.fields) == 1
+
+    def test_get_run_contract_verifies_hash(self) -> None:
+        """get_run_contract() raises AuditIntegrityError on hash mismatch (Bug 7.3)."""
+        from sqlalchemy import update
+
+        from elspeth.core.landscape.schema import runs_table
+
+        _db, recorder = _setup()
+        contract = self._make_contract()
+        recorder.update_run_contract("run-1", contract)
+
+        # Tamper with the stored hash
+        with _db.connection() as conn:
+            conn.execute(update(runs_table).where(runs_table.c.run_id == "run-1").values(schema_contract_hash="tampered_hash_value"))
+            conn.commit()
+
+        with pytest.raises(AuditIntegrityError, match="hash mismatch"):
+            recorder.get_run_contract("run-1")
+
+    def test_get_run_contract_returns_none_when_no_contract(self) -> None:
+        """get_run_contract() returns None when no contract stored."""
+        _db, recorder = _setup()
+        result = recorder.get_run_contract("run-1")
+        assert result is None

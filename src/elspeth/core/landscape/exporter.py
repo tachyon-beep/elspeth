@@ -38,6 +38,7 @@ class LandscapeExporter:
     - row: Source rows
     - token: Row instances
     - token_parent: Token lineage for forks/joins
+    - token_outcome: Terminal state for tokens
     - node_state: Processing records
     - routing_event: Routing decisions
     - call: External calls (may have state_id OR operation_id)
@@ -315,6 +316,12 @@ class LandscapeExporter:
             if call.state_id:  # Should always be true for state-parented calls
                 calls_by_state[call.state_id].append(call)
 
+        # Batch query 6: All token outcomes for this run
+        all_token_outcomes = self._recorder.get_all_token_outcomes_for_run(run_id)
+        outcomes_by_token: dict[str, list[Any]] = defaultdict(list)
+        for outcome in all_token_outcomes:
+            outcomes_by_token[outcome.token_id].append(outcome)
+
         # Now iterate through rows using pre-loaded data (no more per-entity queries)
         for row in self._recorder.get_rows(run_id):
             yield {
@@ -348,6 +355,26 @@ class LandscapeExporter:
                         "token_id": parent.token_id,
                         "parent_token_id": parent.parent_token_id,
                         "ordinal": parent.ordinal,
+                    }
+
+                # Token outcomes (from pre-loaded dict)
+                for outcome in outcomes_by_token.get(token.token_id, []):
+                    yield {
+                        "record_type": "token_outcome",
+                        "run_id": run_id,
+                        "outcome_id": outcome.outcome_id,
+                        "token_id": outcome.token_id,
+                        "outcome": outcome.outcome.value,
+                        "is_terminal": outcome.is_terminal,
+                        "recorded_at": outcome.recorded_at.isoformat(),
+                        "sink_name": outcome.sink_name,
+                        "batch_id": outcome.batch_id,
+                        "fork_group_id": outcome.fork_group_id,
+                        "join_group_id": outcome.join_group_id,
+                        "expand_group_id": outcome.expand_group_id,
+                        "error_hash": outcome.error_hash,
+                        "context_json": outcome.context_json,
+                        "expected_branches_json": outcome.expected_branches_json,
                     }
 
                 # Node states for this token (from pre-loaded dict)

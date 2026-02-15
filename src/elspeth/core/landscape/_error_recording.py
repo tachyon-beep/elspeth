@@ -156,6 +156,26 @@ class ErrorRecordingMixin:
             error_id for tracking
         """
         error_id = f"terr_{generate_id()[:12]}"
+        logger = logging.getLogger(__name__)
+
+        # error_details may contain NaN/Infinity or non-serializable values
+        # (e.g. from exception context in row operations). Wrap in try/except
+        # per Tier 3 boundary: error_details originates from transform results
+        # which may contain arbitrary row-derived data.
+        try:
+            error_details_json = canonical_json(error_details)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Transform error details not canonically serializable (using repr fallback): %s",
+                str(e),
+            )
+            error_details_json = json.dumps(
+                {
+                    "__non_canonical__": True,
+                    "repr": repr(error_details)[:500],
+                    "serialization_error": str(e),
+                }
+            )
 
         self._ops.execute_insert(
             transform_errors_table.insert().values(
@@ -165,7 +185,7 @@ class ErrorRecordingMixin:
                 transform_id=transform_id,
                 row_hash=stable_hash(row_data),
                 row_data_json=canonical_json(row_data),
-                error_details_json=canonical_json(error_details),
+                error_details_json=error_details_json,
                 destination=destination,
                 created_at=now(),
             )

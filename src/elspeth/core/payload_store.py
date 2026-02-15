@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import os
 import re
+import tempfile
 from pathlib import Path
 
 import elspeth.contracts.payload_store as payload_contracts
@@ -103,14 +104,22 @@ class FilesystemPayloadStore:
                 )
         else:
             # File doesn't exist — atomic write via temp file to prevent
-            # partial/corrupted files on crash (Tier 1 integrity requirement)
+            # partial/corrupted files on crash (Tier 1 integrity requirement).
+            # Use NamedTemporaryFile with unique name to prevent race conditions
+            # when concurrent writes target the same hash (deterministic temp
+            # names like path.with_suffix(".tmp") would collide).
             path.parent.mkdir(parents=True, exist_ok=True)
-            temp_path = path.with_suffix(".tmp")
+            with tempfile.NamedTemporaryFile(delete=False, dir=path.parent, suffix=".tmp") as fd:
+                temp_path = Path(fd.name)
+                try:
+                    fd.write(content)
+                    fd.flush()
+                    os.fsync(fd.fileno())
+                except BaseException:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    raise
             try:
-                with open(temp_path, "wb") as f:
-                    f.write(content)
-                    f.flush()
-                    os.fsync(f.fileno())
                 os.replace(temp_path, path)
                 # Fsync parent directory to ensure rename survives power loss
                 dir_fd = os.open(str(path.parent), os.O_RDONLY)

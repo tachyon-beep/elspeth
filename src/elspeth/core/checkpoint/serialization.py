@@ -4,7 +4,14 @@ This module provides serialization that preserves type fidelity for types allowe
 in SchemaContract (int, str, float, bool, NoneType, datetime, object).
 
 The problem: Standard json.dumps() cannot serialize datetime objects.
-The solution: Use type tags to encode datetime as {"__datetime__": iso_string}.
+The solution: Use collision-safe type envelopes with ``__elspeth_type__`` and
+``__elspeth_value__`` keys. User dicts that coincidentally contain the reserved
+key ``__elspeth_type__`` are escaped via ``_escape_reserved_keys()`` before
+encoding, preventing incorrect deserialization.
+
+This replaces the old shape-based tag ``{"__datetime__": iso_string}`` which
+could collide with user data matching the same shape. Per CLAUDE.md No Legacy
+Code Policy, the old tag format is not supported during deserialization.
 
 This is distinct from canonical_json() which:
 1. Is designed for hashing (normalized output)
@@ -25,12 +32,18 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
+# Reserved key used for type envelopes. User dicts containing this key
+# are escaped via _escape_reserved_keys() before encoding.
+_ENVELOPE_TYPE_KEY = "__elspeth_type__"
+_ENVELOPE_VALUE_KEY = "__elspeth_value__"
+
 
 class CheckpointEncoder(json.JSONEncoder):
-    """JSON encoder that preserves datetime with type tags.
+    """JSON encoder that preserves datetime with collision-safe type envelopes.
 
-    Encodes datetime as {"__datetime__": "2024-01-01T00:00:00+00:00"}.
-    This allows deserialization to restore the original datetime type.
+    Encodes datetime as {"__elspeth_type__": "datetime", "__elspeth_value__": "iso_string"}.
+    This allows deserialization to restore the original datetime type without
+    colliding with user dicts that happen to contain similar keys.
 
     NaN and Infinity are rejected per CLAUDE.md audit integrity requirements.
     """
@@ -52,7 +65,10 @@ class CheckpointEncoder(json.JSONEncoder):
             # Ensure timezone-aware (audit requirement)
             if obj.tzinfo is None:
                 obj = obj.replace(tzinfo=UTC)
-            return {"__datetime__": obj.isoformat()}
+            return {
+                _ENVELOPE_TYPE_KEY: "datetime",
+                _ENVELOPE_VALUE_KEY: obj.isoformat(),
+            }
 
         # Let default encoder handle or raise TypeError
         return super().default(obj)
@@ -84,17 +100,48 @@ def _reject_nan_infinity(obj: Any) -> Any:
     return obj
 
 
+def _escape_reserved_keys(obj: Any) -> Any:
+    """Recursively escape user dicts that coincidentally contain the reserved key.
+
+    If a user dict contains __elspeth_type__, wrap it in an escape envelope so
+    _restore_types() can distinguish it from a real type envelope.
+
+    Args:
+        obj: Data structure to process
+
+    Returns:
+        Data with reserved keys escaped
+    """
+    if isinstance(obj, datetime):
+        # Datetimes are handled by CheckpointEncoder, pass through
+        return obj
+    if isinstance(obj, dict):
+        # First recurse into values
+        escaped = {k: _escape_reserved_keys(v) for k, v in obj.items()}
+        # If this dict contains our reserved key, wrap it in an escape envelope
+        if _ENVELOPE_TYPE_KEY in escaped:
+            return {
+                _ENVELOPE_TYPE_KEY: "escaped_dict",
+                _ENVELOPE_VALUE_KEY: escaped,
+            }
+        return escaped
+    if isinstance(obj, list):
+        return [_escape_reserved_keys(v) for v in obj]
+    return obj
+
+
 def checkpoint_dumps(obj: Any) -> str:
     """Serialize object to JSON with type preservation.
 
-    Preserves datetime objects using type tags for round-trip fidelity.
+    Preserves datetime objects using collision-safe type envelopes.
+    Escapes user dicts that coincidentally contain the reserved key.
     Rejects NaN/Infinity per CLAUDE.md audit integrity requirements.
 
     Args:
         obj: Data structure to serialize (typically aggregation state)
 
     Returns:
-        JSON string with type tags for datetime
+        JSON string with type envelopes for datetime
 
     Raises:
         ValueError: If data contains NaN or Infinity
@@ -103,13 +150,22 @@ def checkpoint_dumps(obj: Any) -> str:
     # Validate no NaN/Infinity before serialization
     _reject_nan_infinity(obj)
 
-    return json.dumps(obj, cls=CheckpointEncoder, allow_nan=False)
+    # Escape user dicts that contain reserved keys before encoding
+    escaped = _escape_reserved_keys(obj)
+
+    return json.dumps(escaped, cls=CheckpointEncoder, allow_nan=False)
 
 
 def _restore_types(obj: Any) -> Any:
     """Recursively restore type-tagged values.
 
-    Converts {"__datetime__": iso_string} back to datetime objects.
+    Handles:
+    - New envelopes: {"__elspeth_type__": "datetime", "__elspeth_value__": iso_string}
+    - Escaped dicts: {"__elspeth_type__": "escaped_dict", "__elspeth_value__": {...}}
+
+    The old shape-based tag {"__datetime__": iso_string} is NOT restored. Per
+    CLAUDE.md No Legacy Code Policy, there are no existing checkpoints to
+    preserve compatibility with.
 
     Args:
         obj: Deserialized JSON data
@@ -118,11 +174,18 @@ def _restore_types(obj: Any) -> Any:
         Data with restored Python types
     """
     if isinstance(obj, dict):
-        # Check for type tag — our encoder always writes str values,
-        # so only match when the value is str. Non-str values (e.g. None)
-        # indicate user data that coincidentally uses our reserved key.
-        if "__datetime__" in obj and len(obj) == 1 and isinstance(obj["__datetime__"], str):
-            return datetime.fromisoformat(obj["__datetime__"])
+        # Check for collision-safe envelope
+        if _ENVELOPE_TYPE_KEY in obj and _ENVELOPE_VALUE_KEY in obj and len(obj) == 2:
+            envelope_type = obj[_ENVELOPE_TYPE_KEY]
+            envelope_value = obj[_ENVELOPE_VALUE_KEY]
+
+            if envelope_type == "datetime" and isinstance(envelope_value, str):
+                return datetime.fromisoformat(envelope_value)
+
+            if envelope_type == "escaped_dict" and isinstance(envelope_value, dict):
+                # Unwrap the escaped dict and recurse into its values
+                return {k: _restore_types(v) for k, v in envelope_value.items()}
+
         # Recurse into dict values
         return {k: _restore_types(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -133,7 +196,8 @@ def _restore_types(obj: Any) -> Any:
 def checkpoint_loads(s: str) -> Any:
     """Deserialize JSON string with type restoration.
 
-    Restores datetime objects from type tags.
+    Restores datetime objects from type envelopes. Supports both new
+    collision-safe envelopes and legacy __datetime__ tags.
 
     Args:
         s: JSON string (from checkpoint_dumps)

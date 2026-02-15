@@ -15,6 +15,7 @@ from elspeth.contracts import (
     Row,
     RowLineage,
     Token,
+    TokenOutcome,
     TokenParent,
 )
 from elspeth.contracts.errors import AuditIntegrityError
@@ -24,6 +25,7 @@ from elspeth.core.landscape.schema import (
     node_states_table,
     routing_events_table,
     rows_table,
+    token_outcomes_table,
     token_parents_table,
     tokens_table,
 )
@@ -38,6 +40,7 @@ if TYPE_CHECKING:
         NodeStateRepository,
         RoutingEventRepository,
         RowRepository,
+        TokenOutcomeRepository,
         TokenParentRepository,
         TokenRepository,
     )
@@ -57,6 +60,7 @@ class QueryMethodsMixin:
     _call_repo: CallRepository
     _node_state_repo: NodeStateRepository
     _routing_event_repo: RoutingEventRepository
+    _token_outcome_repo: TokenOutcomeRepository
     _payload_store: PayloadStore | None
 
     def get_rows(self, run_id: str) -> list[Row]:
@@ -407,6 +411,23 @@ class QueryMethodsMixin:
         )
         db_rows = self._ops.execute_fetchall(query)
         return [self._token_parent_repo.load(r) for r in db_rows]
+
+    def get_all_token_outcomes_for_run(self, run_id: str) -> list[TokenOutcome]:
+        """Get all token outcomes for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of TokenOutcome models, ordered by token_id then recorded_at
+        """
+        query = (
+            select(token_outcomes_table)
+            .where(token_outcomes_table.c.run_id == run_id)
+            .order_by(token_outcomes_table.c.token_id, token_outcomes_table.c.recorded_at)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_outcome_repo.load(r) for r in db_rows]
 
     # === Explain Methods (Graceful Degradation) ===
 

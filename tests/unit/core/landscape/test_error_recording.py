@@ -803,3 +803,64 @@ class TestGetTransformErrorsForRun:
         assert len(errors) == 5
         timestamps = [e.created_at for e in errors]
         assert timestamps == sorted(timestamps)
+
+
+# ===========================================================================
+# Bug 7.4: record_transform_error NaN fallback
+# ===========================================================================
+
+
+class TestRecordTransformErrorNaNFallback:
+    """Bug 7.4: NaN in error_details must not crash record_transform_error()."""
+
+    def test_nan_in_error_details_does_not_crash(self):
+        """error_details containing NaN should use repr-based fallback."""
+        _db, recorder = _setup_with_token()
+        error_id = recorder.record_transform_error(
+            run_id="run-1",
+            token_id="tok-1",
+            transform_id="transform-1",
+            row_data={"name": "test"},
+            error_details={"reason": "division_error", "field": "ratio", "error": "nan_result", "value": float("nan")},
+            destination="quarantine",
+        )
+        assert error_id.startswith("terr_")
+
+        # Verify the error was stored
+        errors = recorder.get_transform_errors_for_run("run-1")
+        assert len(errors) == 1
+        # The error_details_json should contain the fallback metadata
+        details = json.loads(errors[0].error_details_json)
+        assert details["__non_canonical__"] is True
+        assert "repr" in details
+
+    def test_infinity_in_error_details_does_not_crash(self):
+        """error_details containing Infinity should use repr-based fallback."""
+        _db, recorder = _setup_with_token()
+        error_id = recorder.record_transform_error(
+            run_id="run-1",
+            token_id="tok-1",
+            transform_id="transform-1",
+            row_data={"name": "test"},
+            error_details={"reason": "overflow", "field": "big", "error": "inf", "value": float("inf")},
+            destination="quarantine",
+        )
+        assert error_id.startswith("terr_")
+
+    def test_normal_error_details_still_uses_canonical_json(self):
+        """Normal error_details should still use canonical JSON (no fallback)."""
+        _db, recorder = _setup_with_token()
+        recorder.record_transform_error(
+            run_id="run-1",
+            token_id="tok-1",
+            transform_id="transform-1",
+            row_data={"name": "test"},
+            error_details={"reason": "parse_failed", "field": "date", "error": "invalid format"},
+            destination="quarantine",
+        )
+        errors = recorder.get_transform_errors_for_run("run-1")
+        assert len(errors) == 1
+        details = json.loads(errors[0].error_details_json)
+        # Normal JSON - no fallback metadata
+        assert "__non_canonical__" not in details
+        assert details["reason"] == "parse_failed"

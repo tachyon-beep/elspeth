@@ -1961,6 +1961,9 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sink
             elif new_key == "routes":
                 # Routes: preserve everything inside (user-defined route labels)
                 child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
+            elif new_key == "branches":
+                # Branches: preserve everything inside (user-defined coalesce branch names)
+                child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
             elif new_key == "sinks":
                 # Entering sinks dict: next level has sink name keys
                 child = _lowercase_schema_keys(v, _preserve_nested=False, _in_sinks=True)

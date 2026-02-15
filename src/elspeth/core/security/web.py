@@ -207,8 +207,17 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
         raise SSRFBlockedError("URL has no hostname")
 
     # Determine port (explicit or default)
-    if parsed.port:
-        port = parsed.port
+    # parsed.port can raise ValueError for out-of-range ports (e.g. 99999).
+    # Port 0 is falsy but must be explicitly rejected (not a valid HTTP port).
+    try:
+        explicit_port = parsed.port
+    except ValueError as e:
+        raise SSRFBlockedError(f"Invalid port in URL: {e}") from e
+
+    if explicit_port is not None:
+        if explicit_port == 0:
+            raise SSRFBlockedError("Port 0 is not allowed")
+        port = explicit_port
     else:
         port = 443 if parsed.scheme.lower() == "https" else 80
 
@@ -220,10 +229,14 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
         path = f"{path}#{parsed.fragment}"
 
     # Step 3: Resolve DNS with timeout
+    # Use explicit lifecycle instead of context manager. ThreadPoolExecutor.__exit__
+    # calls shutdown(wait=True) which blocks until DNS resolution completes,
+    # defeating the timeout purpose.
     def _resolve() -> list[str]:
         return _resolve_hostname(hostname)
 
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="dns_resolve") as executor:
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dns_resolve")
+    try:
         future = executor.submit(_resolve)
         try:
             ip_list = future.result(timeout=timeout)
@@ -235,6 +248,8 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
             # Unexpected exceptions from DNS resolution (UnicodeError, OSError, etc.)
             # are external system failures — wrap as NetworkError
             raise NetworkError(f"DNS resolution failed: {hostname}: {e}") from e
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     if not ip_list:
         raise NetworkError(f"DNS resolution returned no addresses: {hostname}")

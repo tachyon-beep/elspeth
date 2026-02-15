@@ -34,6 +34,7 @@ from elspeth.contracts.audit import (
     Run,
     SecretResolution,
     Token,
+    TokenOutcome,
     TokenParent,
 )
 from elspeth.contracts.enums import (
@@ -44,6 +45,7 @@ from elspeth.contracts.enums import (
     NodeStateStatus,
     NodeType,
     RoutingMode,
+    RowOutcome,
     RunStatus,
     TriggerType,
 )
@@ -270,6 +272,16 @@ _BATCH_MEMBER = BatchMember(
     ordinal=0,
 )
 
+_TOKEN_OUTCOME = TokenOutcome(
+    outcome_id="outcome-1",
+    run_id="run-1",
+    token_id="tok-1",
+    outcome=RowOutcome.COMPLETED,
+    is_terminal=True,
+    recorded_at=_DT2,
+    sink_name="output",
+)
+
 _ARTIFACT = Artifact(
     artifact_id="art-1",
     run_id="run-1",
@@ -295,6 +307,7 @@ def _make_exporter(
     rows: list[Any] | None = None,
     tokens: list[Any] | None = None,
     token_parents: list[Any] | None = None,
+    token_outcomes: list[Any] | None = None,
     node_states: list[Any] | None = None,
     routing_events: list[Any] | None = None,
     state_calls: list[Any] | None = None,
@@ -317,6 +330,7 @@ def _make_exporter(
     object.__setattr__(recorder, "get_rows", Mock(return_value=rows or []))
     object.__setattr__(recorder, "get_all_tokens_for_run", Mock(return_value=tokens or []))
     object.__setattr__(recorder, "get_all_token_parents_for_run", Mock(return_value=token_parents or []))
+    object.__setattr__(recorder, "get_all_token_outcomes_for_run", Mock(return_value=token_outcomes or []))
     object.__setattr__(recorder, "get_all_node_states_for_run", Mock(return_value=node_states or []))
     object.__setattr__(recorder, "get_all_routing_events_for_run", Mock(return_value=routing_events or []))
     object.__setattr__(recorder, "get_all_calls_for_run", Mock(return_value=state_calls or []))
@@ -597,6 +611,52 @@ class TestTokenRecords:
 
 
 # ===========================================================================
+# Token outcome records (Bug 7.2)
+# ===========================================================================
+
+
+class TestTokenOutcomeRecords:
+    """Tests for token_outcome record serialization."""
+
+    def test_token_outcome_fields(self) -> None:
+        exporter = _make_exporter(
+            rows=[_ROW],
+            tokens=[_TOKEN],
+            token_outcomes=[_TOKEN_OUTCOME],
+        )
+        records = list(exporter.export_run("run-1"))
+        outcomes = [r for r in records if r["record_type"] == "token_outcome"]
+        assert len(outcomes) == 1
+        o = outcomes[0]
+        assert o["outcome_id"] == "outcome-1"
+        assert o["run_id"] == "run-1"
+        assert o["token_id"] == "tok-1"
+        assert o["outcome"] == "completed"
+        assert o["is_terminal"] is True
+        assert o["recorded_at"] == _DT2.isoformat()
+        assert o["sink_name"] == "output"
+        assert o["batch_id"] is None
+        assert o["fork_group_id"] is None
+        assert o["error_hash"] is None
+
+    def test_token_outcome_follows_token_parent(self) -> None:
+        """token_outcome records should appear after token_parent records."""
+        exporter = _make_exporter(
+            rows=[_ROW],
+            tokens=[_TOKEN],
+            token_parents=[_TOKEN_PARENT],
+            token_outcomes=[_TOKEN_OUTCOME],
+            node_states=[_NODE_STATE_COMPLETED],
+        )
+        records = list(exporter.export_run("run-1"))
+        types = [r["record_type"] for r in records]
+        parent_idx = types.index("token_parent")
+        outcome_idx = types.index("token_outcome")
+        state_idx = types.index("node_state")
+        assert parent_idx < outcome_idx < state_idx
+
+
+# ===========================================================================
 # NodeState discriminated union
 # ===========================================================================
 
@@ -863,6 +923,7 @@ class TestFullPipelineExport:
             rows=[_ROW],
             tokens=[_TOKEN],
             token_parents=[_TOKEN_PARENT],
+            token_outcomes=[_TOKEN_OUTCOME],
             node_states=[_NODE_STATE_COMPLETED],
             routing_events=[_ROUTING_EVENT],
             state_calls=[_STATE_CALL],
@@ -887,6 +948,7 @@ class TestFullPipelineExport:
             "row": 1,
             "token": 1,
             "token_parent": 1,
+            "token_outcome": 1,
             "node_state": 1,
             "routing_event": 1,
             "batch": 1,
