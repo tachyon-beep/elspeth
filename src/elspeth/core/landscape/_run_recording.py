@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 
+_TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.INTERRUPTED})
+
+
 class RunRecordingMixin:
     """Run lifecycle methods. Mixed into LandscapeRecorder."""
 
@@ -125,7 +128,16 @@ class RunRecordingMixin:
 
         Returns:
             Updated Run model
+
+        Raises:
+            AuditIntegrityError: If status is not a terminal run status
         """
+        if status not in _TERMINAL_RUN_STATUSES:
+            raise AuditIntegrityError(
+                f"complete_run() requires terminal status, got {status.value!r}. "
+                f"Valid terminal statuses: {sorted(s.value for s in _TERMINAL_RUN_STATUSES)}"
+            )
+
         timestamp = now()
 
         self._ops.execute_update(

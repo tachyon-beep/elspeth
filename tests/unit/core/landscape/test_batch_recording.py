@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import BatchStatus, NodeType, TriggerType
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 
@@ -368,6 +369,25 @@ class TestCompleteBatch:
         assert fetched.status == BatchStatus.COMPLETED
         assert fetched.trigger_type == TriggerType.END_OF_SOURCE
         assert fetched.trigger_reason == "source exhausted"
+
+    def test_rejects_non_terminal_status_executing(self):
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.complete_batch("b-1", BatchStatus.EXECUTING)
+
+    def test_rejects_non_terminal_status_draft(self):
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.complete_batch("b-1", BatchStatus.DRAFT)
+
+    def test_accepts_completed_status(self):
+        _db, recorder = _setup()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-1")
+        result = recorder.complete_batch("b-1", BatchStatus.COMPLETED)
+        assert result.status == BatchStatus.COMPLETED
+        assert result.completed_at is not None
 
 
 # ---------------------------------------------------------------------------

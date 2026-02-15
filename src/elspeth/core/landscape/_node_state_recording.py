@@ -188,6 +188,12 @@ class NodeStateRecordingMixin:
         if duration_ms is None:
             raise ValueError("duration_ms is required when completing a node state")
 
+        if status == NodeStateStatus.COMPLETED and output_data is None:
+            raise ValueError("COMPLETED node state requires output_data (output_hash would be NULL)")
+
+        if status == NodeStateStatus.FAILED and error is None:
+            raise ValueError("FAILED node state requires error details")
+
         timestamp = now()
         output_hash = stable_hash(output_data) if output_data is not None else None
         error_json = canonical_json(error) if error is not None else None

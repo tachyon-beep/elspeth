@@ -17,7 +17,7 @@ per_file_rules:
   reason: Security utilities access optional environment variables (Tier 3) - defensive access for missing keys
   expires: null
 allow_hits:
-- key: core/landscape/_node_state_recording.py:R5:NodeStateRecordingMixin:complete_node_state:fp=449fbf004664406f
+- key: core/landscape/_node_state_recording.py:R5:NodeStateRecordingMixin:complete_node_state:fp=4f89cd9e4b00d867
   owner: architecture
   reason: Type narrowing after DB update - discriminated union requires isinstance to verify terminal state
   safety: Raises AuditIntegrityError if wrong state - explicit failure, not masking
@@ -207,22 +207,22 @@ allow_hits:
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
   expires: null
-- key: core/landscape/_run_recording.py:R5:RunRecordingMixin:get_source_field_resolution:fp=a223631a490eb6ac
+- key: core/landscape/_run_recording.py:R5:RunRecordingMixin:get_source_field_resolution:fp=2424b52531fbe971
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: ValueError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: core/landscape/_run_recording.py:R5:RunRecordingMixin:get_source_field_resolution:fp=dfb4bbba26b7416f
+- key: core/landscape/_run_recording.py:R5:RunRecordingMixin:get_source_field_resolution:fp=c47c7454d888f2e1
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: ValueError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: core/landscape/_run_recording.py:R5:RunRecordingMixin:get_source_field_resolution:fp=ac644329fadcf3b7
+- key: core/landscape/_run_recording.py:R5:RunRecordingMixin:get_source_field_resolution:fp=077f7e4f1549b8a0
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: ValueError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: core/landscape/_run_recording.py:R5:RunRecordingMixin:get_source_field_resolution:fp=e9f28518296c9c5a
+- key: core/landscape/_run_recording.py:R5:RunRecordingMixin:get_source_field_resolution:fp=e201bfb2773ed131
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: ValueError raised on corrupt data - explicit failure, not silent coercion

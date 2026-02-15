@@ -783,7 +783,7 @@ class TestCompleteNodeState:
         assert isinstance(fetched, NodeStateCompleted)
         assert fetched.context_after_json is None
 
-    def test_error_json_defaults_to_none_for_failed(self):
+    def test_rejects_completed_without_output_data(self):
         _db, recorder, _row_id, token_id = _setup_with_token()
 
         state = recorder.begin_node_state(
@@ -793,15 +793,95 @@ class TestCompleteNodeState:
             step_index=0,
             input_data={"x": 1},
         )
-        recorder.complete_node_state(
-            state.state_id,
-            NodeStateStatus.FAILED,
-            duration_ms=10,
+
+        with pytest.raises(ValueError, match="COMPLETED node state requires output_data"):
+            recorder.complete_node_state(
+                state.state_id,
+                NodeStateStatus.COMPLETED,
+                output_data=None,
+                duration_ms=10,
+            )
+
+    def test_rejects_failed_without_error(self):
+        _db, recorder, _row_id, token_id = _setup_with_token()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
         )
 
-        fetched = recorder.get_node_state(state.state_id)
-        assert isinstance(fetched, NodeStateFailed)
-        assert fetched.error_json is None
+        with pytest.raises(ValueError, match="FAILED node state requires error"):
+            recorder.complete_node_state(
+                state.state_id,
+                NodeStateStatus.FAILED,
+                error=None,
+                duration_ms=10,
+            )
+
+    def test_completed_with_valid_output_data_succeeds(self):
+        _db, recorder, _row_id, token_id = _setup_with_token()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        result = recorder.complete_node_state(
+            state.state_id,
+            NodeStateStatus.COMPLETED,
+            output_data={"x": 1, "result": "ok"},
+            duration_ms=10,
+        )
+        assert isinstance(result, NodeStateCompleted)
+
+    def test_failed_with_valid_error_succeeds(self):
+        _db, recorder, _row_id, token_id = _setup_with_token()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        result = recorder.complete_node_state(
+            state.state_id,
+            NodeStateStatus.FAILED,
+            error={"reason": "something broke"},
+            duration_ms=10,
+        )
+        assert isinstance(result, NodeStateFailed)
+
+    def test_error_json_defaults_to_none_for_failed(self):
+        """FAILED without error is now rejected by pre-write validation.
+
+        This test documents that the old behavior (FAILED with error=None
+        silently producing error_json=None) is no longer allowed. See
+        test_rejects_failed_without_error for the replacement test.
+        """
+        _db, recorder, _row_id, token_id = _setup_with_token()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        with pytest.raises(ValueError, match="FAILED node state requires error"):
+            recorder.complete_node_state(
+                state.state_id,
+                NodeStateStatus.FAILED,
+                duration_ms=10,
+            )
 
     def test_success_reason_defaults_to_none(self):
         _db, recorder, _row_id, token_id = _setup_with_token()

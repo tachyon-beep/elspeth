@@ -20,6 +20,7 @@ import json
 import pytest
 
 from elspeth.contracts import ExportStatus, NodeType, RunStatus
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 
@@ -117,6 +118,29 @@ class TestCompleteRun:
             reproducibility_grade="full_reproducible",
         )
         assert run.reproducibility_grade == "full_reproducible"
+
+    def test_rejects_non_terminal_status_running(self) -> None:
+        _db, recorder = _setup()
+        with pytest.raises(AuditIntegrityError, match="terminal status"):
+            recorder.complete_run("run-1", RunStatus.RUNNING)
+
+    def test_accepts_interrupted_status(self) -> None:
+        _db, recorder = _setup()
+        run = recorder.complete_run("run-1", RunStatus.INTERRUPTED)
+        assert run.status == RunStatus.INTERRUPTED
+        assert run.completed_at is not None
+
+    def test_accepts_completed_status(self) -> None:
+        _db, recorder = _setup()
+        run = recorder.complete_run("run-1", RunStatus.COMPLETED)
+        assert run.status == RunStatus.COMPLETED
+        assert run.completed_at is not None
+
+    def test_accepts_failed_status(self) -> None:
+        _db, recorder = _setup()
+        run = recorder.complete_run("run-1", RunStatus.FAILED)
+        assert run.status == RunStatus.FAILED
+        assert run.completed_at is not None
 
 
 class TestGetSourceSchema:

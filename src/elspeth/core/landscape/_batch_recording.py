@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     )
 
 
+_TERMINAL_BATCH_STATUSES = frozenset({BatchStatus.COMPLETED, BatchStatus.FAILED})
+
+
 class BatchRecordingMixin:
     """Batch and artifact recording methods. Mixed into LandscapeRecorder."""
 
@@ -169,7 +172,16 @@ class BatchRecordingMixin:
 
         Returns:
             Updated Batch model
+
+        Raises:
+            AuditIntegrityError: If status is not a terminal batch status
         """
+        if status not in _TERMINAL_BATCH_STATUSES:
+            raise AuditIntegrityError(
+                f"complete_batch() requires terminal status, got {status.value!r}. "
+                f"Valid terminal statuses: {sorted(s.value for s in _TERMINAL_BATCH_STATUSES)}"
+            )
+
         timestamp = now()
 
         self._ops.execute_update(
