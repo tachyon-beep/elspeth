@@ -697,19 +697,18 @@ class TestBaseLLMTransformSchemaHandling:
         assert validated.anything == "goes"  # type: ignore[attr-defined]
 
 
-class TestBaseLLMTransformFieldCollision:
-    """Tests for field collision detection in LLM transforms."""
+class TestBaseLLMTransformDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
 
-    @pytest.fixture
-    def ctx(self) -> PluginContext:
-        return PluginContext(run_id="test-run", config={})
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that BaseLLMTransform correctly declares its output fields so the
+    executor can perform pre-execution collision checks.
+    """
 
-    def test_response_field_collision_returns_error(self, ctx: PluginContext) -> None:
-        """LLM transform returns error when response_field collides with input row field."""
-        mock_client = Mock(spec=AuditedLLMClient)
-        mock_client.chat_completion.return_value = LLMResponse(content="test", model="gpt-4", usage={"total_tokens": 10})
-
-        TransformClass = create_test_transform_class(mock_client=mock_client)
+    def test_declared_output_fields_contains_response_field(self) -> None:
+        """declared_output_fields includes the main response field."""
+        TransformClass = create_test_transform_class(mock_client=Mock(spec=AuditedLLMClient))
         transform = TransformClass(
             {
                 "model": "gpt-4",
@@ -720,21 +719,11 @@ class TestBaseLLMTransformFieldCollision:
             }
         )
 
-        # Row already has "llm_response" — collision!
-        row = wrap_in_pipeline_row({"text": "hello", "llm_response": "pre-existing"})
-        result = transform.process(row, ctx)
+        assert "llm_response" in transform.declared_output_fields
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "field_collision"
-        assert "llm_response" in result.reason["collisions"]
-
-    def test_suffixed_field_collision_returns_error(self, ctx: PluginContext) -> None:
-        """LLM transform detects collision on suffixed metadata fields too."""
-        mock_client = Mock(spec=AuditedLLMClient)
-        mock_client.chat_completion.return_value = LLMResponse(content="test", model="gpt-4", usage={"total_tokens": 10})
-
-        TransformClass = create_test_transform_class(mock_client=mock_client)
+    def test_declared_output_fields_contains_audit_fields(self) -> None:
+        """declared_output_fields includes suffixed audit/metadata fields."""
+        TransformClass = create_test_transform_class(mock_client=Mock(spec=AuditedLLMClient))
         transform = TransformClass(
             {
                 "model": "gpt-4",
@@ -745,32 +734,25 @@ class TestBaseLLMTransformFieldCollision:
             }
         )
 
-        # Row has a suffixed field that collides with LLM metadata
-        row = wrap_in_pipeline_row({"text": "hello", "llm_response_usage": {"old": True}})
-        result = transform.process(row, ctx)
+        # Audit fields use the response_field as prefix
+        assert "llm_response_usage" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+        assert "llm_response_template_hash" in transform.declared_output_fields
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "field_collision"
-        assert "llm_response_usage" in result.reason["collisions"]
-
-    def test_no_collision_succeeds(self, ctx: PluginContext) -> None:
-        """LLM transform succeeds normally when no field collision exists."""
-        mock_client = Mock(spec=AuditedLLMClient)
-        mock_client.chat_completion.return_value = LLMResponse(content="classified", model="gpt-4", usage={"total_tokens": 10})
-
-        TransformClass = create_test_transform_class(mock_client=mock_client)
+    def test_declared_output_fields_adapts_to_response_field_name(self) -> None:
+        """declared_output_fields changes when response_field config changes."""
+        TransformClass = create_test_transform_class(mock_client=Mock(spec=AuditedLLMClient))
         transform = TransformClass(
             {
                 "model": "gpt-4",
                 "template": "Classify: {{ row.text }}",
-                "response_field": "llm_response",
+                "response_field": "custom_output",
                 "schema": DYNAMIC_SCHEMA,
                 "required_input_fields": [],
             }
         )
 
-        row = wrap_in_pipeline_row({"text": "hello"})
-        result = transform.process(row, ctx)
-
-        assert result.status == "success"
+        assert "custom_output" in transform.declared_output_fields
+        assert "custom_output_usage" in transform.declared_output_fields
+        # Old name should NOT be present
+        assert "llm_response" not in transform.declared_output_fields

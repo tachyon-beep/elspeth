@@ -24,7 +24,6 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
-from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 
 class BatchReplicateConfig(TransformDataConfig):
@@ -91,9 +90,15 @@ class BatchReplicate(BaseTransform):
     plugin_version = "1.0.0"
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
+    # Batch replicate optionally adds copy_index field
+    transforms_adds_fields: bool = True
+
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = BatchReplicateConfig.from_dict(config)
+
+        # Declare output fields for centralized collision detection.
+        self.declared_output_fields = frozenset(["copy_index"] if cfg.include_copy_index else [])
         self._copies_field = cfg.copies_field
         self._default_copies = cfg.default_copies
         self._max_copies = cfg.max_copies
@@ -181,19 +186,6 @@ class BatchReplicate(BaseTransform):
                     continue
 
                 copies = raw_copies
-
-            # Check for field collisions before writing output
-            if self._include_copy_index:
-                collisions = detect_field_collisions(set(row.to_dict().keys()), ["copy_index"])
-                if collisions is not None:
-                    quarantined.append(
-                        {
-                            "reason": "field_collision",
-                            "collisions": collisions,
-                            "row_data": row.to_dict(),
-                        }
-                    )
-                    continue
 
             # Create copies of this row
             for copy_idx in range(copies):

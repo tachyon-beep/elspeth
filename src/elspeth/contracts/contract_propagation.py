@@ -140,6 +140,7 @@ def narrow_contract_to_output(
                         python_type=source_contract.python_type,
                         required=source_contract.required,
                         source=source_contract.source,
+                        nullable=source_contract.nullable,
                     )
                 )
                 continue
@@ -228,6 +229,7 @@ def merge_contract_with_output(
                 python_type=output_field.python_type,
                 required=output_field.required,
                 source=output_field.source,
+                nullable=output_field.nullable,
             )
         )
 

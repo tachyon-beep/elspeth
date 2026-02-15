@@ -117,6 +117,9 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
 
+    # LLM transforms add response field + metadata fields to the output row
+    transforms_adds_fields: bool = True
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize OpenRouter LLM transform.
 
@@ -127,6 +130,9 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Parse OpenRouter-specific config (includes all LLMConfig fields)
         cfg = OpenRouterConfig.from_dict(config)
+
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
 
         # Pre-build auth headers — avoids storing the raw API key as a named attribute
         self._request_headers = {

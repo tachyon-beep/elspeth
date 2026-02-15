@@ -151,14 +151,16 @@ def _make_transform(
     node_id: str | None = "node_1",
     on_error: str | None = None,
     adds_fields: bool = False,
+    declared_output_fields: frozenset[str] | None = None,
 ) -> MagicMock:
     """Create a mock transform (non-batch)."""
     # Use spec to avoid MagicMock auto-creating 'accept' attribute
-    t = MagicMock(spec=["name", "node_id", "on_error", "transforms_adds_fields", "process"])
+    t = MagicMock(spec=["name", "node_id", "on_error", "transforms_adds_fields", "declared_output_fields", "process"])
     t.name = name
     t.node_id = node_id
     t.on_error = on_error
     t.transforms_adds_fields = adds_fields
+    t.declared_output_fields = declared_output_fields or frozenset()
     return t
 
 
@@ -633,6 +635,89 @@ class TestTransformExecutor:
         ctx.record_transform_error.assert_called_once()
         recorder.record_routing_event.assert_called_once()
         assert recorder.record_routing_event.call_args[1]["mode"] == RoutingMode.DIVERT
+
+    # --- Field collision enforcement ---
+
+    def test_declared_output_fields_collision_raises_contract_violation(self) -> None:
+        """Transform with declared_output_fields that collide with input raises PluginContractViolation.
+
+        The executor checks declared_output_fields against input row keys BEFORE
+        calling transform.process(). Collisions crash the pipeline (not graceful error)
+        because field collision is a pipeline configuration bug, not a data issue.
+        """
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform(
+            declared_output_fields=frozenset({"llm_response", "llm_response_model"}),
+        )
+        # Input row already has "llm_response" — collision!
+        token = _make_token(data={"value": "test", "llm_response": "pre-existing"})
+        ctx = _make_ctx()
+
+        with pytest.raises(PluginContractViolation, match="would overwrite existing input fields"):
+            executor.execute_transform(transform, token, ctx)
+
+    def test_empty_declared_output_fields_skips_collision_check(self) -> None:
+        """Transform with empty declared_output_fields passes through without collision check.
+
+        Transforms that don't add fields (e.g., passthrough, truncate) have
+        declared_output_fields = frozenset(). The executor skips the check entirely.
+        """
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform(declared_output_fields=frozenset())
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "processed"}, contract=contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        result, updated_token, _error_sink = executor.execute_transform(transform, token, ctx)
+
+        assert result.status == "success"
+        assert updated_token.row_data["value"] == "processed"
+
+    def test_collision_raises_before_process_is_called(self) -> None:
+        """Collision check runs BEFORE transform.process() — no wasted API calls.
+
+        This is the key efficiency property: expensive external calls (LLM, HTTP)
+        are never made when we already know the output will collide with the input.
+        """
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform(
+            declared_output_fields=frozenset({"value"}),
+        )
+        token = _make_token(data={"value": "test"})
+        ctx = _make_ctx()
+
+        with pytest.raises(PluginContractViolation):
+            executor.execute_transform(transform, token, ctx)
+
+        # process() must NOT have been called
+        transform.process.assert_not_called()
+
+    def test_no_collision_when_declared_fields_disjoint_from_input(self) -> None:
+        """No collision raised when declared output fields don't overlap with input."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform(
+            declared_output_fields=frozenset({"new_field", "another_new"}),
+        )
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "test", "new_field": "added", "another_new": "also added"}, contract=contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        result, _, _ = executor.execute_transform(transform, token, ctx)
+
+        assert result.status == "success"
+        transform.process.assert_called_once()
 
 
 # =============================================================================

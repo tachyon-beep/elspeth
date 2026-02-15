@@ -153,6 +153,12 @@ class BaseTransform(ABC):
     # When False (default), transform does not add fields to schema.
     transforms_adds_fields: bool = False
 
+    # Field collision enforcement (centralized in TransformExecutor).
+    # Transforms that add fields to the output row declare WHAT fields they add
+    # at init time. The executor checks these against input keys BEFORE running
+    # the transform. Empty frozenset = no fields added = no check needed.
+    declared_output_fields: frozenset[str] = frozenset()
+
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig override this from config.
     # Always non-None at runtime (TransformSettings requires on_error).

@@ -271,6 +271,29 @@ class TestOpenRouterLLMTransformInit:
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
 
+    def test_declared_output_fields_populated(self) -> None:
+        """Regression: OpenRouterLLMTransform was previously unprotected from field collisions.
+
+        Before centralized collision enforcement, OpenRouterLLMTransform had NO
+        collision check. This test verifies declared_output_fields is populated
+        so TransformExecutor can enforce collision detection.
+        """
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        assert isinstance(transform.declared_output_fields, frozenset)
+        assert len(transform.declared_output_fields) > 0
+        assert "llm_response" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+        assert transform.transforms_adds_fields is True
+
 
 class TestOpenRouterLLMTransformPipelining:
     """Tests for OpenRouterLLMTransform with row-level pipelining.

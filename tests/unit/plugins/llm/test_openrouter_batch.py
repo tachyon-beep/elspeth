@@ -775,59 +775,31 @@ class TestOpenRouterBatchTelemetryAttribution:
         assert result.status == "success"
 
 
-class TestOpenRouterBatchFieldCollision:
-    """Tests for field collision detection in batch processing.
+class TestOpenRouterBatchDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
 
-    When input rows already contain fields that the LLM transform would write
-    (e.g., llm_response), processing must fail with a field_collision error
-    rather than silently overwriting source data.
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that OpenRouterBatchLLMTransform correctly declares its output fields so the
+    executor can perform pre-execution collision checks.
     """
 
-    def test_single_row_field_collision_detected(self, chaosllm_server) -> None:
-        """Single row with colliding field returns error with field_collision reason."""
-        transform, ctx = _create_transform_with_context()
+    def test_declared_output_fields_contains_response_field(self) -> None:
+        """declared_output_fields includes the main response field."""
+        transform, _ctx = _create_transform_with_context()
+        assert "llm_response" in transform.declared_output_fields
 
-        # Input row already has the field the transform will write
-        row = {"text": "Hello", "llm_response": "pre-existing value"}
+    def test_declared_output_fields_contains_audit_fields(self) -> None:
+        """declared_output_fields includes suffixed audit/metadata fields."""
+        transform, _ctx = _create_transform_with_context()
+        assert "llm_response_usage" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+        assert "llm_response_template_hash" in transform.declared_output_fields
 
-        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
-            result = transform.process(make_pipeline_row(row), ctx)
-
-        assert result.status == "success"
-        assert result.row is not None
-        # The row should have the collision error, not the overwritten value
-        assert result.row["llm_response"] is None
-        assert result.row["llm_response_error"]["reason"] == "field_collision"
-        assert "llm_response" in result.row["llm_response_error"]["collisions"]
-
-    def test_batch_field_collision_only_affects_colliding_rows(self, chaosllm_server) -> None:
-        """In a batch, only rows with colliding fields get errors; others succeed."""
-        transform, ctx = _create_transform_with_context({"pool_size": 2})
-
-        rows = [
-            {"text": "Row 1"},  # No collision
-            {"text": "Row 2", "llm_response": "existing"},  # Collision!
-            {"text": "Row 3"},  # No collision
-        ]
-
-        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(3)]
-
-        with mock_httpx_client(chaosllm_server, responses):
-            result = transform.process([make_pipeline_row(r) for r in rows], ctx)
-
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 3
-
-        # Row 0 and 2 should succeed
-        assert result.rows[0]["llm_response"] is not None
-        assert result.rows[0].get("llm_response_error") is None
-        assert result.rows[2]["llm_response"] is not None
-        assert result.rows[2].get("llm_response_error") is None
-
-        # Row 1 should have collision error
-        assert result.rows[1]["llm_response"] is None
-        assert result.rows[1]["llm_response_error"]["reason"] == "field_collision"
+    def test_transforms_adds_fields_is_true(self) -> None:
+        """transforms_adds_fields flag is set for schema evolution recording."""
+        transform, _ctx = _create_transform_with_context()
+        assert transform.transforms_adds_fields is True
 
 
 class TestOpenRouterBatchErrorKeyCollision:
@@ -914,34 +886,22 @@ class TestOpenRouterBatchErrorKeyCollision:
 class TestBug4_8_FieldCollisionBeforeAPICall:
     """Bug 4.8: Field collision detected before making API call.
 
-    Previously, the field collision check happened after the API call,
-    meaning an expensive HTTP request was wasted when the result would be
-    discarded anyway. Now the check happens before the API call in
-    _process_single_row() (step 2.5).
+    Originally, the plugin-level collision check happened after the API call,
+    wasting expensive HTTP requests. That was fixed to check before the call.
+
+    Now, collision detection is fully centralized in TransformExecutor
+    (see TestTransformExecutor in test_executors.py). The pre-execution check
+    prevents the transform from running at all when collisions exist.
+
+    This test verifies declared_output_fields is populated correctly so the
+    executor can perform its pre-execution collision check.
     """
 
-    def test_collision_detected_without_http_call(self, chaosllm_server) -> None:
-        """Field collision returns error without making any HTTP call."""
-        transform, ctx = _create_transform_with_context()
+    def test_declared_output_fields_enables_executor_level_check(self) -> None:
+        """declared_output_fields is populated, enabling executor collision detection."""
+        transform, _ctx = _create_transform_with_context()
 
-        # Row already has "llm_response" — collision with output field!
-        row = {"text": "test data", "llm_response": "pre-existing value"}
-
-        # Mock the HTTP client to track if any calls are made
-        from unittest.mock import patch as mock_patch
-
-        with mock_patch("httpx.Client") as mock_client_class:
-            mock_client = mock_client_class.return_value
-            mock_client.__enter__ = Mock(return_value=mock_client)
-            mock_client.__exit__ = Mock(return_value=False)
-
-            result = transform.process(make_pipeline_row(row), ctx)
-
-        assert result.status == "success"  # Individual row processing wraps in success
-        assert result.row is not None
-        assert result.row["llm_response"] is None  # Error marker
-        assert result.row["llm_response_error"]["reason"] == "field_collision"
-        assert "llm_response" in result.row["llm_response_error"]["collisions"]
-
-        # No HTTP calls should have been made
-        mock_client.post.assert_not_called()
+        # The field that would collide must be in declared_output_fields
+        assert "llm_response" in transform.declared_output_fields
+        assert isinstance(transform.declared_output_fields, frozenset)
+        assert len(transform.declared_output_fields) > 0

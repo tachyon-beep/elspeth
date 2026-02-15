@@ -42,7 +42,6 @@ from elspeth.plugins.llm.tracing import (
 )
 from elspeth.plugins.pooling import is_capacity_error
 from elspeth.plugins.schema_factory import create_schema_from_config
-from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -137,6 +136,9 @@ class OpenRouterBatchLLMTransform(BaseTransform):
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
 
+    # LLM transforms add response field + metadata fields to the output row
+    transforms_adds_fields: bool = True
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize OpenRouter batch LLM transform.
 
@@ -147,6 +149,9 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Parse OpenRouter-specific config
         cfg = OpenRouterBatchConfig.from_dict(config)
+
+        # Declare output fields for centralized collision detection.
+        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
 
         # Pre-build auth headers — avoids storing the raw API key as a named attribute
         self._request_headers = {
@@ -645,25 +650,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         }
         if self._max_tokens:
             request_body["max_tokens"] = self._max_tokens
-
-        # 2.5 Check for field collisions BEFORE making API call to avoid wasting
-        # an expensive external call that would be discarded anyway
-        added_fields = [
-            *get_llm_guaranteed_fields(self._response_field),
-            *get_llm_audit_fields(self._response_field),
-        ]
-        collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
-        if collisions is not None:
-            return _RowOutcome(
-                ok=False,
-                error={
-                    "reason": "field_collision",
-                    "collisions": collisions,
-                    "message": (
-                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
-                    ),
-                },
-            )
 
         # 3. Make API call via AuditedHTTPClient (automatically records to audit trail)
         state_id = ctx.state_id

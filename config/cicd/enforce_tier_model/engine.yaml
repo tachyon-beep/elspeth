@@ -46,7 +46,7 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: BatchTransformMixin is system-owned; isinstance replaces prior hasattr checks for type safety
   expires: '2026-05-02'
-- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=b48314307bcfa4c1
+- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=4862f5a79eaca20f
   owner: architecture
   reason: isinstance(e, TimeoutError) for retry timeout handling in batch transform path
   safety: Exception type discrimination for retry logic - required for correct timeout eviction

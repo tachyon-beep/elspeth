@@ -131,6 +131,9 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
 
+    # LLM transforms add response field + metadata fields to the output row
+    transforms_adds_fields: bool = True
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize Azure LLM transform.
 
@@ -141,6 +144,9 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Parse Azure-specific config to validate all required fields
         cfg = AzureOpenAIConfig.from_dict(config)
+
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
 
         # Store Azure-specific config
         self._azure_endpoint = cfg.endpoint

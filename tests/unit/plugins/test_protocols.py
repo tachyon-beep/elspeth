@@ -165,6 +165,7 @@ class TestTransformProtocol:
             is_batch_aware = False  # Batch support (structural aggregation)
             creates_tokens = False  # Deaggregation (multi-row output)
             transforms_adds_fields = False  # Schema evolution tracking
+            declared_output_fields: frozenset[str] = frozenset()  # Collision detection
             on_error: str | None = None  # Error routing (WP-11.99b)
             on_success: str | None = None  # Success routing
 

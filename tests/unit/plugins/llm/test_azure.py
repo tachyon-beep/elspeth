@@ -299,6 +299,30 @@ class TestAzureLLMTransformInit:
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
             transform.process(make_pipeline_row({"text": "hello"}), ctx)
 
+    def test_declared_output_fields_populated(self) -> None:
+        """Regression: AzureLLMTransform was previously unprotected from field collisions.
+
+        Before centralized collision enforcement, AzureLLMTransform had NO
+        collision check. This test verifies declared_output_fields is populated
+        so TransformExecutor can enforce collision detection.
+        """
+        transform = AzureLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-deployment",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+        assert isinstance(transform.declared_output_fields, frozenset)
+        assert len(transform.declared_output_fields) > 0
+        assert "llm_response" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+        assert transform.transforms_adds_fields is True
+
 
 class TestAzureLLMTransformPipelining:
     """Tests for AzureLLMTransform with row-level pipelining.

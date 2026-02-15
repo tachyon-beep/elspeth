@@ -29,7 +29,6 @@ from elspeth.plugins.llm.templates import PromptTemplate
 from elspeth.plugins.llm.tracing import LangfuseTracingConfig, TracingConfig, parse_tracing_config
 from elspeth.plugins.pooling import CapacityError, PooledExecutor
 from elspeth.plugins.schema_factory import create_schema_from_config
-from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -111,6 +110,10 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
                 all_guaranteed.add(f"{spec.output_prefix}_{field_config.suffix}")
 
         all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
+
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        # Includes output_mapping fields, guaranteed fields, AND audit fields per spec.
+        self.declared_output_fields = frozenset(all_guaranteed | all_audit)
 
         base_guaranteed = schema_config.guaranteed_fields or ()
         base_audit = schema_config.audit_fields or ()
@@ -318,26 +321,10 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         Returns:
             TransformResult with all query results merged, or error
         """
-        # Check for field collisions before dispatching any external queries.
-        # The output field names are deterministic (derived from query_specs and
-        # output_mapping), so we can short-circuit here and avoid wasting LLM API
-        # calls on rows that are guaranteed to fail.
+        # Compute output field names for success_reason metadata
         all_fields_added = [
             f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
         ]
-        input_field_names = set(row_data.keys())
-        collisions = detect_field_collisions(input_field_names, all_fields_added)
-        if collisions is not None:
-            return TransformResult.error(
-                {
-                    "reason": "field_collision",
-                    "collisions": collisions,
-                    "message": (
-                        f"Multi-query output fields {collisions} already exist in input row. This would silently overwrite source data."
-                    ),
-                },
-                retryable=False,
-            )
 
         pool_context: dict[str, Any] | None = None
         if self._executor is not None:

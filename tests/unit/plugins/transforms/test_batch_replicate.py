@@ -360,16 +360,17 @@ class TestBatchReplicateDeepCopy:
         assert "injected" not in second["meta"]
 
 
-class TestBatchReplicateFieldCollision:
-    """Tests for field collision detection in BatchReplicate."""
+class TestBatchReplicateDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
 
-    @pytest.fixture
-    def ctx(self) -> PluginContext:
-        """Create minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that BatchReplicate correctly declares its output fields so the executor
+    can perform pre-execution collision checks.
+    """
 
-    def test_copy_index_collision_quarantines_row(self, ctx: PluginContext) -> None:
-        """BatchReplicate quarantines row when copy_index collides with existing field."""
+    def test_declared_output_fields_contains_copy_index_when_enabled(self) -> None:
+        """declared_output_fields includes copy_index when include_copy_index is True."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -380,51 +381,10 @@ class TestBatchReplicateFieldCollision:
             }
         )
 
-        rows = [
-            make_pipeline_row({"id": 1, "copy_index": 99, "copies": 2}),  # Collision!
-        ]
+        assert "copy_index" in transform.declared_output_fields
 
-        result = transform.process(rows, ctx)
-
-        # All rows quarantined → error
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "all_rows_failed"
-        assert result.reason["row_errors"][0]["reason"] == "field_collision"
-
-    def test_copy_index_collision_alongside_valid_rows(self, ctx: PluginContext) -> None:
-        """Colliding row is quarantined but valid rows still replicated."""
-        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
-
-        transform = BatchReplicate(
-            {
-                "schema": DYNAMIC_SCHEMA,
-                "copies_field": "copies",
-                "include_copy_index": True,
-            }
-        )
-
-        rows = [
-            make_pipeline_row({"id": 1, "copy_index": 99, "copies": 2}),  # Collision!
-            make_pipeline_row({"id": 2, "copies": 2}),  # No collision - OK
-        ]
-
-        result = transform.process(rows, ctx)
-
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 2  # Only row 2's copies
-        assert result.rows[0]["id"] == 2
-        assert result.rows[0]["copy_index"] == 0
-        assert result.rows[1]["id"] == 2
-        assert result.rows[1]["copy_index"] == 1
-        # Quarantine info in success_reason.metadata
-        assert result.success_reason is not None
-        assert result.success_reason["metadata"]["quarantined_count"] == 1
-        assert result.success_reason["metadata"]["quarantined"][0]["reason"] == "field_collision"
-
-    def test_no_collision_when_include_copy_index_false(self, ctx: PluginContext) -> None:
-        """No collision check when include_copy_index is False."""
+    def test_declared_output_fields_empty_when_copy_index_disabled(self) -> None:
+        """declared_output_fields is empty when include_copy_index is False."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -435,21 +395,10 @@ class TestBatchReplicateFieldCollision:
             }
         )
 
-        rows = [
-            make_pipeline_row({"id": 1, "copy_index": 99, "copies": 2}),  # Has copy_index but won't collide
-        ]
+        assert len(transform.declared_output_fields) == 0
 
-        result = transform.process(rows, ctx)
-
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 2
-        # copy_index is preserved from input (not overwritten since include_copy_index=False)
-        assert result.rows[0]["copy_index"] == 99
-        assert result.rows[1]["copy_index"] == 99
-
-    def test_no_collision_succeeds(self, ctx: PluginContext) -> None:
-        """BatchReplicate succeeds when no field collision exists."""
+    def test_transforms_adds_fields_is_true(self) -> None:
+        """transforms_adds_fields flag is set for schema evolution recording."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -460,14 +409,4 @@ class TestBatchReplicateFieldCollision:
             }
         )
 
-        rows = [
-            make_pipeline_row({"id": 1, "copies": 2}),
-        ]
-
-        result = transform.process(rows, ctx)
-
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 2
-        assert result.rows[0]["copy_index"] == 0
-        assert result.rows[1]["copy_index"] == 1
+        assert transform.transforms_adds_fields is True

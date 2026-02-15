@@ -1559,12 +1559,13 @@ class TestAzureBatchLLMTransformMissingResults:
         assert len(error_llm_calls) == 0, "Should have no ERROR LLM calls when all results present"
 
 
-class TestAzureBatchLLMTransformFieldCollision:
-    """Tests for field collision detection before batch submission.
+class TestAzureBatchLLMTransformDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
 
-    When input rows already contain fields that the LLM transform would write
-    (e.g., llm_response), _submit_batch must return TransformResult.error()
-    BEFORE any API calls are made.
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that AzureBatchLLMTransform correctly declares its output fields so the
+    executor can perform pre-execution collision checks.
     """
 
     @pytest.fixture
@@ -1581,36 +1582,24 @@ class TestAzureBatchLLMTransformFieldCollision:
             }
         )
 
-    def test_field_collision_detected_before_batch_submission(self, transform: AzureBatchLLMTransform) -> None:
-        """Bug 4.9: Collision detected at batch level BEFORE any API call is made.
+    def test_declared_output_fields_contains_response_field(self, transform: AzureBatchLLMTransform) -> None:
+        """declared_output_fields includes the main response field."""
+        assert "llm_response" in transform.declared_output_fields
 
-        The collision check uses the first row's keys (all rows share the same
-        schema contract), so if any row has colliding fields, the entire batch
-        is rejected immediately without wasting an expensive API call.
-        """
-        ctx = PluginContext(run_id="test-run", config={})
+    def test_declared_output_fields_contains_audit_fields(self, transform: AzureBatchLLMTransform) -> None:
+        """declared_output_fields includes suffixed audit/metadata fields."""
+        assert "llm_response_usage" in transform.declared_output_fields
+        assert "llm_response_model" in transform.declared_output_fields
+        assert "llm_response_template_hash" in transform.declared_output_fields
 
-        # Track whether any API calls were made
-        mock_client = Mock()
-        transform._client = mock_client
+    def test_declared_output_fields_is_nonempty_frozenset(self, transform: AzureBatchLLMTransform) -> None:
+        """declared_output_fields is a non-empty frozenset (immutable)."""
+        assert isinstance(transform.declared_output_fields, frozenset)
+        assert len(transform.declared_output_fields) > 0
 
-        # All rows have "llm_response" — collision with output field!
-        rows = [
-            {"text": "row 1", "llm_response": "pre-existing value"},
-            {"text": "row 2", "llm_response": "another pre-existing"},
-        ]
-
-        result = transform.process([make_pipeline_row(d) for d in rows], ctx)
-
-        # Should return error (not success with per-row errors)
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "field_collision"
-        assert "llm_response" in result.reason["collisions"]
-
-        # No API calls should have been made (collision detected before submission)
-        mock_client.batches.create.assert_not_called()
-        mock_client.files.create.assert_not_called()
+    def test_transforms_adds_fields_is_true(self, transform: AzureBatchLLMTransform) -> None:
+        """transforms_adds_fields flag is set for schema evolution recording."""
+        assert transform.transforms_adds_fields is True
 
 
 class TestBug4_2_NonDictResponseBody:

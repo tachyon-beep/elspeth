@@ -41,7 +41,6 @@ from elspeth.plugins.llm.tracing import (
     validate_tracing_config,
 )
 from elspeth.plugins.schema_factory import create_schema_from_config
-from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 
 class AzureBatchConfig(TransformDataConfig):
@@ -140,6 +139,9 @@ class AzureBatchLLMTransform(BaseTransform):
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
 
+    # LLM transforms add response field + metadata fields to the output row
+    transforms_adds_fields: bool = True
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize Azure Batch LLM transform.
 
@@ -149,6 +151,10 @@ class AzureBatchLLMTransform(BaseTransform):
         super().__init__(config)
 
         cfg = AzureBatchConfig.from_dict(config)
+
+        # Declare output fields for centralized collision detection.
+        self.declared_output_fields = frozenset([*get_llm_guaranteed_fields(cfg.response_field), *get_llm_audit_fields(cfg.response_field)])
+
         self._deployment_name = cfg.deployment_name
         self._endpoint = cfg.endpoint.rstrip("/")
         self._api_key: str | None = cfg.api_key
@@ -516,26 +522,6 @@ class AzureBatchLLMTransform(BaseTransform):
         Raises:
             BatchPendingError: After successful submission
         """
-        # 0. Check for field collisions BEFORE submitting batch to avoid wasting
-        # an expensive batch API call that would be discarded anyway.
-        # Input keys are the same regardless of API response, so check up-front.
-        added_fields = [
-            *get_llm_guaranteed_fields(self._response_field),
-            *get_llm_audit_fields(self._response_field),
-        ]
-        # Check against first row — all rows share the same schema contract
-        collisions = detect_field_collisions(set(rows[0].to_dict().keys()), added_fields)
-        if collisions is not None:
-            return TransformResult.error(
-                {
-                    "reason": "field_collision",
-                    "collisions": collisions,
-                    "message": (
-                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
-                    ),
-                }
-            )
-
         # 1. Render templates for all rows, track failures
         requests: list[dict[str, Any]] = []
         row_mapping: dict[str, dict[str, Any]] = {}  # custom_id -> {index, variables_hash}

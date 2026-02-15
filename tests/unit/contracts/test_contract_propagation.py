@@ -313,6 +313,45 @@ class TestMergeContractWithOutput:
         id_field = next(f for f in merged.fields if f.normalized_name == "id")
         assert id_field.source == "declared"
 
+    def test_merge_preserves_nullable_from_output_schema(self) -> None:
+        """Regression: merge_contract_with_output must preserve nullable from output field.
+
+        Without this fix, nullable=True fields in the output schema lose their
+        nullable flag after merge, causing false contract violations when valid
+        None values flow through downstream transforms.
+        """
+        field_id = make_field("id", int, original_name="id", required=True, source="declared")
+        input_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(field_id,),
+            locked=True,
+        )
+
+        field_id_out = make_field("id", int, original_name="id", required=True, source="declared")
+        field_score = make_field(
+            "score",
+            float,
+            original_name="score",
+            required=False,
+            source="declared",
+            nullable=True,
+        )
+        output_schema_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(field_id_out, field_score),
+            locked=True,
+        )
+
+        merged = merge_contract_with_output(
+            input_contract=input_contract,
+            output_schema_contract=output_schema_contract,
+        )
+
+        score_field = next(f for f in merged.fields if f.normalized_name == "score")
+        assert score_field.nullable is True
+        assert score_field.python_type is float
+        assert score_field.required is False
+
 
 class TestPropagateContractEdgeCases:
     """Edge case tests for contract propagation."""
@@ -380,6 +419,42 @@ class TestPropagateContractEdgeCases:
         assert price_field.python_type is float
         assert price_field.required is True
         assert price_field.source == "declared"
+
+    def test_field_rename_preserves_nullable(self) -> None:
+        """Regression: renaming a nullable field must preserve nullable=True.
+
+        Without this, Optional[float] fields lose their nullable flag after
+        rename, causing false contract violations on valid None values.
+        """
+        from elspeth.contracts.contract_propagation import narrow_contract_to_output
+
+        field_score = make_field(
+            "risk_score",
+            float,
+            original_name="Risk Score",
+            required=False,
+            source="declared",
+            nullable=True,
+        )
+        field_id = make_field("id", int, original_name="ID", required=True, source="declared")
+        input_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(field_score, field_id),
+            locked=True,
+        )
+
+        output_row = {"score": None, "id": 1}
+        output_contract = narrow_contract_to_output(
+            input_contract=input_contract,
+            output_row=output_row,
+            renamed_fields={"Risk Score": "score"},
+        )
+
+        score_field = output_contract.get_field("score")
+        assert score_field is not None
+        assert score_field.nullable is True
+        assert score_field.python_type is float
+        assert score_field.original_name == "Risk Score"
 
     def test_type_conflict_between_contract_and_actual_data(self) -> None:
         """Input contract declares int, but output has string - documents mismatch behavior.

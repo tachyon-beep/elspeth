@@ -79,7 +79,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=9aa59db3311c5947
+- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=2dc7eefedc43ad99
   owner: architecture
   reason: Tier 2 contract enforcement - isinstance validates copies_field type before arithmetic
   safety: Wrong types crash (upstream bug); wrong values quarantined via error result
@@ -109,7 +109,7 @@ allow_hits:
   reason: Config boundary — isinstance(name, str) validates each entry in fields list
   safety: Rejects non-string or empty entries; prevents silent no-op security transform
   expires: '2026-05-13'
-- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=9d38e247fd754d8c
+- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=e60ca12caa9057c9
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -362,7 +362,7 @@ allow_hits:
   safety: Traverses JSON structure to find non-finite floats before audit recording
   expires: '2026-05-02'
 # web_scrape.py — Tier 3 boundary: extract_content can fail on external HTML
-- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=70bdc541b8309880
+- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=474b6c75ad503f46
   owner: architecture
   reason: Tier 3 boundary — response.text is external data, extract_content() can fail unpredictably
   safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL

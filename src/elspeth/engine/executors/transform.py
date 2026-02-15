@@ -198,6 +198,25 @@ class TransformExecutor:
             input_data=input_dict,
             attempt=attempt,
         ) as guard:
+            # --- FIELD COLLISION ENFORCEMENT (pre-execution) ---
+            # Centralized check: if this transform declares output fields,
+            # verify none collide with input fields BEFORE running the transform.
+            # This prevents wasted API calls AND makes collision detection mandatory
+            # (not opt-in per plugin).
+            if transform.declared_output_fields:
+                from elspeth.plugins.transforms.field_collision import detect_field_collisions
+
+                collisions = detect_field_collisions(
+                    set(input_dict.keys()),
+                    transform.declared_output_fields,
+                )
+                if collisions is not None:
+                    raise PluginContractViolation(
+                        f"Transform '{transform.name}' would overwrite existing input fields "
+                        f"{collisions}. This is a pipeline configuration error — the transform's "
+                        f"output fields collide with fields already present in the row."
+                    )
+
             # Set state_id and node_id on context for external call recording
             # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
             ctx.state_id = guard.state_id

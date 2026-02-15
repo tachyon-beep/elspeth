@@ -835,111 +835,17 @@ def test_http_config_timeout_custom() -> None:
     assert transform._timeout == 60
 
 
-class TestWebScrapeFieldCollision:
-    """Tests for field collision detection in WebScrapeTransform."""
+class TestWebScrapeDeclaredOutputFields:
+    """Tests for declared_output_fields — centralized collision detection support.
 
-    @respx.mock
-    def test_hardcoded_field_collision_returns_error(self, mock_ctx):
-        """WebScrapeTransform returns error when hardcoded output field collides with input."""
-        html_content = "<html><body><h1>Title</h1></body></html>"
-        respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
-
-        transform = WebScrapeTransform(
-            {
-                "schema": {"mode": "observed"},
-                "url_field": "url",
-                "content_field": "page_content",
-                "fingerprint_field": "page_fingerprint",
-                "http": {
-                    "abuse_contact": "test@example.com",
-                    "scraping_reason": "Testing collision detection",
-                },
-            }
-        )
-
-        # Row already has "fetch_status" — collision with hardcoded field!
-        row = make_pipeline_row({"url": "https://example.com/page", "fetch_status": 999})
-
-        with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-            result = transform.process(row, mock_ctx)
-
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "field_collision"
-        assert "fetch_status" in result.reason["collisions"]
-
-    @respx.mock
-    def test_configurable_field_collision_returns_error(self, mock_ctx):
-        """WebScrapeTransform returns error when configurable output field collides with input."""
-        html_content = "<html><body><h1>Title</h1></body></html>"
-        respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
-
-        transform = WebScrapeTransform(
-            {
-                "schema": {"mode": "observed"},
-                "url_field": "url",
-                "content_field": "page_content",
-                "fingerprint_field": "page_fingerprint",
-                "http": {
-                    "abuse_contact": "test@example.com",
-                    "scraping_reason": "Testing collision detection",
-                },
-            }
-        )
-
-        # Row already has "page_content" — collision with configurable content_field!
-        row = make_pipeline_row({"url": "https://example.com/page", "page_content": "pre-existing content"})
-
-        with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-            result = transform.process(row, mock_ctx)
-
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "field_collision"
-        assert "page_content" in result.reason["collisions"]
-
-    @respx.mock
-    def test_no_collision_succeeds(self, mock_ctx):
-        """WebScrapeTransform succeeds when no field collision exists."""
-        html_content = "<html><body><h1>Title</h1></body></html>"
-        respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
-
-        transform = WebScrapeTransform(
-            {
-                "schema": {"mode": "observed"},
-                "url_field": "url",
-                "content_field": "page_content",
-                "fingerprint_field": "page_fingerprint",
-                "http": {
-                    "abuse_contact": "test@example.com",
-                    "scraping_reason": "Testing no collision",
-                },
-            }
-        )
-
-        # Row has no colliding fields
-        row = make_pipeline_row({"url": "https://example.com/page"})
-
-        with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-            result = transform.process(row, mock_ctx)
-
-        assert result.status == "success"
-        assert result.row["page_content"] is not None
-        assert result.row["page_fingerprint"] is not None
-        assert result.row["fetch_status"] == 200
-
-
-class TestBug4_10_FieldCollisionBeforeHTTPRequest:
-    """Bug 4.10: Field collision detected before making HTTP request.
-
-    Previously, the field collision check happened after the HTTP fetch and
-    content extraction, meaning an expensive network request was wasted when
-    the result would be discarded anyway. Now the check happens BEFORE
-    _fetch_url() is called.
+    Field collision detection is enforced centrally by TransformExecutor
+    (see TestTransformExecutor in test_executors.py). These tests verify
+    that WebScrapeTransform correctly declares its output fields so the
+    executor can perform pre-execution collision checks.
     """
 
-    def test_collision_detected_without_fetch(self, mock_ctx):
-        """Field collision returns error without making any HTTP request."""
+    def test_declared_output_fields_contains_hardcoded_fields(self):
+        """declared_output_fields includes hardcoded fetch_* audit fields."""
         transform = WebScrapeTransform(
             {
                 "schema": {"mode": "observed"},
@@ -948,20 +854,69 @@ class TestBug4_10_FieldCollisionBeforeHTTPRequest:
                 "fingerprint_field": "page_fingerprint",
                 "http": {
                     "abuse_contact": "test@example.com",
-                    "scraping_reason": "Testing collision check ordering",
+                    "scraping_reason": "Testing declared fields",
                 },
             }
         )
 
-        # Row already has "page_content" — collision with content_field!
-        row = make_pipeline_row({"url": "https://example.com/page", "page_content": "pre-existing"})
+        assert "fetch_status" in transform.declared_output_fields
+        assert "fetch_url_final" in transform.declared_output_fields
+        assert "fetch_request_hash" in transform.declared_output_fields
+        assert "fetch_response_raw_hash" in transform.declared_output_fields
+        assert "fetch_response_processed_hash" in transform.declared_output_fields
 
-        with patch("socket.getaddrinfo", _mock_getaddrinfo()):
-            # Do NOT mock respx — if an HTTP request is made, it should fail
-            # because there's no mock server. The test verifies no request is made.
-            result = transform.process(row, mock_ctx)
+    def test_declared_output_fields_contains_configurable_fields(self):
+        """declared_output_fields includes configurable content and fingerprint fields."""
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing declared fields",
+                },
+            }
+        )
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "field_collision"
-        assert "page_content" in result.reason["collisions"]
+        assert "page_content" in transform.declared_output_fields
+        assert "page_fingerprint" in transform.declared_output_fields
+
+    def test_declared_output_fields_adapts_to_config(self):
+        """declared_output_fields changes when content/fingerprint field names change."""
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "scraped_html",
+                "fingerprint_field": "content_hash",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing declared fields",
+                },
+            }
+        )
+
+        assert "scraped_html" in transform.declared_output_fields
+        assert "content_hash" in transform.declared_output_fields
+        # Old names should NOT be present
+        assert "page_content" not in transform.declared_output_fields
+        assert "page_fingerprint" not in transform.declared_output_fields
+
+    def test_transforms_adds_fields_is_true(self):
+        """transforms_adds_fields flag is set for schema evolution recording."""
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "observed"},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_fingerprint",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Testing declared fields",
+                },
+            }
+        )
+
+        assert transform.transforms_adds_fields is True

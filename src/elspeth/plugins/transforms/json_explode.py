@@ -32,7 +32,6 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import DataPluginConfig, PluginConfigError
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
-from elspeth.plugins.transforms.field_collision import detect_field_collisions
 
 
 class JSONExplodeConfig(DataPluginConfig):
@@ -91,6 +90,9 @@ class JSONExplode(BaseTransform):
     plugin_version = "1.0.0"
     creates_tokens = True  # CRITICAL: enables new token creation for deaggregation
 
+    # JSON explode adds output_field and optionally item_index
+    transforms_adds_fields: bool = True
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize the JSONExplode transform.
 
@@ -110,6 +112,12 @@ class JSONExplode(BaseTransform):
         self._array_field = cfg.array_field
         self._output_field = cfg.output_field
         self._include_index = cfg.include_index
+
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        fields = [cfg.output_field]
+        if cfg.include_index:
+            fields.append("item_index")
+        self.declared_output_fields = frozenset(fields)
 
         # Input schema from config for validation
         self.input_schema = create_schema_from_config(cfg.schema_config, "JSONExplodeInputSchema", allow_coercion=False)
@@ -160,23 +168,6 @@ class JSONExplode(BaseTransform):
             # row[self._array_field] above already validated resolvability.
             normalized_array_field = row.contract.resolve_name(self._array_field)
         base = {k: v for k, v in row_data.items() if k != normalized_array_field}
-
-        # Check for field collisions before writing output
-        added_fields = [self._output_field]
-        if self._include_index:
-            added_fields.append("item_index")
-        collisions = detect_field_collisions(set(base.keys()), added_fields)
-        if collisions is not None:
-            return TransformResult.error(
-                {
-                    "reason": "field_collision",
-                    "collisions": collisions,
-                    "message": (
-                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
-                    ),
-                },
-                retryable=False,
-            )
 
         # Empty array: nothing to deaggregate — quarantine with clear audit trail
         if len(array_value) == 0:

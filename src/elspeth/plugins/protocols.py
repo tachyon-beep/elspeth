@@ -207,6 +207,13 @@ class TransformProtocol(Protocol):
     # When False (default), transform does not add fields to schema.
     transforms_adds_fields: bool
 
+    # Field collision enforcement (centralized in TransformExecutor).
+    # Transforms that add fields to the output row declare WHAT fields they add
+    # at init time. The executor checks these against input keys BEFORE running
+    # the transform, preventing wasted API calls and making collision detection
+    # mandatory (not opt-in per plugin). Empty frozenset = no fields added = no check.
+    declared_output_fields: frozenset[str]
+
     # Error routing configuration (WP-11.99b)
     # Injected by cli_helpers.py bridge from TransformSettings.on_error.
     # Always non-None at runtime (TransformSettings requires on_error).

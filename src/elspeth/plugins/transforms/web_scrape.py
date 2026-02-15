@@ -37,7 +37,6 @@ from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
-from elspeth.plugins.transforms.field_collision import detect_field_collisions
 from elspeth.plugins.transforms.web_scrape_errors import (
     ForbiddenError,
     InvalidURLError,
@@ -131,6 +130,9 @@ class WebScrapeTransform(BaseTransform):
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
 
+    # Web scrape adds content, fingerprint, and fetch metadata fields
+    transforms_adds_fields: bool = True
+
     def __init__(self, options: dict[str, Any]) -> None:
         super().__init__(options)
 
@@ -141,6 +143,19 @@ class WebScrapeTransform(BaseTransform):
         self._url_field = cfg.url_field
         self._content_field = cfg.content_field
         self._fingerprint_field = cfg.fingerprint_field
+
+        # Declare output fields for centralized collision detection in TransformExecutor.
+        self.declared_output_fields = frozenset(
+            [
+                cfg.content_field,
+                cfg.fingerprint_field,
+                "fetch_status",
+                "fetch_url_final",
+                "fetch_request_hash",
+                "fetch_response_raw_hash",
+                "fetch_response_processed_hash",
+            ]
+        )
 
         # Format and fingerprint mode
         self._format = cfg.format
@@ -193,30 +208,6 @@ class WebScrapeTransform(BaseTransform):
                     "error": str(e),
                     "error_type": type(e).__name__,
                 }
-            )
-
-        # Check for field collisions BEFORE making HTTP request to avoid wasting
-        # an expensive external call that would be discarded anyway
-        added_fields = [
-            self._content_field,
-            self._fingerprint_field,
-            "fetch_status",
-            "fetch_url_final",
-            "fetch_request_hash",
-            "fetch_response_raw_hash",
-            "fetch_response_processed_hash",
-        ]
-        collisions = detect_field_collisions(set(row.to_dict().keys()), added_fields)
-        if collisions is not None:
-            return TransformResult.error(
-                {
-                    "reason": "field_collision",
-                    "collisions": collisions,
-                    "message": (
-                        f"Transform output fields {collisions} already exist in input row. This would silently overwrite source data."
-                    ),
-                },
-                retryable=False,
             )
 
         # Fetch URL using pinned IP (prevents DNS rebinding between validation and fetch)
