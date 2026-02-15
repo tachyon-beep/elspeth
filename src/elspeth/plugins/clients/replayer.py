@@ -203,7 +203,7 @@ class CallReplayer:
 
         # Parse error JSON if present
         error_data: dict[str, Any] | None = None
-        if call.error_json:
+        if call.error_json is not None:
             error_data = json.loads(call.error_json)
 
         # Determine if this was an error call

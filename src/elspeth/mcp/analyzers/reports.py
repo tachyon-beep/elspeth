@@ -155,7 +155,7 @@ def get_run_summary(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str) -
             "total": validation_error_count + transform_error_count,
         },
         "outcome_distribution": outcome_distribution,  # type: ignore[typeddict-item]  # SA Row attr types
-        "avg_state_duration_ms": round(avg_duration, 2) if avg_duration else None,
+        "avg_state_duration_ms": round(avg_duration, 2) if avg_duration is not None else None,
     }
 
 
@@ -308,7 +308,7 @@ def get_performance_report(db: LandscapeDB, recorder: LandscapeRecorder, run_id:
                 "plugin": row.plugin_name,
                 "type": row.node_type,
                 "executions": row.executions,
-                "avg_ms": round(row.avg_ms, 2) if row.avg_ms else None,
+                "avg_ms": round(row.avg_ms, 2) if row.avg_ms is not None else None,
                 "min_ms": row.min_ms,
                 "max_ms": row.max_ms,
                 "total_ms": row.total_ms,

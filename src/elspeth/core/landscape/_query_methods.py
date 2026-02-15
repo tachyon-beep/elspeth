@@ -437,7 +437,7 @@ class QueryMethodsMixin:
         source_data: dict[str, Any] | None = None
         payload_available = False
 
-        if row.source_data_ref and self._payload_store:
+        if row.source_data_ref is not None and self._payload_store is not None:
             try:
                 payload_bytes = self._payload_store.retrieve(row.source_data_ref)
                 decoded_source_data = json.loads(payload_bytes.decode("utf-8"))
