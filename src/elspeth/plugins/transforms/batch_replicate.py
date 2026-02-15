@@ -40,7 +40,14 @@ class BatchReplicateConfig(TransformDataConfig):
     default_copies: int = Field(
         default=1,
         ge=1,
+        le=10000,
         description="Default number of copies if copies_field is missing or invalid",
+    )
+    max_copies: int = Field(
+        default=10000,
+        ge=1,
+        le=10000,
+        description="Upper bound on copies per row to prevent unbounded replication",
     )
     include_copy_index: bool = Field(
         default=True,
@@ -89,6 +96,7 @@ class BatchReplicate(BaseTransform):
         cfg = BatchReplicateConfig.from_dict(config)
         self._copies_field = cfg.copies_field
         self._default_copies = cfg.default_copies
+        self._max_copies = cfg.max_copies
         self._include_copy_index = cfg.include_copy_index
 
         self._schema_config = cfg.schema_config
@@ -159,9 +167,9 @@ class BatchReplicate(BaseTransform):
                         f"This indicates an upstream validation bug - check source schema or prior transforms."
                     )
 
-                # Value-level validation: copies must be >= 1
+                # Value-level validation: copies must be >= 1 and <= max_copies
                 # Tier 2 operation safety - type is correct but value is unsafe
-                if raw_copies < 1:
+                if raw_copies < 1 or raw_copies > self._max_copies:
                     quarantined.append(
                         {
                             "reason": "invalid_copies",

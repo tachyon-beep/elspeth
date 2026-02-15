@@ -234,6 +234,10 @@ class SinkPathConfig(PathConfig):
             return v
 
         if isinstance(v, dict):
+            targets = list(v.values())
+            duplicates = [t for t in targets if targets.count(t) > 1]
+            if duplicates:
+                raise ValueError(f"Duplicate header mapping targets: {sorted(set(duplicates))}. Each output header must be unique.")
             return v
 
         if isinstance(v, str):

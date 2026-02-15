@@ -154,7 +154,8 @@ class BatchStats(BaseTransform):
 
             # Contract enforcement: value_field must be numeric (int or float)
             # Tier 2 pipeline data - wrong types indicate upstream bug
-            if not isinstance(raw_value, (int, float)):
+            # Use type() instead of isinstance() to reject bool (bool is subclass of int)
+            if type(raw_value) not in (int, float):
                 raise TypeError(
                     f"Field '{self._value_field}' must be numeric (int or float), "
                     f"got {type(raw_value).__name__} in row {i}. "
@@ -199,6 +200,11 @@ class BatchStats(BaseTransform):
 
         # Include group_by field — validate homogeneity across batch.
         # group_by is configured contract, so missing field is an upstream bug.
+        if self._group_by is not None and self._group_by in result:
+            raise ValueError(
+                f"group_by field '{self._group_by}' collides with aggregate output key. "
+                f"Choose a group_by field name that is not one of: {', '.join(sorted(result.keys()))}"
+            )
         if self._group_by and rows:
             group_value = rows[0][self._group_by]
             for row in rows[1:]:

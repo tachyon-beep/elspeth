@@ -79,6 +79,11 @@ def get_llm_guaranteed_fields(response_field: str) -> tuple[str, ...]:
     """
     if not response_field or not response_field.strip():
         raise ValueError("response_field cannot be empty or whitespace-only")
+    if not response_field.isidentifier():
+        raise ValueError(
+            f"response_field '{response_field}' is not a valid Python identifier. "
+            f"Use only letters, digits, and underscores, starting with a letter or underscore."
+        )
     return tuple(f"{response_field}{suffix}" for suffix in LLM_GUARANTEED_SUFFIXES)
 
 
@@ -100,6 +105,11 @@ def get_llm_audit_fields(response_field: str) -> tuple[str, ...]:
     """
     if not response_field or not response_field.strip():
         raise ValueError("response_field cannot be empty or whitespace-only")
+    if not response_field.isidentifier():
+        raise ValueError(
+            f"response_field '{response_field}' is not a valid Python identifier. "
+            f"Use only letters, digits, and underscores, starting with a letter or underscore."
+        )
     return tuple(f"{response_field}{suffix}" for suffix in LLM_AUDIT_SUFFIXES)
 
 
@@ -125,6 +135,11 @@ def get_multi_query_guaranteed_fields(output_prefix: str) -> tuple[str, ...]:
     """
     if not output_prefix or not output_prefix.strip():
         raise ValueError("output_prefix cannot be empty or whitespace-only")
+    if not output_prefix.isidentifier():
+        raise ValueError(
+            f"output_prefix '{output_prefix}' is not a valid Python identifier. "
+            f"Use only letters, digits, and underscores, starting with a letter or underscore."
+        )
     return tuple(f"{output_prefix}{suffix}" for suffix in MULTI_QUERY_GUARANTEED_SUFFIXES)
 
 

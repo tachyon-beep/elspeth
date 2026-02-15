@@ -386,7 +386,14 @@ def get_errors(
 
     Returns:
         Errors grouped by type
+
+    Raises:
+        ValueError: If error_type is not "all", "validation", or "transform"
     """
+    valid_error_types = {"all", "validation", "transform"}
+    if error_type not in valid_error_types:
+        raise ValueError(f"Invalid error_type '{error_type}'. Must be one of: {', '.join(sorted(valid_error_types))}")
+
     from sqlalchemy import select
 
     from elspeth.core.landscape.schema import transform_errors_table, validation_errors_table

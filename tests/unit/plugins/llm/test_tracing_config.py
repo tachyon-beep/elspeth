@@ -90,13 +90,13 @@ class TestTracingConfigParsing:
         assert isinstance(result, LangfuseTracingConfig)
         assert result.tracing_enabled is False
 
-    def test_unknown_provider_returns_base_config(self) -> None:
-        """Unknown provider returns base TracingConfig."""
-        config = {"provider": "unknown_provider"}
-        result = parse_tracing_config(config)
+    def test_unknown_provider_raises_value_error(self) -> None:
+        """Unknown provider raises ValueError instead of silently accepting."""
+        import pytest
 
-        assert isinstance(result, TracingConfig)
-        assert result.provider == "unknown_provider"
+        config = {"provider": "unknown_provider"}
+        with pytest.raises(ValueError, match="Unknown tracing provider"):
+            parse_tracing_config(config)
 
     def test_none_provider_returns_base_config(self) -> None:
         """Provider 'none' returns base TracingConfig."""

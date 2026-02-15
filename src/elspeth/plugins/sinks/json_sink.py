@@ -546,7 +546,19 @@ class JSONSink(BaseSink):
 
         # Transform each row's keys to display names
         # Fields not in the mapping keep their original names (transform-added fields)
-        return [{display_map.get(k, k): v for k, v in row.items()} for row in rows]
+        result_rows = []
+        for row in rows:
+            mapped: dict[str, Any] = {}
+            for k, v in row.items():
+                display_key = display_map[k] if k in display_map else k  # noqa: SIM401 — .get() banned by tier model
+                if display_key in mapped:
+                    raise ValueError(
+                        f"Header collision: multiple fields map to output key '{display_key}'. "
+                        f"Check display_headers mapping for duplicate targets."
+                    )
+                mapped[display_key] = v
+            result_rows.append(mapped)
+        return result_rows
 
     # === Lifecycle Hooks ===
 

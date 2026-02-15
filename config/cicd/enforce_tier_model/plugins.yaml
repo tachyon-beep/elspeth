@@ -336,16 +336,6 @@ allow_hits:
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
   expires: null
-- key: plugins/sinks/json_sink.py:R1:JSONSink:_apply_display_headers:fp=e4e90c2776c1a966
-  owner: feature
-  reason: Display header mapping - fields not in map keep original name (transform-added fields)
-  safety: Intentional fallback to original field name, not bug hiding
-  expires: null
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=f54b9087450d567e
-  owner: P1-2026-02-05-typecheck
-  reason: Internal boundary - PipelineRow vs dict discrimination after mypy typecheck fixes
-  safety: isinstance() check required to handle union type from batch processing
-  expires: null
 - key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=2ab97d065af608ef
   owner: architecture
   reason: Tier 2 row value type discrimination — float vs int for NaN/Infinity check (ints always finite)

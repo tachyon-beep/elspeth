@@ -1364,6 +1364,9 @@ def purge(
 
     # Determine retention days: CLI override > config > default (90)
     if retention_days is not None:
+        if retention_days <= 0:
+            typer.echo("Error: --retention-days must be greater than 0.", err=True)
+            raise typer.Exit(1)
         effective_retention_days = retention_days
     elif config:
         effective_retention_days = config.payload_store.retention_days

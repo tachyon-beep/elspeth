@@ -96,6 +96,28 @@ class AzureAuthConfig(BaseModel):
             ]
         )
 
+        # Check for partial configurations BEFORE the method-counting logic,
+        # so users get specific "missing field X" messages instead of generic "no auth"
+        if self.sas_token and not self.account_url:
+            raise ValueError("SAS token auth requires account_url. Example: https://mystorageaccount.blob.core.windows.net")
+
+        if self.use_managed_identity and not self.account_url:
+            raise ValueError("Managed Identity auth requires account_url. Example: https://mystorageaccount.blob.core.windows.net")
+
+        sp_fields = [self.tenant_id, self.client_id, self.client_secret, self.account_url]
+        sp_field_count = sum(1 for f in sp_fields if f is not None)
+        if 0 < sp_field_count < 4:
+            missing = []
+            if self.tenant_id is None:
+                missing.append("tenant_id")
+            if self.client_id is None:
+                missing.append("client_id")
+            if self.client_secret is None:
+                missing.append("client_secret")
+            if self.account_url is None:
+                missing.append("account_url")
+            raise ValueError(f"Service Principal auth requires all fields. Missing: {', '.join(missing)}")
+
         methods = [has_conn_string, has_sas_token, has_managed_identity, has_service_principal]
         active_count = sum(methods)
 
@@ -116,27 +138,6 @@ class AzureAuthConfig(BaseModel):
                 "managed identity (use_managed_identity + account_url), or "
                 "service principal (tenant_id + client_id + client_secret + account_url)"
             )
-
-        # Additional validation for partial configurations
-        if self.sas_token and not self.account_url:
-            raise ValueError("SAS token auth requires account_url. Example: https://mystorageaccount.blob.core.windows.net")
-
-        if self.use_managed_identity and not self.account_url:
-            raise ValueError("Managed Identity auth requires account_url. Example: https://mystorageaccount.blob.core.windows.net")
-
-        sp_fields = [self.tenant_id, self.client_id, self.client_secret]
-        sp_field_count = sum(1 for f in sp_fields if f is not None)
-        if 0 < sp_field_count < 3:
-            missing = []
-            if self.tenant_id is None:
-                missing.append("tenant_id")
-            if self.client_id is None:
-                missing.append("client_id")
-            if self.client_secret is None:
-                missing.append("client_secret")
-            if self.account_url is None:
-                missing.append("account_url")
-            raise ValueError(f"Service Principal auth requires all fields. Missing: {', '.join(missing)}")
 
         return self
 
