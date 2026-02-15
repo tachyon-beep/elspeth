@@ -48,6 +48,7 @@ class FieldContract:
     python_type: type
     required: bool
     source: Literal["declared", "inferred"]
+    nullable: bool = False
 
     def __post_init__(self) -> None:
         """Validate python_type is checkpoint-serializable.
@@ -261,9 +262,11 @@ class SchemaContract:
 
                 value = row[fc.normalized_name]
 
-                # Optional fields (required=False) allow None values
-                # This matches Pydantic semantics where Optional[T] = T | None
-                if value is None and not fc.required:
+                # Allow None values for:
+                # - Optional fields (required=False): field can be absent or None
+                # - Nullable fields (nullable=True): field must be present but value can be None
+                # This matches Pydantic semantics: score: float | None = field is required, but None is valid
+                if value is None and (not fc.required or fc.nullable):
                     continue
 
                 # Normalize runtime type for comparison
@@ -322,6 +325,7 @@ class SchemaContract:
                 "t": fc.python_type.__name__,
                 "r": fc.required,
                 "s": fc.source,  # Include source in hash - tampering = audit falsification
+                "nullable": fc.nullable,
             }
             for fc in sorted(self.fields, key=lambda f: f.normalized_name)
         ]
@@ -353,6 +357,7 @@ class SchemaContract:
                     "python_type": fc.python_type.__name__,
                     "required": fc.required,
                     "source": fc.source,
+                    "nullable": fc.nullable,
                 }
                 for fc in self.fields
             ],
@@ -385,6 +390,7 @@ class SchemaContract:
                     python_type=CONTRACT_TYPE_MAP[f["python_type"]],
                     required=f["required"],
                     source=f["source"],
+                    nullable=f.get("nullable", False),  # Backward compat for old checkpoints
                 )
                 for f in data["fields"]
             )
@@ -470,6 +476,7 @@ class SchemaContract:
                     python_type=self_fc.python_type,
                     required=self_fc.required or other_fc.required,
                     source="declared" if self_fc.source == "declared" or other_fc.source == "declared" else "inferred",
+                    nullable=self_fc.nullable or other_fc.nullable,
                 )
             elif in_self:
                 # Only in self - include but mark non-required
@@ -480,6 +487,7 @@ class SchemaContract:
                     python_type=fc.python_type,
                     required=False,  # Can't require field from only one path
                     source=fc.source,
+                    nullable=fc.nullable,
                 )
             else:
                 # Only in other (in_other must be True since name came from union)
@@ -490,6 +498,7 @@ class SchemaContract:
                     python_type=fc.python_type,
                     required=False,  # Can't require field from only one path
                     source=fc.source,
+                    nullable=fc.nullable,
                 )
 
         return SchemaContract(

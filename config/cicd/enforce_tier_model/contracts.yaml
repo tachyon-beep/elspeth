@@ -169,3 +169,18 @@ allow_hits:
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl
   safety: TypeError raised if wrong URL type - explicit failure, not masking
   expires: null
+- key: contracts/schema_contract.py:R1:SchemaContract:from_checkpoint:fp=96e4ffd0b17aa989
+  owner: bugfix
+  reason: Backward compatibility for old checkpoints that lack the nullable field - legitimate .get() at deserialization boundary
+  safety: Defaults to False (non-nullable) which is the safe conservative default for old data
+  expires: null
+- key: contracts/transform_contract.py:R2:_get_python_type:fp=37ef1f2fbd33537f
+  owner: bugfix
+  reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
+  safety: Falls back to str(a) for display purposes only; used in error message, not logic
+  expires: null
+- key: contracts/transform_contract.py:R2:_get_python_type:fp=24df5cf5593bf5fa
+  owner: bugfix
+  reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
+  safety: Falls back to str(unwrapped) for display purposes only; used in error message, not logic
+  expires: null

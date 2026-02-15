@@ -674,3 +674,31 @@ class TestSchemaConfigRequiredBoolValidation:
                     "fields": [{"name": "score", "type": 42}],
                 }
             )
+
+
+class TestSchemaConfigFromDictTypeGuard:
+    """Bug son8: from_dict must reject non-dict input with ValueError."""
+
+    def test_list_input_raises_value_error(self) -> None:
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match="must be a dict"):
+            SchemaConfig.from_dict([])  # type: ignore[arg-type]
+
+    def test_string_input_raises_value_error(self) -> None:
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match="must be a dict"):
+            SchemaConfig.from_dict("fixed")  # type: ignore[arg-type]
+
+    def test_none_input_raises_value_error(self) -> None:
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match="must be a dict"):
+            SchemaConfig.from_dict(None)  # type: ignore[arg-type]
+
+    def test_valid_dict_input_works(self) -> None:
+        from elspeth.contracts.schema import SchemaConfig
+
+        result = SchemaConfig.from_dict({"mode": "observed"})
+        assert result.mode == "observed"

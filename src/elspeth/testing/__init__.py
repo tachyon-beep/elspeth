@@ -121,6 +121,7 @@ def make_field(
     original_name: str | None = None,
     required: bool = False,
     source: Literal["declared", "inferred"] = "inferred",
+    nullable: bool = False,
 ) -> FieldContract:
     """Build a single FieldContract."""
     return FieldContract(
@@ -129,6 +130,7 @@ def make_field(
         python_type=python_type,
         required=required,
         source=source,
+        nullable=nullable,
     )
 
 

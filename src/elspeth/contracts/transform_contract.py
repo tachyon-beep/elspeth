@@ -33,39 +33,60 @@ def _unwrap_annotated(annotation: Any) -> Any:
     return current
 
 
-def _get_python_type(annotation: Any) -> type:
-    """Extract Python type from type annotation.
+def _get_python_type(annotation: Any) -> tuple[type, bool]:
+    """Extract Python type and nullability from type annotation.
 
-    Handles Optional, Union, etc. by taking the first non-None type.
-    Unknown types return `object` (the 'any' type in contracts).
+    Handles Optional/Union by detecting T | None pattern.
+    Unknown types raise TypeError (only explicit Any maps to object).
 
     Args:
         annotation: Type annotation from schema
 
     Returns:
-        Python primitive type, or object for unknown types
+        Tuple of (python_type, is_nullable)
+
+    Raises:
+        TypeError: If annotation is an unsupported concrete type or multi-type union
     """
     unwrapped = _unwrap_annotated(annotation)
 
     # Handle Optional[X] which is Union[X, None] or X | None
     if _is_union_type(unwrapped):
-        # Union type - get first non-None arg
         args = get_args(unwrapped)
-        saw_non_none = False
-        for arg in args:
-            if arg is not type(None):
-                saw_non_none = True
-                resolved = _get_python_type(arg)
-                if resolved is not object:
-                    return resolved
-        if saw_non_none:
-            return object
-        return type(None)
+        non_none_args = [a for a in args if a is not type(None)]
+        has_none = len(non_none_args) < len(args)
 
-    # Simple type - return if in allowed set, or 'object' for unknown types
+        if len(non_none_args) == 0:
+            # Union of only NoneType (weird but handle it)
+            return (type(None), False)
+
+        if len(non_none_args) > 1:
+            # Multi-type union like int | float - not supported
+            type_names = [getattr(a, "__name__", str(a)) for a in non_none_args]
+            raise TypeError(
+                f"Multi-type union '{' | '.join(type_names)}' not supported in schema contracts. "
+                f"Use 'Any' for fields that accept multiple types."
+            )
+
+        # Exactly one non-None type: T | None pattern
+        resolved_type, _ = _get_python_type(non_none_args[0])
+        return (resolved_type, has_none)  # nullable = True if None was in the union
+
+    # Explicit Any -> object (intentional wildcard)
+    if unwrapped is Any:
+        return (object, False)
+
+    # Simple type - must be in allowed set
     if unwrapped in ALLOWED_CONTRACT_TYPES:
-        return cast(type, unwrapped)
-    return object
+        return (cast(type, unwrapped), False)
+
+    # Unsupported concrete type (e.g., list[str], dict[str, Any])
+    type_name = getattr(unwrapped, "__name__", str(unwrapped))
+    raise TypeError(
+        f"Unsupported type annotation '{type_name}' in schema contract. "
+        f"Allowed types: {', '.join(sorted(t.__name__ for t in ALLOWED_CONTRACT_TYPES))}. "
+        f"Use 'Any' for fields that accept any value."
+    )
 
 
 def create_output_contract_from_schema(
@@ -111,7 +132,7 @@ def create_output_contract_from_schema(
 
         # Get the annotation from field_info
         annotation = field_info.annotation
-        python_type = _get_python_type(annotation)
+        python_type, is_nullable = _get_python_type(annotation)
 
         # Field is required if no default and not Optional
         required = field_info.is_required()
@@ -123,6 +144,7 @@ def create_output_contract_from_schema(
                 python_type=python_type,
                 required=required,
                 source="declared",
+                nullable=is_nullable,
             )
         )
 

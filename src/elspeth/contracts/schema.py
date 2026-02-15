@@ -329,8 +329,11 @@ class SchemaConfig:
             SchemaConfig instance
 
         Raises:
-            ValueError: If config is invalid
+            ValueError: If config is invalid (including non-dict input)
         """
+        if not isinstance(config, dict):
+            raise ValueError(f"Schema config must be a dict, got {type(config).__name__}")
+
         # Parse contract fields (valid for all schema modes)
         guaranteed_fields = _parse_field_names_list(config.get("guaranteed_fields"), "guaranteed_fields")
         required_fields = _parse_field_names_list(config.get("required_fields"), "required_fields")
