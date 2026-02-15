@@ -91,6 +91,7 @@ class TestFieldAuditRecord:
             "python_type": "float",
             "required": True,
             "source": "declared",
+            "nullable": False,
         }
 
         # Verify JSON serializable
@@ -639,3 +640,85 @@ class TestContractRecordsIntegration:
         missing_errors = [e for e in error_records if e.violation_type == "missing_field"]
         assert len(missing_errors) == 1
         assert missing_errors[0].normalized_field_name == "amount"
+
+
+# =============================================================================
+# Nullable Audit Round-Trip Tests
+# =============================================================================
+
+
+class TestNullableAuditRoundTrip:
+    """Regression tests for nullable field audit serialization.
+
+    Nullable fields must survive the full audit round-trip:
+    SchemaContract → ContractAuditRecord → JSON → ContractAuditRecord → SchemaContract.
+    Hash must match after round-trip (Tier 1 integrity requirement).
+    """
+
+    def test_nullable_field_survives_audit_roundtrip(self) -> None:
+        """A nullable FieldContract must produce identical hash after round-trip."""
+        from elspeth.contracts.contract_records import ContractAuditRecord
+
+        nullable_field = make_field("score", float, original_name="Score", required=True, source="declared", nullable=True)
+        non_nullable_field = make_field("name", str, original_name="Name", required=True, source="declared", nullable=False)
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(nullable_field, non_nullable_field),
+            locked=True,
+        )
+        original_hash = contract.version_hash()
+
+        # Full round-trip: contract → audit record → JSON → audit record → contract
+        audit_record = ContractAuditRecord.from_contract(contract)
+        json_str = audit_record.to_json()
+        restored_record = ContractAuditRecord.from_json(json_str)
+        restored_contract = restored_record.to_schema_contract()
+
+        assert restored_contract.version_hash() == original_hash
+
+        # Verify nullable preserved on the right field
+        score_field = next(f for f in restored_contract.fields if f.normalized_name == "score")
+        name_field = next(f for f in restored_contract.fields if f.normalized_name == "name")
+        assert score_field.nullable is True
+        assert name_field.nullable is False
+
+    def test_non_nullable_contract_backward_compat(self) -> None:
+        """Audit JSON without 'nullable' key must deserialize as nullable=False.
+
+        Pre-nullable audit records don't have the field. from_json() must
+        default to False for backward compatibility.
+        """
+        from elspeth.contracts.contract_records import ContractAuditRecord
+
+        # Simulate pre-nullable audit JSON (no "nullable" key in fields)
+        pre_nullable_json = json.dumps(
+            {
+                "mode": "FIXED",
+                "locked": True,
+                "version_hash": "placeholder",
+                "fields": [
+                    {
+                        "normalized_name": "amount",
+                        "original_name": "Amount",
+                        "python_type": "float",
+                        "required": True,
+                        "source": "declared",
+                        # No "nullable" key — old format
+                    }
+                ],
+            }
+        )
+
+        record = ContractAuditRecord.from_json(pre_nullable_json)
+        assert record.fields[0].nullable is False
+
+    def test_nullable_field_audit_record_to_dict(self) -> None:
+        """FieldAuditRecord.to_dict() includes nullable in output."""
+        from elspeth.contracts.contract_records import FieldAuditRecord
+
+        nullable_field = make_field("score", float, original_name="Score", required=True, source="declared", nullable=True)
+        record = FieldAuditRecord.from_field_contract(nullable_field)
+
+        assert record.nullable is True
+        d = record.to_dict()
+        assert d["nullable"] is True

@@ -42,6 +42,7 @@ class FieldAuditRecord:
         python_type: Python type name as string (e.g., "int", "str")
         required: Whether field must be present in row
         source: "declared" (from config) or "inferred" (from first row observation)
+        nullable: Whether None is a valid value (from T | None union types)
     """
 
     normalized_name: str
@@ -49,6 +50,7 @@ class FieldAuditRecord:
     python_type: str
     required: bool
     source: Literal["declared", "inferred"]
+    nullable: bool = False
 
     @classmethod
     def from_field_contract(cls, fc: FieldContract) -> FieldAuditRecord:
@@ -68,6 +70,7 @@ class FieldAuditRecord:
             python_type=fc.python_type.__name__,
             required=fc.required,
             source=fc.source,
+            nullable=fc.nullable,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -82,6 +85,7 @@ class FieldAuditRecord:
             "python_type": self.python_type,
             "required": self.required,
             "source": self.source,
+            "nullable": self.nullable,
         }
 
 
@@ -187,6 +191,7 @@ class ContractAuditRecord:
                     python_type=python_type,
                     required=f["required"],
                     source=source,
+                    nullable=f.get("nullable", False),
                 )
             )
 
@@ -239,6 +244,7 @@ class ContractAuditRecord:
                 python_type=CONTRACT_TYPE_MAP[f.python_type],
                 required=f.required,
                 source=f.source,
+                nullable=f.nullable,
             )
             for f in self.fields
         )
