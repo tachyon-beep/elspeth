@@ -971,6 +971,6 @@ class TestBug4_1_KeyErrorInBuildTemplateContext:
 
             assert result.status == "error"
             assert result.reason is not None
-            assert result.reason["reason"] == "template_context_failed"
+            assert result.reason["reason"] == "missing_field"
             # Error should mention one of the missing fields
             assert "cs1_bg" in result.reason["error"] or "cs1_sym" in result.reason["error"] or "cs1_hist" in result.reason["error"]

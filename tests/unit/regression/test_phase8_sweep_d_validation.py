@@ -41,12 +41,12 @@ class TestAzureAuthPartialSP:
         """Providing 3 of 4 SP fields should raise ValueError."""
         from elspeth.plugins.azure.auth import AzureAuthConfig
 
-        with pytest.raises(ValueError, match="Service Principal auth requires all fields"):
+        with pytest.raises(ValueError, match="Service Principal auth requires account_url"):
             AzureAuthConfig(
                 tenant_id="t",
                 client_id="c",
                 client_secret="s",
-                # account_url missing — now caught because it's in sp_fields
+                # account_url missing — specific error for missing account_url
             )
 
     def test_all_sp_fields_accepted(self) -> None:

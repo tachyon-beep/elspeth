@@ -104,9 +104,12 @@ class AzureAuthConfig(BaseModel):
         if self.use_managed_identity and not self.account_url:
             raise ValueError("Managed Identity auth requires account_url. Example: https://mystorageaccount.blob.core.windows.net")
 
-        sp_fields = [self.tenant_id, self.client_id, self.client_secret, self.account_url]
-        sp_field_count = sum(1 for f in sp_fields if f is not None)
-        if 0 < sp_field_count < 4:
+        # Only check SP-specific fields (tenant_id, client_id, client_secret).
+        # account_url is shared across SAS, managed identity, and SP auth methods,
+        # so it shouldn't trigger partial-SP detection.
+        sp_specific_fields = [self.tenant_id, self.client_id, self.client_secret]
+        sp_specific_count = sum(1 for f in sp_specific_fields if f is not None)
+        if 0 < sp_specific_count < 3:
             missing = []
             if self.tenant_id is None:
                 missing.append("tenant_id")
@@ -114,9 +117,9 @@ class AzureAuthConfig(BaseModel):
                 missing.append("client_id")
             if self.client_secret is None:
                 missing.append("client_secret")
-            if self.account_url is None:
-                missing.append("account_url")
             raise ValueError(f"Service Principal auth requires all fields. Missing: {', '.join(missing)}")
+        if sp_specific_count == 3 and self.account_url is None:
+            raise ValueError("Service Principal auth requires account_url. Example: https://mystorageaccount.blob.core.windows.net")
 
         methods = [has_conn_string, has_sas_token, has_managed_identity, has_service_principal]
         active_count = sum(methods)

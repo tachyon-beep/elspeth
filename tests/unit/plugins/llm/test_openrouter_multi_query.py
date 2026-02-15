@@ -1333,7 +1333,7 @@ class TestBug4_3_Tier3BoundaryTypeChecks:
 
             assert result.status == "error"
             assert result.reason is not None
-            assert result.reason["reason"] == "invalid_content_type"
+            assert result.reason["reason"] == "type_mismatch"
 
     def test_non_dict_usage_returns_error(self, chaosllm_server) -> None:
         """LLM returning non-dict usage returns error instead of crashing."""
@@ -1367,7 +1367,7 @@ class TestBug4_3_Tier3BoundaryTypeChecks:
 
             assert result.status == "error"
             assert result.reason is not None
-            assert result.reason["reason"] == "invalid_usage_type"
+            assert result.reason["reason"] == "type_mismatch"
 
     def test_non_numeric_completion_tokens_fallback_to_zero(self, chaosllm_server) -> None:
         """Non-numeric completion_tokens falls back to 0 instead of crashing."""
