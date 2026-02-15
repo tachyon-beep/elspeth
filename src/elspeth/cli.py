@@ -1634,6 +1634,32 @@ def resume(
         typer.echo(f"Error connecting to database: {e}", err=True)
         raise typer.Exit(1) from None
 
+    # Verify database has Landscape schema (resume requires existing tables).
+    # With create_tables=False, tables are NOT created — so an existing file
+    # without Landscape tables (empty DB, wrong file) would crash later with
+    # "OperationalError: no such table: runs". Validate upfront.
+    from sqlalchemy import inspect as sa_inspect
+
+    try:
+        inspector = sa_inspect(db.engine)
+        existing_tables = set(inspector.get_table_names())
+    except Exception as e:
+        typer.echo(f"Error inspecting database schema: {e}", err=True)
+        db.close()
+        raise typer.Exit(1) from None
+
+    required_tables = {"runs", "tokens", "node_states"}
+    missing_tables = required_tables - existing_tables
+    if missing_tables:
+        typer.echo(
+            f"Error: Database exists but is not a Landscape database "
+            f"(missing tables: {', '.join(sorted(missing_tables))}). "
+            f"Check the database path.",
+            err=True,
+        )
+        db.close()
+        raise typer.Exit(1) from None
+
     try:
         checkpoint_manager = CheckpointManager(db)
         recovery_manager = RecoveryManager(db, checkpoint_manager)

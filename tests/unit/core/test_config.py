@@ -3647,6 +3647,57 @@ sinks:
         settings = load_settings(config_file)
         assert settings.source.plugin == "csv"
 
+    def test_env_var_injected_keys_not_rejected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ELSPETH_* env vars injected by Dynaconf must not trigger unknown key error.
+
+        Regression test: Dynaconf captures ALL ELSPETH_* process env vars (e.g.,
+        ELSPETH_LOG_LEVEL set in docker-compose) and injects them into raw_config.
+        The unknown-key check must only flag keys from the YAML file, not env vars.
+        """
+        from elspeth.core.config import load_settings
+
+        # Set an ELSPETH_* env var that is NOT an ElspethSettings field
+        monkeypatch.setenv("ELSPETH_LOG_LEVEL", "DEBUG")
+        monkeypatch.setenv("ELSPETH_CUSTOM_THING", "42")
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+""")
+        # Must NOT raise ValueError about "log_level" or "custom_thing"
+        settings = load_settings(config_file)
+        assert settings.source.plugin == "csv"
+
+    def test_yaml_typo_still_rejected_with_env_vars_present(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """YAML typos must still be rejected even when env vars are present.
+
+        Regression test: env var filtering must not accidentally disable
+        the typo check for actual YAML key typos.
+        """
+        from elspeth.core.config import load_settings
+
+        # Set a legitimate env var
+        monkeypatch.setenv("ELSPETH_LOG_LEVEL", "DEBUG")
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+  on_success: output
+sinks:
+  output:
+    plugin: csv
+trnasforms:
+  - plugin: passthrough
+""")
+        with pytest.raises(ValueError, match="trnasforms"):
+            load_settings(config_file)
+
     def test_secrets_key_not_rejected(self, tmp_path: Path) -> None:
         """The 'secrets' YAML key is handled by SecretsConfig, not ElspethSettings.
 

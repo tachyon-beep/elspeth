@@ -163,6 +163,48 @@ landscape:
         # Must NOT have created the file
         assert not nonexistent_db.exists(), "resume should not create a new database file"
 
+    def test_resume_rejects_non_landscape_db(self, tmp_path: Path) -> None:
+        """resume exits cleanly when DB exists but has no Landscape tables.
+
+        Regression test: switching to create_tables=False caused an uncaught
+        OperationalError ('no such table: runs') when the DB file exists but
+        is not a Landscape database. Must give a clear CLI error instead.
+        """
+        from elspeth.cli import app
+
+        # Create an empty SQLite file (exists but has no tables)
+        empty_db = tmp_path / "not_landscape.db"
+        import sqlite3
+
+        conn = sqlite3.connect(str(empty_db))
+        conn.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+        conn.close()
+
+        settings_content = f"""
+source:
+  plugin: csv
+  on_success: default
+  options:
+    path: input.csv
+    on_validation_failure: discard
+sinks:
+  default:
+    plugin: json
+    options:
+      path: output.json
+landscape:
+  url: "sqlite:///{empty_db}"
+"""
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(settings_content)
+
+        result = runner.invoke(app, ["resume", "fake-run-id", "-s", str(settings_file)])
+
+        assert result.exit_code == 1, f"Expected exit code 1, got {result.exit_code}. Output: {result.output}"
+        assert "not a Landscape database" in result.output, f"Expected clear error about missing tables, got: {result.output}"
+        # Must NOT have crashed with a traceback
+        assert "Traceback" not in result.output, f"Should not show traceback: {result.output}"
+
 
 class TestBuildResumeGraphs:
     """Test _build_resume_graphs accepts connection-valued on_success.

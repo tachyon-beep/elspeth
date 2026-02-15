@@ -102,29 +102,15 @@ def make_mock_executor(clock: MockClock | None = None) -> CoalesceExecutor:
     mock_span_factory = MagicMock()
     mock_token_manager = MagicMock()
 
-    # Make coalesce_tokens return a merged token
+    # Make coalesce_tokens return a merged token.
+    # Production CoalesceExecutor._execute_merge() passes merged_data as a
+    # PipelineRow (already wrapped with contract). Match TokenManager.coalesce_tokens
+    # behavior: use merged_data directly as row_data, don't re-wrap.
     def mock_coalesce_tokens(parents, merged_data, node_id):
-        from elspeth.contracts import PipelineRow
-        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
-        # Create OBSERVED contract from merged data
-        fields = tuple(
-            FieldContract(
-                normalized_name=key,
-                original_name=key,
-                python_type=object,
-                required=False,
-                source="inferred",
-            )
-            for key in merged_data
-        )
-        contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-        pipeline_row = PipelineRow(merged_data, contract)
-
         return TokenInfo(
             token_id=f"merged-{parents[0].row_id}",
             row_id=parents[0].row_id,
-            row_data=pipeline_row,
+            row_data=merged_data,
             join_group_id=f"join-{parents[0].row_id}",
         )
 

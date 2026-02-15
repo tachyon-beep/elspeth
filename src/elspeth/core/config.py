@@ -2028,14 +2028,19 @@ def load_settings(config_path: Path) -> ElspethSettings:
             "Then remove the 'default_sink' line from your pipeline YAML."
         )
 
-    # Reject unknown user keys before filtering. Any key that isn't a known
-    # Pydantic field AND isn't a known Dynaconf internal is a user error (typo).
-    # This replaces the old silent allowlist that dropped typos before Pydantic's
-    # extra="forbid" could catch them.
+    # Reject unknown YAML keys before filtering. Only check keys that originate
+    # from the YAML file, NOT from environment variables. Dynaconf captures ALL
+    # ELSPETH_* env vars (e.g., ELSPETH_LOG_LEVEL → "log_level") and injects
+    # them into raw_config. These are legitimate runtime env vars, not typos.
     known_fields = set(ElspethSettings.model_fields.keys())
-    unknown_user_keys = sorted(k for k in raw_config if k not in known_fields and k not in _DYNACONF_INTERNAL_KEYS)
-    if unknown_user_keys:
-        raise ValueError(f"Unknown configuration keys: {unknown_user_keys}. Check for typos. Valid top-level keys: {sorted(known_fields)}")
+    with open(config_path) as _f:
+        _yaml_only = yaml.safe_load(_f) or {}
+    yaml_keys_lower = {k.lower() for k in _yaml_only}
+    unknown_yaml_keys = sorted(k for k in yaml_keys_lower if k not in known_fields and k not in _DYNACONF_INTERNAL_KEYS)
+    if unknown_yaml_keys:
+        raise ValueError(
+            f"Unknown configuration keys in {config_path.name}: {unknown_yaml_keys}. Check for typos. Valid top-level keys: {sorted(known_fields)}"
+        )
 
     # Filter Dynaconf internals (now safe — all non-known keys are Dynaconf's)
     raw_config = {k: v for k, v in raw_config.items() if k in known_fields}
