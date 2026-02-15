@@ -66,16 +66,6 @@ _DYNACONF_INTERNAL_KEYS = frozenset(
         "root_path",
         "validators",
         "encoding",
-        # --- ELSPETH env vars that Dynaconf captures ---
-        # Dynaconf's envvar_prefix="ELSPETH" captures ALL env vars matching
-        # ELSPETH_* and strips the prefix. These are system env vars used
-        # directly by various subsystems (security, landscape, etc.) but are
-        # NOT ElspethSettings fields.
-        "fingerprint_key",  # ELSPETH_FINGERPRINT_KEY — secret fingerprinting
-        "allow_raw_secrets",  # ELSPETH_ALLOW_RAW_SECRETS — dev mode flag
-        "audit_key",  # ELSPETH_AUDIT_KEY — SQLCipher passphrase
-        "signing_key",  # ELSPETH_SIGNING_KEY — export signing
-        "database_url",  # ELSPETH_DATABASE_URL — MCP server default URL
         # --- YAML keys handled outside ElspethSettings ---
         # "secrets" is handled by SecretsConfig in the CLI, not by ElspethSettings.
         # It passes through Dynaconf but is consumed before Pydantic validation.
@@ -2038,7 +2028,9 @@ def load_settings(config_path: Path) -> ElspethSettings:
     known_fields = set(ElspethSettings.model_fields.keys())
     with open(config_path) as _f:
         _yaml_only = yaml.safe_load(_f) or {}
-    yaml_keys_lower = {k.lower() for k in _yaml_only}
+    if not isinstance(_yaml_only, dict):
+        raise ValueError(f"Configuration file {config_path.name} must be a YAML mapping (key: value), not {type(_yaml_only).__name__}")
+    yaml_keys_lower = {str(k).lower() for k in _yaml_only}
     unknown_yaml_keys = sorted(k for k in yaml_keys_lower if k not in known_fields and k not in _DYNACONF_INTERNAL_KEYS)
     if unknown_yaml_keys:
         raise ValueError(

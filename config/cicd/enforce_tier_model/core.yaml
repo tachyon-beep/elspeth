@@ -477,3 +477,18 @@ allow_hits:
   reason: Tier-3 boundary — quarantined row payload may contain NaN/Infinity that canonical_json rejects
   safety: Falls back to json.dumps(repr()) for payload storage; original error recorded in quarantine metadata
   expires: '2026-05-12'
+- key: core/security/web.py:R4:validate_url_for_ssrf:_resolve_worker:fp=e3763a5eb2c7497a
+  owner: bugfix
+  reason: DNS resolver worker catches BaseException to relay ALL errors through the queue to the caller thread
+  safety: Every caught exception is put on the queue and re-raised by the caller; nothing is suppressed
+  expires: '2026-05-12'
+- key: core/security/web.py:R5:validate_url_for_ssrf:fp=58ffd0bf0d478cc0
+  owner: bugfix
+  reason: Type narrowing assert for mypy — queue returns union type, assert narrows to BaseException after status=="error"
+  safety: This is a code invariant assertion, not defensive programming; violation is a bug in our queue protocol
+  expires: '2026-05-12'
+- key: core/security/web.py:R5:validate_url_for_ssrf:fp=ca27176a3ae061f8
+  owner: bugfix
+  reason: DNS errors may be SSRFBlockedError or NetworkError — isinstance distinguishes known error types for re-raise
+  safety: Known errors propagate directly; unknown errors wrapped as NetworkError with full context and cause chain
+  expires: '2026-05-12'

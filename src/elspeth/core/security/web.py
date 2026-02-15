@@ -21,10 +21,10 @@ the TOCTOU (Time-of-Check to Time-of-Use) vulnerability in traditional SSRF defe
 from __future__ import annotations
 
 import ipaddress
+import queue
 import socket
+import threading
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 
 
@@ -229,27 +229,35 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
         path = f"{path}#{parsed.fragment}"
 
     # Step 3: Resolve DNS with timeout
-    # Use explicit lifecycle instead of context manager. ThreadPoolExecutor.__exit__
-    # calls shutdown(wait=True) which blocks until DNS resolution completes,
-    # defeating the timeout purpose.
-    def _resolve() -> list[str]:
-        return _resolve_hostname(hostname)
+    # Use a daemon thread instead of ThreadPoolExecutor. Daemon threads:
+    # 1. Don't prevent process shutdown (unlike ThreadPoolExecutor workers)
+    # 2. Are cleaned up automatically on process exit
+    # 3. Don't accumulate on repeated timeouts (the OS resolver will
+    #    eventually return and the daemon thread will exit naturally)
+    result_queue: queue.Queue[tuple[str, list[str] | BaseException]] = queue.Queue()
 
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dns_resolve")
-    try:
-        future = executor.submit(_resolve)
+    def _resolve_worker() -> None:
         try:
-            ip_list = future.result(timeout=timeout)
-        except FuturesTimeoutError as e:
-            raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from e
-        except (SSRFBlockedError, NetworkError):
-            raise  # Re-raise our own exception types unchanged
-        except Exception as e:
-            # Unexpected exceptions from DNS resolution (UnicodeError, OSError, etc.)
-            # are external system failures — wrap as NetworkError
-            raise NetworkError(f"DNS resolution failed: {hostname}: {e}") from e
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+            result_queue.put(("ok", _resolve_hostname(hostname)))
+        except BaseException as exc:
+            result_queue.put(("error", exc))
+
+    thread = threading.Thread(target=_resolve_worker, daemon=True, name="dns_resolve")
+    thread.start()
+
+    try:
+        status, value = result_queue.get(timeout=timeout)
+    except queue.Empty:
+        raise NetworkError(f"DNS resolution timeout ({timeout}s): {hostname}") from None
+
+    if status == "error":
+        exc = value
+        assert isinstance(exc, BaseException)
+        if isinstance(exc, (SSRFBlockedError, NetworkError)):
+            raise exc
+        raise NetworkError(f"DNS resolution failed: {hostname}: {exc}") from exc
+
+    ip_list: list[str] = value  # type: ignore[assignment]
 
     if not ip_list:
         raise NetworkError(f"DNS resolution returned no addresses: {hostname}")
