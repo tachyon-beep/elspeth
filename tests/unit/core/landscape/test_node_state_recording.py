@@ -1812,3 +1812,27 @@ class TestRecordRoutingEvents:
 
         for event in events:
             assert event.created_at is not None
+
+    def test_empty_routes_returns_empty_without_orphaned_payload(self, tmp_path):
+        """Bug ut1w: empty routes must return early without storing payload."""
+        from unittest.mock import MagicMock
+
+        _db, recorder, _row_id, token_id, _edge_id = _setup_with_token_and_edge()
+
+        state = recorder.begin_node_state(
+            token_id=token_id,
+            node_id="source-0",
+            run_id="run-1",
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        # Mock the payload store to detect any store() calls
+        mock_store = MagicMock()
+        recorder._payload_store = mock_store
+
+        reason = {"action": "continue", "match": "default"}
+        events = recorder.record_routing_events(state.state_id, routes=[], reason=reason)
+
+        assert events == []
+        mock_store.store.assert_not_called()

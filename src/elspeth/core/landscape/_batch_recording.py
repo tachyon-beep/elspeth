@@ -427,5 +427,7 @@ class BatchRecordingMixin:
         if sink_node_id:
             query = query.where(artifacts_table.c.sink_node_id == sink_node_id)
 
+        # Order for deterministic export signatures
+        query = query.order_by(artifacts_table.c.created_at, artifacts_table.c.artifact_id)
         rows = self._ops.execute_fetchall(query)
         return [self._artifact_repo.load(row) for row in rows]

@@ -257,10 +257,10 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=3f32c48564ee23ba
+- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=90299392a195cce0
   owner: architecture
   reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
-- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=0ccb1c8df3875bcb
+- key: core/landscape/_query_methods.py:R6:QueryMethodsMixin:explain_row:fp=90b2556ec80e61dd
   owner: architecture
   reason: KeyError from PayloadStore when payload purged by retention policy — expected, not corruption
 - key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=9ca89eaa0e651dcf
@@ -305,7 +305,7 @@ allow_hits:
 - key: core/landscape/journal.py:R5:LandscapeJournal:_columns_to_values:fp=8a63a6b78ec0851c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=0bc9a6b3b94f93c9
+- key: core/landscape/_call_recording.py:R6:CallRecordingMixin:get_call_response_data:fp=dd59a2fa59ac304e
   owner: architecture
   reason: Graceful handling of purged payloads - retention policy may have deleted response data
 - key: core/dag/builder.py:R2:build_execution_graph:fp=baf69eb5ca987e9b

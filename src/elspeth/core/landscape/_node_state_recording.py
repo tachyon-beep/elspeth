@@ -322,6 +322,9 @@ class NodeStateRecordingMixin:
         Returns:
             List of RoutingEvent models
         """
+        if not routes:
+            return []
+
         routing_group_id = generate_id()
         reason_hash = stable_hash(reason) if reason else None
         timestamp = now()

@@ -42,6 +42,8 @@ if TYPE_CHECKING:
         TokenRepository,
     )
 
+_QUERY_CHUNK_SIZE = 500
+
 
 class QueryMethodsMixin:
     """Read-only query methods. Mixed into LandscapeRecorder."""
@@ -222,6 +224,9 @@ class QueryMethodsMixin:
     def get_routing_events_for_states(self, state_ids: list[str]) -> list[RoutingEvent]:
         """Get routing events for multiple states in one query.
 
+        Chunks state_ids to stay within SQLite's SQLITE_MAX_VARIABLE_NUMBER
+        limit (default 999).
+
         Args:
             state_ids: List of state IDs to query
 
@@ -231,22 +236,30 @@ class QueryMethodsMixin:
         """
         if not state_ids:
             return []
-        query = (
-            select(routing_events_table)
-            .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
-            .where(routing_events_table.c.state_id.in_(state_ids))
-            .order_by(
-                node_states_table.c.step_index,
-                node_states_table.c.attempt,
-                routing_events_table.c.ordinal,
-                routing_events_table.c.event_id,
+
+        all_db_rows = []
+        for offset in range(0, len(state_ids), _QUERY_CHUNK_SIZE):
+            chunk = state_ids[offset : offset + _QUERY_CHUNK_SIZE]
+            query = (
+                select(
+                    routing_events_table,
+                    node_states_table.c.step_index,
+                    node_states_table.c.attempt,
+                )
+                .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
+                .where(routing_events_table.c.state_id.in_(chunk))
             )
-        )
-        db_rows = self._ops.execute_fetchall(query)
-        return [self._routing_event_repo.load(r) for r in db_rows]
+            all_db_rows.extend(self._ops.execute_fetchall(query))
+
+        # Sort all rows by the same ordering the original single-query version used
+        all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.ordinal, r.event_id))
+        return [self._routing_event_repo.load(r) for r in all_db_rows]
 
     def get_calls_for_states(self, state_ids: list[str]) -> list[Call]:
         """Get external calls for multiple states in one query.
+
+        Chunks state_ids to stay within SQLite's SQLITE_MAX_VARIABLE_NUMBER
+        limit (default 999).
 
         Args:
             state_ids: List of state IDs to query
@@ -257,18 +270,24 @@ class QueryMethodsMixin:
         """
         if not state_ids:
             return []
-        query = (
-            select(calls_table)
-            .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
-            .where(calls_table.c.state_id.in_(state_ids))
-            .order_by(
-                node_states_table.c.step_index,
-                node_states_table.c.attempt,
-                calls_table.c.call_index,
+
+        all_db_rows = []
+        for offset in range(0, len(state_ids), _QUERY_CHUNK_SIZE):
+            chunk = state_ids[offset : offset + _QUERY_CHUNK_SIZE]
+            query = (
+                select(
+                    calls_table,
+                    node_states_table.c.step_index,
+                    node_states_table.c.attempt,
+                )
+                .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+                .where(calls_table.c.state_id.in_(chunk))
             )
-        )
-        db_rows = self._ops.execute_fetchall(query)
-        return [self._call_repo.load(r) for r in db_rows]
+            all_db_rows.extend(self._ops.execute_fetchall(query))
+
+        # Sort all rows by the same ordering the original single-query version used
+        all_db_rows.sort(key=lambda r: (r.step_index, r.attempt, r.call_index))
+        return [self._call_repo.load(r) for r in all_db_rows]
 
     # === Batch Query Methods (Bug 76r: N+1 query fix for exporter) ===
     #

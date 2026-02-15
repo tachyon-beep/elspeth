@@ -16,6 +16,7 @@ from elspeth.contracts import (
     FrameworkBugError,
     Operation,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.schema import (
@@ -590,8 +591,12 @@ class CallRecordingMixin:
 
         try:
             payload_bytes = self._payload_store.retrieve(row.response_ref)
-            data: dict[str, Any] = json.loads(payload_bytes.decode("utf-8"))
-            return data
+            decoded = json.loads(payload_bytes.decode("utf-8"))
+            if type(decoded) is not dict:
+                raise AuditIntegrityError(
+                    f"Corrupt call response payload (ref={row.response_ref}): expected JSON object, got {type(decoded).__name__}"
+                )
+            return decoded
         except KeyError:
             # Payload has been purged
             return None

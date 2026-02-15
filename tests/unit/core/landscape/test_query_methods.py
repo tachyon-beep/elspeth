@@ -1110,3 +1110,118 @@ class TestCallsOrderedByExecution:
         assert calls[0].state_id == "zzz-state-first-exec"
         assert calls[1].state_id == "bbb-state-retry"
         assert calls[2].state_id == "aaa-state-second-step"
+
+
+class TestChunkedQueryMethods:
+    """Bug 68zb: IN queries must chunk state_ids for SQLite variable limit."""
+
+    def _setup_many_states(self, recorder, run_id: str, count: int) -> list[str]:
+        """Create many row/token/state triples, return state_ids.
+
+        Uses offset indices (100+) to avoid conflicts with _setup_full which
+        creates row-1/tok-1/state-1 at row_index=0.
+        """
+        state_ids = []
+        for i in range(count):
+            row_id = f"row-chunk-{i}"
+            token_id = f"tok-chunk-{i}"
+            state_id = f"state-chunk-{i}"
+            recorder.create_row(run_id, "source-0", 100 + i, {"idx": i}, row_id=row_id)
+            recorder.create_token(row_id, token_id=token_id)
+            recorder.begin_node_state(token_id, "transform-1", run_id, 100 + i, {"idx": i}, state_id=state_id)
+            state_ids.append(state_id)
+        return state_ids
+
+    def test_routing_events_for_states_with_many_state_ids(self):
+        """Chunked query returns same results as small query."""
+        _, recorder = _setup_full()
+
+        # Create enough states to exceed one chunk
+        state_ids = self._setup_many_states(recorder, "run-1", 10)
+
+        # Record a routing event for each state
+        for sid in state_ids:
+            recorder.record_routing_event(
+                state_id=sid,
+                edge_id="edge-1",
+                mode=RoutingMode.MOVE,
+            )
+
+        events = recorder.get_routing_events_for_states(state_ids)
+
+        assert len(events) == 10
+        returned_state_ids = {e.state_id for e in events}
+        assert returned_state_ids == set(state_ids)
+
+    def test_calls_for_states_with_many_state_ids(self):
+        """Chunked query returns same results as small query."""
+        _, recorder = _setup_full()
+
+        state_ids = self._setup_many_states(recorder, "run-1", 10)
+
+        # Record a call for each state
+        for sid in state_ids:
+            recorder.record_call(
+                state_id=sid,
+                call_index=0,
+                call_type=CallType.LLM,
+                status=CallStatus.SUCCESS,
+                request_data={"prompt": f"call-{sid}"},
+                response_data={"out": "ok"},
+                latency_ms=50.0,
+            )
+
+        calls = recorder.get_calls_for_states(state_ids)
+
+        assert len(calls) == 10
+        returned_state_ids = {c.state_id for c in calls}
+        assert returned_state_ids == set(state_ids)
+
+    def test_routing_events_ordering_preserved_across_chunks(self):
+        """Results must maintain execution order even across chunks."""
+        from unittest.mock import patch
+
+        _, recorder = _setup_full()
+        state_ids = self._setup_many_states(recorder, "run-1", 5)
+
+        for sid in state_ids:
+            recorder.record_routing_event(
+                state_id=sid,
+                edge_id="edge-1",
+                mode=RoutingMode.MOVE,
+            )
+
+        # Force tiny chunk size to exercise merging
+        with patch("elspeth.core.landscape._query_methods._QUERY_CHUNK_SIZE", 2):
+            events = recorder.get_routing_events_for_states(state_ids)
+
+        assert len(events) == 5
+        # step_index increases 0..4, so events should be in state order
+        event_state_ids = [e.state_id for e in events]
+        assert event_state_ids == state_ids
+
+    def test_calls_ordering_preserved_across_chunks(self):
+        """Results must maintain execution order even across chunks."""
+        from unittest.mock import patch
+
+        _, recorder = _setup_full()
+        state_ids = self._setup_many_states(recorder, "run-1", 5)
+
+        for sid in state_ids:
+            recorder.record_call(
+                state_id=sid,
+                call_index=0,
+                call_type=CallType.LLM,
+                status=CallStatus.SUCCESS,
+                request_data={"prompt": f"call-{sid}"},
+                response_data={"out": "ok"},
+                latency_ms=50.0,
+            )
+
+        # Force tiny chunk size to exercise merging
+        with patch("elspeth.core.landscape._query_methods._QUERY_CHUNK_SIZE", 2):
+            calls = recorder.get_calls_for_states(state_ids)
+
+        assert len(calls) == 5
+        call_state_ids = [c.state_id for c in calls]
+        assert call_state_ids == state_ids

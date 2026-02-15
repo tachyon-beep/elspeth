@@ -983,3 +983,100 @@ class TestGetCallResponseData:
         result = recorder.get_call_response_data(call.call_id)
 
         assert result is None
+
+    def test_raises_on_non_dict_response_payload(self, tmp_path):
+        """Bug gxan: non-dict JSON must raise AuditIntegrityError."""
+        import json
+
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = LandscapeDB.in_memory()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="transform-1",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
+        recorder.create_token("row-1", token_id="tok-1")
+        state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")
+
+        # Store a JSON array (not a dict) as the response payload
+        list_payload = json.dumps([1, 2, 3]).encode("utf-8")
+        response_ref = store.store(list_payload)
+
+        idx = recorder.allocate_call_index(state.state_id)
+        call = recorder.record_call(
+            state.state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.SUCCESS,
+            request_data={"prompt": "hello"},
+            response_data={"text": "world"},
+            response_ref=response_ref,  # Override with our corrupt ref
+        )
+
+        with pytest.raises(AuditIntegrityError, match="expected JSON object"):
+            recorder.get_call_response_data(call.call_id)
+
+    def test_returns_dict_response_payload_successfully(self, tmp_path):
+        """Bug gxan: valid dict payload should return correctly."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = LandscapeDB.in_memory()
+        store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=store)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-1")
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        recorder.register_node(
+            run_id="run-1",
+            plugin_name="transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            node_id="transform-1",
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
+        )
+        recorder.create_row("run-1", "source-0", 0, {"name": "test"}, row_id="row-1")
+        recorder.create_token("row-1", token_id="tok-1")
+        state = recorder.begin_node_state("tok-1", "transform-1", "run-1", 0, {"name": "test"}, state_id="state-1")
+
+        idx = recorder.allocate_call_index(state.state_id)
+        call = recorder.record_call(
+            state.state_id,
+            idx,
+            CallType.LLM,
+            CallStatus.SUCCESS,
+            request_data={"prompt": "hello"},
+            response_data={"text": "world"},
+        )
+
+        result = recorder.get_call_response_data(call.call_id)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert result["text"] == "world"

@@ -1193,3 +1193,55 @@ class TestGetArtifacts:
         assert run1_arts[0].artifact_id == "art-r1"
         assert len(run2_arts) == 1
         assert run2_arts[0].artifact_id == "art-r2"
+
+    def test_deterministic_ordering_by_created_at_then_artifact_id(self):
+        """Bug 6kno: get_artifacts() must return deterministic order for export signing."""
+        _db, recorder = _setup_with_sink()
+        recorder.begin_node_state(
+            "tok-1",
+            "source-0",
+            "run-1",
+            0,
+            {"data": "test"},
+            state_id="state-1",
+        )
+        # Register multiple artifacts
+        recorder.register_artifact(
+            run_id="run-1",
+            state_id="state-1",
+            sink_node_id="sink-0",
+            artifact_type="csv",
+            path="/output/c.csv",
+            content_hash="sha256:c",
+            size_bytes=300,
+            artifact_id="art-c",
+        )
+        recorder.register_artifact(
+            run_id="run-1",
+            state_id="state-1",
+            sink_node_id="sink-0",
+            artifact_type="csv",
+            path="/output/a.csv",
+            content_hash="sha256:a",
+            size_bytes=100,
+            artifact_id="art-a",
+        )
+        recorder.register_artifact(
+            run_id="run-1",
+            state_id="state-1",
+            sink_node_id="sink-0",
+            artifact_type="json",
+            path="/output/b.json",
+            content_hash="sha256:b",
+            size_bytes=200,
+            artifact_id="art-b",
+        )
+
+        # Call twice — must be identical
+        artifacts_first = recorder.get_artifacts("run-1")
+        artifacts_second = recorder.get_artifacts("run-1")
+
+        ids_first = [a.artifact_id for a in artifacts_first]
+        ids_second = [a.artifact_id for a in artifacts_second]
+        assert ids_first == ids_second
+        assert len(ids_first) == 3
