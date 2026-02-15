@@ -1597,10 +1597,6 @@ class TestAzureBatchLLMTransformDeclaredOutputFields:
         assert isinstance(transform.declared_output_fields, frozenset)
         assert len(transform.declared_output_fields) > 0
 
-    def test_transforms_adds_fields_is_true(self, transform: AzureBatchLLMTransform) -> None:
-        """transforms_adds_fields flag is set for schema evolution recording."""
-        assert transform.transforms_adds_fields is True
-
 
 class TestBug4_2_NonDictResponseBody:
     """Bug 4.2: Non-dict response.body is caught as malformed.

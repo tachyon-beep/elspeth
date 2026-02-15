@@ -203,6 +203,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
 
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder, telemetry, and rate limit context for pooled execution."""
+        super().on_start(ctx)
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
@@ -455,8 +456,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
 
         with self._http_clients_lock:
             if state_id not in self._http_clients:
-                if self._recorder is None:
-                    raise RuntimeError("ContentSafety requires recorder. Ensure on_start was called.")
+                assert self._recorder is not None
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,

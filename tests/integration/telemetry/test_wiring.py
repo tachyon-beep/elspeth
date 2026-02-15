@@ -89,7 +89,6 @@ class SimpleTransform:
     node_id: str | None = None
     is_batch_aware = False
     creates_tokens = False
-    transforms_adds_fields = False
     on_error: str | None = None
     on_success: str | None = "output"
 

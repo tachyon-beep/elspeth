@@ -32,7 +32,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
     LangfuseTracingConfig,
@@ -139,9 +139,6 @@ class AzureBatchLLMTransform(BaseTransform):
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
 
-    # LLM transforms add response field + metadata fields to the output row
-    transforms_adds_fields: bool = True
-
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize Azure Batch LLM transform.
 
@@ -213,6 +210,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         Called by the engine at pipeline start. Initializes Tier 2 tracing.
         """
+        super().on_start(ctx)
         if self._tracing_config is not None:
             self._setup_tracing()
 
@@ -1226,17 +1224,18 @@ class AzureBatchLLMTransform(BaseTransform):
                 row_info = row_mapping[custom_id]
                 variables_hash = row_info["variables_hash"]
 
-                # Guaranteed fields (contract-stable)
-                output_row[f"{self._response_field}_usage"] = usage
-                output_row[f"{self._response_field}_model"] = body.get("model", self._deployment_name)
-
-                # Audit fields (provenance metadata)
-                output_row[f"{self._response_field}_template_hash"] = self._template.template_hash
-                output_row[f"{self._response_field}_variables_hash"] = variables_hash
-                output_row[f"{self._response_field}_template_source"] = self._template.template_source
-                output_row[f"{self._response_field}_lookup_hash"] = self._template.lookup_hash
-                output_row[f"{self._response_field}_lookup_source"] = self._template.lookup_source
-                output_row[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
+                populate_llm_metadata_fields(
+                    output_row,
+                    self._response_field,
+                    usage=usage,
+                    model=body.get("model", self._deployment_name),
+                    template_hash=self._template.template_hash,
+                    variables_hash=variables_hash,
+                    template_source=self._template.template_source,
+                    lookup_hash=self._template.lookup_hash,
+                    lookup_source=self._template.lookup_source,
+                    system_prompt_source=self._system_prompt_source,
+                )
 
                 output_rows.append(output_row)
 

@@ -221,33 +221,24 @@ class TestCSVSinkAppendMode:
         lines = content.strip().split("\n")
         assert len(lines) == 4  # header + 3 rows
 
-    def test_append_mode_missing_required_field_preserves_existing_file(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Append with missing required field fails before mutating existing output."""
+    def test_append_mode_declared_required_fields_set(self, tmp_path: Path) -> None:
+        """Append-mode sink declares required fields for executor enforcement.
+
+        Required-field enforcement is centralized in SinkExecutor. This test
+        verifies the sink correctly populates declared_required_fields so the
+        executor can reject rows with missing fields before they reach write().
+        """
         output_path = tmp_path / "output.csv"
 
-        sink1 = CSVSink(
-            {
-                "path": str(output_path),
-                "schema": STRICT_SCHEMA,
-            }
-        )
-        sink1.write([{"id": 1, "value": "a"}], ctx)
-        sink1.flush()
-        sink1.close()
-        original_content = output_path.read_text()
-
-        sink2 = CSVSink(
+        sink = CSVSink(
             {
                 "path": str(output_path),
                 "schema": STRICT_SCHEMA,
                 "mode": "append",
             }
         )
-        with pytest.raises(ValueError, match="missing required fields"):
-            sink2.write([{"id": 2}], ctx)  # Missing required "value"
-        sink2.close()
 
-        assert output_path.read_text() == original_content
+        assert sink.declared_required_fields == frozenset({"id", "value"})
 
 
 class TestCSVSinkAppendExplicitSchema:

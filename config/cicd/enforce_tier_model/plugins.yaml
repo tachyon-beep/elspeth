@@ -79,37 +79,37 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=2dc7eefedc43ad99
+- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=08c42297700bdf0d
   owner: architecture
   reason: Tier 2 contract enforcement - isinstance validates copies_field type before arithmetic
   safety: Wrong types crash (upstream bug); wrong values quarantined via error result
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=215bae67b700c3fd
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=a322360de8a02939
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=f93822a8a17d752b
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=9a99384d76557d33
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=840bd57450114a00
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:_get_fields_to_scan:fp=dbccd889a81cdd57
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilterConfig:validate_fields_not_empty:fp=0c59e7d52c6bd5d8
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilterConfig:validate_fields_not_empty:fp=5ed658117ed3ead6
   owner: bugfix
   reason: Config boundary — isinstance(v, str) to distinguish str vs list[str] fields config
   safety: Rejects empty fields at config time; security transforms must scan at least one field
   expires: '2026-05-13'
-- key: plugins/transforms/keyword_filter.py:R5:KeywordFilterConfig:validate_fields_not_empty:fp=f6cb81ae5829c500
+- key: plugins/transforms/keyword_filter.py:R5:KeywordFilterConfig:validate_fields_not_empty:fp=56040adb5b5f4af4
   owner: bugfix
   reason: Config boundary — isinstance(name, str) validates each entry in fields list
   safety: Rejects non-string or empty entries; prevents silent no-op security transform
   expires: '2026-05-13'
-- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=e60ca12caa9057c9
+- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=f13d515a1364a785
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -316,12 +316,12 @@ allow_hits:
   owner: architecture
   reason: Telemetry emission failure — must not crash main LLM call flow
   safety: Logged and continues — telemetry is non-critical to LLM processing
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=5513c655d6bb1799
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=529df26a8624a42d
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
   expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=4b1188b665744b55
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=688e26cbcb3aa309
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
@@ -336,12 +336,12 @@ allow_hits:
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
   expires: null
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=2ab97d065af608ef
+- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=1ea4521698a5c2c6
   owner: architecture
   reason: Tier 2 row value type discrimination — float vs int for NaN/Infinity check (ints always finite)
   safety: Preserves int precision for values > 2^53; only floats need isfinite() guard
   expires: null
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=fb6ac6c75fbf49f7
+- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=80ca47a3d9f55504
   owner: architecture
   reason: Tier 2 overflow guard — only float sums can overflow to Infinity (int sums use arbitrary precision)
   safety: Returns TransformResult.error() on overflow; int path cannot trigger this
@@ -362,7 +362,7 @@ allow_hits:
   safety: Traverses JSON structure to find non-finite floats before audit recording
   expires: '2026-05-02'
 # web_scrape.py — Tier 3 boundary: extract_content can fail on external HTML
-- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=474b6c75ad503f46
+- key: plugins/transforms/web_scrape.py:R4:WebScrapeTransform:process:fp=ba13e0d9177595d6
   owner: architecture
   reason: Tier 3 boundary — response.text is external data, extract_content() can fail unpredictably
   safety: Returns TransformResult.error() for quarantine with reason, error_type, and URL

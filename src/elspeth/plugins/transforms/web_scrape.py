@@ -130,9 +130,6 @@ class WebScrapeTransform(BaseTransform):
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
 
-    # Web scrape adds content, fingerprint, and fetch metadata fields
-    transforms_adds_fields: bool = True
-
     def __init__(self, options: dict[str, Any]) -> None:
         super().__init__(options)
 

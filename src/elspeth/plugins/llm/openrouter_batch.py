@@ -31,7 +31,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.http import AuditedHTTPClient
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
@@ -136,9 +136,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
 
-    # LLM transforms add response field + metadata fields to the output row
-    transforms_adds_fields: bool = True
-
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize OpenRouter batch LLM transform.
 
@@ -229,6 +226,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         recorder, run_id, telemetry callback, and rate limiter for use in
         worker threads. Also initializes Tier 2 tracing if configured.
         """
+        super().on_start(ctx)
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
@@ -574,8 +572,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         """
         with self._http_clients_lock:
             if state_id not in self._http_clients:
-                if self._recorder is None:
-                    raise RuntimeError("OpenRouter batch transform requires recorder. Ensure on_start was called.")
+                assert self._recorder is not None
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,
@@ -776,14 +773,18 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # 7. Build output row (OUR CODE - let exceptions crash)
         output = row.to_dict()
         output[self._response_field] = content
-        output[f"{self._response_field}_usage"] = usage
-        output[f"{self._response_field}_template_hash"] = rendered.template_hash
-        output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
-        output[f"{self._response_field}_template_source"] = rendered.template_source
-        output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
-        output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
-        output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
-        output[f"{self._response_field}_model"] = response_model
+        populate_llm_metadata_fields(
+            output,
+            self._response_field,
+            usage=usage,
+            model=response_model,
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
 
         return _RowOutcome(ok=True, row=output)
 

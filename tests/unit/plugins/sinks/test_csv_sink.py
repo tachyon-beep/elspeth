@@ -176,35 +176,32 @@ class TestCSVSink:
         # Empty write still has a hash (of empty content)
         assert artifact.content_hash == hashlib.sha256(b"").hexdigest()
 
-    def test_missing_required_field_fails_fast_even_without_validate_input(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Missing required fields must fail fast with validate_input=False."""
+    def test_declared_required_fields_set_from_strict_schema(self, tmp_path: Path) -> None:
+        """CSVSink populates declared_required_fields from fixed-mode schema.
+
+        Required-field enforcement is centralized in SinkExecutor (not in sink.write()).
+        This test verifies the sink correctly declares which fields are required,
+        so the executor can enforce them.
+        """
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
         sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
-        with pytest.raises(ValueError, match="missing required fields"):
-            sink.write([{"id": "1"}], ctx)
+        # Both 'id' and 'name' are required (no '?' suffix in STRICT_SCHEMA)
+        assert sink.declared_required_fields == frozenset({"id", "name"})
 
-        sink.close()
-        assert not output_file.exists()
-
-    def test_missing_required_field_mid_batch_writes_nothing(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """If any row misses required fields, entire batch fails before writes."""
+    def test_declared_required_fields_excludes_optional(self, tmp_path: Path) -> None:
+        """Optional fields (with '?' suffix) are not in declared_required_fields."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
+        optional_schema = {"mode": "fixed", "fields": ["id: str", "name: str?"]}
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": optional_schema})
 
-        rows = [
-            {"id": "1", "name": "alice"},
-            {"id": "2"},  # Missing required field "name"
-        ]
-        with pytest.raises(ValueError, match="missing required fields"):
-            sink.write(rows, ctx)
-
-        sink.close()
-        assert not output_file.exists()
+        # Only 'id' is required; 'name' has '?' suffix so it's optional
+        assert sink.declared_required_fields == frozenset({"id"})
+        assert "name" not in sink.declared_required_fields
 
     def test_missing_optional_field_is_allowed(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Optional schema fields may be omitted without failing."""

@@ -627,20 +627,16 @@ class TestBaseLLMTransformProcess:
 class TestBaseLLMTransformAddsFields:
     """Regression test for Phase 0 fix #12: BaseLLM adds_fields.
 
-    Bug: BaseLLMTransform did not set transforms_adds_fields = True.
-    This caused DAG schema validation to incorrectly assume LLM transforms
-    don't add fields (like llm_response, llm_response_model, etc.),
-    leading to spurious validation warnings or errors.
+    Bug: BaseLLMTransform did not declare output fields, so schema
+    evolution was silently skipped in the executor.
 
-    Fix: Set transforms_adds_fields = True on BaseLLMTransform class.
+    Fix: declared_output_fields is derived from the response field
+    config at init time. The executor uses bool(declared_output_fields)
+    to decide whether to record schema evolution.
     """
 
-    def test_base_llm_transform_has_adds_fields_true(self) -> None:
-        """BaseLLMTransform.transforms_adds_fields must be True."""
-        assert BaseLLMTransform.transforms_adds_fields is True
-
-    def test_concrete_subclass_inherits_adds_fields(self) -> None:
-        """Concrete subclass inherits transforms_adds_fields = True."""
+    def test_base_llm_transform_has_declared_output_fields(self) -> None:
+        """BaseLLMTransform must declare output fields at init."""
         TestLLMTransform = create_test_transform_class()
         transform = TestLLMTransform(
             {
@@ -650,7 +646,21 @@ class TestBaseLLMTransformAddsFields:
                 "required_input_fields": [],
             }
         )
-        assert transform.transforms_adds_fields is True
+        assert transform.declared_output_fields, "LLM transforms must declare output fields"
+
+    def test_concrete_subclass_has_declared_output_fields(self) -> None:
+        """Concrete subclass has non-empty declared_output_fields."""
+        TestLLMTransform = create_test_transform_class()
+        transform = TestLLMTransform(
+            {
+                "model": "gpt-4",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+        assert isinstance(transform.declared_output_fields, frozenset)
+        assert len(transform.declared_output_fields) > 0
 
 
 class TestBaseLLMTransformSchemaHandling:

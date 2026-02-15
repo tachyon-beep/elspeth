@@ -59,7 +59,6 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
     """
 
     creates_tokens = False  # Does not create new tokens (1 row in -> 1 row out)
-    transforms_adds_fields = True  # Multi-query adds output_prefix result fields per query spec
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     plugin_version = "1.0.0"
 
@@ -190,6 +189,7 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder, telemetry, and rate limit context for pooled execution."""
+        super().on_start(ctx)
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit

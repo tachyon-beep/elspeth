@@ -904,8 +904,8 @@ class TestWebScrapeDeclaredOutputFields:
         assert "page_content" not in transform.declared_output_fields
         assert "page_fingerprint" not in transform.declared_output_fields
 
-    def test_transforms_adds_fields_is_true(self):
-        """transforms_adds_fields flag is set for schema evolution recording."""
+    def test_declared_output_fields_drives_schema_evolution(self):
+        """declared_output_fields is non-empty, enabling schema evolution."""
         transform = WebScrapeTransform(
             {
                 "schema": {"mode": "observed"},
@@ -919,4 +919,4 @@ class TestWebScrapeDeclaredOutputFields:
             }
         )
 
-        assert transform.transforms_adds_fields is True
+        assert transform.declared_output_fields

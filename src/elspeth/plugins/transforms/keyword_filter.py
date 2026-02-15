@@ -11,7 +11,6 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 
 # ReDoS detection: patterns with nested quantifiers cause catastrophic backtracking
 # on adversarial input. E.g., (a+)+ on "aaa...!" is O(2^n).
@@ -141,14 +140,7 @@ class KeywordFilter(BaseTransform):
             _validate_regex_safety(pattern)
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
-        # Create schema
-        schema = create_schema_from_config(
-            cfg.schema_config,
-            "KeywordFilterSchema",
-            allow_coercion=False,  # Transforms do NOT coerce
-        )
-        self.input_schema = schema
-        self.output_schema = schema
+        self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "KeywordFilter")
 
     def process(
         self,

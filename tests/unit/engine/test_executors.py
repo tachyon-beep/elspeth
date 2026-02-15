@@ -150,17 +150,17 @@ def _make_transform(
     name: str = "test_transform",
     node_id: str | None = "node_1",
     on_error: str | None = None,
-    adds_fields: bool = False,
     declared_output_fields: frozenset[str] | None = None,
 ) -> MagicMock:
     """Create a mock transform (non-batch)."""
     # Use spec to avoid MagicMock auto-creating 'accept' attribute
-    t = MagicMock(spec=["name", "node_id", "on_error", "transforms_adds_fields", "declared_output_fields", "process"])
+    t = MagicMock(spec=["name", "node_id", "on_error", "declared_output_fields", "validate_input", "_on_start_called", "process"])
     t.name = name
     t.node_id = node_id
     t.on_error = on_error
-    t.transforms_adds_fields = adds_fields
     t.declared_output_fields = declared_output_fields or frozenset()
+    t.validate_input = False
+    t._on_start_called = True
     return t
 
 
@@ -172,6 +172,8 @@ def _make_sink(
     sink = MagicMock()
     sink.name = name
     sink.node_id = node_id
+    sink.declared_required_fields = frozenset()
+    sink.validate_input = False
     sink.write.return_value = ArtifactDescriptor(
         artifact_type="file",
         path_or_uri="file:///output/test.csv",
@@ -263,6 +265,48 @@ class TestTransformExecutor:
 
         with pytest.raises(OrchestrationInvariantError, match="without node_id"):
             executor.execute_transform(transform, token, ctx)
+
+    # --- Input validation (centralized) ---
+
+    def test_validate_input_rejects_wrong_type(self) -> None:
+        """Executor rejects row that fails input schema validation when validate_input=True."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        transform = _make_transform()
+        transform.validate_input = True
+        # Create a schema that expects int — give it a string
+        from elspeth.contracts import PluginSchema
+
+        class StrictSchema(PluginSchema):
+            count: int
+
+        transform.input_schema = StrictSchema
+        token = _make_token(data={"count": "not_an_int"})
+        ctx = _make_ctx()
+
+        with pytest.raises(PluginContractViolation, match="input validation failed"):
+            executor.execute_transform(transform, token, ctx)
+
+        transform.process.assert_not_called()
+
+    def test_validate_input_disabled_passes_wrong_type(self) -> None:
+        """Executor skips input validation when validate_input=False (default)."""
+        recorder = _make_recorder()
+        executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
+        contract = _make_contract()
+        transform = _make_transform()
+        transform.validate_input = False
+        transform.process.return_value = TransformResult.success(
+            make_row({"count": "not_an_int"}, contract=contract),
+            success_reason={"action": "test"},
+        )
+        token = _make_token(data={"count": "not_an_int"}, contract=contract)
+        ctx = _make_ctx()
+
+        result, _, _ = executor.execute_transform(transform, token, ctx)
+
+        assert result.status == "success"
+        transform.process.assert_called_once()
 
     # --- Success path ---
 
@@ -1622,6 +1666,87 @@ class TestSinkExecutor:
                 pending_outcome=pending,
             )
 
+    # --- Input validation (centralized in executor) ---
+
+    def test_sink_validate_input_rejects_wrong_type(self) -> None:
+        """Executor rejects row that fails sink input schema when validate_input=True."""
+        from elspeth.contracts import PluginSchema
+
+        class StrictSinkSchema(PluginSchema):
+            count: int
+
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        token = _make_token(data={"count": "not_an_int"})
+        sink = _make_sink()
+        sink.validate_input = True
+        sink.input_schema = StrictSinkSchema
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(PluginContractViolation, match="input validation failed"):
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        sink.write.assert_not_called()
+
+    # --- Required-field enforcement (centralized in executor) ---
+
+    def test_missing_required_field_raises_plugin_contract_violation(self) -> None:
+        """Executor rejects rows missing declared required fields before sink.write()."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        token = _make_token(data={"id": "1"})  # Missing 'name' field
+        sink = _make_sink()
+        sink.declared_required_fields = frozenset({"id", "name"})
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(PluginContractViolation, match=r"missing required fields.*name"):
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        # Sink.write() must NOT have been called — enforcement is pre-write
+        sink.write.assert_not_called()
+
+    def test_missing_required_field_mid_batch_rejects_entire_batch(self) -> None:
+        """If any row in a batch misses a required field, the whole batch fails."""
+        recorder = _make_recorder()
+        executor = SinkExecutor(recorder, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        tokens = [
+            _make_token(data={"id": "1", "name": "alice"}, token_id="t1", contract=contract),
+            _make_token(data={"id": "2"}, token_id="t2", contract=contract),  # Missing 'name'
+        ]
+        sink = _make_sink()
+        sink.declared_required_fields = frozenset({"id", "name"})
+        ctx = _make_ctx()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        with pytest.raises(PluginContractViolation, match=r"row 1.*missing required fields.*name"):
+            executor.write(
+                sink,
+                tokens,
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        sink.write.assert_not_called()
+
     # --- Successful write ---
 
     def test_successful_write_completes_states_and_registers_artifact(self) -> None:
@@ -2311,7 +2436,7 @@ class TestTransformExecutorTerminality:
         """
         recorder = _make_recorder()
         executor = TransformExecutor(recorder, _make_span_factory(), _make_step_resolver())
-        transform = _make_transform(adds_fields=True)
+        transform = _make_transform(declared_output_fields=frozenset({"new_field"}))
 
         contract = _make_contract()
         # Return a row with a new field (triggers contract evolution)

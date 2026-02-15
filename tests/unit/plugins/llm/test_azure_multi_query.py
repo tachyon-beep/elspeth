@@ -194,15 +194,19 @@ class TestSingleQueryProcessing:
                 assert result.reason["reason"] == "template_rendering_failed"
                 assert "missing" in result.reason["error"]
 
-    def test_get_llm_client_requires_recorder(self) -> None:
-        """_get_llm_client raises RuntimeError if recorder not set via on_start."""
+    def test_on_start_sets_lifecycle_flag(self) -> None:
+        """on_start() sets _on_start_called flag for centralized lifecycle guard."""
         transform = AzureMultiQueryLLMTransform(make_config())
-        # Don't call on_start - recorder will be None
+        assert not transform._on_start_called
 
-        with pytest.raises(RuntimeError) as exc_info:
-            transform._get_llm_client("state-123")
+        ctx = Mock()
+        ctx.landscape = Mock()
+        ctx.run_id = "test-run"
+        ctx.telemetry_emit = None
+        ctx.rate_limit_registry = None
+        transform.on_start(ctx)
 
-        assert "recorder" in str(exc_info.value).lower()
+        assert transform._on_start_called
 
 
 class TestRowProcessingWithPipelining:

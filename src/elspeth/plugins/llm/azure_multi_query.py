@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 from elspeth.contracts import TransformErrorCategory, TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
+from elspeth.plugins.llm import populate_llm_metadata_fields
 from elspeth.plugins.llm.base_multi_query import BaseMultiQueryTransform
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfig,
@@ -354,21 +355,25 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             output[output_key] = value
 
         # 9. Add metadata for audit trail
-        output[f"{spec.output_prefix}_usage"] = (
-            response.usage
-            if response.usage
-            else {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-            }
+        populate_llm_metadata_fields(
+            output,
+            spec.output_prefix,
+            usage=(
+                response.usage
+                if response.usage
+                else {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                }
+            ),
+            model=response.model,
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self._system_prompt_source,
         )
-        output[f"{spec.output_prefix}_model"] = response.model
-        output[f"{spec.output_prefix}_template_hash"] = rendered.template_hash
-        output[f"{spec.output_prefix}_variables_hash"] = rendered.variables_hash
-        output[f"{spec.output_prefix}_template_source"] = rendered.template_source
-        output[f"{spec.output_prefix}_lookup_hash"] = rendered.lookup_hash
-        output[f"{spec.output_prefix}_lookup_source"] = rendered.lookup_source
-        output[f"{spec.output_prefix}_system_prompt_source"] = self._system_prompt_source
 
         fields_added = [f"{spec.output_prefix}_{fc.suffix}" for fc in self._output_mapping.values()]
         observed = SchemaContract(
@@ -416,8 +421,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
         """Get or create LLM client for a state_id."""
         with self._llm_clients_lock:
             if state_id not in self._llm_clients:
-                if self._recorder is None:
-                    raise RuntimeError("Transform requires recorder. Ensure on_start was called.")
+                assert self._recorder is not None
                 self._llm_clients[state_id] = AuditedLLMClient(
                     recorder=self._recorder,
                     state_id=state_id,

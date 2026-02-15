@@ -292,7 +292,6 @@ class TestOpenRouterLLMTransformInit:
         assert len(transform.declared_output_fields) > 0
         assert "llm_response" in transform.declared_output_fields
         assert "llm_response_model" in transform.declared_output_fields
-        assert transform.transforms_adds_fields is True
 
 
 class TestOpenRouterLLMTransformPipelining:

@@ -230,6 +230,7 @@ class TestRetryAuditTrail:
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
         ctx = PluginContext(run_id=run_id, config={})
+        transform.on_start(ctx)
 
         # Track attempt number manually since _execute_transform_with_retry
         # is on RowProcessor. We'll simulate its behavior directly.
@@ -330,6 +331,7 @@ class TestRetryAuditTrail:
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
         ctx = PluginContext(run_id=run_id, config={})
+        transform.on_start(ctx)
 
         # Track attempt number
         attempt_tracker = {"current": 0}
@@ -430,6 +432,7 @@ class TestRetryAuditTrail:
         transform_executor = TransformExecutor(recorder, span_factory, step_resolver)
 
         ctx = PluginContext(run_id=run_id, config={})
+        transform.on_start(ctx)
 
         # Execute without retry manager (single attempt)
         result, _out_token, _error_sink = transform_executor.execute_transform(

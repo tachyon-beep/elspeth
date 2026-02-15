@@ -665,8 +665,8 @@ class TestJSONExplodeDeclaredOutputFields:
         assert "item_index" not in transform.declared_output_fields
         assert "item" in transform.declared_output_fields  # still includes output_field
 
-    def test_transforms_adds_fields_is_true(self) -> None:
-        """transforms_adds_fields flag is set for schema evolution recording."""
+    def test_declared_output_fields_drives_schema_evolution(self) -> None:
+        """declared_output_fields is non-empty, enabling schema evolution."""
         from elspeth.plugins.transforms.json_explode import JSONExplode
 
         transform = JSONExplode(
@@ -676,4 +676,4 @@ class TestJSONExplodeDeclaredOutputFields:
             }
         )
 
-        assert transform.transforms_adds_fields is True
+        assert transform.declared_output_fields

@@ -200,7 +200,7 @@ class JSONSink(BaseSink):
         self._path = cfg.resolved_path()
         self._encoding = cfg.encoding
         self._indent = cfg.indent
-        self._validate_input = cfg.validate_input
+        self.validate_input = cfg.validate_input
 
         # Header mode configuration
         self._headers_mode: HeaderMode = cfg.headers_mode
@@ -240,6 +240,9 @@ class JSONSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
+        # Required-field enforcement (centralized in SinkExecutor)
+        self.declared_required_fields = self._schema_config.get_effective_required_fields()
+
         self._file: IO[str] | None = None
         self._rows: list[dict[str, Any]] = []  # Buffer for json array format
 
@@ -264,12 +267,6 @@ class JSONSink(BaseSink):
                 content_hash=hashlib.sha256(b"").hexdigest(),
                 size_bytes=0,
             )
-
-        # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_observed:
-            for row in rows:
-                # Raises ValidationError on failure - this is intentional
-                self._schema_class.model_validate(row)
 
         # Lazy resolution of contract from context for headers: original mode
         # ctx.contract is set by orchestrator after first valid source row

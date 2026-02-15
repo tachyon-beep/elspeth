@@ -241,14 +241,13 @@ class TestFieldMapper:
         with pytest.raises(PluginConfigError, match="schema"):
             FieldMapper({"mapping": {"a": "b"}})
 
-    def test_validate_input_rejects_wrong_type(self, ctx: PluginContext) -> None:
-        """validate_input=True crashes on wrong types (upstream bug).
+    def test_validate_input_attribute_set_from_config(self) -> None:
+        """validate_input=True is stored as attribute for executor enforcement.
 
-        Per three-tier trust model: transforms use allow_coercion=False,
-        so string "42" is NOT coerced to int 42 - it raises ValidationError.
+        Input validation is centralized in TransformExecutor. This test verifies
+        the plugin correctly sets the attribute from config so the executor can
+        check it before calling process().
         """
-        from pydantic import ValidationError
-
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         transform = FieldMapper(
@@ -259,8 +258,7 @@ class TestFieldMapper:
             }
         )
 
-        with pytest.raises(ValidationError):
-            transform.process(make_pipeline_row({"count": "not_an_int"}), ctx)
+        assert transform.validate_input is True
 
     def test_validate_input_disabled_passes_wrong_type(self, ctx: PluginContext) -> None:
         """validate_input=False (default) passes wrong types through.

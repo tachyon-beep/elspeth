@@ -119,6 +119,8 @@ class TestSinkDurability:
         sink.node_id = "sink"
         sink.plugin_version = "1.0"
         sink.determinism = Determinism.IO_WRITE
+        sink.validate_input = False
+        sink.declared_required_fields = frozenset()
 
         # Mock write() to return artifact descriptor
         def mock_write(rows, ctx):

@@ -782,8 +782,8 @@ class TestMultiQueryDeclaredOutputFields:
             assert f"{prefix}_rationale" in transform.declared_output_fields
             assert f"{prefix}_usage" in transform.declared_output_fields
 
-    def test_transforms_adds_fields_is_true(self) -> None:
-        """transforms_adds_fields flag is set for schema evolution recording."""
+    def test_declared_output_fields_is_nonempty(self) -> None:
+        """declared_output_fields is populated for schema evolution recording."""
         config = make_azure_multi_query_config(
             case_studies=[{"name": "cs1", "input_fields": ["cs1_bg"]}],
             criteria=[{"name": "diagnosis", "code": "DIAG"}],
@@ -792,4 +792,4 @@ class TestMultiQueryDeclaredOutputFields:
 
         transform = AzureMultiQueryLLMTransform(config)
 
-        assert transform.transforms_adds_fields is True
+        assert transform.declared_output_fields

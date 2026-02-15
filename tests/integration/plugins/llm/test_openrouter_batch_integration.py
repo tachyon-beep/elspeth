@@ -561,18 +561,45 @@ class TestOnStartWiring:
         assert transform._telemetry_emit == events.append
         transform.close()
 
-    def test_recorder_none_prevents_http_client_creation(self, recorder: LandscapeRecorder) -> None:
-        """_get_http_client crashes if on_start wasn't called (recorder is None).
+    def test_on_start_sets_lifecycle_flag(self, recorder: LandscapeRecorder) -> None:
+        """on_start() sets _on_start_called for executor lifecycle guard.
 
-        Per CLAUDE.md: plugin initialization bugs must crash, not silently
-        produce wrong results.
+        Lifecycle enforcement is centralized in TransformExecutor.
+        This test verifies the plugin correctly participates in the
+        lifecycle protocol via BaseTransform._on_start_called.
         """
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
-        # Deliberately skip on_start()
+        assert not transform._on_start_called
 
-        with pytest.raises(RuntimeError, match="requires recorder"):
-            transform._get_http_client("state-test")
+        # Reuse existing test infrastructure for context setup
+        schema = SchemaConfig.from_dict({"mode": "observed"})
+        run = recorder.begin_run(config={"test": True}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="openrouter_batch_llm",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={"model": "openai/gpt-4o-mini"},
+            schema_config=schema,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={"text": "test"},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={"text": "test"},
+        )
+        ctx = _make_real_context(recorder, run.run_id, state.state_id)
+        transform.on_start(ctx)
 
+        assert transform._on_start_called
         transform.close()
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import IO, TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
@@ -168,7 +168,7 @@ class CSVSink(BaseSink):
         self._path = cfg.resolved_path()
         self._delimiter = cfg.delimiter
         self._encoding = cfg.encoding
-        self._validate_input = cfg.validate_input
+        self.validate_input = cfg.validate_input
         self._mode = cfg.mode
 
         # Header mode configuration
@@ -206,6 +206,9 @@ class CSVSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
+        # Required-field enforcement (centralized in SinkExecutor)
+        self.declared_required_fields = self._schema_config.get_effective_required_fields()
+
         self._file: IO[str] | None = None
         self._writer: csv.DictWriter[str] | None = None
         self._fieldnames: Sequence[str] | None = None
@@ -233,16 +236,6 @@ class CSVSink(BaseSink):
                 content_hash=hashlib.sha256(b"").hexdigest(),
                 size_bytes=0,
             )
-
-        # Required fields must exist even when validate_input=False.
-        # Missing required fields are upstream bugs and must fail fast.
-        self._validate_required_fields_present(rows)
-
-        # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_observed:
-            for row in rows:
-                # Raises ValidationError on failure - this is intentional
-                self._schema_class.model_validate(row)
 
         # Lazy resolution of contract from context for headers: original mode
         # ctx.contract is set by orchestrator after first valid source row
@@ -288,20 +281,6 @@ class CSVSink(BaseSink):
             content_hash=content_hash,
             size_bytes=size_bytes,
         )
-
-    def _validate_required_fields_present(self, rows: Sequence[Mapping[str, object]]) -> None:
-        """Fail fast when any required schema field is missing from a row."""
-        required_fields = self._schema_config.get_effective_required_fields()
-        if not required_fields:
-            return
-
-        ordered_required = sorted(required_fields)
-        for row_index, row in enumerate(rows):
-            missing = [name for name in ordered_required if name not in row]
-            if missing:
-                raise ValueError(
-                    f"CSVSink row {row_index} is missing required fields: {missing}. This indicates an upstream schema/transform bug."
-                )
 
     def _open_file(self, rows: list[dict[str, Any]]) -> None:
         """Open file for writing, handling append mode and display headers.

@@ -8,10 +8,8 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pydantic import ValidationError
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
@@ -111,8 +109,13 @@ class TestCSVSinkProperties:
 
             assert header == fieldnames
 
-    def test_csv_sink_validate_input_rejects_wrong_types(self, tmp_path: Path) -> None:
-        path = tmp_path / "bad.csv"
+    def test_csv_sink_validate_input_attribute_set_from_config(self, tmp_path: Path) -> None:
+        """validate_input=True stored as attribute for executor enforcement.
+
+        Input validation is centralized in SinkExecutor. This test verifies
+        the plugin correctly sets the attribute from config.
+        """
+        path = tmp_path / "good.csv"
 
         sink = CSVSink(
             {
@@ -121,7 +124,5 @@ class TestCSVSinkProperties:
                 "validate_input": True,
             }
         )
-        ctx = PluginContext(run_id="test-run", config={})
 
-        with pytest.raises(ValidationError):
-            sink.write([{"value": "not-an-int"}], ctx)
+        assert sink.validate_input is True

@@ -26,12 +26,10 @@ from pydantic import Field
 
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import DataPluginConfig, PluginConfigError
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 
 
 class JSONExplodeConfig(DataPluginConfig):
@@ -90,9 +88,6 @@ class JSONExplode(BaseTransform):
     plugin_version = "1.0.0"
     creates_tokens = True  # CRITICAL: enables new token creation for deaggregation
 
-    # JSON explode adds output_field and optionally item_index
-    transforms_adds_fields: bool = True
-
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize the JSONExplode transform.
 
@@ -119,19 +114,10 @@ class JSONExplode(BaseTransform):
             fields.append("item_index")
         self.declared_output_fields = frozenset(fields)
 
-        # Input schema from config for validation
-        self.input_schema = create_schema_from_config(cfg.schema_config, "JSONExplodeInputSchema", allow_coercion=False)
-
-        # Output schema MUST be dynamic because JSONExplode changes row shape:
-        # - Removes array_field
-        # - Adds output_field (e.g., "item")
-        # - Adds item_index (if include_index=True)
-        # The output shape depends on config, not input schema.
-        # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
-        self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "observed"}),
-            "JSONExplodeOutputSchema",
-            allow_coercion=False,
+        self.input_schema, self.output_schema = self._create_schemas(
+            cfg.schema_config,
+            "JSONExplode",
+            adds_fields=True,
         )
 
     def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:

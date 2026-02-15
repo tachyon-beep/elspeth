@@ -201,18 +201,17 @@ class TransformProtocol(Protocol):
     # When False, success_multi() is only valid in passthrough aggregation mode.
     creates_tokens: bool
 
-    # Schema evolution flag (P1-2026-02-05)
-    # When True, transform adds fields during execution and evolved contract
-    # should be recorded to audit trail (input fields + added fields).
-    # When False (default), transform does not add fields to schema.
-    transforms_adds_fields: bool
-
     # Field collision enforcement (centralized in TransformExecutor).
     # Transforms that add fields to the output row declare WHAT fields they add
     # at init time. The executor checks these against input keys BEFORE running
     # the transform, preventing wasted API calls and making collision detection
     # mandatory (not opt-in per plugin). Empty frozenset = no fields added = no check.
     declared_output_fields: frozenset[str]
+
+    # Input validation (centralized in TransformExecutor).
+    # When True, executor validates input against input_schema before process().
+    # Defaults to False — only enabled via plugin config (validate_input: true).
+    validate_input: bool
 
     # Error routing configuration (WP-11.99b)
     # Injected by cli_helpers.py bridge from TransformSettings.on_error.
@@ -444,6 +443,16 @@ class SinkProtocol(Protocol):
 
     # Resume capability (Phase 5 - Checkpoint/Resume)
     supports_resume: bool  # Can this sink append to existing output on resume?
+
+    # Required-field enforcement (centralized in SinkExecutor).
+    # Sinks that declare required fields have them checked BEFORE write().
+    # Empty frozenset = no required-field check = all fields optional.
+    declared_required_fields: frozenset[str]
+
+    # Input validation (centralized in SinkExecutor).
+    # When True, executor validates input against input_schema before write().
+    # Defaults to False — only enabled via plugin config (validate_input: true).
+    validate_input: bool
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""

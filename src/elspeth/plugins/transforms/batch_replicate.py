@@ -18,12 +18,10 @@ from pydantic import Field
 
 from elspeth.contracts.errors import TransformSuccessReason
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 
 
 class BatchReplicateConfig(TransformDataConfig):
@@ -90,9 +88,6 @@ class BatchReplicate(BaseTransform):
     plugin_version = "1.0.0"
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
-    # Batch replicate optionally adds copy_index field
-    transforms_adds_fields: bool = True
-
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = BatchReplicateConfig.from_dict(config)
@@ -106,19 +101,10 @@ class BatchReplicate(BaseTransform):
 
         self._schema_config = cfg.schema_config
 
-        # Input schema from config
-        self.input_schema = create_schema_from_config(
+        self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,
-            "BatchReplicateInputSchema",
-            allow_coercion=False,
-        )
-
-        # Output schema MUST be dynamic because BatchReplicate adds copy_index field
-        # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
-        self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "observed"}),
-            "BatchReplicateOutputSchema",
-            allow_coercion=False,
+            "BatchReplicate",
+            adds_fields=True,
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow

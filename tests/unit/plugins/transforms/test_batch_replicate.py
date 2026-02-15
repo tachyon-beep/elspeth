@@ -397,8 +397,8 @@ class TestBatchReplicateDeclaredOutputFields:
 
         assert len(transform.declared_output_fields) == 0
 
-    def test_transforms_adds_fields_is_true(self) -> None:
-        """transforms_adds_fields flag is set for schema evolution recording."""
+    def test_declared_output_fields_drives_schema_evolution(self) -> None:
+        """declared_output_fields is non-empty when include_copy_index=True, enabling schema evolution."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
@@ -409,4 +409,4 @@ class TestBatchReplicateDeclaredOutputFields:
             }
         )
 
-        assert transform.transforms_adds_fields is True
+        assert transform.declared_output_fields

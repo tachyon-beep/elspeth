@@ -164,10 +164,10 @@ class TestTransformProtocol:
             plugin_version = "1.0.0"
             is_batch_aware = False  # Batch support (structural aggregation)
             creates_tokens = False  # Deaggregation (multi-row output)
-            transforms_adds_fields = False  # Schema evolution tracking
             declared_output_fields: frozenset[str] = frozenset()  # Collision detection
             on_error: str | None = None  # Error routing (WP-11.99b)
             on_success: str | None = None  # Success routing
+            validate_input: bool = False  # Centralized in executor
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -423,6 +423,8 @@ class TestSinkProtocol:
             determinism = Determinism.IO_WRITE
             plugin_version = "1.0.0"
             supports_resume = False  # Required by SinkProtocol
+            validate_input: bool = False  # Centralized in executor
+            declared_required_fields: frozenset[str] = frozenset()  # Centralized in executor
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -488,6 +490,8 @@ class TestSinkProtocol:
             determinism = Determinism.IO_WRITE
             plugin_version = "1.0.0"
             supports_resume = False  # Required by SinkProtocol
+            validate_input: bool = False  # Centralized in executor
+            declared_required_fields: frozenset[str] = frozenset()  # Centralized in executor
             rows: ClassVar[list[dict[str, Any]]] = []
 
             def __init__(self, config: dict[str, Any]) -> None:

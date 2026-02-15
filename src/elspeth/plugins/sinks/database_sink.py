@@ -104,7 +104,7 @@ class DatabaseSink(BaseSink):
         self._sanitized_url = SanitizedDatabaseUrl.from_raw_url(cfg.url, fail_if_no_key=fail_if_no_key)  # For audit trail
         self._table_name = cfg.table
         self._if_exists = cfg.if_exists
-        self._validate_input = cfg.validate_input
+        self.validate_input = cfg.validate_input
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
@@ -127,6 +127,9 @@ class DatabaseSink(BaseSink):
 
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
+
+        # Required-field enforcement (centralized in SinkExecutor)
+        self.declared_required_fields = self._schema_config.get_effective_required_fields()
 
         self._engine: Engine | None = None
         self._table: Table | None = None
@@ -333,12 +336,6 @@ class DatabaseSink(BaseSink):
                 payload_size=payload_size,
                 row_count=0,
             )
-
-        # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_observed:
-            for row in rows:
-                # Raises ValidationError on failure - this is intentional
-                self._schema_class.model_validate(row)
 
         # Ensure table exists (infer from first row)
         self._ensure_table(rows[0])

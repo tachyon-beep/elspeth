@@ -198,6 +198,16 @@ class TransformExecutor:
             input_data=input_dict,
             attempt=attempt,
         ) as guard:
+            # --- LIFECYCLE GUARD (pre-execution) ---
+            # Centralized check: ensure on_start() was called before process().
+            # Uses getattr with True default for non-BaseTransform implementations.
+            if not getattr(transform, "_on_start_called", True):
+                raise PluginContractViolation(
+                    f"Transform '{transform.name}' was called before on_start(). "
+                    f"This is an engine lifecycle bug — on_start() must be called "
+                    f"before any process() invocation."
+                )
+
             # --- FIELD COLLISION ENFORCEMENT (pre-execution) ---
             # Centralized check: if this transform declares output fields,
             # verify none collide with input fields BEFORE running the transform.
@@ -216,6 +226,20 @@ class TransformExecutor:
                         f"{collisions}. This is a pipeline configuration error — the transform's "
                         f"output fields collide with fields already present in the row."
                     )
+
+            # --- INPUT VALIDATION (pre-execution) ---
+            # Centralized check: if transform has validate_input=True,
+            # validate input against its input_schema before calling process().
+            if transform.validate_input:
+                from pydantic import ValidationError
+
+                try:
+                    transform.input_schema.model_validate(input_dict)
+                except ValidationError as e:
+                    raise PluginContractViolation(
+                        f"Transform '{transform.name}' input validation failed: {e}. "
+                        f"This indicates an upstream transform/source schema bug."
+                    ) from e
 
             # Set state_id and node_id on context for external call recording
             # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
@@ -355,7 +379,7 @@ class TransformExecutor:
                 # This ensures that if contract evolution fails, the state is
                 # auto-completed as FAILED by the guard (no "completed-then-crash"
                 # window).  Fix for B1 terminality bug.
-                if result.row is not None and transform.transforms_adds_fields:
+                if result.row is not None and transform.declared_output_fields:
                     from elspeth.contracts.contract_propagation import propagate_contract
 
                     # Compute evolved contract: input contract + fields added by transform

@@ -147,17 +147,15 @@ class BaseTransform(ABC):
     # Default: False (most transforms don't create new tokens)
     creates_tokens: bool = False
 
-    # Schema evolution flag (P1-2026-02-05)
-    # When True, transform adds fields during execution and evolved contract
-    # should be recorded to audit trail (input fields + added fields).
-    # When False (default), transform does not add fields to schema.
-    transforms_adds_fields: bool = False
-
     # Field collision enforcement (centralized in TransformExecutor).
     # Transforms that add fields to the output row declare WHAT fields they add
     # at init time. The executor checks these against input keys BEFORE running
     # the transform. Empty frozenset = no fields added = no check needed.
     declared_output_fields: frozenset[str] = frozenset()
+
+    # Input validation (centralized in TransformExecutor).
+    # When True, executor validates input against input_schema before process().
+    validate_input: bool = False
 
     # Error routing configuration (WP-11.99b)
     # Transforms extending TransformDataConfig override this from config.
@@ -173,6 +171,10 @@ class BaseTransform(ABC):
     # via cli_helpers bridge (set from TransformSettings.on_success).
     on_success: str | None = None
 
+    # Lifecycle guard (centralized in TransformExecutor).
+    # Set to True by on_start(). The executor checks this before process().
+    _on_start_called: bool = False
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -180,6 +182,46 @@ class BaseTransform(ABC):
             config: Plugin configuration
         """
         self.config = config
+
+    @staticmethod
+    def _create_schemas(
+        schema_config: Any,
+        name: str,
+        *,
+        adds_fields: bool = False,
+    ) -> tuple[type[PluginSchema], type[PluginSchema]]:
+        """Create input/output schema pair from config.
+
+        Reduces boilerplate for the common two-schema pattern:
+        - Shape-preserving transforms: input and output share the same schema.
+        - Shape-changing transforms: output uses observed mode (accepts any fields).
+
+        Args:
+            schema_config: The plugin's SchemaConfig instance.
+            name: Plugin name for schema class naming.
+            adds_fields: If True, output schema uses observed mode
+                (accepts any fields since output shape is dynamic).
+
+        Returns:
+            Tuple of (input_schema, output_schema).
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        input_schema = create_schema_from_config(
+            schema_config,
+            f"{name}Input",
+            allow_coercion=False,
+        )
+        if adds_fields:
+            output_schema = create_schema_from_config(
+                SchemaConfig.from_dict({"mode": "observed"}),
+                f"{name}Output",
+                allow_coercion=False,
+            )
+        else:
+            output_schema = input_schema
+        return input_schema, output_schema
 
     def process(
         self,
@@ -236,7 +278,7 @@ class BaseTransform(ABC):
     # Resume path: on_start/on_complete/close are called normally for
     # transforms during resume runs.
 
-    def on_start(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
+    def on_start(self, ctx: PluginContext) -> None:
         """Called once before any rows are processed.
 
         Override for per-run initialization: capturing the recorder,
@@ -244,8 +286,10 @@ class BaseTransform(ABC):
 
         Called on the main thread. If this raises, the pipeline aborts
         and neither on_complete() nor close() will be called.
+
+        Subclasses MUST call super().on_start(ctx) to set the lifecycle flag.
         """
-        pass
+        self._on_start_called = True
 
     def on_complete(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
         """Called after all rows are processed (or after pipeline error).
@@ -333,6 +377,15 @@ class BaseSink(ABC):
     # Resume capability (Phase 5 - Checkpoint/Resume)
     # Default: sinks don't support resume. Override in subclasses that can append.
     supports_resume: bool = False
+
+    # Required-field enforcement (centralized in SinkExecutor).
+    # Sinks set this from schema_config.get_effective_required_fields() at init.
+    # Empty frozenset = no required-field check.
+    declared_required_fields: frozenset[str] = frozenset()
+
+    # Input validation (centralized in SinkExecutor).
+    # When True, executor validates input against input_schema before write().
+    validate_input: bool = False
 
     def configure_for_resume(self) -> None:
         """Configure sink for resume mode (append instead of truncate).

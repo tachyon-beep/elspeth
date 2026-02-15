@@ -22,6 +22,7 @@ import httpx
 from elspeth.contracts import TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.clients.http import AuditedHTTPClient
+from elspeth.plugins.llm import populate_llm_metadata_fields
 from elspeth.plugins.llm.base_multi_query import BaseMultiQueryTransform
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfigMixin,
@@ -427,14 +428,18 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
             output[output_key] = value
 
         # 11. Add metadata for audit trail
-        output[f"{spec.output_prefix}_usage"] = usage
-        output[f"{spec.output_prefix}_model"] = data.get("model", self._model)
-        output[f"{spec.output_prefix}_template_hash"] = rendered.template_hash
-        output[f"{spec.output_prefix}_variables_hash"] = rendered.variables_hash
-        output[f"{spec.output_prefix}_template_source"] = rendered.template_source
-        output[f"{spec.output_prefix}_lookup_hash"] = rendered.lookup_hash
-        output[f"{spec.output_prefix}_lookup_source"] = rendered.lookup_source
-        output[f"{spec.output_prefix}_system_prompt_source"] = self._system_prompt_source
+        populate_llm_metadata_fields(
+            output,
+            spec.output_prefix,
+            usage=usage,
+            model=data.get("model", self._model),
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
 
         fields_added = [f"{spec.output_prefix}_{field_config.suffix}" for field_config in self._output_mapping.values()]
         observed = SchemaContract(
@@ -462,8 +467,7 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
         """
         with self._http_clients_lock:
             if state_id not in self._http_clients:
-                if self._recorder is None:
-                    raise RuntimeError("OpenRouter multi-query transform requires recorder. Ensure on_start was called.")
+                assert self._recorder is not None
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,

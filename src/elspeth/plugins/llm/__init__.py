@@ -143,6 +143,50 @@ def get_multi_query_guaranteed_fields(output_prefix: str) -> tuple[str, ...]:
     return tuple(f"{output_prefix}{suffix}" for suffix in MULTI_QUERY_GUARANTEED_SUFFIXES)
 
 
+def populate_llm_metadata_fields(
+    output: dict[str, object],
+    field_prefix: str,
+    *,
+    usage: dict[str, int] | None,
+    model: str,
+    template_hash: str,
+    variables_hash: str,
+    template_source: str | None,
+    lookup_hash: str | None,
+    lookup_source: str | None,
+    system_prompt_source: str | None,
+) -> None:
+    """Populate standard LLM metadata fields into an output row dict.
+
+    The caller sets the base content field separately
+    (e.g., ``output[field_prefix] = response.content``).
+    This function adds the 8 metadata fields that ALL LLM transforms
+    must include for audit completeness.
+
+    Args:
+        output: Mutable row dict to populate.
+        field_prefix: Response field name (e.g., "llm_response").
+        usage: Token usage dict (prompt_tokens, completion_tokens).
+        model: Model identifier that actually responded.
+        template_hash: SHA-256 of prompt template.
+        variables_hash: SHA-256 of rendered template variables.
+        template_source: Config file path of template (None if inline).
+        lookup_hash: SHA-256 of lookup data (None if no lookup).
+        lookup_source: Config file path of lookup data (None if no lookup).
+        system_prompt_source: Config file path of system prompt (None if inline).
+    """
+    # Guaranteed metadata (contract-stable)
+    output[f"{field_prefix}_usage"] = usage
+    output[f"{field_prefix}_model"] = model
+    # Audit metadata (provenance)
+    output[f"{field_prefix}_template_hash"] = template_hash
+    output[f"{field_prefix}_variables_hash"] = variables_hash
+    output[f"{field_prefix}_template_source"] = template_source
+    output[f"{field_prefix}_lookup_hash"] = lookup_hash
+    output[f"{field_prefix}_lookup_source"] = lookup_source
+    output[f"{field_prefix}_system_prompt_source"] = system_prompt_source
+
+
 __all__ = [
     "LLM_AUDIT_SUFFIXES",
     "LLM_GUARANTEED_SUFFIXES",
@@ -150,4 +194,5 @@ __all__ = [
     "get_llm_audit_fields",
     "get_llm_guaranteed_fields",
     "get_multi_query_guaranteed_fields",
+    "populate_llm_metadata_fields",
 ]

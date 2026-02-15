@@ -796,11 +796,6 @@ class TestOpenRouterBatchDeclaredOutputFields:
         assert "llm_response_model" in transform.declared_output_fields
         assert "llm_response_template_hash" in transform.declared_output_fields
 
-    def test_transforms_adds_fields_is_true(self) -> None:
-        """transforms_adds_fields flag is set for schema evolution recording."""
-        transform, _ctx = _create_transform_with_context()
-        assert transform.transforms_adds_fields is True
-
 
 class TestOpenRouterBatchErrorKeyCollision:
     """Regression tests for ydk4: source rows with an 'error' field.

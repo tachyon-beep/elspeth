@@ -22,7 +22,7 @@ from elspeth.contracts.schema_contract import FieldContract, PipelineRow, Schema
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import PoolConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -219,9 +219,6 @@ class BaseLLMTransform(BaseTransform):
     # LLM transforms are non-deterministic by nature
     determinism: Determinism = Determinism.NON_DETERMINISTIC
 
-    # LLM transforms add response field + metadata fields to the output row
-    transforms_adds_fields: bool = True
-
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
 
@@ -354,16 +351,18 @@ class BaseLLMTransform(BaseTransform):
         # 6. Build output row (OUR CODE - let exceptions crash)
         output = row_data.copy()
         output[self._response_field] = response.content
-        output[f"{self._response_field}_model"] = response.model
-        output[f"{self._response_field}_usage"] = response.usage
-
-        # 7. Add audit metadata for template traceability
-        output[f"{self._response_field}_template_hash"] = rendered.template_hash
-        output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
-        output[f"{self._response_field}_template_source"] = rendered.template_source
-        output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
-        output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
-        output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
+        populate_llm_metadata_fields(
+            output,
+            self._response_field,
+            usage=response.usage,
+            model=response.model,
+            template_hash=rendered.template_hash,
+            variables_hash=rendered.variables_hash,
+            template_source=rendered.template_source,
+            lookup_hash=rendered.lookup_hash,
+            lookup_source=rendered.lookup_source,
+            system_prompt_source=self._system_prompt_source,
+        )
 
         # 8. Propagate contract (always present in PipelineRow)
         output_contract = propagate_contract(

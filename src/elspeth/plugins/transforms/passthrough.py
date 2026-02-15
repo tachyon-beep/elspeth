@@ -16,7 +16,6 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 
 
 class PassThroughConfig(TransformDataConfig):
@@ -51,19 +50,10 @@ class PassThrough(BaseTransform):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = PassThroughConfig.from_dict(config)
-        self._validate_input = cfg.validate_input
+        self.validate_input = cfg.validate_input
 
         self._schema_config = cfg.schema_config
-
-        # Create schema from config
-        # CRITICAL: allow_coercion=False - wrong types are source bugs
-        schema = create_schema_from_config(
-            cfg.schema_config,
-            "PassThroughSchema",
-            allow_coercion=False,
-        )
-        self.input_schema = schema
-        self.output_schema = schema
+        self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "PassThrough")
 
     def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Return row unchanged (deep copy to prevent mutation).
@@ -79,10 +69,6 @@ class PassThrough(BaseTransform):
             ValidationError: If validate_input=True and row fails schema validation.
                 This indicates a bug in the upstream source/transform.
         """
-        # Optional input validation - crash on wrong types (source bug!)
-        if self._validate_input and not self._schema_config.is_observed:
-            self.input_schema.model_validate(row.to_dict())  # Raises on failure
-
         return TransformResult.success(
             PipelineRow(copy.deepcopy(row.to_dict()), row.contract),
             success_reason={"action": "passthrough"},

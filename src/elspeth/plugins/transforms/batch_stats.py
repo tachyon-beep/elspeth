@@ -13,12 +13,10 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts.plugin_context import PluginContext
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.results import TransformResult
-from elspeth.plugins.schema_factory import create_schema_from_config
 
 
 class BatchStatsConfig(TransformDataConfig):
@@ -80,21 +78,10 @@ class BatchStats(BaseTransform):
 
         self._schema_config = cfg.schema_config
 
-        # Create input schema from config
-        self.input_schema = create_schema_from_config(
+        self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,
-            "BatchStatsInputSchema",
-            allow_coercion=False,
-        )
-
-        # Output schema MUST be dynamic because BatchStats outputs a completely
-        # different shape: {count, sum, mean, batch_size, group_by?}
-        # The output shape has no relation to the input schema.
-        # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
-        self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "observed"}),
-            "BatchStatsOutputSchema",
-            allow_coercion=False,
+            "BatchStats",
+            adds_fields=True,
         )
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow

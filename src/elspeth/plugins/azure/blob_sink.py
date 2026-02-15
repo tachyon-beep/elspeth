@@ -309,6 +309,9 @@ class AzureBlobSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
+        # Required-field enforcement (centralized in SinkExecutor)
+        self.declared_required_fields = self._schema_config.get_effective_required_fields()
+
         # Lazy-loaded clients
         self._container_client: ContainerClient | None = None
         # Buffer rows across write() calls so each upload represents full run output.

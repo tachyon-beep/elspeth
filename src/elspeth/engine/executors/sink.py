@@ -13,7 +13,7 @@ from elspeth.contracts import (
     TokenInfo,
 )
 from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.operations import track_operation
@@ -225,6 +225,28 @@ class SinkExecutor:
                 node_id=sink_node_id,
                 token_ids=sink_token_ids,
             ):
+                # Centralized input validation (before sink.write)
+                if sink.validate_input:
+                    from pydantic import ValidationError
+
+                    for row in rows:
+                        try:
+                            sink.input_schema.model_validate(row)
+                        except ValidationError as e:
+                            raise PluginContractViolation(
+                                f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                            ) from e
+
+                # Centralized required-field check (before sink.write)
+                if sink.declared_required_fields:
+                    for row_index, row in enumerate(rows):
+                        missing = sorted(f for f in sink.declared_required_fields if f not in row)
+                        if missing:
+                            raise PluginContractViolation(
+                                f"Sink '{sink.name}' row {row_index} is missing required fields "
+                                f"{missing}. This indicates an upstream transform/schema bug."
+                            )
+
                 start = time.perf_counter()
                 try:
                     artifact_info = sink.write(rows, ctx)
