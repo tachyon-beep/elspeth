@@ -99,11 +99,12 @@ def _create_row(
     )
 
 
-def _create_token(conn: Connection, row_id: str, token_id: str) -> None:
+def _create_token(conn: Connection, run_id: str, row_id: str, token_id: str) -> None:
     conn.execute(
         tokens_table.insert().values(
             token_id=token_id,
             row_id=row_id,
+            run_id=run_id,
             created_at=datetime.now(UTC),
         )
     )
@@ -419,7 +420,7 @@ class TestFindExpiredPayloadRefs:
                 row_index=0,
                 source_data_ref="ref-row-expired",
             )
-            _create_token(conn, "expired-row", "tok-expired")
+            _create_token(conn, "expired-run", "expired-row", "tok-expired")
             _create_node_state(
                 conn,
                 state_id="state-expired",
@@ -516,7 +517,7 @@ class TestFindExpiredPayloadRefs:
                 row_index=0,
                 source_data_ref=None,
             )
-            _create_token(conn, "row-state-call", "tok-state-call")
+            _create_token(conn, "run-state-call", "row-state-call", "tok-state-call")
             _create_node_state(
                 conn,
                 state_id="state-state-call",
@@ -573,7 +574,7 @@ class TestFindExpiredPayloadRefs:
                 row_index=0,
                 source_data_ref=None,
             )
-            _create_token(conn, "row-routing", "tok-routing")
+            _create_token(conn, "run-routing", "row-routing", "tok-routing")
             _create_node_state(
                 conn,
                 state_id="state-routing",

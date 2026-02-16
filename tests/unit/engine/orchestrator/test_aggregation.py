@@ -1228,3 +1228,199 @@ class TestRouteAggregationOutcome:
         _route_aggregation_outcome(result, pending, checkpoint_callback=callback)
 
         callback.assert_called_once_with(result.token)
+
+
+# =============================================================================
+# check_aggregation_timeouts — checkpoint callback support
+# BUG FIX: P1-2026-02-14 — timeout flushes were missing checkpoint callbacks.
+# =============================================================================
+
+
+class TestCheckAggregationTimeoutsCheckpointCallback:
+    """Tests that check_aggregation_timeouts passes checkpoint_callback.
+
+    BUG: check_aggregation_timeouts had no checkpoint_callback parameter,
+    so aggregation-boundary checkpoints were skipped for timeout flushes.
+    flush_remaining_aggregation_buffers supported callbacks but the timeout
+    path did not, creating asymmetric checkpoint behavior.
+    """
+
+    def test_checkpoint_callback_called_for_completed_result(self) -> None:
+        """checkpoint_callback fires for completed results from timeout flush."""
+        token = make_token_info()
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
+
+        agg_transform = _make_batch_transform(node_id="agg-1")
+        config = _make_config(
+            transforms=[agg_transform],
+            aggregation_settings={"agg-1": _make_agg_settings()},
+        )
+        processor = Mock()
+        processor.check_aggregation_timeout.return_value = (True, TriggerType.TIMEOUT)
+        processor.get_aggregation_buffer_count.return_value = 5
+        processor.handle_timeout_flush.return_value = ([completed], [])
+
+        pending = _make_pending()
+        callback = Mock()
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+
+        check_aggregation_timeouts(
+            config=config,
+            processor=processor,
+            ctx=Mock(),
+            pending_tokens=pending,
+            agg_transform_lookup=lookup,
+            checkpoint_callback=callback,
+        )
+
+        callback.assert_called_once_with(token)
+
+    def test_checkpoint_callback_not_called_for_failed_result(self) -> None:
+        """checkpoint_callback does NOT fire for failed results."""
+        failed = Mock(outcome=RowOutcome.FAILED)
+
+        agg_transform = _make_batch_transform(node_id="agg-1")
+        config = _make_config(
+            transforms=[agg_transform],
+            aggregation_settings={"agg-1": _make_agg_settings()},
+        )
+        processor = Mock()
+        processor.check_aggregation_timeout.return_value = (True, TriggerType.TIMEOUT)
+        processor.get_aggregation_buffer_count.return_value = 3
+        processor.handle_timeout_flush.return_value = ([failed], [])
+
+        pending = _make_pending()
+        callback = Mock()
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+
+        check_aggregation_timeouts(
+            config=config,
+            processor=processor,
+            ctx=Mock(),
+            pending_tokens=pending,
+            agg_transform_lookup=lookup,
+            checkpoint_callback=callback,
+        )
+
+        callback.assert_not_called()
+
+    def test_checkpoint_callback_called_for_downstream_completed(self) -> None:
+        """checkpoint_callback fires for downstream COMPLETED from work items."""
+        work_token = make_token_info()
+        work_item = _make_work_item(token=work_token, current_node_id=NodeID("continue-node"))
+        downstream_result = _make_result(RowOutcome.COMPLETED, token=work_token, sink_name="output")
+
+        agg_transform = _make_batch_transform(node_id="agg-1")
+        config = _make_config(
+            transforms=[agg_transform, Mock()],
+            aggregation_settings={"agg-1": _make_agg_settings()},
+        )
+        processor = Mock()
+        processor.check_aggregation_timeout.return_value = (True, TriggerType.TIMEOUT)
+        processor.get_aggregation_buffer_count.return_value = 2
+        processor.handle_timeout_flush.return_value = ([], [work_item])
+        processor.process_token.return_value = [downstream_result]
+
+        pending = _make_pending()
+        callback = Mock()
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+
+        check_aggregation_timeouts(
+            config=config,
+            processor=processor,
+            ctx=Mock(),
+            pending_tokens=pending,
+            agg_transform_lookup=lookup,
+            checkpoint_callback=callback,
+        )
+
+        callback.assert_called_once_with(work_token)
+
+    def test_checkpoint_callback_called_for_downstream_routed(self) -> None:
+        """checkpoint_callback fires for downstream ROUTED from work items."""
+        work_item = _make_work_item()
+        routed = _make_result(RowOutcome.ROUTED, sink_name="risk_sink")
+
+        agg_transform = _make_batch_transform(node_id="agg-1")
+        config = _make_config(
+            transforms=[agg_transform],
+            aggregation_settings={"agg-1": _make_agg_settings()},
+        )
+        processor = Mock()
+        processor.check_aggregation_timeout.return_value = (True, TriggerType.TIMEOUT)
+        processor.get_aggregation_buffer_count.return_value = 1
+        processor.handle_timeout_flush.return_value = ([], [work_item])
+        processor.process_token.return_value = [routed]
+
+        pending: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {"output": [], "risk_sink": []}
+        callback = Mock()
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+
+        check_aggregation_timeouts(
+            config=config,
+            processor=processor,
+            ctx=Mock(),
+            pending_tokens=pending,
+            agg_transform_lookup=lookup,
+            checkpoint_callback=callback,
+        )
+
+        callback.assert_called_once()
+
+    def test_checkpoint_callback_called_for_downstream_coalesced(self) -> None:
+        """checkpoint_callback fires for downstream COALESCED from work items."""
+        work_item = _make_work_item()
+        coalesced = _make_result(RowOutcome.COALESCED, sink_name="output")
+
+        agg_transform = _make_batch_transform(node_id="agg-1")
+        config = _make_config(
+            transforms=[agg_transform],
+            aggregation_settings={"agg-1": _make_agg_settings()},
+        )
+        processor = Mock()
+        processor.check_aggregation_timeout.return_value = (True, TriggerType.TIMEOUT)
+        processor.get_aggregation_buffer_count.return_value = 1
+        processor.handle_timeout_flush.return_value = ([], [work_item])
+        processor.process_token.return_value = [coalesced]
+
+        pending = _make_pending()
+        callback = Mock()
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+
+        check_aggregation_timeouts(
+            config=config,
+            processor=processor,
+            ctx=Mock(),
+            pending_tokens=pending,
+            agg_transform_lookup=lookup,
+            checkpoint_callback=callback,
+        )
+
+        callback.assert_called_once()
+
+    def test_no_crash_when_checkpoint_callback_is_none(self) -> None:
+        """No crash when checkpoint_callback is None (backwards compatible)."""
+        token = make_token_info()
+        completed = Mock(outcome=RowOutcome.COMPLETED, token=token, sink_name="output")
+
+        agg_transform = _make_batch_transform(node_id="agg-1")
+        config = _make_config(
+            transforms=[agg_transform],
+            aggregation_settings={"agg-1": _make_agg_settings()},
+        )
+        processor = Mock()
+        processor.check_aggregation_timeout.return_value = (True, TriggerType.TIMEOUT)
+        processor.get_aggregation_buffer_count.return_value = 1
+        processor.handle_timeout_flush.return_value = ([completed], [])
+
+        pending = _make_pending()
+        lookup: dict[str, tuple[TransformProtocol, NodeID]] = {"agg-1": (agg_transform, NodeID("agg-1"))}
+
+        # No crash — checkpoint_callback=None is the default
+        check_aggregation_timeouts(
+            config=config,
+            processor=processor,
+            ctx=Mock(),
+            pending_tokens=pending,
+            agg_transform_lookup=lookup,
+        )

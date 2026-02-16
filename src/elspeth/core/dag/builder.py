@@ -10,6 +10,7 @@ Dependency: models.py (leaf) — no import of graph.py at module level.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 from collections import Counter
 from types import MappingProxyType
@@ -151,14 +152,18 @@ def build_execution_graph(
         audit_fields from e.g., LLM transforms) over raw config["schema"].
         Pass-through nodes (gates, coalesce) should inherit the computed
         schema so audit records reflect actual data contracts.
+
+        Returns a deep copy to prevent aliasing — mutations to the returned
+        dict must not affect the source node's schema or other nodes that
+        received the same schema. BUG FIX: P1-2026-02-14.
         """
         info = graph.get_node_info(nid)
         if info.output_schema_config is not None:
-            return info.output_schema_config.to_dict()
+            return copy.deepcopy(info.output_schema_config.to_dict())
         # config["schema"] is Any from NodeConfig (dict[str, Any] value access).
         # It's always a dict at runtime — ensured by DataPluginConfig validation.
         schema: dict[str, Any] = info.config["schema"]
-        return schema
+        return copy.deepcopy(schema)
 
     def _sink_name_set() -> set[str]:
         return {str(name) for name in sink_ids}
@@ -908,6 +913,11 @@ def build_execution_graph(
     # NodeInfo is frozen=True so we use object.__setattr__ to replace the
     # mutable dict with an immutable MappingProxyType.  This prevents
     # accidental mutation of node configs after graph construction.
+    #
+    # Note: This is a shallow freeze (top-level only). Deep immutability is
+    # not enforced because downstream code (SchemaConfig.from_dict, etc.)
+    # expects dict/list types, not MappingProxyType/tuple. The aliasing bug
+    # (P1-2026-02-14) is fixed by deep-copying in _best_schema_dict() instead.
     for _, attrs in graph._graph.nodes(data=True):
         info = attrs["info"]
         if isinstance(info.config, dict):

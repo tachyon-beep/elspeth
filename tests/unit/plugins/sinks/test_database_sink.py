@@ -55,9 +55,9 @@ class TestDatabaseSink:
         sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         # Write rows in multiple batches (batching now handled by caller)
-        sink.write([{"id": 0, "value": "val0"}, {"id": 1, "value": "val1"}], ctx)
-        sink.write([{"id": 2, "value": "val2"}, {"id": 3, "value": "val3"}], ctx)
-        sink.write([{"id": 4, "value": "val4"}], ctx)
+        sink.write([{"id": 0, "name": "val0"}, {"id": 1, "name": "val1"}], ctx)
+        sink.write([{"id": 2, "name": "val2"}, {"id": 3, "name": "val3"}], ctx)
+        sink.write([{"id": 4, "name": "val4"}], ctx)
         sink.close()
 
         engine = create_engine(db_url)
@@ -75,7 +75,7 @@ class TestDatabaseSink:
 
         sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
-        sink.write([{"id": 1}], ctx)
+        sink.write([{"id": 1, "name": "alice"}], ctx)
         sink.close()
         sink.close()  # Should not raise
 
@@ -85,7 +85,7 @@ class TestDatabaseSink:
 
         sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": STRICT_SCHEMA})
 
-        sink.write([{"col": "value"}], ctx)
+        sink.write([{"id": 1, "name": "alice"}], ctx)
         # Can't verify in-memory after close, but should not raise
         sink.close()
 
@@ -126,7 +126,7 @@ class TestDatabaseSink:
 
         sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
-        artifact = sink.write([{"id": 1}, {"id": 2}, {"id": 3}], ctx)
+        artifact = sink.write([{"id": 1, "name": "a"}, {"id": 2, "name": "b"}, {"id": 3, "name": "c"}], ctx)
         sink.close()
 
         assert artifact.metadata is not None
@@ -290,7 +290,7 @@ class TestDatabaseSinkIfExistsReplace:
                 "if_exists": "append",
             }
         )
-        sink1.write([{"id": 1}, {"id": 2}], ctx)
+        sink1.write([{"id": 1, "name": "a"}, {"id": 2, "name": "b"}], ctx)
         sink1.close()
 
         assert self._get_row_count(db_url, "output") == 2
@@ -304,7 +304,7 @@ class TestDatabaseSinkIfExistsReplace:
                 "if_exists": "replace",
             }
         )
-        sink2.write([{"id": 3}], ctx)
+        sink2.write([{"id": 3, "name": "c"}], ctx)
         sink2.close()
 
         # Only the new row should exist (old rows dropped)
@@ -329,9 +329,9 @@ class TestDatabaseSinkIfExistsReplace:
         )
 
         # First write - would drop if table existed
-        sink.write([{"id": 1}], ctx)
+        sink.write([{"id": 1, "name": "a"}], ctx)
         # Second write - should append, not drop again
-        sink.write([{"id": 2}], ctx)
+        sink.write([{"id": 2, "name": "b"}], ctx)
         sink.close()
 
         # Both rows should exist (second write appended)
@@ -350,7 +350,7 @@ class TestDatabaseSinkIfExistsReplace:
                 "if_exists": "append",  # Explicit, but also the default
             }
         )
-        sink1.write([{"id": 1}], ctx)
+        sink1.write([{"id": 1, "name": "a"}], ctx)
         sink1.close()
 
         # Second sink appends more data
@@ -362,7 +362,7 @@ class TestDatabaseSinkIfExistsReplace:
                 "if_exists": "append",
             }
         )
-        sink2.write([{"id": 2}], ctx)
+        sink2.write([{"id": 2, "name": "b"}], ctx)
         sink2.close()
 
         # Both rows should exist
@@ -385,7 +385,7 @@ class TestDatabaseSinkIfExistsReplace:
         )
 
         # Should not raise - creates table since it doesn't exist
-        sink.write([{"id": 1}], ctx)
+        sink.write([{"id": 1, "name": "a"}], ctx)
         sink.close()
 
         assert self._get_row_count(db_url, "new_table") == 1
@@ -499,7 +499,7 @@ class TestDatabaseSinkCanonicalHashing:
 
         # Unicode that json.dumps escapes but RFC 8785 keeps literal
         rows = [{"emoji": "😀", "text": "café"}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": {"mode": "observed"}})
 
         artifact = sink.write(rows, ctx)
         sink.close()
@@ -519,7 +519,7 @@ class TestDatabaseSinkCanonicalHashing:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"value": float("nan")}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": {"mode": "observed"}})
 
         # canonical_json raises ValueError for NaN
         with pytest.raises(ValueError, match="non-finite float"):
@@ -535,7 +535,7 @@ class TestDatabaseSinkCanonicalHashing:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"value": float("inf")}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": {"mode": "observed"}})
 
         # canonical_json raises ValueError for Infinity
         with pytest.raises(ValueError, match="non-finite float"):
@@ -555,7 +555,7 @@ class TestDatabaseSinkCanonicalHashing:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"id": np.int64(42), "score": np.float64(3.14)}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": {"mode": "observed"}})
 
         # Should not raise - canonical_json normalizes numpy types
         artifact = sink.write(rows, ctx)
@@ -576,7 +576,7 @@ class TestDatabaseSinkCanonicalHashing:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"emoji": "😀"}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": {"mode": "observed"}})
 
         artifact = sink.write(rows, ctx)
         sink.close()

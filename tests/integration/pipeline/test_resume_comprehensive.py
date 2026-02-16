@@ -222,6 +222,7 @@ class TestResumeComprehensive:
                     tokens_table.insert().values(
                         token_id=f"t{i}",
                         row_id=f"r{i}",
+                        run_id=run_id,
                         created_at=now,
                     )
                 )
@@ -574,6 +575,7 @@ class TestResumeComprehensive:
                     tokens_table.insert().values(
                         token_id=f"t{i}",
                         row_id=f"r{i}",
+                        run_id=run_id,
                         created_at=now,
                     )
                 )
@@ -778,6 +780,7 @@ class TestResumeComprehensive:
                     tokens_table.insert().values(
                         token_id=f"t{i}",
                         row_id=f"r{i}",
+                        run_id=run_id,
                         created_at=now,
                     )
                 )
@@ -978,6 +981,7 @@ class TestResumeComprehensive:
                     tokens_table.insert().values(
                         token_id=f"t{i}",
                         row_id=f"r{i}",
+                        run_id=run_id,
                         created_at=now,
                     )
                 )
@@ -1178,6 +1182,7 @@ class TestResumeComprehensive:
                     tokens_table.insert().values(
                         token_id=f"t{i}",
                         row_id=f"r{i}",
+                        run_id=run_id,
                         created_at=now,
                     )
                 )
@@ -1367,6 +1372,7 @@ class TestResumeComprehensive:
                 tokens_table.insert().values(
                     token_id="t0",
                     row_id="r0",
+                    run_id=run_id,
                     created_at=now,
                 )
             )

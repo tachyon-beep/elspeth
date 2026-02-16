@@ -233,6 +233,44 @@ class TestCallReplayer:
         assert result.error_data == error_details
         assert result.response_data == {}  # Empty dict is correct here
 
+    def test_replay_error_call_with_response_ref_but_no_hash_raises(self) -> None:
+        """Error calls with response_ref set but response_hash=None must fail
+        when response payload is unavailable.
+
+        Regression: P1-2026-02-14 — response_expected was inferred from
+        response_hash or SUCCESS status, but not from response_ref. This
+        meant error calls that had a recorded response (proved by response_ref)
+        but no response_hash fell through to the empty dict fallback,
+        fabricating synthetic data.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        error_details = {
+            "type": "ServiceError",
+            "message": "Internal server error",
+        }
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            status=CallStatus.ERROR,
+            latency_ms=80.0,
+            error_json=json.dumps(error_details),
+            response_ref="payload_ref_xyz",  # Response WAS recorded
+            response_hash=None,  # But hash is missing
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = None  # Payload unavailable
+
+        replayer = CallReplayer(recorder, source_run_id="run_abc123")
+
+        # Should raise because response_ref proves a response existed
+        with pytest.raises(ReplayPayloadMissingError) as exc_info:
+            replayer.replay(call_type="llm", request_data=request_data)
+
+        assert exc_info.value.call_id == "call_123"
+        assert exc_info.value.request_hash == request_hash
+
     def test_replay_error_call_with_purged_response_raises(self) -> None:
         """Error calls that HAD a response but it was purged must fail.
 

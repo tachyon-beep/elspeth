@@ -147,6 +147,7 @@ def check_aggregation_timeouts(
     ctx: PluginContext,
     pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
     agg_transform_lookup: dict[str, tuple[TransformProtocol, NodeID]] | None = None,
+    checkpoint_callback: Callable[[TokenInfo], None] | None = None,
 ) -> AggregationFlushResult:
     """Check and flush any aggregations whose timeout has expired.
 
@@ -180,6 +181,9 @@ def check_aggregation_timeouts(
         agg_transform_lookup: Pre-computed dict mapping node_id_str ->
             (transform, aggregation_node_id).
             If None, lookup is computed on each call (less efficient).
+        checkpoint_callback: Optional callback to create checkpoint after successful
+            token routing. Called with the token that was routed. Mirrors the
+            checkpoint_callback support in flush_remaining_aggregation_buffers().
 
     Returns:
         AggregationFlushResult with counts for succeeded, failed, routed,
@@ -238,7 +242,7 @@ def check_aggregation_timeouts(
             if result.outcome == RowOutcome.FAILED:
                 rows_failed += 1
             else:
-                _route_aggregation_outcome(result, pending_tokens)
+                _route_aggregation_outcome(result, pending_tokens, checkpoint_callback)
                 rows_succeeded += 1
 
         # Process work items through remaining transforms
@@ -258,7 +262,7 @@ def check_aggregation_timeouts(
                 if result.outcome == RowOutcome.FAILED:
                     rows_failed += 1
                 elif result.outcome == RowOutcome.COMPLETED:
-                    _route_aggregation_outcome(result, pending_tokens)
+                    _route_aggregation_outcome(result, pending_tokens, checkpoint_callback)
                     rows_succeeded += 1
                 elif result.outcome == RowOutcome.ROUTED:
                     rows_routed += 1
@@ -270,6 +274,8 @@ def check_aggregation_timeouts(
                             f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
                         )
                     pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
+                    if checkpoint_callback is not None:
+                        checkpoint_callback(result.token)
                 elif result.outcome == RowOutcome.QUARANTINED:
                     rows_quarantined += 1
                 elif result.outcome == RowOutcome.COALESCED:
@@ -282,6 +288,8 @@ def check_aggregation_timeouts(
                             f"Available: {sorted(pending_tokens.keys())}. Token: {result.token}"
                         )
                     pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
+                    if checkpoint_callback is not None:
+                        checkpoint_callback(result.token)
                 elif result.outcome == RowOutcome.FORKED:
                     rows_forked += 1
                 elif result.outcome == RowOutcome.EXPANDED:

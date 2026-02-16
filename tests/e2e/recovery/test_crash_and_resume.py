@@ -708,6 +708,7 @@ class TestCheckpointRecovery:
                     tokens_table.insert().values(
                         token_id=token_id,
                         row_id=row_id,
+                        run_id=run_id,
                         created_at=now,
                     )
                 )
@@ -818,6 +819,7 @@ class TestCheckpointRecovery:
                 tokens_table.insert().values(
                     token_id="tok-000",
                     row_id="row-000",
+                    run_id=run_id,
                     created_at=now,
                 )
             )

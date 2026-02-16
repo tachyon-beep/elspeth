@@ -266,14 +266,37 @@ class PooledExecutor:
             # release-then-reacquire: if we acquired here, the main thread
             # could steal permits for queued tasks that can't run because
             # worker threads are blocked waiting to reacquire.
-            future = self._thread_pool.submit(
-                self._execute_single,
-                buffer_idx,
-                ctx.row,
-                ctx.state_id,
-                process_fn,
-            )
-            futures[future] = buffer_idx
+            try:
+                future = self._thread_pool.submit(
+                    self._execute_single,
+                    buffer_idx,
+                    ctx.row,
+                    ctx.state_id,
+                    process_fn,
+                )
+            except RuntimeError:
+                # Thread pool is shut down (concurrent shutdown() call).
+                # Complete the reserved buffer slot with a deterministic error
+                # so the buffer stays consistent and the row gets a proper
+                # error result instead of being silently dropped.
+                shutdown_result = TransformResult.error(
+                    {"reason": "shutdown_requested", "error": "thread pool shut down during submission"},
+                    retryable=False,
+                )
+                self._buffer.complete(buffer_idx, shutdown_result)
+                # Mark remaining contexts as shutdown errors too
+                for _remaining_ctx in contexts[contexts.index(ctx) + 1 :]:
+                    remaining_idx = self._buffer.submit()
+                    self._buffer.complete(
+                        remaining_idx,
+                        TransformResult.error(
+                            {"reason": "shutdown_requested", "error": "thread pool shut down during submission"},
+                            retryable=False,
+                        ),
+                    )
+                break
+            else:
+                futures[future] = buffer_idx
 
         # Wait for all futures and collect results with full metadata
         entries: list[BufferEntry[TransformResult]] = []

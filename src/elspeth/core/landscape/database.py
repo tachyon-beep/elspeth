@@ -28,6 +28,8 @@ class SchemaCompatibilityError(Exception):
 # Used by _validate_schema() to detect outdated SQLite databases.
 _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     ("tokens", "expand_group_id"),
+    # Added for run ownership — prevents cross-run contamination of token-linked records
+    ("tokens", "run_id"),
     # Added for composite FK to nodes (node_id, run_id) - enables run-isolated queries
     ("node_states", "run_id"),
     # Field resolution audit trail - captures original→final header mapping

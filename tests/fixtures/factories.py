@@ -375,6 +375,7 @@ def populate_run(
                 tokens_table.insert().values(
                     token_id=token_ids[i],
                     row_id=row_ids[i],
+                    run_id=run_id,
                     created_at=now,
                 )
             )

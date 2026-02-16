@@ -238,27 +238,44 @@ class JSONSource(BaseSource):
                 yield quarantined
 
     def _load_json_array(self, ctx: PluginContext) -> Iterator[SourceRow]:
-        """Load from JSON array format."""
-        with open(self._path, encoding=self._encoding) as f:
-            # parse_constant rejects NaN/Infinity at parse time (canonical JSON policy)
-            try:
-                data = json.load(f, parse_constant=_reject_nonfinite_constant)
-            except (json.JSONDecodeError, ValueError) as e:
-                # File-level parse error - treat as Tier 3 boundary
-                # External data can be malformed; don't crash the pipeline
-                if isinstance(e, json.JSONDecodeError):
-                    error_msg = f"JSON parse error at line {e.lineno} col {e.colno}: {e.msg}"
-                else:
-                    # ValueError from _reject_nonfinite_constant (NaN/Infinity)
-                    error_msg = f"JSON parse error: {e}"
-                quarantined = self._record_parse_error(
-                    ctx=ctx,
-                    row={"file_path": str(self._path), "error": error_msg},
-                    error_msg=error_msg,
-                )
-                if quarantined is not None:
-                    yield quarantined
-                return  # Stop processing this file
+        """Load from JSON array format.
+
+        Per Three-Tier Trust Model (CLAUDE.md), external data (Tier 3) that
+        fails to parse or decode is quarantined, not crash the pipeline.
+        """
+        try:
+            with open(self._path, encoding=self._encoding) as f:
+                # parse_constant rejects NaN/Infinity at parse time (canonical JSON policy)
+                try:
+                    data = json.load(f, parse_constant=_reject_nonfinite_constant)
+                except (json.JSONDecodeError, ValueError) as e:
+                    # File-level parse error - treat as Tier 3 boundary
+                    # External data can be malformed; don't crash the pipeline
+                    if isinstance(e, json.JSONDecodeError):
+                        error_msg = f"JSON parse error at line {e.lineno} col {e.colno}: {e.msg}"
+                    else:
+                        # ValueError from _reject_nonfinite_constant (NaN/Infinity)
+                        error_msg = f"JSON parse error: {e}"
+                    quarantined = self._record_parse_error(
+                        ctx=ctx,
+                        row={"file_path": str(self._path), "error": error_msg},
+                        error_msg=error_msg,
+                    )
+                    if quarantined is not None:
+                        yield quarantined
+                    return  # Stop processing this file
+        except UnicodeDecodeError as e:
+            # Invalid byte sequences in external file - quarantine, don't crash.
+            # Matches JSONL mode's outer UnicodeDecodeError handler.
+            error_msg = f"JSON parse error: invalid {self._encoding} encoding ({e})"
+            quarantined = self._record_parse_error(
+                ctx=ctx,
+                row={"file_path": str(self._path)},
+                error_msg=error_msg,
+            )
+            if quarantined is not None:
+                yield quarantined
+            return
 
         # Extract from nested key if specified
         # Per Three-Tier Trust Model (CLAUDE.md), structural mismatches in external

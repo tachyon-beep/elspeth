@@ -146,6 +146,60 @@ class TestDuplicateNameValidation:
         with pytest.raises(ValueError, match="duplicate_name"):
             manager.register(Plugin2())
 
+    def test_duplicate_registration_does_not_pollute_pluggy_state(self) -> None:
+        """After a duplicate registration fails, the manager must be in a clean state.
+
+        Regression: P1-2026-02-14 — register() added the plugin to pluggy before
+        duplicate detection in _refresh_caches(). When _refresh_caches() raised
+        ValueError, the plugin remained in pluggy, poisoning all future registrations.
+        """
+        import pytest
+
+        from elspeth.plugins import PluginManager, hookimpl
+
+        class Plugin1:
+            @hookimpl
+            def elspeth_get_transforms(self) -> list[type]:
+                class T1:
+                    name = "duplicate_name"
+
+                return [T1]
+
+        class Plugin2:
+            @hookimpl
+            def elspeth_get_transforms(self) -> list[type]:
+                class T2:
+                    name = "duplicate_name"
+
+                return [T2]
+
+        class Plugin3:
+            @hookimpl
+            def elspeth_get_transforms(self) -> list[type]:
+                class T3:
+                    name = "unique_name"
+
+                return [T3]
+
+        manager = PluginManager()
+        manager.register(Plugin1())
+
+        # Duplicate registration should fail
+        with pytest.raises(ValueError, match="duplicate_name"):
+            manager.register(Plugin2())
+
+        # After failure, manager must still be clean:
+        # 1. Only the original Plugin1 transform should exist
+        transforms = manager.get_transforms()
+        assert len(transforms) == 1
+        assert transforms[0].name == "duplicate_name"
+
+        # 2. Registering a distinct plugin should succeed
+        manager.register(Plugin3())
+        transforms = manager.get_transforms()
+        names = sorted(t.name for t in transforms)
+        assert names == ["duplicate_name", "unique_name"]
+
     def test_same_name_different_types_ok(self) -> None:
         """Same name in different plugin types is allowed."""
         from elspeth.plugins import PluginManager, hookimpl

@@ -56,6 +56,8 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._ensure_table:row"
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._create_columns_from_schema_or_row:row"
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink.write:rows (list)"
+  - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._serialize_any_typed_fields:rows (list)"
+  - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink._serialize_any_typed_fields:return (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._open_file:rows (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._get_field_names_and_display:row"
@@ -259,6 +261,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._update_checkpoint:data"
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._check_batch_status:checkpoint"
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._download_results:checkpoint"
+  - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._record_per_row_failure_calls:checkpoint"
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.azure_config:return"
 
   # Azure multi-query LLM (refactored: PipelineRow is now the row type at plugin boundary)

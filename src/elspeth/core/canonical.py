@@ -92,6 +92,16 @@ def _normalize_value(obj: Any) -> Any:
             return _normalize_value(obj.item())
         return [_normalize_value(x) for x in obj.tolist()]
 
+    # NumPy datetime64
+    if isinstance(obj, np.datetime64):
+        if np.isnat(obj):
+            return None
+        # Convert to pd.Timestamp for consistent UTC ISO 8601 output
+        ts = pd.Timestamp(obj)
+        if ts.tz is None:
+            return ts.tz_localize("UTC").isoformat()
+        return ts.tz_convert("UTC").isoformat()
+
     # Pandas types
     if isinstance(obj, pd.Timestamp):
         # Naive timestamps assumed UTC (explicit policy)

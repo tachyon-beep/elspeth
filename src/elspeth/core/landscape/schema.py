@@ -133,12 +133,15 @@ tokens_table = Table(
     metadata,
     Column("token_id", String(64), primary_key=True),
     Column("row_id", String(64), ForeignKey("rows.row_id"), nullable=False),
+    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),  # Run ownership for cross-run contamination prevention
     Column("fork_group_id", String(64)),
     Column("join_group_id", String(64)),
     Column("expand_group_id", String(32), nullable=True, index=True),  # For deaggregation
     Column("branch_name", String(64)),
     Column("step_in_pipeline", Integer),  # Step where this token was created (fork/coalesce/expand)
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Composite unique target for downstream composite FKs (token_id, run_id)
+    UniqueConstraint("token_id", "run_id"),
 )
 
 # === Token Outcomes (AUD-001: Explicit terminal state recording) ===
@@ -148,8 +151,10 @@ token_outcomes_table = Table(
     metadata,
     # Identity
     Column("outcome_id", String(64), primary_key=True),
-    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False, index=True),
-    Column("token_id", String(64), ForeignKey("tokens.token_id"), nullable=False, index=True),
+    Column("run_id", String(64), nullable=False, index=True),
+    Column("token_id", String(64), nullable=False, index=True),
+    # Composite FK: enforces token_id and run_id belong together (prevents cross-run contamination)
+    ForeignKeyConstraint(["token_id", "run_id"], ["tokens.token_id", "tokens.run_id"]),
     # Core outcome
     Column("outcome", String(32), nullable=False),
     Column("is_terminal", Integer, nullable=False),  # SQLite doesn't have Boolean, use Integer
@@ -435,14 +440,20 @@ transform_errors_table = Table(
     "transform_errors",
     metadata,
     Column("error_id", String(32), primary_key=True),
-    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("token_id", String(64), ForeignKey("tokens.token_id", ondelete="RESTRICT"), nullable=False),
+    Column("run_id", String(64), nullable=False),
+    Column("token_id", String(64), nullable=False),
     Column("transform_id", String(64), nullable=False),  # Part of composite FK to nodes
     Column("row_hash", String(64), nullable=False),
     Column("row_data_json", Text),
     Column("error_details_json", Text),  # From TransformResult.error()
     Column("destination", String(255), nullable=False),  # Sink name or "discard"
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Composite FK to tokens (token_id, run_id) — enforces token/run ownership
+    ForeignKeyConstraint(
+        ["token_id", "run_id"],
+        ["tokens.token_id", "tokens.run_id"],
+        ondelete="RESTRICT",
+    ),
     # Composite FK to nodes (transform_id, run_id)
     ForeignKeyConstraint(
         ["transform_id", "run_id"],

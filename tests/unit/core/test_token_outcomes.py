@@ -194,19 +194,24 @@ class TestTokenOutcomesTableSchema:
         pk_columns = [c.name for c in token_outcomes_table.primary_key.columns]
         assert pk_columns == ["outcome_id"]
 
-    def test_run_id_has_foreign_key(self) -> None:
+    def test_composite_fk_to_tokens(self) -> None:
+        """token_outcomes.(token_id, run_id) is a composite FK to tokens.(token_id, run_id).
+
+        This prevents cross-run contamination at the DB level: token_id and run_id
+        must belong together in the tokens table, not just exist independently.
+        """
         from elspeth.core.landscape.schema import token_outcomes_table
 
+        # run_id FK target is now tokens.run_id (via composite FK),
+        # not runs.run_id (the old independent FK). Referential integrity
+        # to runs is enforced transitively: tokens.run_id -> runs.run_id.
         run_id_col = token_outcomes_table.c.run_id
-        fk_targets = [fk.target_fullname for fk in run_id_col.foreign_keys]
-        assert "runs.run_id" in fk_targets
-
-    def test_token_id_has_foreign_key(self) -> None:
-        from elspeth.core.landscape.schema import token_outcomes_table
+        run_id_fk_targets = [fk.target_fullname for fk in run_id_col.foreign_keys]
+        assert "tokens.run_id" in run_id_fk_targets
 
         token_id_col = token_outcomes_table.c.token_id
-        fk_targets = [fk.target_fullname for fk in token_id_col.foreign_keys]
-        assert "tokens.token_id" in fk_targets
+        token_id_fk_targets = [fk.target_fullname for fk in token_id_col.foreign_keys]
+        assert "tokens.token_id" in token_id_fk_targets
 
 
 class TestRecordTokenOutcome:

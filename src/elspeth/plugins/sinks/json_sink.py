@@ -308,9 +308,27 @@ class JSONSink(BaseSink):
 
         Uses write mode (truncate) or append mode based on self._mode.
         Append mode is used during resume to add to existing output.
+
+        When appending to an existing file with an explicit schema (fixed or
+        flexible), validates schema compatibility before opening. This mirrors
+        CSVSink's append-mode validation and prevents silent schema drift.
         """
         if self._file is None:
             file_mode = "a" if self._mode == "append" else "w"
+
+            # Validate schema compatibility before first append to existing file.
+            # Without this, append mode can write rows with incompatible schemas
+            # into the same JSONL file, violating sink schema contracts.
+            if self._mode == "append" and self._path.exists() and not self._schema_config.is_observed:
+                validation = self.validate_output_target()
+                if not validation.valid:
+                    msg_parts = [f"JSONL schema mismatch: {validation.error_message}"]
+                    if validation.missing_fields:
+                        msg_parts.append(f"Missing fields: {list(validation.missing_fields)}")
+                    if validation.extra_fields:
+                        msg_parts.append(f"Extra fields: {list(validation.extra_fields)}")
+                    raise ValueError(". ".join(msg_parts))
+
             self._file = open(self._path, file_mode, encoding=self._encoding)  # noqa: SIM115
 
         for row in rows:

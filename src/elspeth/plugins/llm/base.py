@@ -22,7 +22,12 @@ from elspeth.contracts.schema_contract import FieldContract, PipelineRow, Schema
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
+from elspeth.plugins.llm import (
+    _build_augmented_output_schema,
+    get_llm_audit_fields,
+    get_llm_guaranteed_fields,
+    populate_llm_metadata_fields,
+)
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import PoolConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -248,7 +253,15 @@ class BaseLLMTransform(BaseTransform):
             allow_coercion=False,  # Transforms do NOT coerce
         )
         self.input_schema = schema
-        self.output_schema = schema
+        # Build augmented output schema that includes LLM-added fields.
+        # Without this, output_schema diverges from output_schema_config's
+        # guaranteed_fields, causing DAG validation failures for explicit-schema
+        # pipelines where downstream consumers require LLM output fields.
+        self.output_schema = _build_augmented_output_schema(
+            base_schema_config=schema_config,
+            response_field=cfg.response_field,
+            schema_name=f"{self.name}OutputSchema",
+        )
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)

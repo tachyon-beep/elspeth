@@ -21,7 +21,12 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
+from elspeth.plugins.llm import (
+    _build_augmented_output_schema,
+    get_llm_audit_fields,
+    get_llm_guaranteed_fields,
+    populate_llm_metadata_fields,
+)
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
@@ -175,7 +180,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             allow_coercion=False,  # Transforms do NOT coerce
         )
         self.input_schema = schema
-        self.output_schema = schema
+        self.output_schema = _build_augmented_output_schema(
+            base_schema_config=schema_config,
+            response_field=cfg.response_field,
+            schema_name=f"{self.name}OutputSchema",
+        )
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)
@@ -439,7 +448,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         messages.append({"role": "user", "content": rendered.prompt})
 
         # 3. Get LLM client (cached per state_id for call_index uniqueness)
-        if ctx.state_id is None:
+        # BUG-AZURE-STATE-ID: Snapshot state_id at method entry. ctx.state_id is mutable
+        # (engine rewrites it per retry attempt on the shared context object), so using
+        # it in the finally block could evict the wrong cache entry during retry races.
+        state_id = ctx.state_id
+        if state_id is None:
             raise RuntimeError("Azure LLM transform requires state_id. Ensure transform is executed through the engine.")
 
         try:
@@ -448,7 +461,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             if ctx.token is None:
                 raise RuntimeError("Azure LLM transform requires ctx.token. Ensure transform is executed through the engine.")
             token_id = ctx.token.token_id
-            llm_client = self._get_llm_client(ctx.state_id, token_id=token_id)
+            llm_client = self._get_llm_client(state_id, token_id=token_id)
 
             # 4. Call LLM (EXTERNAL - wrap)
             # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
@@ -522,9 +535,10 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 success_reason={"action": "enriched", "fields_added": [self._response_field]},
             )
         finally:
-            # Clean up cached client for this state_id to prevent unbounded growth
+            # Clean up cached client for this state_id to prevent unbounded growth.
+            # Uses snapshot (not ctx.state_id) to avoid evicting wrong entry during retry races.
             with self._llm_clients_lock:
-                self._llm_clients.pop(ctx.state_id, None)
+                self._llm_clients.pop(state_id, None)
 
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client.
@@ -772,4 +786,19 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
         connection_string=config.connection_string,
         enable_live_metrics=config.enable_live_metrics,
     )
+
+    # Wire enable_content_recording to the Azure AI Inference tracing SDK.
+    # Without this, the config field is accepted and logged but never applied,
+    # leaving operators with a false sense of their content recording policy.
+    try:
+        from azure.ai.inference.tracing import AIInferenceInstrumentor  # type: ignore[import-not-found,import-untyped]  # optional dep
+
+        AIInferenceInstrumentor().instrument(enable_content_recording=config.enable_content_recording)
+    except ImportError:
+        # azure-ai-inference not installed — fall back to environment variable
+        # which the OpenAI SDK instrumentor reads at trace emission time.
+        import os
+
+        os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = str(config.enable_content_recording).lower()
+
     return True

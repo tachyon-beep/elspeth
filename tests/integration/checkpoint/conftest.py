@@ -172,6 +172,7 @@ def run_with_checkpoint_and_payloads(
                 tokens_table.insert().values(
                     token_id=f"tok-{i:03d}",
                     row_id=row_id,
+                    run_id=run_id,
                     created_at=now,
                 )
             )

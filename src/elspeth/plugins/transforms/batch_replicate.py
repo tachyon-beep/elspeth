@@ -159,7 +159,10 @@ class BatchReplicate(BaseTransform):
 
                 # Contract enforcement: copies_field must be int if present
                 # Tier 2 pipeline data - wrong types indicate upstream bug
-                if not isinstance(raw_copies, int):
+                # Use `type(x) is int` instead of `isinstance(x, int)` because
+                # bool is a subclass of int in Python, so isinstance(True, int)
+                # returns True. We must reject bool values explicitly.
+                if type(raw_copies) is not int:
                     raise TypeError(
                         f"Field '{self._copies_field}' must be int, got {type(raw_copies).__name__}. "
                         f"This indicates an upstream validation bug - check source schema or prior transforms."

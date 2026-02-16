@@ -1136,3 +1136,154 @@ class TestJSONSourceDataKeyStructuralErrors:
 
         call_kwargs = mock_landscape.record_validation_error.call_args[1]
         assert call_kwargs["schema_mode"] == "parse"
+
+
+class TestJSONSourceArrayModeUnicodeDecodeError:
+    """Regression tests for P1: JSONSource crashes on invalid byte sequences in array mode.
+
+    Bug: P1-2026-02-14-jsonsource-crashes-on-invalid-byte-sequences-in-json-array-mode
+
+    Per Three-Tier Trust Model, external data with invalid encoding must be
+    quarantined, not crash the pipeline. JSONL mode already handled this;
+    JSON array mode did not.
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_invalid_utf8_bytes_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Invalid UTF-8 byte sequences in JSON array file are quarantined, not crash."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        # Write raw bytes: valid JSON prefix followed by invalid UTF-8 bytes
+        json_file.write_bytes(b'[{"id": 1}, {"name": "\xff\xfe"}]')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "encoding": "utf-8",
+                "on_validation_failure": "quarantine",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        # Should NOT crash with UnicodeDecodeError — should quarantine
+        results = list(source.load(ctx))
+
+        assert len(results) == 1
+        quarantined = results[0]
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_destination == "quarantine"
+        assert quarantined.quarantine_error is not None
+        assert "utf-8" in quarantined.quarantine_error.lower()
+        assert "file_path" in quarantined.row
+
+    def test_invalid_utf8_bytes_with_discard_mode(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Invalid UTF-8 bytes in array mode with discard yields nothing."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        json_file.write_bytes(b'[{"id": 1}, {"name": "\xff\xfe"}]')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "encoding": "utf-8",
+                "on_validation_failure": "discard",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        results = list(source.load(ctx))
+        assert len(results) == 0
+
+    def test_truncated_utf16_file_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Truncated UTF-16 file in JSON array mode is quarantined, not crash."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        # Write a valid UTF-16 BOM then truncate mid-sequence
+        json_file.write_bytes(b'\xff\xfe[{"id": 1}')  # Incomplete UTF-16
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "encoding": "utf-16",
+                "on_validation_failure": "quarantine",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        # Should NOT crash — should quarantine
+        results = list(source.load(ctx))
+
+        # Either UnicodeDecodeError or JSONDecodeError depending on decoder —
+        # both should be quarantined, not crash
+        assert len(results) >= 1
+        assert all(r.is_quarantined for r in results)
+
+    def test_invalid_encoding_records_validation_error(self, tmp_path: Path) -> None:
+        """Invalid encoding in array mode records validation error in audit trail."""
+        from unittest.mock import MagicMock
+
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        json_file.write_bytes(b'[{"id": 1}, {"name": "\xff\xfe"}]')
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_validation_error.return_value = "verr_test"
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_json",
+            landscape=mock_landscape,
+        )
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "encoding": "utf-8",
+                "on_validation_failure": "quarantine",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        list(source.load(ctx))
+
+        # Verify validation error was recorded via landscape
+        mock_landscape.record_validation_error.assert_called_once()
+        call_kwargs = mock_landscape.record_validation_error.call_args[1]
+        assert call_kwargs["schema_mode"] == "parse"
+        assert "utf-8" in call_kwargs["error"].lower()
+
+    def test_pure_binary_garbage_quarantined(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Completely invalid binary file is quarantined in array mode."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        json_file.write_bytes(bytes(range(128, 256)))  # All high bytes
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "encoding": "utf-8",
+                "on_validation_failure": "quarantine",
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        # Should quarantine the decode error, not crash
+        results = list(source.load(ctx))
+
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None

@@ -190,6 +190,14 @@ class JSONExplode(BaseTransform):
                         f"row {i} has fields {sorted(row_keys)}"
                     )
 
+        # Determine the contract type for the output field.
+        # If the exploded array contains heterogeneous types (e.g., ["a", {"k": 1}]),
+        # the output field type must be `object` (the universal type) rather than
+        # the type inferred from only the first element. This prevents downstream
+        # components from relying on a contract type that doesn't hold for all rows.
+        item_types = {type(item) for item in array_value}
+        output_field_is_heterogeneous = len(item_types) > 1
+
         # Update contract using first output row (all rows have same schema)
         output_contract = narrow_contract_to_output(
             input_contract=row.contract,
@@ -208,6 +216,26 @@ class JSONExplode(BaseTransform):
                         source="inferred",
                     ),
                 ),
+                locked=True,
+            )
+        elif output_field_is_heterogeneous:
+            # Override the inferred type to `object` when items have mixed types.
+            # narrow_contract_to_output inferred the type from the first element only,
+            # which would be wrong for subsequent rows with different element types.
+            patched_fields = tuple(
+                FieldContract(
+                    normalized_name=fc.normalized_name,
+                    original_name=fc.original_name,
+                    python_type=object if fc.normalized_name == self._output_field else fc.python_type,
+                    required=fc.required,
+                    source=fc.source,
+                    nullable=fc.nullable,
+                )
+                for fc in output_contract.fields
+            )
+            output_contract = SchemaContract(
+                mode=output_contract.mode,
+                fields=patched_fields,
                 locked=True,
             )
 

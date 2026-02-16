@@ -1276,6 +1276,30 @@ class Orchestrator:
         else:
             default_last_node_id = source_id
 
+        # Build checkpoint callback for aggregation timeout flushes
+        # BUG FIX: P1-2026-02-14 — timeout flushes were missing checkpoint callbacks,
+        # so crash recovery could lose aggregation-boundary progress.
+        # Must be after default_last_node_id computation (closure captures it).
+        timeout_checkpoint_callback: Callable[[TokenInfo], None] | None = None
+        if self._checkpoint_config and self._checkpoint_config.enabled and self._checkpoint_manager:
+
+            def _make_timeout_checkpoint_callback() -> Callable[[TokenInfo], None]:
+                captured_run_id = run_id
+                captured_node_id = default_last_node_id
+
+                def callback(token: TokenInfo) -> None:
+                    agg_state = processor.get_aggregation_checkpoint_state()
+                    self._maybe_checkpoint(
+                        run_id=captured_run_id,
+                        token_id=token.token_id,
+                        node_id=captured_node_id,
+                        aggregation_state=agg_state,
+                    )
+
+                return callback
+
+            timeout_checkpoint_callback = _make_timeout_checkpoint_callback()
+
         # SOURCE phase - initialize source and begin loading
         phase_start = time.perf_counter()
         self._events.emit(PhaseStarted(phase=PipelinePhase.SOURCE, action=PhaseAction.INITIALIZING, target=config.source.name))
@@ -1570,6 +1594,7 @@ class Orchestrator:
                             ctx=ctx,
                             pending_tokens=pending_tokens,
                             agg_transform_lookup=agg_transform_lookup,
+                            checkpoint_callback=timeout_checkpoint_callback,
                         )
                         counters.accumulate_flush_result(timeout_result)
 

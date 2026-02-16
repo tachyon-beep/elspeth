@@ -153,13 +153,23 @@ def handle_coalesce_timeouts(
             coalesce_name=coalesce_name_str,
         )
         for outcome in timed_out:
-            if outcome.merged_token is not None:
+            has_merged = outcome.merged_token is not None
+            has_failure = outcome.failure_reason is not None
+            if has_merged == has_failure:
+                raise OrchestrationInvariantError(
+                    f"Invalid CoalesceOutcome state: merged={has_merged}, "
+                    f"failure_reason={outcome.failure_reason!r}. "
+                    f"Outcome must have exactly one of merged_token or failure_reason."
+                )
+            if has_merged:
                 counters.rows_coalesced += 1
+                merged_token = outcome.merged_token
+                assert merged_token is not None  # guarded by has_merged check above
                 # Route merged token through processor from the coalesce node.
                 # Processor internals decide terminal vs non-terminal using DAG
                 # continuation metadata and return COMPLETED with sink_name when terminal.
                 continuation_results = processor.process_token(
-                    token=outcome.merged_token,
+                    token=merged_token,
                     ctx=ctx,
                     current_node_id=coalesce_node_id,
                     coalesce_node_id=coalesce_node_id,
@@ -171,7 +181,7 @@ def handle_coalesce_timeouts(
                     config_sinks,
                     pending_tokens,
                 )
-            elif outcome.failure_reason:
+            else:
                 counters.rows_coalesce_failed += 1
 
 
@@ -204,17 +214,30 @@ def flush_coalesce_pending(
 
     # Handle any merged tokens from flush
     for outcome in pending_outcomes:
-        if outcome.merged_token is not None:
+        has_merged = outcome.merged_token is not None
+        has_failure = outcome.failure_reason is not None
+        if has_merged == has_failure:
+            raise OrchestrationInvariantError(
+                f"Invalid CoalesceOutcome state: merged={has_merged}, "
+                f"failure_reason={outcome.failure_reason!r}. "
+                f"Outcome must have exactly one of merged_token or failure_reason."
+            )
+        if has_merged:
             # Successful merge
             counters.rows_coalesced += 1
             # Business logic: coalesce_name is guaranteed non-None when merged_token is not None
-            assert outcome.coalesce_name is not None, "Coalesce outcome must have coalesce_name when merged_token exists"
+            if outcome.coalesce_name is None:
+                raise OrchestrationInvariantError(
+                    "CoalesceOutcome has merged_token but coalesce_name is None. This indicates a bug in CoalesceExecutor.flush_pending()."
+                )
             coalesce_name = CoalesceName(outcome.coalesce_name)
+            merged_token = outcome.merged_token
+            assert merged_token is not None  # guarded by invariant check above
             # Route merged token through processor from the coalesce node.
             # Processor internals decide terminal vs non-terminal using DAG
             # continuation metadata and return COMPLETED with sink_name when terminal.
             continuation_results = processor.process_token(
-                token=outcome.merged_token,
+                token=merged_token,
                 ctx=ctx,
                 current_node_id=coalesce_node_map[coalesce_name],
                 coalesce_node_id=coalesce_node_map[coalesce_name],
@@ -226,7 +249,7 @@ def flush_coalesce_pending(
                 config_sinks,
                 pending_tokens,
             )
-        elif outcome.failure_reason:
+        else:
             # Coalesce failed (quorum_not_met, incomplete_branches)
             # Audit trail recorded by executor: each consumed token has
             # node_state with status="failed" and error_json explaining why.

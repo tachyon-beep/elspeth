@@ -9,7 +9,7 @@ If the source outputs wrong types, the transform crashes immediately.
 import copy
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.plugin_context import PluginContext
@@ -32,6 +32,38 @@ class FieldMapperConfig(TransformDataConfig):
     select_only: bool = False
     strict: bool = False
     validate_input: bool = False  # Optional input validation
+
+    @model_validator(mode="after")
+    def _reject_duplicate_targets(self) -> "FieldMapperConfig":
+        """Reject mappings where multiple sources map to the same target.
+
+        Duplicate targets cause silent data loss: the last write wins,
+        overwriting the value from the earlier mapping without any error.
+        This also produces incorrect contract metadata (type/original_name
+        lineage from the wrong source field).
+        """
+        if not self.mapping:
+            return self
+        targets: list[str] = list(self.mapping.values())
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for target in targets:
+            if target in seen:
+                duplicates.add(target)
+            seen.add(target)
+        if duplicates:
+            # Build source->target details for the error message
+            collisions: dict[str, list[str]] = {}
+            for source, target in self.mapping.items():
+                if target in duplicates:
+                    collisions.setdefault(target, []).append(source)
+            msg = (
+                f"Mapping has duplicate target field names: "
+                f"{', '.join(f'{t!r} <- {srcs}' for t, srcs in sorted(collisions.items()))}. "
+                f"Multiple sources mapping to the same target causes silent data loss."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class FieldMapper(BaseTransform):

@@ -71,6 +71,7 @@ def _insert_checkpoint_prereqs(
         tokens_table.insert().values(
             token_id=token_id,
             row_id=row_id,
+            run_id=run_id,
             created_at=now,
         )
     )

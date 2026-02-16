@@ -55,6 +55,7 @@ class TestTransformErrorRecording:
                 tokens_table.insert().values(
                     token_id=token_id,
                     row_id=row.row_id,
+                    run_id=run_id,
                     step_in_pipeline=0,
                     created_at=datetime.now(UTC),
                 )

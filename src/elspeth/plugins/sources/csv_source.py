@@ -7,7 +7,6 @@ IMPORTANT: Sources use allow_coercion=True to normalize external data.
 This is the ONLY place in the pipeline where coercion is allowed.
 """
 
-import contextlib
 import csv
 from collections.abc import Iterator
 from typing import Any
@@ -136,13 +135,61 @@ class CSVSource(BaseSource):
             reader = csv.reader(f, delimiter=self._delimiter)
 
             # Skip CSV records as configured (not raw lines), preserving multiline alignment.
-            # csv.Error is caught because skip_rows targets non-CSV metadata preamble
-            # (comments, version headers, etc.) that may contain unmatched quotes or
-            # other constructs invalid under RFC 4180.  The user explicitly asked to
-            # discard these rows, so a parse failure is not an error worth surfacing.
-            for _ in range(self._skip_rows):
-                with contextlib.suppress(csv.Error):
-                    next(reader, None)
+            # skip_rows targets non-CSV metadata preamble (comments, version headers, etc.)
+            # that may contain unmatched quotes or other RFC 4180 violations.
+            #
+            # CRITICAL: csv.Error during skip means the parser consumed an unknown amount
+            # of data (e.g., an unmatched quote swallowed subsequent lines). We record the
+            # error and stop processing to avoid silent data loss from corrupted parser state.
+            for skip_idx in range(self._skip_rows):
+                try:
+                    if next(reader, None) is None:
+                        # Fewer rows than skip_rows — file exhausted during skip.
+                        # Record that we ran out of data so the audit trail shows
+                        # skip_rows consumed everything (no silent empty result).
+                        skip_count = skip_idx  # rows successfully skipped before exhaustion
+                        error_msg = (
+                            f"CSV file exhausted during skip_rows; "
+                            f"skip_rows={self._skip_rows} requested but file "
+                            f"only had {skip_count} row(s) to skip "
+                            f"(no header or data rows remain)"
+                        )
+                        raw_row = {
+                            "file_path": str(self._path),
+                            "skip_rows": self._skip_rows,
+                            "rows_skipped": skip_count,
+                        }
+                        ctx.record_validation_error(
+                            row=raw_row,
+                            error=error_msg,
+                            schema_mode="parse",
+                            destination=self._on_validation_failure,
+                        )
+                        return
+                except csv.Error as e:
+                    # Parser error during skip — the csv reader state may be corrupted
+                    # (e.g., unmatched quote consumed subsequent lines). Record the error
+                    # and stop processing to prevent silent data loss.
+                    physical_line = reader.line_num if reader.line_num > 0 else skip_idx + 1
+                    raw_row = {
+                        "file_path": str(self._path),
+                        "__line_number__": physical_line,
+                        "__raw_line__": f"(csv.Error during skip_rows at row {skip_idx + 1})",
+                    }
+                    error_msg = f"CSV parse error during skip_rows at row {skip_idx + 1} (line {physical_line}): {e}"
+                    ctx.record_validation_error(
+                        row=raw_row,
+                        error=error_msg,
+                        schema_mode="parse",
+                        destination=self._on_validation_failure,
+                    )
+                    if self._on_validation_failure != "discard":
+                        yield SourceRow.quarantined(
+                            row=raw_row,
+                            error=error_msg,
+                            destination=self._on_validation_failure,
+                        )
+                    return  # Don't continue with corrupted parser state
 
             # Determine headers based on config
             if self._columns is not None:
@@ -153,7 +200,22 @@ class CSVSource(BaseSource):
                 try:
                     raw_headers = next(reader)
                 except StopIteration:
-                    return  # Empty file after skip_rows
+                    # File exhausted after skip_rows — no header row remains.
+                    # Record so the audit trail shows skip_rows consumed all content.
+                    if self._skip_rows > 0:
+                        error_msg = (
+                            f"CSV file has no header row after skipping {self._skip_rows} row(s); skip_rows may exceed available content"
+                        )
+                        ctx.record_validation_error(
+                            row={
+                                "file_path": str(self._path),
+                                "skip_rows": self._skip_rows,
+                            },
+                            error=error_msg,
+                            schema_mode="parse",
+                            destination=self._on_validation_failure,
+                        )
+                    return
                 except csv.Error as e:
                     # Header parse failure at source boundary (Tier 3): record and quarantine/discard
                     physical_line = reader.line_num if reader.line_num > 0 else self._skip_rows + 1

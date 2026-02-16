@@ -39,12 +39,12 @@ per_file_rules:
   reason: Azure API responses are external data (Tier 3) - all defensive patterns legitimate
   expires: null
 allow_hits:
-- key: plugins/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=efe10b71fb5afade
+- key: plugins/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=1354b5a5a2a3ca27
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=4217324caed47be5
+- key: plugins/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=c59b28f42a9b6dd3
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -69,7 +69,7 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=2313ec3565068c68
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=1ad7abf6393764cd
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -78,11 +78,6 @@ allow_hits:
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=08c42297700bdf0d
-  owner: architecture
-  reason: Tier 2 contract enforcement - isinstance validates copies_field type before arithmetic
-  safety: Wrong types crash (upstream bug); wrong values quarantined via error result
   expires: '2026-05-02'
 - key: plugins/transforms/keyword_filter.py:R5:KeywordFilter:process:fp=a322360de8a02939
   owner: architecture
@@ -149,17 +144,12 @@ allow_hits:
   reason: contextlib.suppress for expected exceptions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=1eb8d42fd33ba478
+- key: plugins/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=353ea75e2e1045c1
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=a710984dc1fb9979
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=9230e59132d3de9f
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=67b74383a3990f5e
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
@@ -316,17 +306,17 @@ allow_hits:
   owner: architecture
   reason: Telemetry emission failure — must not crash main LLM call flow
   safety: Logged and continues — telemetry is non-critical to LLM processing
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=529df26a8624a42d
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=58b19b185d408859
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
   expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=688e26cbcb3aa309
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=017cf6843f27cf8c
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
   expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=4f8918e243e34a1a
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=b85c6ebf7d83a196
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
@@ -412,8 +402,27 @@ allow_hits:
   owner: architecture
   reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access
-- key: plugins/sources/csv_source.py:R7:CSVSource:load:fp=f69de22403a3594b
-  owner: architecture
-  reason: Tier 3 boundary — skip_rows targets non-CSV metadata preamble that may violate RFC 4180
-  safety: User explicitly configured these rows to be discarded; csv.Error during skip is irrelevant
-  expires: null
+# multi_query.py — setdefault for prefix collision detection grouping
+- key: plugins/llm/multi_query.py:R8:validate_multi_query_key_collisions:fp=af4645d13fe9f171
+  owner: bugfix
+  reason: setdefault used for grouping cross-product prefixes to detect collision ambiguity
+  safety: Grouping is deterministic; ValueError raised if collisions found
+  expires: '2026-05-17'
+# pooling/executor.py — RuntimeError on thread pool shutdown during batch submission
+- key: plugins/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=277c4bd1b236787e
+  owner: bugfix
+  reason: Thread pool may be shut down concurrently; RuntimeError caught to complete buffer slot with error result
+  safety: Buffer slot filled with deterministic error result; row gets proper error instead of silent drop
+  expires: '2026-05-17'
+# database_sink.py — isinstance for dict/list JSON serialization of ANY-typed fields
+- key: plugins/sinks/database_sink.py:R5:DatabaseSink:_serialize_any_typed_fields:fp=99b7b72714bd97fa
+  owner: bugfix
+  reason: Tier 2 contract enforcement — isinstance distinguishes dict/list fields for JSON serialization before DB insert
+  safety: Only dict/list values serialized; all other types pass through unchanged
+  expires: '2026-05-17'
+# field_mapper.py — setdefault for duplicate target collision grouping
+- key: plugins/transforms/field_mapper.py:R8:FieldMapperConfig:_reject_duplicate_targets:fp=53b77afeb7d71fec
+  owner: bugfix
+  reason: setdefault used for grouping sources-by-target to detect duplicate target field names
+  safety: Grouping is deterministic; ValueError raised if duplicates found — prevents silent data loss
+  expires: '2026-05-17'

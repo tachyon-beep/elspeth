@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import os
 from collections.abc import Sequence
 from typing import IO, TYPE_CHECKING, Any, Literal
@@ -259,11 +260,28 @@ class CSVSink(BaseSink):
         if self._hasher is None:
             raise RuntimeError("CSVSink hasher not initialized - this is a bug")
 
+        # Stage the entire batch in memory BEFORE writing to file.
+        # This prevents partial writes: if any row fails serialization (e.g.,
+        # extra fields rejected by DictWriter), NO rows are written to disk.
+        # Without this, row N failing after rows 0..N-1 are written causes
+        # audit divergence -- CSV has rows the Landscape marks as FAILED.
+        staging_buffer = io.StringIO()
+        fieldnames = self._fieldnames
+        assert fieldnames is not None, "write() called before _fieldnames set by _write_header()"
+        staging_writer = csv.DictWriter(
+            staging_buffer,
+            fieldnames=fieldnames,
+            delimiter=self._delimiter,
+        )
+        for row in rows:
+            staging_writer.writerow(row)
+        staged_content = staging_buffer.getvalue()
+
         # Track file size before writing for incremental hashing
         pre_write_size = self._path.stat().st_size
 
-        for row in rows:
-            writer.writerow(row)
+        # Atomic batch write: all staged rows written at once
+        file.write(staged_content)
 
         # Flush to ensure content is on disk for hashing
         file.flush()

@@ -444,10 +444,28 @@ class AzureBlobSink(BaseSink):
         return data_fields, display_fields
 
     def _serialize_csv(self, rows: list[dict[str, Any]]) -> bytes:
-        """Serialize rows to CSV bytes."""
+        """Serialize rows to CSV bytes.
+
+        Validates that all rows conform to the established fieldnames BEFORE
+        any serialization occurs. This prevents partial serialization failures
+        that would leave the buffer in an inconsistent state.
+        """
         output = io.StringIO()
 
         data_fields, display_fields = self._get_field_names_and_display(rows)
+
+        # Preflight validation: reject extra fields before serialization.
+        # Without this, DictWriter raises mid-batch on extras, producing
+        # partial CSV content in the buffer.
+        if not self._schema_config.is_observed:
+            allowed = set(data_fields)
+            for i, row in enumerate(rows):
+                extra = sorted(set(row) - allowed)
+                if extra:
+                    raise ValueError(
+                        f"AzureBlobSink CSV row {i} has unexpected fields: {extra}. This indicates an upstream transform/schema bug."
+                    )
+
         writer = csv.DictWriter(
             output,
             fieldnames=data_fields,

@@ -167,6 +167,7 @@ class TokenRepository:
             expand_group_id=row.expand_group_id,
             branch_name=row.branch_name,
             step_in_pipeline=row.step_in_pipeline,
+            run_id=row.run_id,
         )
 
 

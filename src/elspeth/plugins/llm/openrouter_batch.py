@@ -31,7 +31,12 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.http import AuditedHTTPClient
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
+from elspeth.plugins.llm import (
+    _build_augmented_output_schema,
+    get_llm_audit_fields,
+    get_llm_guaranteed_fields,
+    populate_llm_metadata_fields,
+)
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
@@ -184,7 +189,11 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             allow_coercion=False,  # Transforms do NOT coerce
         )
         self.input_schema = schema
-        self.output_schema = schema
+        self.output_schema = _build_augmented_output_schema(
+            base_schema_config=schema_config,
+            response_field=cfg.response_field,
+            schema_name=f"{self.name}OutputSchema",
+        )
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)
@@ -470,24 +479,39 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 f"empty buffers. This indicates a bug in the engine or test setup."
             )
 
+        # Snapshot state_id for per-batch client eviction (same pattern as azure.py).
+        # Aggregation flushes generate new state_ids each time, so without eviction
+        # the client cache grows unboundedly.
+        state_id = ctx.state_id
+
         # Process rows in parallel using AuditedHTTPClient (one per state_id).
         # Each worker thread gets a cached client via _get_http_client().
         results: dict[int, _RowOutcome | Exception] = {}
 
-        with ThreadPoolExecutor(max_workers=self._pool_size) as executor:
-            futures = {executor.submit(self._process_single_row, idx, row, ctx): idx for idx, row in enumerate(rows)}
+        try:
+            with ThreadPoolExecutor(max_workers=self._pool_size) as executor:
+                futures = {executor.submit(self._process_single_row, idx, row, ctx): idx for idx, row in enumerate(rows)}
 
-            # Collect results - catch only transport exceptions, let plugin bugs crash.
-            # _process_single_row already handles HTTPStatusError and RequestError
-            # (the two HTTPError subclasses). Only StreamError can legitimately
-            # escape — it occurs during response streaming, after the request succeeds.
-            # InvalidURL is a config bug (bad base_url) and must crash per CLAUDE.md.
-            for future in as_completed(futures):
-                idx = futures[future]
-                try:
-                    results[idx] = future.result()
-                except httpx.StreamError as e:
-                    results[idx] = e
+                # Collect results - catch only transport exceptions, let plugin bugs crash.
+                # _process_single_row already handles HTTPStatusError and RequestError
+                # (the two HTTPError subclasses). Only StreamError can legitimately
+                # escape — it occurs during response streaming, after the request succeeds.
+                # InvalidURL is a config bug (bad base_url) and must crash per CLAUDE.md.
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    try:
+                        results[idx] = future.result()
+                    except httpx.StreamError as e:
+                        results[idx] = e
+        finally:
+            # Evict and close the state-scoped HTTP client after each batch completes
+            # (success or failure). Without this, each flush creates a new state_id and
+            # the cache grows unboundedly for long-running aggregation pipelines.
+            if state_id is not None:
+                with self._http_clients_lock:
+                    client = self._http_clients.pop(state_id, None)
+                if client is not None:
+                    client.close()
 
         # Assemble output rows in original order
         # Every row gets an output (success or with error markers) - no rows are dropped

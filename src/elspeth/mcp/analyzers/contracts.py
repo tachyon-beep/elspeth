@@ -92,12 +92,12 @@ def explain_field(
     if contract is None:
         return {"error": f"Run '{run_id}' has no contract stored"}
 
-    # Try to find field by normalized or original name
-    field_contract = None
-    for f in contract.fields:
-        if f.normalized_name == field_name or f.original_name == field_name:
-            field_contract = f
-            break
+    # Resolve field using canonical name resolution (normalized_name takes precedence)
+    normalized = contract.find_name(field_name)
+    if normalized is not None:
+        field_contract = contract.get_field(normalized)
+    else:
+        field_contract = None
 
     if field_contract is None:
         available_fields = [f.normalized_name for f in contract.fields]

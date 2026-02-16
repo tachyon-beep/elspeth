@@ -275,11 +275,21 @@ class BatchTransformMixin:
         Runs in a dedicated thread. Blocks on wait_for_next_release() until
         the next FIFO-ordered result is ready, then emits to output port.
 
+        Exit condition: ShutdownError from buffer (set during shutdown_batch_processing).
+        The loop does NOT check _batch_shutdown -- it keeps running until the buffer
+        is explicitly shut down, ensuring all completed results are drained first.
+
         Retry Safety:
             Each result includes state_id to ensure correct waiter matching.
             This prevents stale results from being delivered to retry attempts.
         """
-        while not self._batch_shutdown.is_set():
+        while True:
+            # Reset per-iteration to detect pre-unpack failures (Bug 2 fix).
+            # If an exception occurs before entry.result is unpacked, token/state_id
+            # remain None, preventing the handler from using stale values from a
+            # previous iteration.
+            token: TokenInfo | None = None
+            state_id: str | None = None
             try:
                 # Block until next result is ready (FIFO order)
                 entry = self._batch_buffer.wait_for_next_release(timeout=1.0)
@@ -297,14 +307,22 @@ class BatchTransformMixin:
                 self._batch_output.emit(token, result, state_id)
 
             except TimeoutError:
-                # Normal during low load - just check shutdown and continue
+                # Normal during low load - just loop and try again
                 continue
 
             except ShutdownError:
-                # Buffer was shut down - exit cleanly
+                # Buffer was shut down - exit cleanly.
+                # This is the ONLY exit path: shutdown_batch_processing() waits for
+                # workers to finish, then calls buffer.shutdown(), so all completed
+                # results have been drained by this point.
                 break
 
             except Exception as e:
+                if token is None:
+                    # Exception occurred BEFORE entry.result was unpacked.
+                    # This is an internal invariant violation (e.g., buffer corruption).
+                    # Re-raise immediately -- this is our bug, not a row-level error.
+                    raise
                 # Output port failure - this is a bug (CLAUDE.md compliance)
                 # Wrap exception and emit it so the waiter can propagate, rather than hanging
                 tb = traceback.format_exc()
@@ -393,22 +411,30 @@ class BatchTransformMixin:
 
         Call this in close() or cleanup.
 
-        Order:
-        1. Signal shutdown
-        2. Wait for workers to finish current tasks
-        3. Shutdown buffer (wakes release thread)
-        4. Wait for release thread to finish
+        Order (drain-first -- ensures no in-flight rows are dropped):
+        1. Signal shutdown (prevents new submissions via accept_row)
+        2. Wait for worker pool to finish current tasks
+        3. Shutdown buffer (wakes release thread with ShutdownError)
+        4. Wait for release thread to finish draining
+
+        The release loop does NOT check _batch_shutdown; it exits only when
+        the buffer raises ShutdownError. This ensures the loop keeps emitting
+        completed results until the buffer is explicitly shut down AFTER
+        workers have finished.
         """
-        # 1. Signal shutdown
+        # 1. Signal shutdown (accept_row will raise ShutdownError on new submits)
         self._batch_shutdown.set()
 
-        # 2. Shutdown worker pool (finish current tasks)
+        # 2. Wait for worker pool to finish current tasks.
+        #    After this returns, all workers have called complete() on their
+        #    tickets, so the release loop can drain every remaining entry.
         self._batch_executor.shutdown(wait=True)
 
-        # 3. Shutdown buffer (wakes release thread with ShutdownError)
+        # 3. Shutdown buffer -- this wakes the release thread with ShutdownError
+        #    so it exits after draining all completed entries.
         self._batch_buffer.shutdown()
 
-        # 4. Wait for release thread
+        # 4. Wait for release thread to finish
         self._batch_release_thread.join(timeout=timeout)
         if self._batch_release_thread.is_alive():
             import logging

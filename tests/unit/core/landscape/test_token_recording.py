@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts import NodeType, RowOutcome
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 
@@ -917,3 +918,454 @@ class TestGetTokenOutcomesForRow:
         # Query with a different run_id
         outcomes = recorder_a.get_token_outcomes_for_row(run_id="run-B", row_id=row_a.row_id)
         assert outcomes == []
+
+
+# ===========================================================================
+# Regression tests: P1-2026-02-14 cross-run contamination prevention
+# ===========================================================================
+
+
+def _setup_two_runs() -> tuple[LandscapeDB, LandscapeRecorder]:
+    """Set up a shared database with two runs, each with a source and aggregation node."""
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+
+    # Run A
+    recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
+    recorder.register_node(
+        run_id="run-A",
+        plugin_name="csv",
+        node_type=NodeType.SOURCE,
+        plugin_version="1.0",
+        config={},
+        node_id="source-0",
+        schema_config=_DYNAMIC_SCHEMA,
+    )
+    recorder.register_node(
+        run_id="run-A",
+        plugin_name="count_agg",
+        node_type=NodeType.AGGREGATION,
+        plugin_version="1.0",
+        config={},
+        node_id="agg-0",
+        schema_config=_DYNAMIC_SCHEMA,
+    )
+
+    # Run B
+    recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
+    recorder.register_node(
+        run_id="run-B",
+        plugin_name="csv",
+        node_type=NodeType.SOURCE,
+        plugin_version="1.0",
+        config={},
+        node_id="source-0",
+        schema_config=_DYNAMIC_SCHEMA,
+    )
+    recorder.register_node(
+        run_id="run-B",
+        plugin_name="count_agg",
+        node_type=NodeType.AGGREGATION,
+        plugin_version="1.0",
+        config={},
+        node_id="agg-0",
+        schema_config=_DYNAMIC_SCHEMA,
+    )
+
+    return db, recorder
+
+
+class TestCrossRunContaminationPrevention:
+    """P1-2026-02-14: Token lifecycle methods must crash on cross-run contamination.
+
+    These tests verify that recording audit records under the wrong run_id
+    raises AuditIntegrityError immediately, rather than silently corrupting
+    the audit trail.
+    """
+
+    def test_record_token_outcome_rejects_wrong_run_id(self):
+        """record_token_outcome must crash if token belongs to a different run."""
+        _db, recorder = _setup_two_runs()
+
+        # Create row and token in run-A
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        # Attempt to record outcome under run-B -- must crash
+        with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
+            recorder.record_token_outcome(
+                run_id="run-B",
+                token_id=token_a.token_id,
+                outcome=RowOutcome.COMPLETED,
+                sink_name="output",
+            )
+
+    def test_record_token_outcome_accepts_correct_run_id(self):
+        """record_token_outcome must succeed when run_id matches token ownership."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        # Recording with the correct run_id should succeed
+        outcome_id = recorder.record_token_outcome(
+            run_id="run-A",
+            token_id=token_a.token_id,
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output",
+        )
+        assert outcome_id is not None
+
+    def test_fork_token_rejects_wrong_run_id(self):
+        """fork_token must crash if parent token belongs to a different run."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
+            recorder.fork_token(
+                parent_token_id=token_a.token_id,
+                row_id=row_a.row_id,
+                branches=["path-a", "path-b"],
+                run_id="run-B",
+            )
+
+    def test_fork_token_rejects_wrong_row_id(self):
+        """fork_token must crash if parent token belongs to a different row."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value-a"},
+        )
+        row_b = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=1,
+            data={"col": "value-b"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        with pytest.raises(AuditIntegrityError, match="Cross-row lineage"):
+            recorder.fork_token(
+                parent_token_id=token_a.token_id,
+                row_id=row_b.row_id,
+                branches=["path-a"],
+                run_id="run-A",
+            )
+
+    def test_fork_token_accepts_correct_ownership(self):
+        """fork_token must succeed when run_id and row_id match parent token."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        children, fg = recorder.fork_token(
+            parent_token_id=token_a.token_id,
+            row_id=row_a.row_id,
+            branches=["path-a", "path-b"],
+            run_id="run-A",
+        )
+        assert len(children) == 2
+        assert fg is not None
+
+    def test_expand_token_rejects_wrong_run_id(self):
+        """expand_token must crash if parent token belongs to a different run."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        with pytest.raises(AuditIntegrityError, match="Cross-run contamination"):
+            recorder.expand_token(
+                parent_token_id=token_a.token_id,
+                row_id=row_a.row_id,
+                count=3,
+                run_id="run-B",
+            )
+
+    def test_expand_token_rejects_wrong_row_id(self):
+        """expand_token must crash if parent token belongs to a different row."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value-a"},
+        )
+        row_b = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=1,
+            data={"col": "value-b"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        with pytest.raises(AuditIntegrityError, match="Cross-row lineage"):
+            recorder.expand_token(
+                parent_token_id=token_a.token_id,
+                row_id=row_b.row_id,
+                count=2,
+                run_id="run-A",
+            )
+
+    def test_expand_token_accepts_correct_ownership(self):
+        """expand_token must succeed when run_id and row_id match parent token."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        children, eg = recorder.expand_token(
+            parent_token_id=token_a.token_id,
+            row_id=row_a.row_id,
+            count=3,
+            run_id="run-A",
+        )
+        assert len(children) == 3
+        assert eg is not None
+
+    def test_coalesce_tokens_rejects_cross_run_parents(self):
+        """coalesce_tokens must crash if parent tokens belong to different runs."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value-a"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        row_b = recorder.create_row(
+            run_id="run-B",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value-b"},
+        )
+        token_b = recorder.create_token(row_b.row_id)
+
+        # token_a belongs to run-A, token_b belongs to run-B
+        # coalesce requires row_id match, so this will fail on row ownership first
+        with pytest.raises(AuditIntegrityError):
+            recorder.coalesce_tokens(
+                parent_token_ids=[token_a.token_id, token_b.token_id],
+                row_id=row_a.row_id,
+            )
+
+    def test_coalesce_tokens_rejects_wrong_row_id(self):
+        """coalesce_tokens must crash if parent token belongs to a different row."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value-a"},
+        )
+        row_b = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=1,
+            data={"col": "value-b"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+        token_b = recorder.create_token(row_a.row_id)
+
+        # Both tokens belong to row_a, but we say row_b
+        with pytest.raises(AuditIntegrityError, match="Cross-row lineage"):
+            recorder.coalesce_tokens(
+                parent_token_ids=[token_a.token_id, token_b.token_id],
+                row_id=row_b.row_id,
+            )
+
+    def test_coalesce_tokens_accepts_correct_ownership(self):
+        """coalesce_tokens must succeed when all parents belong to the same row/run."""
+        _db, recorder = _setup_two_runs()
+
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+        token_b = recorder.create_token(row_a.row_id)
+
+        merged = recorder.coalesce_tokens(
+            parent_token_ids=[token_a.token_id, token_b.token_id],
+            row_id=row_a.row_id,
+        )
+        assert merged.token_id is not None
+        assert merged.run_id == "run-A"
+
+
+class TestTokenRunIdConsistency:
+    """P1-2026-02-14: Tokens must store run_id and derive it from their row.
+
+    These tests verify that create_token correctly derives run_id from the
+    row record and stores it, ensuring schema-level enforcement via composite FKs.
+    """
+
+    def test_create_token_stores_run_id(self):
+        """create_token must derive and store run_id from the row's run."""
+        _db, recorder = _setup(run_id="run-1")
+        row = recorder.create_row(
+            run_id="run-1",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token = recorder.create_token(row.row_id)
+        assert token.run_id == "run-1"
+
+    def test_create_token_for_nonexistent_row_crashes(self):
+        """create_token must crash if the row_id does not exist (Tier 1 violation)."""
+        _db, recorder = _setup(run_id="run-1")
+        with pytest.raises(AuditIntegrityError, match="does not exist"):
+            recorder.create_token("nonexistent-row-id")
+
+    def test_fork_children_have_run_id(self):
+        """Forked child tokens must inherit run_id from parent."""
+        _db, recorder = _setup(run_id="run-1")
+        row, token = _make_row(recorder)
+        children, _fg = recorder.fork_token(
+            parent_token_id=token.token_id,
+            row_id=row.row_id,
+            branches=["path-a", "path-b"],
+            run_id="run-1",
+        )
+        assert all(c.run_id == "run-1" for c in children)
+
+    def test_expand_children_have_run_id(self):
+        """Expanded child tokens must inherit run_id from parent."""
+        _db, recorder = _setup(run_id="run-1")
+        row, token = _make_row(recorder)
+        children, _eg = recorder.expand_token(
+            parent_token_id=token.token_id,
+            row_id=row.row_id,
+            count=3,
+            run_id="run-1",
+        )
+        assert all(c.run_id == "run-1" for c in children)
+
+    def test_coalesced_token_has_run_id(self):
+        """Coalesced token must inherit run_id from parents."""
+        _db, recorder = _setup(run_id="run-1")
+        row, token_a = _make_row(recorder, row_index=0)
+        token_b = recorder.create_token(row.row_id)
+        merged = recorder.coalesce_tokens(
+            parent_token_ids=[token_a.token_id, token_b.token_id],
+            row_id=row.row_id,
+        )
+        assert merged.run_id == "run-1"
+
+    def test_token_roundtrip_preserves_run_id(self):
+        """Token run_id should survive DB roundtrip via get_token."""
+        _db, recorder = _setup(run_id="run-1")
+        row = recorder.create_row(
+            run_id="run-1",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token = recorder.create_token(row.row_id)
+        fetched = recorder.get_token(token.token_id)
+        assert fetched is not None
+        assert fetched.run_id == "run-1"
+
+    def test_schema_composite_fk_prevents_cross_run_outcome(self):
+        """Schema composite FK on token_outcomes must reject mismatched (token_id, run_id).
+
+        Even if the application-level check were bypassed, the database constraint
+        should reject the insert.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.core.landscape._helpers import generate_id, now
+        from elspeth.core.landscape.schema import token_outcomes_table
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Set up run-A with row + token
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-A")
+        recorder.register_node(
+            run_id="run-A",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        row_a = recorder.create_row(
+            run_id="run-A",
+            source_node_id="source-0",
+            row_index=0,
+            data={"col": "value"},
+        )
+        token_a = recorder.create_token(row_a.row_id)
+
+        # Set up run-B (but don't create any tokens in it)
+        recorder.begin_run(config={}, canonical_version="v1", run_id="run-B")
+        recorder.register_node(
+            run_id="run-B",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        # Try to insert directly into token_outcomes with mismatched (token_id, run_id)
+        # token_a belongs to run-A, but we try to record under run-B
+        # The composite FK should reject this
+        with pytest.raises(IntegrityError), db.connection() as conn:
+            conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id=f"out_{generate_id()[:12]}",
+                    run_id="run-B",
+                    token_id=token_a.token_id,
+                    outcome=RowOutcome.COMPLETED.value,
+                    is_terminal=1,
+                    recorded_at=now(),
+                    sink_name="output",
+                )
+            )

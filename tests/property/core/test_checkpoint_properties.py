@@ -22,7 +22,6 @@ pipelines could produce corrupt audit trails or lose aggregation data.
 
 from __future__ import annotations
 
-import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +34,7 @@ from hypothesis import strategies as st
 from elspeth.contracts import Checkpoint, Determinism, NodeType, RunStatus
 from elspeth.core.canonical import stable_hash
 from elspeth.core.checkpoint import CheckpointCompatibilityValidator, CheckpointManager
+from elspeth.core.checkpoint.serialization import checkpoint_loads
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table, tokens_table
@@ -177,6 +177,7 @@ def setup_checkpoint_prerequisites(
             tokens_table.insert().values(
                 token_id=token_id,
                 row_id="row-001",
+                run_id=run_id,
                 created_at=now,
             )
         )
@@ -218,7 +219,7 @@ class TestAggregationStateRoundTripProperties:
             )
 
             assert checkpoint.aggregation_state_json is not None
-            restored = json.loads(checkpoint.aggregation_state_json)
+            restored = checkpoint_loads(checkpoint.aggregation_state_json)
             assert restored == state, f"Aggregation state corrupted during round-trip!\nOriginal: {state}\nRestored: {restored}"
         finally:
             db.close()

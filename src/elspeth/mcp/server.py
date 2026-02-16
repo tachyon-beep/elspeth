@@ -27,7 +27,7 @@ from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import CallToolResult, TextContent, Tool
 
 from elspeth.mcp.analyzer import LandscapeAnalyzer
 
@@ -510,7 +510,7 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
         ]
 
     @server.call_tool()  # type: ignore[misc, untyped-decorator]  # MCP SDK decorators lack type stubs
-    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult | list[TextContent]:
         """Handle tool calls.
 
         Arguments are validated at the Tier 3 boundary before dispatch.
@@ -522,7 +522,10 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
         try:
             args = _validate_tool_args(name, arguments)
         except (ValueError, TypeError) as e:
-            return [TextContent(type="text", text=f"Invalid arguments: {e!s}")]
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"Invalid arguments: {e!s}")],
+                isError=True,
+            )
 
         # Dispatch to analyzer — no blanket catch. Database errors,
         # serialization bugs, and analyzer bugs must propagate so they
@@ -629,7 +632,10 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
         else:
             # _validate_tool_args already raises for unknown tools,
             # but keep this branch for defense-in-depth.
-            return [TextContent(type="text", text=f"Unknown tool: {name}")]
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"Unknown tool: {name}")],
+                isError=True,
+            )
 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 

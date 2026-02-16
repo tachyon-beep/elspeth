@@ -140,6 +140,7 @@ class Token:
     expand_group_id: str | None = None  # For deaggregation grouping
     branch_name: str | None = None
     step_in_pipeline: int | None = None  # Step where token was created (fork/coalesce/expand)
+    run_id: str | None = None  # Run ownership — required in DB, optional in dataclass for backwards compat
 
 
 @dataclass

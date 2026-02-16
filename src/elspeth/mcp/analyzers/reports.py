@@ -304,7 +304,7 @@ def get_performance_report(db: LandscapeDB, recorder: LandscapeRecorder, run_id:
         pct_of_total = ((row.total_ms or 0) / total_time_ms * 100) if total_time_ms > 0 else 0
         node_performance.append(
             {
-                "node_id": row.node_id[:12] + "...",
+                "node_id": row.node_id,
                 "plugin": row.plugin_name,
                 "type": row.node_type,
                 "executions": row.executions,
@@ -686,7 +686,7 @@ def get_outcome_analysis(db: LandscapeDB, recorder: LandscapeRecorder, run_id: s
     outcomes = [
         {
             "outcome": row.outcome,
-            "is_terminal": row.is_terminal,
+            "is_terminal": bool(row.is_terminal),
             "count": row.count,
         }
         for row in outcome_rows

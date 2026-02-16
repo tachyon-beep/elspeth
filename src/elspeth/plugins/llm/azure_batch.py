@@ -32,7 +32,12 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields, populate_llm_metadata_fields
+from elspeth.plugins.llm import (
+    _build_augmented_output_schema,
+    get_llm_audit_fields,
+    get_llm_guaranteed_fields,
+    populate_llm_metadata_fields,
+)
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.llm.tracing import (
     LangfuseTracingConfig,
@@ -178,7 +183,11 @@ class AzureBatchLLMTransform(BaseTransform):
             allow_coercion=False,  # Transforms do NOT coerce
         )
         self.input_schema = schema
-        self.output_schema = schema
+        self.output_schema = _build_augmented_output_schema(
+            base_schema_config=schema_config,
+            response_field=cfg.response_field,
+            schema_name="AzureBatchOutputSchema",
+        )
 
         # Build output schema config with field categorization
         guaranteed = get_llm_guaranteed_fields(self._response_field)
@@ -687,6 +696,57 @@ class AzureBatchLLMTransform(BaseTransform):
             node_id=self.node_id,
         )
 
+    def _record_per_row_failure_calls(
+        self,
+        checkpoint: dict[str, Any],
+        ctx: PluginContext,
+        terminal_status: str,
+        error_detail: str | None = None,
+    ) -> None:
+        """Record per-row LLM call records for terminal batch failure paths.
+
+        When a batch fails/cancels/expires/times-out, the per-row LLM calls are
+        never recorded because _download_results() (the only place that records them)
+        is only called on the "completed" path. This method ensures audit completeness
+        by emitting a CallType.LLM error record for each submitted request before
+        the checkpoint is cleared.
+
+        Args:
+            checkpoint: Checkpoint data containing "requests" and "row_mapping".
+            ctx: Plugin context for record_call.
+            terminal_status: The batch terminal status (failed, cancelled, expired, batch_timeout).
+            error_detail: Optional extra error detail string.
+        """
+        requests_data = checkpoint.get("requests")
+        row_mapping = checkpoint.get("row_mapping")
+        batch_id = checkpoint.get("batch_id", "unknown")
+
+        if not requests_data or not row_mapping:
+            return  # No requests were submitted (e.g., all templates failed)
+
+        for custom_id, original_request in requests_data.items():
+            row_index = row_mapping[custom_id]["index"] if custom_id in row_mapping else None
+            error_info: dict[str, Any] = {
+                "reason": f"batch_{terminal_status}",
+                "batch_id": batch_id,
+                "custom_id": custom_id,
+            }
+            if error_detail:
+                error_info["detail"] = error_detail
+
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data={
+                    "custom_id": custom_id,
+                    "row_index": row_index,
+                    **original_request,
+                },
+                response_data=None,
+                error=error_info,
+                provider="azure",
+            )
+
     def _check_batch_status(
         self,
         checkpoint: dict[str, Any],
@@ -772,8 +832,7 @@ class AzureBatchLLMTransform(BaseTransform):
             return self._download_results(batch, checkpoint, rows, ctx)
 
         elif batch.status == "failed":
-            # Batch failed - clear checkpoint and return error
-            self._clear_checkpoint(ctx)
+            # Batch failed - record per-row calls, then clear checkpoint and return error
 
             error_info: TransformErrorReason = {
                 "reason": "batch_failed",
@@ -783,6 +842,15 @@ class AzureBatchLLMTransform(BaseTransform):
             if hasattr(batch, "errors") and batch.errors:  # Tier 3: SDK errors attr is optional
                 error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
                 error_message = "; ".join(e.message for e in batch.errors.data)
+
+            # Record per-row LLM calls BEFORE clearing checkpoint for audit completeness
+            self._record_per_row_failure_calls(
+                checkpoint,
+                ctx,
+                terminal_status="failed",
+                error_detail=error_message,
+            )
+            self._clear_checkpoint(ctx)
 
             # Calculate latency for failed batch
             submitted_at_str = checkpoint.get("submitted_at")
@@ -804,7 +872,8 @@ class AzureBatchLLMTransform(BaseTransform):
             return TransformResult.error(error_info)
 
         elif batch.status == "cancelled":
-            # Batch was cancelled - clear checkpoint and return error
+            # Batch was cancelled - record per-row calls, then clear checkpoint and return error
+            self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="cancelled")
             self._clear_checkpoint(ctx)
 
             # Calculate latency for cancelled batch
@@ -831,7 +900,8 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         elif batch.status == "expired":
-            # Batch expired (exceeded 24h) - clear checkpoint and return error
+            # Batch expired (exceeded 24h) - record per-row calls, clear checkpoint and return error
+            self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="expired")
             self._clear_checkpoint(ctx)
             return TransformResult.error(
                 {
@@ -848,6 +918,7 @@ class AzureBatchLLMTransform(BaseTransform):
             elapsed_hours = (datetime.now(UTC) - submitted_at).total_seconds() / 3600
 
             if elapsed_hours > self._max_wait_hours:
+                self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="batch_timeout")
                 self._clear_checkpoint(ctx)
                 return TransformResult.error(
                     {

@@ -1,11 +1,9 @@
-"""Regression test for Phase 0 fix #10: MCP Mermaid non-unique IDs.
+"""Regression tests for MCP report analyzer functions.
 
-Bug: get_dag_structure() used node_id[:8] truncation for Mermaid node IDs.
-When multiple nodes shared a prefix (e.g., "transform_classifier",
-"transform_mapper"), the generated Mermaid had duplicate node IDs,
-producing an invalid diagram.
-
-Fix: Used sequential aliases (N0, N1, ...) instead of node_id[:8] truncation.
+Bug fixes covered:
+- Phase 0 fix #10: MCP Mermaid non-unique IDs (node_id[:8] truncation)
+- P1-2026-02-14: get_performance_report truncates node_id
+- P1-2026-02-14: get_outcome_analysis returns is_terminal as DB integer
 """
 
 from __future__ import annotations
@@ -14,7 +12,11 @@ import re
 from unittest.mock import MagicMock
 
 from elspeth.contracts.enums import NodeType, RoutingMode
-from elspeth.mcp.analyzers.reports import get_dag_structure
+from elspeth.mcp.analyzers.reports import (
+    get_dag_structure,
+    get_outcome_analysis,
+    get_performance_report,
+)
 
 
 def _make_node(node_id: str, plugin_name: str, node_type: NodeType) -> MagicMock:
@@ -86,3 +88,126 @@ class TestMermaidUniqueNodeIDs:
         # Verify we got sequential aliases (N0, N1, ...)
         for i, node_def in enumerate(node_defs):
             assert node_def == f"N{i}", f"Expected sequential alias N{i}, got {node_def}"
+
+
+class TestPerformanceReportNodeId:
+    """Verify get_performance_report returns full node_id.
+
+    Regression: P1-2026-02-14 — node_id was truncated to 12 chars + "...",
+    making node identity ambiguous and preventing exact cross-referencing.
+    """
+
+    def test_node_id_is_not_truncated(self) -> None:
+        """Node IDs in performance report must be the full canonical ID."""
+        full_node_id = "transform_llm_classifier_abc123def456"
+
+        # Mock a stats row with full node_id
+        stats_row = MagicMock()
+        stats_row.node_id = full_node_id
+        stats_row.plugin_name = "llm_classifier"
+        stats_row.node_type = "transform"
+        stats_row.executions = 10
+        stats_row.avg_ms = 150.0
+        stats_row.min_ms = 50.0
+        stats_row.max_ms = 500.0
+        stats_row.total_ms = 1500.0
+
+        # Mock database connection and query results
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [stats_row],  # stats_query
+            [],  # failed_query
+        ]
+
+        db = MagicMock()
+        db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        db.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        recorder = MagicMock()
+        recorder.get_run.return_value = MagicMock(
+            started_at=None,
+            completed_at=None,
+            status=MagicMock(value="completed"),
+        )
+
+        result = get_performance_report(db, recorder, "run-123")
+
+        assert "error" not in result
+        node_perf = result["node_performance"]
+        assert len(node_perf) == 1
+        # The key assertion: full node_id, no truncation
+        assert node_perf[0]["node_id"] == full_node_id
+        assert "..." not in node_perf[0]["node_id"]
+
+
+class TestOutcomeAnalysisIsTerminal:
+    """Verify get_outcome_analysis returns is_terminal as bool.
+
+    Regression: P1-2026-02-14 — is_terminal was returned as DB integer (0/1)
+    instead of bool, violating the OutcomeDistributionEntry contract.
+    """
+
+    def test_is_terminal_is_bool_not_int(self) -> None:
+        """is_terminal must be a Python bool, not an integer 0/1."""
+        # Mock outcome rows with integer is_terminal (as from SQLite)
+        outcome_row_terminal = MagicMock()
+        outcome_row_terminal.outcome = "COMPLETED"
+        outcome_row_terminal.is_terminal = 1  # DB integer
+        outcome_row_terminal.count = 10
+
+        outcome_row_non_terminal = MagicMock()
+        outcome_row_non_terminal.outcome = "BUFFERED"
+        outcome_row_non_terminal.is_terminal = 0  # DB integer
+        outcome_row_non_terminal.count = 3
+
+        # Mock sink rows (empty)
+        # Mock fork/join counts
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [outcome_row_terminal, outcome_row_non_terminal],  # outcome_dist
+            [],  # sink_dist
+        ]
+        mock_conn.execute.return_value.scalar.side_effect = [0, 0]  # fork_count, join_count
+
+        # Need to handle multiple calls to execute() returning different results
+        call_count = 0
+
+        def side_effect_execute(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.fetchall.return_value = [outcome_row_terminal, outcome_row_non_terminal]
+            elif call_count == 2:
+                result.fetchall.return_value = []
+            elif call_count in (3, 4):
+                result.scalar.return_value = 0
+            return result
+
+        mock_conn.execute = side_effect_execute
+
+        db = MagicMock()
+        db.connection.return_value.__enter__ = MagicMock(return_value=mock_conn)
+        db.connection.return_value.__exit__ = MagicMock(return_value=False)
+
+        recorder = MagicMock()
+        recorder.get_run.return_value = MagicMock(
+            started_at=None,
+            completed_at=None,
+            status=MagicMock(value="completed"),
+        )
+
+        result = get_outcome_analysis(db, recorder, "run-123")
+
+        assert "error" not in result
+        outcomes = result["outcome_distribution"]
+        assert len(outcomes) == 2
+
+        for outcome in outcomes:
+            assert isinstance(outcome["is_terminal"], bool), f"is_terminal must be bool, got {type(outcome['is_terminal']).__name__}"
+
+        # Verify correct boolean values
+        terminal = next(o for o in outcomes if o["outcome"] == "COMPLETED")
+        non_terminal = next(o for o in outcomes if o["outcome"] == "BUFFERED")
+        assert terminal["is_terminal"] is True
+        assert non_terminal["is_terminal"] is False

@@ -521,6 +521,87 @@ class TestSanitizeForCanonical:
         assert result == {"x": 3.14, "y": 0.0, "z": -1.5}
 
 
+class TestNumpyDatetime64Normalization:
+    """np.datetime64 values must be normalized to ISO 8601 strings.
+
+    BUG FIX: P1-2026-02-14 — np.datetime64 could pass schema validation
+    (contract layer treats it as datetime) but crashed canonical hashing
+    because _normalize_value had no branch for it.
+    """
+
+    def test_np_datetime64_converts_to_iso_string(self) -> None:
+        """np.datetime64 with a valid date converts to UTC ISO 8601."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.datetime64("2024-01-01"))
+        assert isinstance(result, str)
+        assert "2024-01-01" in result
+        assert "+00:00" in result  # UTC timezone
+
+    def test_np_datetime64_with_time_converts_to_iso_string(self) -> None:
+        """np.datetime64 with datetime precision converts correctly."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.datetime64("2024-06-15T10:30:00"))
+        assert isinstance(result, str)
+        assert "2024-06-15" in result
+        assert "10:30:00" in result
+
+    def test_np_datetime64_nat_converts_to_none(self) -> None:
+        """np.datetime64('NaT') must convert to None (missing value)."""
+        from elspeth.core.canonical import _normalize_value
+
+        result = _normalize_value(np.datetime64("NaT"))
+        assert result is None
+
+    def test_np_datetime64_stable_hash_deterministic(self) -> None:
+        """np.datetime64 values must produce stable hashes."""
+        from elspeth.core.canonical import stable_hash
+
+        data1 = {"event_time": np.datetime64("2024-01-01")}
+        data2 = {"event_time": np.datetime64("2024-01-01")}
+
+        assert stable_hash(data1) == stable_hash(data2)
+
+    def test_np_datetime64_matches_pd_timestamp_hash(self) -> None:
+        """np.datetime64 and pd.Timestamp for same date produce same hash."""
+        from elspeth.core.canonical import stable_hash
+
+        np_data = {"event_time": np.datetime64("2024-01-01")}
+        pd_data = {"event_time": pd.Timestamp("2024-01-01")}
+
+        assert stable_hash(np_data) == stable_hash(pd_data)
+
+    def test_np_datetime64_canonical_json_succeeds(self) -> None:
+        """canonical_json should handle np.datetime64 without error."""
+        from elspeth.core.canonical import canonical_json
+
+        result = canonical_json({"ts": np.datetime64("2024-03-15T08:00:00")})
+        assert isinstance(result, str)
+        assert "2024-03-15" in result
+
+    def test_np_datetime64_nat_in_nested_structure(self) -> None:
+        """NaT in nested structures normalizes to null in canonical JSON."""
+        from elspeth.core.canonical import canonical_json
+
+        result = canonical_json({"values": [np.datetime64("2024-01-01"), np.datetime64("NaT")]})
+        assert "null" in result
+
+    def test_np_datetime64_in_dict_with_other_types(self) -> None:
+        """np.datetime64 works alongside other numpy/pandas types."""
+        from elspeth.core.canonical import _normalize_for_canonical
+
+        data = {
+            "timestamp": np.datetime64("2024-01-01"),
+            "count": np.int64(42),
+            "rate": np.float64(3.14),
+        }
+        result = _normalize_for_canonical(data)
+        assert isinstance(result["timestamp"], str)
+        assert result["count"] == 42
+        assert result["rate"] == 3.14
+
+
 class TestCoreIntegration:
     """Core module integration - all Phase 1 components exportable."""
 

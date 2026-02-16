@@ -79,11 +79,13 @@ class PluginManager:
         self._pm.register(plugin)
         try:
             self._pm.check_pending()
-        except pluggy.PluginValidationError:
-            # Roll back partial registration on hook validation failure.
+            self._refresh_caches()
+        except Exception:
+            # Roll back registration on any failure (hook validation,
+            # duplicate name, etc.) to keep pluggy state clean.
             self._pm.unregister(plugin=plugin)
+            self._refresh_caches()
             raise
-        self._refresh_caches()
 
     def _refresh_caches(self) -> None:
         """Refresh plugin caches from hooks.

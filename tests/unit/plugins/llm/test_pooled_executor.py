@@ -966,3 +966,109 @@ class TestPooledExecutorBugFixes:
             )
 
         executor.shutdown()
+
+
+class TestPooledExecutorShutdownRace:
+    """Regression tests for P1-2026-02-14: shutdown race leaves buffer slots stranded.
+
+    The bug: _execute_batch_locked reserves buffer slots before submitting to
+    ThreadPoolExecutor. If shutdown() happens mid-submission, submit() raises
+    RuntimeError and the reserved slot is never completed, leaving pending_count > 0.
+
+    Fix: Wrap thread pool submit in try/except RuntimeError. On failure, complete
+    the reserved slot with a shutdown error result, and do the same for all
+    remaining contexts.
+    """
+
+    def test_shutdown_during_submit_returns_error_results_for_all_rows(self) -> None:
+        """All rows get deterministic error results when pool is shut down during submit."""
+        config = PoolConfig(pool_size=2)
+        executor = PooledExecutor(config)
+
+        # Shut down the thread pool immediately so submit() will raise
+        executor._thread_pool.shutdown(wait=False)
+
+        def never_called(row: dict[str, Any], state_id: str) -> TransformResult:
+            raise AssertionError("Should not be called after shutdown")
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
+
+        # Must not raise -- should return error results for all rows
+        entries = executor.execute_batch(contexts, never_called)
+
+        # One result per context
+        assert len(entries) == len(contexts), (
+            f"Expected {len(contexts)} entries but got {len(entries)}. Shutdown left stranded buffer slots."
+        )
+
+        # All results should be shutdown errors
+        for i, entry in enumerate(entries):
+            assert entry.result.status == "error", f"Entry {i} has status {entry.result.status}"
+            assert entry.result.reason is not None
+            assert entry.result.reason["reason"] == "shutdown_requested"
+
+        # Buffer must be fully drained
+        assert executor.pending_count == 0, f"pending_count is {executor.pending_count} after shutdown batch. Buffer slots were stranded."
+
+    def test_shutdown_during_partial_submit_returns_mixed_results(self) -> None:
+        """Partial submit (some succeed, some fail) returns correct results for all rows."""
+        config = PoolConfig(pool_size=4)
+        executor = PooledExecutor(config)
+
+        call_count = 0
+        call_lock = Lock()
+
+        def process_then_shutdown(row: dict[str, Any], state_id: str) -> TransformResult:
+            nonlocal call_count
+            with call_lock:
+                call_count += 1
+            # First call triggers shutdown for the remaining submits
+            if row["idx"] == 0:
+                executor._thread_pool.shutdown(wait=False)
+                time.sleep(0.05)  # Give shutdown time to propagate
+            return TransformResult.success(
+                make_pipeline_row({"idx": row["idx"]}),
+                success_reason={"action": "processed"},
+            )
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(6)]
+
+        # Should not raise
+        entries = executor.execute_batch(contexts, process_then_shutdown)
+
+        # Must return exactly one result per context
+        assert len(entries) == len(contexts), f"Expected {len(contexts)} entries but got {len(entries)}"
+
+        # Count successes and errors
+        successes = [e for e in entries if e.result.status == "success"]
+        errors = [e for e in entries if e.result.status == "error"]
+
+        # At least some should have succeeded (the ones submitted before shutdown)
+        # and the rest should be shutdown errors
+        assert len(successes) + len(errors) == len(contexts)
+        assert len(successes) >= 1, "Expected at least one successful result"
+
+        for error_entry in errors:
+            assert error_entry.result.reason is not None
+            assert error_entry.result.reason["reason"] == "shutdown_requested"
+
+        # Buffer must be fully drained
+        assert executor.pending_count == 0
+
+    def test_pending_count_zero_after_full_shutdown_batch(self) -> None:
+        """pending_count must be 0 after a batch where all submits fail due to shutdown."""
+        config = PoolConfig(pool_size=1)
+        executor = PooledExecutor(config)
+
+        # Pre-shutdown the pool
+        executor.shutdown(wait=True)
+
+        def never_called(row: dict[str, Any], state_id: str) -> TransformResult:
+            raise AssertionError("Should not be called")
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"s_{i}", row_index=i) for i in range(10)]
+
+        entries = executor.execute_batch(contexts, never_called)
+
+        assert len(entries) == 10
+        assert executor.pending_count == 0

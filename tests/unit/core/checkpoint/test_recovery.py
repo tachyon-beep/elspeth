@@ -134,11 +134,12 @@ def _insert_row(conn: Connection, run_id: str, row_id: str, *, row_index: int, s
     )
 
 
-def _insert_token(conn: Connection, token_id: str, row_id: str) -> None:
+def _insert_token(conn: Connection, run_id: str, token_id: str, row_id: str) -> None:
     conn.execute(
         tokens_table.insert().values(
             token_id=token_id,
             row_id=row_id,
+            run_id=run_id,
             created_at=datetime.now(UTC),
         )
     )
@@ -175,7 +176,7 @@ def _create_failed_run_with_checkpoint(
         _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
         _insert_node(conn, run_id, checkpoint_node_id)
         _insert_row(conn, run_id, "row-0", row_index=0, source_data_ref=None)
-        _insert_token(conn, "tok-0", "row-0")
+        _insert_token(conn, run_id, "tok-0", "row-0")
 
     checkpoint_manager.create_checkpoint(
         run_id=run_id,
@@ -337,30 +338,30 @@ def test_get_unprocessed_rows_handles_fork_and_excludes_buffered_rows(
 
         # row-completed: one completed token -> should be excluded.
         _insert_row(conn, run_id, "row-completed", row_index=0, source_data_ref=None)
-        _insert_token(conn, "tok-completed", "row-completed")
+        _insert_token(conn, run_id, "tok-completed", "row-completed")
         _insert_terminal_outcome(conn, run_id, "tok-completed", outcome=RowOutcome.COMPLETED)
 
         # row-delegation-only: FORKED parent only, no child terminal -> should be included.
         _insert_row(conn, run_id, "row-delegation-only", row_index=1, source_data_ref=None)
-        _insert_token(conn, "tok-parent", "row-delegation-only")
+        _insert_token(conn, run_id, "tok-parent", "row-delegation-only")
         _insert_terminal_outcome(conn, run_id, "tok-parent", outcome=RowOutcome.FORKED)
 
         # row-child-pending: one completed child + one pending child -> should be included.
         _insert_row(conn, run_id, "row-child-pending", row_index=2, source_data_ref=None)
-        _insert_token(conn, "tok-child-ok", "row-child-pending")
+        _insert_token(conn, run_id, "tok-child-ok", "row-child-pending")
         _insert_terminal_outcome(conn, run_id, "tok-child-ok", outcome=RowOutcome.COMPLETED)
-        _insert_token(conn, "tok-child-pending", "row-child-pending")
+        _insert_token(conn, run_id, "tok-child-pending", "row-child-pending")
 
         # row-buffered: appears incomplete but all incomplete tokens are buffered
         # in checkpoint state -> excluded.
         _insert_row(conn, run_id, "row-buffered", row_index=3, source_data_ref=None)
-        _insert_token(conn, "tok-buffered", "row-buffered")
+        _insert_token(conn, run_id, "tok-buffered", "row-buffered")
 
         # row-mixed-buffering: one incomplete token buffered + one incomplete token
         # not buffered -> must remain unprocessed.
         _insert_row(conn, run_id, "row-mixed-buffering", row_index=4, source_data_ref=None)
-        _insert_token(conn, "tok-mixed-buffered", "row-mixed-buffering")
-        _insert_token(conn, "tok-mixed-pending", "row-mixed-buffering")
+        _insert_token(conn, run_id, "tok-mixed-buffered", "row-mixed-buffering")
+        _insert_token(conn, run_id, "tok-mixed-pending", "row-mixed-buffering")
 
     checkpoint_manager.create_checkpoint(
         run_id=run_id,
@@ -406,15 +407,15 @@ def test_get_unprocessed_rows_chunks_buffered_token_query(
 
         # row-a: incomplete token is buffered -> excluded
         _insert_row(conn, run_id, "row-a", row_index=0, source_data_ref=None)
-        _insert_token(conn, "tok-a", "row-a")
+        _insert_token(conn, run_id, "tok-a", "row-a")
 
         # row-b: incomplete token is NOT buffered -> included
         _insert_row(conn, run_id, "row-b", row_index=1, source_data_ref=None)
-        _insert_token(conn, "tok-b", "row-b")
+        _insert_token(conn, run_id, "tok-b", "row-b")
 
         # row-c: incomplete token is buffered -> excluded
         _insert_row(conn, run_id, "row-c", row_index=2, source_data_ref=None)
-        _insert_token(conn, "tok-c", "row-c")
+        _insert_token(conn, run_id, "tok-c", "row-c")
 
     checkpoint_manager.create_checkpoint(
         run_id=run_id,
@@ -617,9 +618,9 @@ def test_get_unprocessed_rows_handles_delegation_token_with_completed_leaf(
         _insert_node(conn, run_id, "source-node", node_type=NodeType.SOURCE)
         _insert_node(conn, run_id, "checkpoint-node")
         _insert_row(conn, run_id, "row-forked-complete", row_index=1, source_data_ref=None)
-        _insert_token(conn, "tok-parent", "row-forked-complete")
+        _insert_token(conn, run_id, "tok-parent", "row-forked-complete")
         _insert_terminal_outcome(conn, run_id, "tok-parent", outcome=RowOutcome.FORKED)
-        _insert_token(conn, "tok-child", "row-forked-complete")
+        _insert_token(conn, run_id, "tok-child", "row-forked-complete")
         _insert_terminal_outcome(conn, run_id, "tok-child", outcome=RowOutcome.COMPLETED)
 
     checkpoint_manager.create_checkpoint(

@@ -162,6 +162,48 @@ class TestBatchReplicateTypeEnforcement:
         with pytest.raises(TypeError, match="must be int, got NoneType"):
             transform.process(rows, ctx)
 
+    def test_bool_true_copies_raises_type_error(self, ctx: PluginContext) -> None:
+        """Bool True in copies field raises TypeError (not silently treated as 1).
+
+        Python's isinstance(True, int) returns True because bool is a subclass
+        of int. The fix uses `type(x) is int` for strict type checking, so
+        True/False are rejected as distinct logical types.
+        """
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+            }
+        )
+
+        rows = [make_pipeline_row({"id": 1, "copies": True})]
+
+        with pytest.raises(TypeError, match="must be int, got bool"):
+            transform.process(rows, ctx)
+
+    def test_bool_false_copies_raises_type_error(self, ctx: PluginContext) -> None:
+        """Bool False in copies field raises TypeError (not silently treated as 0).
+
+        Without strict type checking, False would be treated as 0 copies,
+        which would then be quarantined as invalid (< 1). The bug is that
+        the type check passes at all - bool is not int for contract purposes.
+        """
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "copies_field": "copies",
+            }
+        )
+
+        rows = [make_pipeline_row({"id": 1, "copies": False})]
+
+        with pytest.raises(TypeError, match="must be int, got bool"):
+            transform.process(rows, ctx)
+
     def test_zero_copies_returns_error_when_all_invalid(self, ctx: PluginContext) -> None:
         """All rows with zero copies returns error result (no valid output to expand)."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate

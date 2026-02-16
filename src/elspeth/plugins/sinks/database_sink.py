@@ -8,6 +8,7 @@ output correct types. Wrong types = upstream bug = crash.
 """
 
 import hashlib
+import json
 import os
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -131,10 +132,52 @@ class DatabaseSink(BaseSink):
         # Required-field enforcement (centralized in SinkExecutor)
         self.declared_required_fields = self._schema_config.get_effective_required_fields()
 
+        # Track which fields have 'any' type so we can serialize dict/list values
+        # to JSON strings before INSERT (SQL TEXT columns can't store Python dicts).
+        self._any_typed_fields: frozenset[str] = self._compute_any_typed_fields()
+
         self._engine: Engine | None = None
         self._table: Table | None = None
         self._metadata: MetaData | None = None
         self._table_replaced: bool = False  # Track if we've done the replace for this instance
+
+    def _compute_any_typed_fields(self) -> frozenset[str]:
+        """Identify fields with 'any' type from the schema config.
+
+        These fields may contain dict/list values that must be serialized
+        to JSON strings before INSERT into TEXT columns.
+        """
+        if self._schema_config.is_observed or not self._schema_config.fields:
+            return frozenset()
+        return frozenset(f.name for f in self._schema_config.fields if f.field_type == "any")
+
+    def _serialize_any_typed_fields(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Serialize dict/list values in 'any'-typed fields to JSON strings.
+
+        SQL TEXT columns cannot store Python dicts or lists. This method
+        converts non-scalar values to their JSON string representation
+        before INSERT, ensuring valid 'any' payloads (e.g., {"k": 1})
+        are stored as '{"k": 1}' rather than crashing with a driver error.
+
+        For observed-mode schemas, ALL fields are checked since any field
+        could contain a complex value when the schema is inferred.
+
+        Scalar values (str, int, float, bool, None) are left unchanged.
+        """
+        if not self._any_typed_fields and not self._schema_config.is_observed:
+            return rows
+
+        result = []
+        for row in rows:
+            new_row = dict(row)
+            fields_to_check = self._any_typed_fields if self._any_typed_fields else set(row.keys())
+            for field in fields_to_check:
+                if field in new_row:
+                    value = new_row[field]
+                    if isinstance(value, (dict, list)):
+                        new_row[field] = json.dumps(value)
+            result.append(new_row)
+        return result
 
     def _ensure_engine_and_metadata_initialized(self) -> None:
         """Initialize engine/metadata pair together.
@@ -284,9 +327,9 @@ class DatabaseSink(BaseSink):
 
             for field_def in self._schema_config.fields:
                 sql_type = SCHEMA_TYPE_TO_SQLALCHEMY[field_def.field_type]
-                # Note: nullable=True for optional fields, but SQLAlchemy Column
-                # defaults to nullable=True anyway, so we don't need to set it
-                columns.append(Column(field_def.name, sql_type))
+                # Enforce nullable based on required status: required fields
+                # are NOT NULL, optional fields are nullable.
+                columns.append(Column(field_def.name, sql_type, nullable=not field_def.required))
                 declared_names.add(field_def.name)
 
             if self._schema_config.mode == "flexible":
@@ -340,13 +383,30 @@ class DatabaseSink(BaseSink):
         # Ensure table exists (infer from first row)
         self._ensure_table(rows[0])
 
+        # Validate rows against table columns before INSERT.
+        # SQLAlchemy silently drops keys not in the table schema, which
+        # hides upstream bugs. In fixed mode, extra fields are rejected.
+        # In all modes after table creation, unknown columns are rejected.
+        if self._table is not None:
+            known_columns = {c.name for c in self._table.columns}
+            for i, row in enumerate(rows):
+                extra = sorted(set(row) - known_columns)
+                if extra:
+                    raise ValueError(
+                        f"DatabaseSink row {i} has fields not in table schema: {extra}. This indicates an upstream transform/schema bug."
+                    )
+
+        # Serialize dict/list values in 'any'-typed fields to JSON strings
+        # before INSERT. SQL TEXT columns cannot store Python dicts/lists.
+        insert_rows = self._serialize_any_typed_fields(rows)
+
         # Insert all rows in batch with call recording for audit trail
         # (ctx.operation_id is set by executor)
         start_time = time.perf_counter()
         try:
             if self._engine is not None and self._table is not None:
                 with self._engine.begin() as conn:
-                    conn.execute(insert(self._table), rows)
+                    conn.execute(insert(self._table), insert_rows)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             # Record successful INSERT in audit trail

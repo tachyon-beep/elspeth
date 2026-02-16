@@ -1,0 +1,562 @@
+"""Regression tests for P1 sink plugin bugs.
+
+Bug 1: Azure blob sink misses required field validation (P2-2026-02-14)
+Bug 2: CSVSink partial batch writes (P1-2026-02-14)
+Bug 3: DatabaseSink accepts schema-invalid rows (P2-2026-02-14)
+Bug 4: Schema type 'any' mapped to SQL TEXT without serialization (P1-2026-02-14)
+Bug 5: JSONSink append mode lacks schema validation (P2-2026-02-14)
+"""
+
+import csv
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from elspeth.contracts.plugin_context import PluginContext
+
+# === Shared fixtures and schemas ===
+
+FIXED_SCHEMA = {"mode": "fixed", "fields": ["id: int", "name: str"]}
+FLEXIBLE_SCHEMA = {"mode": "flexible", "fields": ["id: int", "name: str"]}
+OBSERVED_SCHEMA = {"mode": "observed"}
+
+# Azure Blob Sink test constants
+TEST_CONNECTION_STRING = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key"
+TEST_CONTAINER = "output-container"
+TEST_BLOB_PATH = "results/output.csv"
+
+
+@pytest.fixture
+def ctx() -> PluginContext:
+    """Create a minimal plugin context."""
+    return PluginContext(run_id="test-run", config={})
+
+
+# =============================================================================
+# Bug 2: CSVSink partial batch writes
+# =============================================================================
+
+
+class TestCSVSinkAtomicBatchWrite:
+    """Regression tests for P1-2026-02-14: CSVSink partial batch writes.
+
+    CSVSink.write() must be all-or-nothing for each batch. If row N fails
+    serialization (e.g., extra fields), rows 0..N-1 must NOT be written.
+    """
+
+    def test_extra_field_in_batch_writes_nothing(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """If any row in the batch has extra fields, NO rows are written.
+
+        Before the fix, DictWriter wrote rows one-by-one, so rows before the
+        failing row would be in the CSV while the audit trail shows FAILED.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+
+        # First batch succeeds (establishes file)
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+        sink.flush()
+        initial_size = output_file.stat().st_size
+
+        # Second batch: row 0 is valid, row 1 has extra field
+        with pytest.raises(ValueError, match="c"):
+            sink.write(
+                [
+                    {"id": 2, "name": "bob"},
+                    {"id": 3, "name": "carol", "c": "extra"},
+                ],
+                ctx,
+            )
+
+        # File size must NOT have changed -- no partial write
+        assert output_file.stat().st_size == initial_size
+
+        sink.close()
+
+        # Verify only the first batch is in the file
+        with open(output_file) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 1
+        assert rows[0]["id"] == "1"
+
+    def test_valid_batch_still_writes_correctly(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Valid batches still write correctly after the staging change."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+
+        sink.write(
+            [
+                {"id": 1, "name": "alice"},
+                {"id": 2, "name": "bob"},
+                {"id": 3, "name": "carol"},
+            ],
+            ctx,
+        )
+        sink.flush()
+        sink.close()
+
+        with open(output_file) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 3
+        assert rows[2]["name"] == "carol"
+
+    def test_hash_is_correct_after_staged_write(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Content hash matches actual file content after staged write."""
+        import hashlib
+
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink({"path": str(output_file), "schema": FIXED_SCHEMA})
+
+        artifact = sink.write([{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}], ctx)
+        sink.flush()
+        sink.close()
+
+        expected_hash = hashlib.sha256(output_file.read_bytes()).hexdigest()
+        assert artifact.content_hash == expected_hash
+
+
+# =============================================================================
+# Bug 3: DatabaseSink accepts schema-invalid rows
+# =============================================================================
+
+
+class TestDatabaseSinkSchemaEnforcement:
+    """Regression tests for P2-2026-02-14: DatabaseSink silently accepts
+    schema-invalid rows.
+
+    SQLAlchemy silently drops extra keys on INSERT. DatabaseSink must reject
+    rows with fields not in the table schema.
+    """
+
+    @pytest.fixture
+    def db_url(self, tmp_path: Path) -> str:
+        return f"sqlite:///{tmp_path / 'test.db'}"
+
+    def test_extra_fields_rejected_after_table_creation(self, db_url: str, ctx: PluginContext) -> None:
+        """Rows with extra fields are rejected after the table is created.
+
+        Before the fix, SQLAlchemy silently dropped unknown keys, hiding
+        upstream bugs.
+        """
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": FIXED_SCHEMA})
+
+        # First write creates the table with columns [id, name]
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+
+        # Second write with extra field should be rejected
+        with pytest.raises(ValueError, match="not in table schema"):
+            sink.write([{"id": 2, "name": "bob", "extra": "value"}], ctx)
+
+        sink.close()
+
+    def test_required_fields_enforced_by_nullable_columns(self, db_url: str, ctx: PluginContext) -> None:
+        """Required fields create NOT NULL columns in the database.
+
+        Before the fix, all columns were nullable by default, allowing
+        NULL to silently replace missing required fields.
+        """
+        from sqlalchemy import create_engine, inspect
+
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        required_schema = {"mode": "fixed", "fields": ["id: int", "name: str"]}
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": required_schema})
+
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+        sink.close()
+
+        # Inspect column nullability
+        engine = create_engine(db_url)
+        inspector = inspect(engine)
+        columns = {col["name"]: col for col in inspector.get_columns("output")}
+
+        # Both fields are required (no '?' suffix) so nullable should be False
+        assert columns["id"]["nullable"] is False
+        assert columns["name"]["nullable"] is False
+
+        engine.dispose()
+
+    def test_optional_fields_are_nullable(self, db_url: str, ctx: PluginContext) -> None:
+        """Optional fields create nullable columns."""
+        from sqlalchemy import create_engine, inspect
+
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        optional_schema = {"mode": "fixed", "fields": ["id: int", "name: str?"]}
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": optional_schema})
+
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+        sink.close()
+
+        engine = create_engine(db_url)
+        inspector = inspect(engine)
+        columns = {col["name"]: col for col in inspector.get_columns("output")}
+
+        assert columns["id"]["nullable"] is False  # Required
+        assert columns["name"]["nullable"] is True  # Optional
+
+        engine.dispose()
+
+
+# =============================================================================
+# Bug 4: Schema type 'any' mapped to SQL TEXT without serialization
+# =============================================================================
+
+
+class TestDatabaseSinkAnyTypeSerialization:
+    """Regression tests for P1-2026-02-14: Schema type 'any' is mapped to
+    SQL TEXT without serialization.
+
+    Valid 'any' values like dicts and lists must be serialized to JSON strings
+    before INSERT into TEXT columns, not crash with driver errors.
+    """
+
+    @pytest.fixture
+    def db_url(self, tmp_path: Path) -> str:
+        return f"sqlite:///{tmp_path / 'test.db'}"
+
+    def test_dict_value_in_any_field_is_serialized(self, db_url: str, ctx: PluginContext) -> None:
+        """Dict values in 'any'-typed fields are serialized to JSON strings.
+
+        Before the fix, inserting {"payload": {"k": 1}} into a TEXT column
+        crashed with "type 'dict' is not supported".
+        """
+        from sqlalchemy import MetaData, Table, create_engine, select
+
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        any_schema = {"mode": "fixed", "fields": ["id: int", "payload: any"]}
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": any_schema})
+
+        sink.write([{"id": 1, "payload": {"key": "value", "nested": [1, 2, 3]}}], ctx)
+        sink.close()
+
+        # Verify the JSON was stored as a string
+        engine = create_engine(db_url)
+        metadata = MetaData()
+        table = Table("output", metadata, autoload_with=engine)
+        with engine.connect() as conn:
+            rows = list(conn.execute(select(table)))
+        engine.dispose()
+
+        assert len(rows) == 1
+        stored_payload = rows[0][1]  # payload column
+        assert isinstance(stored_payload, str)
+        parsed = json.loads(stored_payload)
+        assert parsed == {"key": "value", "nested": [1, 2, 3]}
+
+    def test_list_value_in_any_field_is_serialized(self, db_url: str, ctx: PluginContext) -> None:
+        """List values in 'any'-typed fields are serialized to JSON strings."""
+        from sqlalchemy import MetaData, Table, create_engine, select
+
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        any_schema = {"mode": "fixed", "fields": ["id: int", "items: any"]}
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": any_schema})
+
+        sink.write([{"id": 1, "items": [1, 2, 3]}], ctx)
+        sink.close()
+
+        engine = create_engine(db_url)
+        metadata = MetaData()
+        table = Table("output", metadata, autoload_with=engine)
+        with engine.connect() as conn:
+            rows = list(conn.execute(select(table)))
+        engine.dispose()
+
+        assert len(rows) == 1
+        stored_items = rows[0][1]
+        assert isinstance(stored_items, str)
+        assert json.loads(stored_items) == [1, 2, 3]
+
+    def test_scalar_any_values_are_not_modified(self, db_url: str, ctx: PluginContext) -> None:
+        """Scalar values (str, int, None) in 'any' fields are stored as-is."""
+        from sqlalchemy import MetaData, Table, create_engine, select
+
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        # Use optional 'any' field (with '?') so None is allowed as NULL
+        any_schema = {"mode": "fixed", "fields": ["id: int", "data: any?"]}
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": any_schema})
+
+        sink.write(
+            [
+                {"id": 1, "data": "hello"},
+                {"id": 2, "data": None},
+            ],
+            ctx,
+        )
+        sink.close()
+
+        engine = create_engine(db_url)
+        metadata = MetaData()
+        table = Table("output", metadata, autoload_with=engine)
+        with engine.connect() as conn:
+            rows = list(conn.execute(select(table)))
+        engine.dispose()
+
+        assert len(rows) == 2
+        assert rows[0][1] == "hello"  # str stored as-is
+        assert rows[1][1] is None  # None stored as NULL
+
+    def test_observed_mode_serializes_complex_values(self, db_url: str, ctx: PluginContext) -> None:
+        """Observed mode also serializes dict/list values to JSON strings."""
+        from sqlalchemy import MetaData, Table, create_engine, select
+
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": OBSERVED_SCHEMA})
+
+        sink.write([{"id": 1, "meta": {"source": "test"}}], ctx)
+        sink.close()
+
+        engine = create_engine(db_url)
+        metadata = MetaData()
+        table = Table("output", metadata, autoload_with=engine)
+        with engine.connect() as conn:
+            rows = list(conn.execute(select(table)))
+        engine.dispose()
+
+        assert len(rows) == 1
+        stored_meta = rows[0][1]
+        assert isinstance(stored_meta, str)
+        assert json.loads(stored_meta) == {"source": "test"}
+
+
+# =============================================================================
+# Bug 5: JSONSink append mode lacks schema validation
+# =============================================================================
+
+
+class TestJSONSinkAppendSchemaValidation:
+    """Regression tests for P2-2026-02-14: JSONSink append mode lacks
+    schema validation.
+
+    When appending to an existing JSONL file with an explicit schema,
+    the sink must validate that the existing data is compatible.
+    """
+
+    def test_append_to_incompatible_fixed_schema_raises(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Appending to a JSONL file with incompatible fixed schema raises ValueError.
+
+        Before the fix, incompatible rows were silently appended.
+        """
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+        # Write existing data with different fields
+        output_file.write_text(json.dumps({"x": 1, "y": 2}) + "\n")
+
+        # Try to append with a fixed schema that requires id and name
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "format": "jsonl",
+                "mode": "append",
+                "schema": FIXED_SCHEMA,
+            }
+        )
+
+        with pytest.raises(ValueError, match="JSONL schema mismatch"):
+            sink.write([{"id": 1, "name": "alice"}], ctx)
+
+        sink.close()
+
+    def test_append_to_compatible_fixed_schema_succeeds(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Appending to a JSONL file with compatible fixed schema succeeds."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+        # Existing data has same fields
+        output_file.write_text(json.dumps({"id": 1, "name": "alice"}) + "\n")
+
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "format": "jsonl",
+                "mode": "append",
+                "schema": FIXED_SCHEMA,
+            }
+        )
+
+        # Should succeed -- schema matches
+        sink.write([{"id": 2, "name": "bob"}], ctx)
+        sink.flush()
+        sink.close()
+
+        lines = output_file.read_text().strip().split("\n")
+        assert len(lines) == 2
+        assert json.loads(lines[1]) == {"id": 2, "name": "bob"}
+
+    def test_append_to_missing_flexible_schema_field_raises(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Appending to JSONL missing a required flexible field raises ValueError."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+        # Existing data is missing 'name' field required by flexible schema
+        output_file.write_text(json.dumps({"id": 1}) + "\n")
+
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "format": "jsonl",
+                "mode": "append",
+                "schema": FLEXIBLE_SCHEMA,
+            }
+        )
+
+        with pytest.raises(ValueError, match="JSONL schema mismatch"):
+            sink.write([{"id": 2, "name": "bob"}], ctx)
+
+        sink.close()
+
+    def test_append_to_nonexistent_file_succeeds(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Appending to a nonexistent JSONL file creates it successfully."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+        assert not output_file.exists()
+
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "format": "jsonl",
+                "mode": "append",
+                "schema": FIXED_SCHEMA,
+            }
+        )
+
+        sink.write([{"id": 1, "name": "alice"}], ctx)
+        sink.flush()
+        sink.close()
+
+        lines = output_file.read_text().strip().split("\n")
+        assert len(lines) == 1
+        assert json.loads(lines[0]) == {"id": 1, "name": "alice"}
+
+    def test_append_observed_mode_skips_validation(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append with observed schema skips validation (dynamic adapts)."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+        # Existing data has completely different fields
+        output_file.write_text(json.dumps({"x": 1, "y": 2}) + "\n")
+
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "format": "jsonl",
+                "mode": "append",
+                "schema": OBSERVED_SCHEMA,
+            }
+        )
+
+        # Should succeed -- observed mode doesn't validate
+        sink.write([{"a": 1, "b": 2}], ctx)
+        sink.flush()
+        sink.close()
+
+        lines = output_file.read_text().strip().split("\n")
+        assert len(lines) == 2
+
+
+# =============================================================================
+# Bug 1: Azure blob sink misses required field validation
+# =============================================================================
+
+
+class TestAzureBlobSinkFieldValidation:
+    """Regression tests for P2-2026-02-14: Azure blob sink misses required
+    field validation.
+
+    The blob sink's CSV serialization path must reject extra fields before
+    serialization, not mid-batch via DictWriter's extrasaction='raise'.
+    """
+
+    @pytest.fixture
+    def mock_container_client(self):
+        """Create a mock container client for testing."""
+        with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client") as mock:
+            yield mock
+
+    def test_csv_extra_fields_rejected_in_fixed_mode(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """Extra fields in fixed-mode CSV are rejected before serialization."""
+        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(
+            {
+                "connection_string": TEST_CONNECTION_STRING,
+                "container": TEST_CONTAINER,
+                "blob_path": TEST_BLOB_PATH,
+                "format": "csv",
+                "schema": FIXED_SCHEMA,
+            }
+        )
+
+        with pytest.raises(ValueError, match="unexpected fields"):
+            sink.write(
+                [
+                    {"id": 1, "name": "alice"},
+                    {"id": 2, "name": "bob", "extra": "bad"},
+                ],
+                ctx,
+            )
+
+        # No upload should have happened
+        mock_blob_client.upload_blob.assert_not_called()
+
+    def test_csv_valid_rows_still_upload(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """Valid rows in fixed mode still upload successfully."""
+        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(
+            {
+                "connection_string": TEST_CONNECTION_STRING,
+                "container": TEST_CONTAINER,
+                "blob_path": TEST_BLOB_PATH,
+                "format": "csv",
+                "schema": FIXED_SCHEMA,
+            }
+        )
+
+        sink.write([{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}], ctx)
+        mock_blob_client.upload_blob.assert_called_once()
+
+    def test_declared_required_fields_populated(self) -> None:
+        """AzureBlobSink populates declared_required_fields from schema."""
+        from elspeth.plugins.azure.blob_sink import AzureBlobSink
+
+        with patch("elspeth.plugins.azure.blob_sink.AzureBlobSink._get_container_client"):
+            sink = AzureBlobSink(
+                {
+                    "connection_string": TEST_CONNECTION_STRING,
+                    "container": TEST_CONTAINER,
+                    "blob_path": TEST_BLOB_PATH,
+                    "format": "csv",
+                    "schema": FIXED_SCHEMA,
+                }
+            )
+
+        assert sink.declared_required_fields == frozenset({"id", "name"})
