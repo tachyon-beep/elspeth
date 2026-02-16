@@ -277,6 +277,20 @@ class TestBatchReplicateConfigValidation:
                 }
             )
 
+    def test_default_copies_above_max_rejected(self) -> None:
+        """Config with default_copies > max_copies is rejected at validation time."""
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        with pytest.raises(PluginConfigError, match="exceeds max_copies"):
+            BatchReplicate(
+                {
+                    "schema": {"mode": "observed"},
+                    "default_copies": 11,
+                    "max_copies": 10,
+                }
+            )
+
 
 class TestBatchReplicateSchemaContract:
     """Schema contract tests."""
