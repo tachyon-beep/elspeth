@@ -6,7 +6,7 @@ Tests cover:
 - compute_grade with empty pipeline (no nodes) → FULL_REPRODUCIBLE
 - compute_grade with seeded nodes → FULL_REPRODUCIBLE
 - compute_grade crashes on NULL/invalid determinism (Tier 1)
-- set_run_grade updates the runs table
+- compute_grade raises for nonexistent run
 - update_grade_after_purge degrades REPLAY→ATTRIBUTABLE, leaves others
 """
 
@@ -20,9 +20,9 @@ from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.reproducibility import (
     ReproducibilityGrade,
     compute_grade,
-    set_run_grade,
     update_grade_after_purge,
 )
+from elspeth.core.landscape.schema import runs_table
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
@@ -157,16 +157,16 @@ class TestComputeGrade:
         grade = compute_grade(db, "run-1")
         assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
+    def test_nonexistent_run_raises(self) -> None:
+        db, _recorder = _setup()
+        with pytest.raises(ValueError, match="does not exist"):
+            compute_grade(db, "nonexistent-run")
 
-class TestSetRunGrade:
-    """Tests for set_run_grade — updates the runs table."""
 
-    def test_sets_grade_on_run(self) -> None:
-        db, recorder = _setup()
-        set_run_grade(db, "run-1", ReproducibilityGrade.FULL_REPRODUCIBLE)
-        run = recorder.get_run("run-1")
-        assert run is not None
-        assert run.reproducibility_grade == "full_reproducible"
+def _set_grade(db: LandscapeDB, run_id: str, grade: ReproducibilityGrade) -> None:
+    """Set reproducibility grade via direct SQL (test helper)."""
+    with db.connection() as conn:
+        conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(reproducibility_grade=grade.value))
 
 
 class TestUpdateGradeAfterPurge:
@@ -174,7 +174,7 @@ class TestUpdateGradeAfterPurge:
 
     def test_replay_degrades_to_attributable(self) -> None:
         db, recorder = _setup()
-        set_run_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+        _set_grade(db, "run-1", ReproducibilityGrade.REPLAY_REPRODUCIBLE)
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
@@ -182,7 +182,7 @@ class TestUpdateGradeAfterPurge:
 
     def test_full_unchanged_after_purge(self) -> None:
         db, recorder = _setup()
-        set_run_grade(db, "run-1", ReproducibilityGrade.FULL_REPRODUCIBLE)
+        _set_grade(db, "run-1", ReproducibilityGrade.FULL_REPRODUCIBLE)
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None
@@ -190,7 +190,7 @@ class TestUpdateGradeAfterPurge:
 
     def test_attributable_unchanged_after_purge(self) -> None:
         db, recorder = _setup()
-        set_run_grade(db, "run-1", ReproducibilityGrade.ATTRIBUTABLE_ONLY)
+        _set_grade(db, "run-1", ReproducibilityGrade.ATTRIBUTABLE_ONLY)
         update_grade_after_purge(db, "run-1")
         run = recorder.get_run("run-1")
         assert run is not None

@@ -842,6 +842,51 @@ class TestRetryBatch:
         retry2 = recorder.retry_batch(retry1.batch_id)
         assert retry2.attempt == 2
 
+    def test_retry_is_idempotent(self):
+        """Retrying the same failed batch twice returns the same retry batch."""
+        _db, recorder = _setup_with_token()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-orig")
+        recorder.add_batch_member("b-orig", "tok-1", ordinal=0)
+        recorder.add_batch_member("b-orig", "tok-2", ordinal=1)
+        recorder.update_batch_status("b-orig", BatchStatus.FAILED)
+
+        first_retry = recorder.retry_batch("b-orig")
+        second_retry = recorder.retry_batch("b-orig")
+
+        assert first_retry.batch_id == second_retry.batch_id
+        assert first_retry.attempt == second_retry.attempt == 1
+
+        # Only one retry batch exists (not two)
+        all_batches = recorder.get_batches("run-1")
+        attempt_1_batches = [b for b in all_batches if b.attempt == 1]
+        assert len(attempt_1_batches) == 1
+
+    def test_retry_idempotency_across_recovery_cycles(self):
+        """Simulates crash-recovery-crash-recovery creating only one retry."""
+        _db, recorder = _setup_with_token()
+        recorder.create_batch("run-1", "agg-1", batch_id="b-orig")
+        recorder.add_batch_member("b-orig", "tok-1", ordinal=0)
+        recorder.update_batch_status("b-orig", BatchStatus.FAILED)
+
+        # First recovery cycle creates retry batch
+        retry1 = recorder.retry_batch("b-orig")
+
+        # Simulate crash: retry batch stays as DRAFT
+        # Second recovery cycle tries to retry the same failed batch
+        retry2 = recorder.retry_batch("b-orig")
+
+        # Third recovery cycle — same thing
+        retry3 = recorder.retry_batch("b-orig")
+
+        # All three calls return the same batch
+        assert retry1.batch_id == retry2.batch_id == retry3.batch_id
+        assert retry1.attempt == 1
+
+        # Members were only copied once
+        members = recorder.get_batch_members(retry1.batch_id)
+        assert len(members) == 1
+        assert members[0].token_id == "tok-1"
+
 
 # ---------------------------------------------------------------------------
 # register_artifact

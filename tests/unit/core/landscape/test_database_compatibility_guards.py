@@ -20,6 +20,7 @@ def _make_instance(url: str) -> LandscapeDB:
     instance._passphrase = None
     instance._journal = None
     instance._engine = create_engine(url, echo=False)
+    instance._require_existing_schema = False
     return instance
 
 

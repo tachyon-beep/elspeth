@@ -254,7 +254,7 @@ class TestExplainParentIntegrity:
 
     def test_parent_token_not_found_raises(self) -> None:
         """Missing parent token is audit corruption."""
-        token = _make_token()
+        token = _make_token(fork_group_id="fork-group-1")
         row_lineage = _make_row_lineage()
         parent_ref = TokenParent(token_id="tok-1", parent_token_id="missing-parent", ordinal=0)
         recorder = _make_recorder(

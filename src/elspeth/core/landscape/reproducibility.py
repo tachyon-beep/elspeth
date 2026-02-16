@@ -56,6 +56,13 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
     Raises:
         ValueError: If any node has invalid determinism enum value (audit corruption)
     """
+    # Verify run exists before computing grade — a nonexistent run_id
+    # must not return FULL_REPRODUCIBLE (which is what "no nodes" implies).
+    with db.connection() as conn:
+        run_check = conn.execute(select(runs_table.c.run_id).where(runs_table.c.run_id == run_id))
+        if run_check.fetchone() is None:
+            raise ValueError(f"Cannot compute reproducibility grade: run '{run_id}' does not exist")
+
     # Tier-1 audit data validation: Fetch ALL distinct determinism values
     # and validate each is a valid Determinism enum member.
     # Per Data Manifesto: "Bad data in the audit trail = crash immediately"
@@ -93,18 +100,6 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
         return ReproducibilityGrade.REPLAY_REPRODUCIBLE
     else:
         return ReproducibilityGrade.FULL_REPRODUCIBLE
-
-
-def set_run_grade(db: "LandscapeDB", run_id: str, grade: ReproducibilityGrade) -> None:
-    """Set reproducibility grade on the runs table.
-
-    Args:
-        db: LandscapeDB instance
-        run_id: Run ID to update
-        grade: ReproducibilityGrade to set
-    """
-    with db.connection() as conn:
-        conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(reproducibility_grade=grade.value))
 
 
 def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:

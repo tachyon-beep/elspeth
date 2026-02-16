@@ -19,8 +19,6 @@ class TestExplainGracefulDegradation:
 
     def test_explain_with_missing_row_payload(self, tmp_path: Path, payload_store) -> None:
         """explain_row() succeeds even when row payload is purged."""
-        import json
-
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -40,20 +38,18 @@ class TestExplainGracefulDegradation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store row data in payload store
+        # create_row auto-stores payload via configured payload_store
         row_data = {"name": "test", "value": 42}
-        payload_ref = payload_store.store(json.dumps(row_data).encode())
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data=row_data,
-            payload_ref=payload_ref,
         )
 
         # Purge the payload (simulate retention policy)
-        payload_store.delete(payload_ref)
+        payload_store.delete(row.source_data_ref)
 
         # explain_row should still work
         lineage = recorder.explain_row(
@@ -68,8 +64,6 @@ class TestExplainGracefulDegradation:
 
     def test_explain_reports_payload_status(self, tmp_path: Path, payload_store) -> None:
         """explain_row() explicitly reports payload availability."""
-        import json
-
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -89,20 +83,18 @@ class TestExplainGracefulDegradation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store row data in payload store
+        # create_row auto-stores payload via configured payload_store
         row_data = {"name": "test"}
-        payload_ref = payload_store.store(json.dumps(row_data).encode())
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data=row_data,
-            payload_ref=payload_ref,
         )
 
         # Purge the payload
-        payload_store.delete(payload_ref)
+        payload_store.delete(row.source_data_ref)
 
         # Check payload_available attribute
         lineage = recorder.explain_row(
@@ -115,8 +107,6 @@ class TestExplainGracefulDegradation:
 
     def test_explain_with_available_payload(self, tmp_path: Path, payload_store) -> None:
         """explain_row() returns payload when available."""
-        import json
-
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -136,16 +126,14 @@ class TestExplainGracefulDegradation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store row data in payload store
+        # create_row auto-stores payload via configured payload_store
         row_data = {"name": "test", "value": 123}
-        payload_ref = payload_store.store(json.dumps(row_data).encode())
 
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data=row_data,
-            payload_ref=payload_ref,
         )
 
         # Payload NOT purged
@@ -234,13 +222,12 @@ class TestExplainGracefulDegradation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Create row without payload_ref
+        # Create row — no payload_store configured, so source_data_ref will be None
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data={"name": "test"},
-            # No payload_ref provided
         )
 
         lineage = recorder.explain_row(
@@ -250,7 +237,7 @@ class TestExplainGracefulDegradation:
 
         assert lineage is not None
         assert lineage.source_data_hash is not None
-        assert lineage.source_data is None  # No payload_ref
+        assert lineage.source_data is None  # No payload store configured
         assert lineage.payload_available is False
 
     def test_explain_row_with_corrupted_payload(self, tmp_path: Path, payload_store) -> None:
@@ -273,18 +260,23 @@ class TestExplainGracefulDegradation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store corrupted (non-JSON) data directly to payload store
-        corrupted_data = b"this is not valid json {{{{"
-        payload_ref = payload_store.store(corrupted_data)
-
-        # Create row with the corrupted payload ref
+        # create_row auto-stores valid canonical JSON via payload_store
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            data={"name": "test"},  # Valid data for hash
-            payload_ref=payload_ref,
+            data={"name": "test"},
         )
+
+        # Store corrupted (non-JSON) data separately with a valid hash
+        bad_ref = payload_store.store(b"this is not valid json {{{{")
+
+        # Point the row's source_data_ref to the corrupted payload
+        from elspeth.core.landscape.schema import rows_table
+
+        with db.engine.connect() as conn:
+            conn.execute(rows_table.update().where(rows_table.c.row_id == row.row_id).values(source_data_ref=bad_ref))
+            conn.commit()
 
         # Tier 1 violation: corrupted payload store data is OUR data — must crash
         with pytest.raises(AuditIntegrityError, match="Corrupt payload"):
@@ -315,14 +307,23 @@ class TestExplainGracefulDegradation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        payload_ref = payload_store.store(json.dumps([1, 2, 3]).encode())
+        # create_row auto-stores valid canonical JSON via payload_store
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data={"name": "test"},
-            payload_ref=payload_ref,
         )
+
+        # Store non-object JSON separately with a valid hash
+        bad_ref = payload_store.store(json.dumps([1, 2, 3]).encode())
+
+        # Point the row's source_data_ref to the non-object payload
+        from elspeth.core.landscape.schema import rows_table
+
+        with db.engine.connect() as conn:
+            conn.execute(rows_table.update().where(rows_table.c.row_id == row.row_id).values(source_data_ref=bad_ref))
+            conn.commit()
 
         with pytest.raises(AuditIntegrityError, match="expected JSON object"):
             recorder.explain_row(
@@ -332,8 +333,6 @@ class TestExplainGracefulDegradation:
 
     def test_explain_row_rejects_run_id_mismatch(self, tmp_path: Path, payload_store) -> None:
         """explain_row() returns None when row belongs to different run."""
-        import json
-
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -355,15 +354,13 @@ class TestExplainGracefulDegradation:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Create row in run1
+        # Create row in run1 (create_row auto-stores payload)
         row_data = {"name": "test"}
-        payload_ref = payload_store.store(json.dumps(row_data).encode())
         row = recorder.create_row(
             run_id=run1.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data=row_data,
-            payload_ref=payload_ref,
         )
 
         # Try to explain using run2's ID - should return None

@@ -305,16 +305,18 @@ class BatchRecordingMixin:
         return [self._batch_member_repo.load(row) for row in rows]
 
     def retry_batch(self, batch_id: str) -> Batch:
-        """Create a new batch attempt from a failed batch.
+        """Create a new batch attempt from a failed batch (idempotent).
 
         Copies batch metadata and members to a new batch with
-        incremented attempt counter and draft status.
+        incremented attempt counter and draft status. If a retry batch
+        already exists for this attempt, returns it without creating
+        a duplicate.
 
         Args:
             batch_id: The failed batch to retry
 
         Returns:
-            New Batch with attempt = original.attempt + 1
+            New or existing Batch with attempt = original.attempt + 1
 
         Raises:
             ValueError: If original batch not found or not in failed status
@@ -325,11 +327,22 @@ class BatchRecordingMixin:
         if original.status != BatchStatus.FAILED:
             raise ValueError(f"Can only retry failed batches, got status: {original.status}")
 
+        next_attempt = original.attempt + 1
+
+        # Idempotency: check if a retry batch already exists for this attempt
+        existing = self._find_batch_by_attempt(
+            run_id=original.run_id,
+            aggregation_node_id=original.aggregation_node_id,
+            attempt=next_attempt,
+        )
+        if existing is not None:
+            return existing
+
         # Create new batch with incremented attempt
         new_batch = self.create_batch(
             run_id=original.run_id,
             aggregation_node_id=original.aggregation_node_id,
-            attempt=original.attempt + 1,
+            attempt=next_attempt,
         )
 
         # Copy members to new batch
@@ -342,6 +355,28 @@ class BatchRecordingMixin:
             )
 
         return new_batch
+
+    def _find_batch_by_attempt(
+        self,
+        run_id: str,
+        aggregation_node_id: str,
+        attempt: int,
+    ) -> Batch | None:
+        """Find an existing batch by (run_id, aggregation_node_id, attempt).
+
+        Used for retry idempotency — prevents creating duplicate draft
+        batches when recovery restarts after a mid-recovery crash.
+        """
+        query = (
+            select(batches_table)
+            .where(batches_table.c.run_id == run_id)
+            .where(batches_table.c.aggregation_node_id == aggregation_node_id)
+            .where(batches_table.c.attempt == attempt)
+        )
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            return None
+        return self._batch_repo.load(row)
 
     # === Artifact Registration ===
 

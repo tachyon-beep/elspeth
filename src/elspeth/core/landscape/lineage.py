@@ -163,16 +163,42 @@ def explain(
     parent_tokens: list[Token] = []
     parents = recorder.get_token_parents(token_id)
 
-    # Validate parent relationships consistency
-    # If token has fork_group_id, join_group_id, or expand_group_id, it MUST have parents
-    has_group_id = token.fork_group_id or token.join_group_id or token.expand_group_id
-    if has_group_id and not parents:
-        group_type = "fork" if token.fork_group_id else ("join" if token.join_group_id else "expand")
-        group_id = token.fork_group_id or token.join_group_id or token.expand_group_id
+    # Validate parent relationships consistency using strict `is not None` checks.
+    # Empty-string group IDs are audit corruption (UUIDs are never empty).
+    group_ids = {
+        "fork": token.fork_group_id,
+        "join": token.join_group_id,
+        "expand": token.expand_group_id,
+    }
+    # Reject empty-string group IDs — they're corruption, not valid values
+    for gtype, gval in group_ids.items():
+        if gval is not None and gval == "":
+            raise ValueError(
+                f"Audit integrity violation: token '{token_id}' has empty {gtype}_group_id. "
+                f"Group IDs must be non-empty UUIDs or NULL. This indicates database corruption."
+            )
+    set_groups = [k for k, v in group_ids.items() if v is not None]
+    # At most one group type should be set (fork XOR join XOR expand)
+    if len(set_groups) > 1:
+        raise ValueError(
+            f"Audit integrity violation: token '{token_id}' has multiple group IDs set: "
+            f"{set_groups}. A token can belong to exactly one lineage operation."
+        )
+    # Bidirectional consistency: group_id ↔ parents
+    if set_groups and not parents:
+        group_type = set_groups[0]
+        group_id = group_ids[group_type]
         raise ValueError(
             f"Audit integrity violation: token '{token_id}' has {group_type}_group_id='{group_id}' "
             f"but no parent relationships in token_parents table. Tokens with group IDs must have "
             f"parent lineage recorded. This indicates missing {group_type} metadata or audit corruption."
+        )
+    if parents and not set_groups:
+        parent_ids = [p.parent_token_id for p in parents]
+        raise ValueError(
+            f"Audit integrity violation: token '{token_id}' has parent relationships "
+            f"{parent_ids} but no group ID (fork/join/expand) is set. Parent tokens must "
+            f"be associated with a lineage operation."
         )
 
     for parent in parents:

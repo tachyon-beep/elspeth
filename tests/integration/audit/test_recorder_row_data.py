@@ -56,7 +56,7 @@ class TestGetRowDataExplicitStates:
             source_node_id=source.node_id,
             row_index=0,
             data={"name": "test"},
-            # No payload_ref - source_data_ref will be None
+            # No payload_store configured - source_data_ref will be None
         )
 
         result = recorder.get_row_data(row.row_id)
@@ -81,15 +81,13 @@ class TestGetRowDataExplicitStates:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store payload and create row with ref
+        # create_row auto-stores payload via configured payload_store
         test_data = {"field": "value"}
-        payload_ref = payload_store.store(json.dumps(test_data).encode())
         row = recorder_with_store.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data=test_data,
-            payload_ref=payload_ref,
         )
 
         # Create new recorder WITHOUT payload store, using same db
@@ -116,19 +114,17 @@ class TestGetRowDataExplicitStates:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store payload and create row with ref
+        # create_row auto-stores payload via configured payload_store
         test_data = {"field": "value"}
-        payload_ref = payload_store.store(json.dumps(test_data).encode())
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data=test_data,
-            payload_ref=payload_ref,
         )
 
         # Delete the payload (simulating retention policy purge)
-        payload_store.delete(payload_ref)
+        payload_store.delete(row.source_data_ref)
 
         result = recorder.get_row_data(row.row_id)
 
@@ -151,15 +147,13 @@ class TestGetRowDataExplicitStates:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store payload and create row with ref
+        # create_row auto-stores payload via configured payload_store
         test_data = {"field": "value", "number": 42}
-        payload_ref = payload_store.store(json.dumps(test_data).encode())
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data=test_data,
-            payload_ref=payload_ref,
         )
 
         result = recorder.get_row_data(row.row_id)
@@ -199,19 +193,18 @@ class TestGetRowDataTier1Corruption:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store valid payload and create row
+        # create_row auto-stores payload via configured payload_store
         test_data = {"field": "value"}
-        payload_ref = payload_store.store(json.dumps(test_data).encode())
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data=test_data,
-            payload_ref=payload_ref,
         )
 
         # Corrupt the payload file by tampering with its contents
         # FilesystemPayloadStore uses hash[:2]/hash as path structure
+        payload_ref = row.source_data_ref
         payload_path = tmp_path / "payloads" / payload_ref[:2] / payload_ref
         payload_path.write_bytes(b"corrupted data that won't match hash")
 
@@ -244,16 +237,23 @@ class TestGetRowDataTier1Corruption:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Store non-JSON bytes (but with valid hash)
-        non_json_data = b"this is not valid JSON {"
-        payload_ref = payload_store.store(non_json_data)
+        # create_row auto-stores valid canonical JSON via payload_store
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
-            data={"placeholder": "ignored"},  # This won't be retrieved
-            payload_ref=payload_ref,
+            data={"placeholder": "ignored"},
         )
+
+        # Store non-JSON bytes separately (hash-valid but not JSON)
+        bad_ref = payload_store.store(b"this is not valid JSON {")
+
+        # Point the row's source_data_ref to the bad payload
+        from elspeth.core.landscape.schema import rows_table
+
+        with db.engine.connect() as conn:
+            conn.execute(rows_table.update().where(rows_table.c.row_id == row.row_id).values(source_data_ref=bad_ref))
+            conn.commit()
 
         # get_row_data must raise JSONDecodeError, not return None or garbage
         with pytest.raises(json.JSONDecodeError):
@@ -277,14 +277,23 @@ class TestGetRowDataTier1Corruption:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        payload_ref = payload_store.store(json.dumps([1, 2, 3]).encode())
+        # create_row auto-stores valid canonical JSON via payload_store
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=source.node_id,
             row_index=0,
             data={"placeholder": "ignored"},
-            payload_ref=payload_ref,
         )
+
+        # Store non-object JSON separately (hash-valid but not a JSON object)
+        bad_ref = payload_store.store(json.dumps([1, 2, 3]).encode())
+
+        # Point the row's source_data_ref to the bad payload
+        from elspeth.core.landscape.schema import rows_table
+
+        with db.engine.connect() as conn:
+            conn.execute(rows_table.update().where(rows_table.c.row_id == row.row_id).values(source_data_ref=bad_ref))
+            conn.commit()
 
         with pytest.raises(AuditIntegrityError, match="expected JSON object"):
             recorder.get_row_data(row.row_id)

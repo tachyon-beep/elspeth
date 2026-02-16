@@ -377,17 +377,15 @@ class TestResumeIdempotence:
         recorder.update_run_contract(run_id, source_contract)
         recorder.update_node_output_contract(run_id, "source", source_contract)
 
-        # Create all 5 rows with payloads
+        # Create all 5 rows with payloads (create_row auto-stores via payload_store_b)
         row_ids = []
         token_ids = []
         for i, row_data in enumerate(source_data):
-            payload_ref = payload_store_b.store(json.dumps(row_data).encode("utf-8"))
             row = recorder.create_row(
                 run_id=run_id,
                 source_node_id="source",
                 row_index=i,
                 data=row_data,
-                payload_ref=payload_ref,
             )
             row_ids.append(row.row_id)
             token = recorder.create_token(row_id=row.row_id)

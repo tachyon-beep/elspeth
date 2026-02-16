@@ -53,7 +53,6 @@ class TokenRecordingMixin:
         data: dict[str, Any],
         *,
         row_id: str | None = None,
-        payload_ref: str | None = None,
         quarantined: bool = False,
     ) -> Row:
         """Create a source row record.
@@ -64,7 +63,6 @@ class TokenRecordingMixin:
             row_index: Position in source (0-indexed)
             data: Row data for hashing and optional storage
             row_id: Optional row ID (generated if not provided)
-            payload_ref: DEPRECATED - payload persistence now handled internally
             quarantined: If True, data is Tier-3 external data that may contain
                 non-canonical values (NaN, Infinity). Uses repr_hash fallback.
 
@@ -72,7 +70,7 @@ class TokenRecordingMixin:
             Row model
 
         Note:
-            Payload persistence is now handled by LandscapeRecorder, not callers.
+            Payload persistence is handled by LandscapeRecorder, not callers.
             If self._payload_store is configured, the method will:
             1. Serialize data using canonical_json (handles pandas/numpy/datetime/Decimal)
             2. Store in payload store
@@ -97,8 +95,8 @@ class TokenRecordingMixin:
         timestamp = now()
 
         # Landscape owns payload persistence - serialize and store if configured
-        final_payload_ref = payload_ref  # Legacy path (will be removed)
-        if self._payload_store is not None and payload_ref is None:
+        final_payload_ref: str | None = None
+        if self._payload_store is not None:
             # Canonical JSON handles pandas/numpy/Decimal/datetime types.
             # For quarantined data, fall back to json.dumps(repr()) if
             # canonical serialization fails on non-canonical values.

@@ -1265,15 +1265,12 @@ class TestTokenOutcomeRepository:
             repo.load(sa_row)
 
     def test_is_terminal_true_bool_raises_value_error(self) -> None:
-        """Python True == 1 so True is IN (0, 1). But the domain type
-        validates is_terminal must be bool. Since True == 1, the repo
-        check passes, but the result should be True (bool)."""
-        # True is in (0, 1) because True == 1 in Python, so the repo
-        # check passes. The resulting is_terminal = (True == 1) = True.
+        """Bool is a subclass of int in Python, so True == 1.
+        But Tier 1 strictness requires exact int type — bool must be rejected."""
         sa_row = self._make_outcome_row(is_terminal=True)
         repo = TokenOutcomeRepository()
-        result = repo.load(sa_row)
-        assert result.is_terminal is True
+        with pytest.raises(ValueError, match="invalid is_terminal"):
+            repo.load(sa_row)
 
     def test_invalid_outcome_raises_value_error(self) -> None:
         sa_row = self._make_outcome_row(outcome="vanished")

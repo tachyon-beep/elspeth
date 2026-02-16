@@ -200,7 +200,12 @@ class RunRecordingMixin:
                 f"Cannot resume without schema - type fidelity would be violated."
             )
 
-        return str(source_schema_json)
+        if type(source_schema_json) is not str:
+            raise ValueError(
+                f"Run {run_id} source_schema_json is {type(source_schema_json).__name__}, "
+                f"expected str - audit data corruption (Tier 1 violation)"
+            )
+        return source_schema_json
 
     def record_source_field_resolution(
         self,
