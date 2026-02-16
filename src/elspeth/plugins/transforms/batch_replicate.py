@@ -14,7 +14,7 @@ row, with parent linkage to track deaggregation lineage.
 import copy
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from elspeth.contracts.errors import TransformSuccessReason
 from elspeth.contracts.plugin_context import PluginContext
@@ -50,6 +50,13 @@ class BatchReplicateConfig(TransformDataConfig):
         default=True,
         description="Whether to add a 'copy_index' field (0-based) to each output row",
     )
+
+    @model_validator(mode="after")
+    def _default_within_max(self) -> "BatchReplicateConfig":
+        if self.default_copies > self.max_copies:
+            msg = f"default_copies ({self.default_copies}) exceeds max_copies ({self.max_copies})"
+            raise ValueError(msg)
+        return self
 
 
 class BatchReplicate(BaseTransform):
@@ -145,8 +152,8 @@ class BatchReplicate(BaseTransform):
         for row in rows:
             # Get copies count - field is optional, type must be correct if present
             if self._copies_field not in row:
-                # Field missing - use default (valid scenario)
-                copies = self._default_copies
+                # Field missing - use default, still bounded by max_copies
+                copies = min(self._default_copies, self._max_copies)
             else:
                 raw_copies = row[self._copies_field]
 
