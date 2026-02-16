@@ -174,6 +174,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder, telemetry, and rate limit context for pooled execution."""
+        super().on_start(ctx)
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit

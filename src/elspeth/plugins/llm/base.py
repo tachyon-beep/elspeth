@@ -193,6 +193,7 @@ class BaseLLMTransform(BaseTransform):
                 self._limiter = None  # Set in on_start
 
             def on_start(self, ctx: PluginContext) -> None:
+                super().on_start(ctx)  # Required: sets lifecycle flag
                 # Capture rate limiter for throttling
                 self._limiter = (
                     ctx.rate_limit_registry.get_limiter("openai")
