@@ -1,8 +1,10 @@
 # Bug Fix Strategy
 
 **Created:** 2026-02-14
+**Updated:** 2026-02-17
 **Branch:** `RC3.1-bug-hunt`
-**Inventory:** 178 open bugs (64 P1, 89 P2, 25 P3), 18 closed
+**Original inventory:** 178 open bugs (64 P1, 89 P2, 25 P3), 18 closed
+**Current:** 77 open (33 P1, 39 P2, 5 P3), 118 closed — **60% resolved**
 
 ## Principles
 
@@ -12,206 +14,253 @@
 4. **Parallel agents per cluster.** Independent clusters can be fixed simultaneously.
 5. **Each fix includes its regression test.** No fix merges without a test that would have caught it.
 
-## Phase 0: Quick Wins
+## Phase 0: Quick Wins — COMPLETE
 
-**Goal:** Clear trivially-fixable P1s that have documented one-liner fixes. Build momentum.
-**Effort:** ~1 session. **Bugs closed:** ~12
+**Commit:** `c4ce8cda`
+**Bugs closed:** 12 P1
 
-These are isolated, independent fixes with no design decisions and no risk of regression cascades.
+| Bug | File | Status |
+|-----|------|--------|
+| Template mutation | `plugins/llm/__init__.py` | CLOSED |
+| GraphValidationError suppressed | `core/dag/graph.py` | CLOSED |
+| MCP eager import | `mcp/__init__.py` | CLOSED |
+| Journal circuit-breaker dead | `core/landscape/journal.py` | CLOSED |
+| Interrupted run purge | `core/retention/purge.py` | CLOSED |
+| Resume leaves RUNNING | `engine/orchestrator/core.py` | CLOSED |
+| Plugin cleanup skipped | `engine/orchestrator/core.py` | CLOSED |
+| Gate executor open states | `engine/executors/gate.py` | CLOSED |
+| PoolConfig zero-delay | `plugins/pooling/config.py` | CLOSED |
+| MCP Mermaid non-unique IDs | `mcp/analyzers/reports.py` | CLOSED |
+| Purge unbounded IN | `core/retention/purge.py` | CLOSED |
+| `base_llm` adds_fields | `plugins/llm/base.py` | CLOSED |
 
-| Bug | File | Fix |
-|-----|------|-----|
-| Template mutation | `plugins/llm/__init__.py` | `SandboxedEnvironment` → `ImmutableSandboxedEnvironment` |
-| GraphValidationError suppressed | `core/dag/graph.py:1088-1092` | Delete the try/except block |
-| MCP eager import | `mcp/__init__.py` | Lazy import behind function |
-| Journal circuit-breaker dead | `core/landscape/journal.py` | Restructure hook to not short-circuit before recovery check |
-| Interrupted run purge | `core/retention/purge.py:145-149` | `status != "running"` → `status.in_(("completed", "failed"))` |
-| Resume leaves RUNNING | `engine/orchestrator/core.py` | Add except clause mirroring `run()` |
-| Plugin cleanup skipped | `engine/orchestrator/core.py` | Move cleanup outside try block |
-| Gate executor open states | `engine/executors/gate.py` | Widen except block to include dispatch errors |
-| PoolConfig zero-delay | `plugins/pooling/config.py` | Pydantic validator: `min_delay > 0 or recovery_step > 0` |
-| MCP Mermaid non-unique IDs | `mcp/analyzers/reports.py` | Use full node_id or hash-based short IDs |
-| Purge unbounded IN | `core/retention/purge.py:352-403` | Apply existing `_METADATA_CHUNK_SIZE` chunking pattern |
-| `base_llm` adds_fields | `plugins/llm/base.py` | Set `transforms_adds_fields = True` |
+## Phase 1: NaN/Infinity Root Cause — COMPLETE
 
-## Phase 1: NaN/Infinity Root Cause
+**Commit:** `6ea152e8`
+**Bugs closed:** 5 P1 + 1 P2
 
-**Goal:** Fix the systemic NaN/Infinity boundary gap. Single root cause, ~8 downstream bugs neutralized.
-**Effort:** ~1 session. **Bugs closed:** 5-8 directly + reduces risk on ~4 P2s
-**Depends on:** Nothing
+All NaN/Infinity boundary fixes landed. The `np.datetime64` canonical hashing issue (originally listed here) is the sole remaining item — see Remaining Work below.
 
-### Root cause
-Pydantic float validation accepts `float("nan")` and `float("inf")` — these pass schema validation at the source boundary, flow into the pipeline, and crash `canonical_json()` (RFC 8785 rejects them).
-
-### Fix sequence
-1. **Boundary fix** — `plugins/schema_factory.py`: Add `math.isfinite()` guard to float validation for explicit schemas
-2. **Defense-in-depth** — `plugins/llm/validate_field_type`: Add `math.isfinite()` for NUMBER outputs
-3. **LLM response parsing** — `plugins/llm/openrouter_multi_query.py`: Use `parse_constant` kwarg to reject NaN in `json.loads`
-4. **LLM response parsing** — `plugins/llm/openrouter.py`: Same pattern for re-parsed responses
-5. **Canonical guard** — `core/canonical.py`: `np.datetime64` rejection (related non-standard type issue)
+### Fix sequence (all delivered)
+1. Boundary fix — `plugins/schema_factory.py`: `math.isfinite()` guard on float validation
+2. Defense-in-depth — `plugins/llm/validate_field_type`: `math.isfinite()` for NUMBER outputs
+3. LLM response parsing — `plugins/llm/openrouter_multi_query.py`: `parse_constant` kwarg
+4. LLM response parsing — `plugins/llm/openrouter.py`: Same pattern
+5. Canonical guard — `core/canonical.py`: non-standard type rejection
 
 ### Downstream bugs neutralized
-After the boundary fix, these become defense-in-depth (their risk drops from P1 to "already blocked"):
-- `core-rate-limit/P2-nan-timeout`
-- `core/P2-sanitize-for-canonical`
+- `core-rate-limit/P2-nan-timeout` — CLOSED
+- `core/P2-sanitize-for-canonical` — CLOSED
 
-## Phase 2: Fail-Open Security
+## Phase 2: Fail-Open Security — COMPLETE
 
-**Goal:** Fix all security transforms that silently report "clean" on malformed/empty input.
-**Effort:** ~1 session. **Bugs closed:** 5
-**Depends on:** Nothing (independent of Phase 1)
+**Commit:** `6ef7b55e`
+**Bugs closed:** 5 P1 + 1 P2
 
-These are the highest-risk bugs in the inventory — they don't crash, they silently succeed, and the audit trail looks correct. An auditor would see "content validated" when nothing was actually checked.
+| Bug | File | Status |
+|-----|------|--------|
+| Content severity accepts bool/negative | `plugins/transforms/azure/content_safety.py` | CLOSED |
+| Empty documents analysis = clean | `plugins/transforms/azure/content_safety.py` | CLOSED |
+| Prompt shield empty fields = validated | `plugins/transforms/azure/prompt_shield.py` | CLOSED |
+| Keyword filter empty fields = no-op | `plugins/transforms/keyword_filter.py` | CLOSED |
+| Content safety retry race | `plugins/transforms/azure/content_safety.py` | CLOSED |
 
-| Bug | File | Pattern |
-|-----|------|---------|
-| Content severity accepts bool/negative | `plugins/transforms/azure_content_safety.py` | Validate severity is int, 0-7 range |
-| Empty documents analysis = clean | `plugins/transforms/azure_content_safety.py` | Reject len(analyses) != len(documents) |
-| Prompt shield empty fields = validated | `plugins/transforms/azure_prompt_shield.py` | Reject `fields=[]` at config validation |
-| Keyword filter empty fields = no-op | `plugins/transforms/keyword_filter.py` | Reject `fields=[]` at config validation |
-| Content safety retry race | `plugins/transforms/azure_content_safety.py` | Capture state_id before try block |
+## Phase 3: Silent Data Loss — Field Collisions — COMPLETE
 
-All 5 bugs are in 3 files. One agent can fix all of them in a single pass.
+**Commits:** `abc6aace` through `dec2b95a`, `9542218f`, `d2932c84`
+**Bugs closed:** 7
 
-## Phase 3: Silent Data Loss — Field Collisions
+Implemented centralized `detect_field_collisions()` utility and deployed it across all transforms. Also centralized collision detection in `TransformExecutor` as defense-in-depth.
 
-**Goal:** Fix all field-overwrite and sentinel-collision bugs.
-**Effort:** ~1 session. **Bugs closed:** 6-8
-**Depends on:** Nothing
+| Bug | File | Status |
+|-----|------|--------|
+| GroupBy aggregate overwrite | `plugins/transforms/group_by.py` | CLOSED |
+| JsonExplode output_field collision | `plugins/transforms/json_explode.py` | CLOSED |
+| JsonSink header mapping collision | `plugins/sinks/json_sink.py` | CLOSED |
+| SinkPathConfig header collision | `plugins/config_base.py` | CLOSED |
+| OpenRouter error sentinel | `plugins/llm/openrouter_batch.py` | CLOSED |
+| LLM/multi-query/batch collisions | Multiple LLM files | CLOSED |
+| TransformExecutor centralized guard | `engine/executors/transform.py` | CLOSED |
 
-Pattern: A dict comprehension or field assignment silently overwrites when names collide. The audit trail records both fields, but the artifact/output has only one — a divergence that breaks traceability.
+**Still open:** FieldMapper target collisions (`plugins/transforms/field_mapper.py`) — see Remaining Work.
 
-| Bug | File | Fix pattern |
-|-----|------|-------------|
-| FieldMapper target collisions | `plugins/transforms/field_mapper.py` | Validate no duplicate targets at config time |
-| GroupBy aggregate overwrite | `plugins/transforms/group_by.py` | Check aggregate field name not in row keys |
-| JsonExplode output_field collision | `plugins/transforms/json_explode.py` | Error if output_field already exists in row |
-| JsonSink header mapping collision | `plugins/sinks/json_sink.py` | Detect collision in dict comprehension |
-| SinkPathConfig header collision | `plugins/config_base.py` | Validate no duplicate values in header_mapping |
-| OpenRouter error sentinel | `plugins/llm/openrouter_batch.py` | Use typed discriminated union instead of `"error" in result` |
+## Phase 4: Tier 3 Boundary Hardening — COMPLETE
 
-These are all in separate files. Fully parallelizable.
+**Commit:** `eb0e8ba7`
+**Bugs closed:** 10 P1
 
-## Phase 4: Tier 3 Boundary Hardening
+| Bug | File | Status |
+|-----|------|--------|
+| Azure multi-query KeyError | `plugins/llm/azure_multi_query.py` | CLOSED |
+| Azure batch non-dict body | `plugins/llm/azure_batch.py` | CLOSED |
+| OpenRouter malformed shapes | `plugins/llm/openrouter_multi_query.py` | CLOSED |
+| Blob source type(e) rewrap | `plugins/azure/blob_source.py` | CLOSED |
+| JSONL decode ValueError | `plugins/azure/blob_source.py` | CLOSED |
+| Chat completion broad catch | `plugins/clients/chat_completion.py` | CLOSED |
+| Redirect hop not recorded | `plugins/clients/http.py` | CLOSED |
 
-**Goal:** Fix external-response handling in LLM and Azure plugins.
-**Effort:** ~1 session. **Bugs closed:** 7-9
-**Depends on:** Nothing
+## Phase 5: Engine Correctness — COMPLETE
 
-Pattern: External API responses are used without type/shape validation, violating the Tier 3 trust model.
+**Commits:** `5557573b`, `c624e546`, `7fa16b4c`, `3947f7c7`
+**Bugs closed:** 12 P1 (exceeded target of 5-6)
 
-### LLM plugins (same file cluster)
-| Bug | File | Fix |
-|-----|------|-----|
-| Azure multi-query KeyError | `plugins/llm/azure_multi_query.py` | Wrap template context building in try/except |
-| Azure batch non-dict body | `plugins/llm/azure_batch.py` | Validate `isinstance(body, dict)` before `.get()` |
-| OpenRouter malformed shapes | `plugins/llm/openrouter_multi_query.py` | Validate content is str, usage is dict |
+| Bug | File | Status |
+|-----|------|--------|
+| Fork-to-sink skips coalesce notify | `engine/processor.py` | CLOSED |
+| DAGNavigator misroutes continuations | `engine/dag_navigator.py` | CLOSED |
+| AggregationExecutor non-terminal | `engine/executors/aggregation.py` | CLOSED |
+| TransformExecutor terminality | `engine/executors/transform.py` | CLOSED |
+| Reconstruct Optional[Decimal] | `engine/orchestrator/export.py` | CLOSED |
+| Batch adapter crash-on-None | `engine/batch_adapter.py` | CLOSED |
+| + 6 additional engine bugs found during fixing | Various | CLOSED |
 
-### Azure plugins
-| Bug | File | Fix |
-|-----|------|-----|
-| Blob source type(e) rewrap | `plugins/azure/blob_source.py` | Use `RuntimeError(str(e)) from e` instead of `type(e)(...)` |
-| JSONL decode ValueError | `plugins/azure/blob_source.py` | Catch ValueError, quarantine row |
+## Phase 6: Contracts Hardening — COMPLETE
 
-### Audit gap
-| Bug | File | Fix |
-|-----|------|-----|
-| Chat completion broad catch | `plugins/clients/chat_completion.py` | Narrow try block to SDK call only |
-| Redirect hop not recorded | `plugins/clients/http.py` | Record HTTP_REDIRECT before attempting hop |
+**Commit:** `bf5dc956`
+**Bugs closed:** 10 P1
 
-## Phase 5: Engine Correctness
+| Bug | File | Status |
+|-----|------|--------|
+| check_compatibility nullable widening | `schema_contract.py` | CLOSED |
+| ContractAuditRecord invalid enum | `audit.py` | CLOSED |
+| ContractBuilder crashes on dict/list | `builder.py` | CLOSED |
+| create_contract_from_config inconsistent | `factory.py` | CLOSED |
+| PipelineRow coerces non-dict | `pipeline_row.py` | CLOSED |
+| propagate/narrow drops fields on TypeError | `schema_contract.py` | CLOSED |
+| SchemaConfig coerces non-bool required | `schema.py` | CLOSED |
+| TransformResult error invariants | `results.py` | CLOSED |
+| TypeMismatchViolation serializes raw | `violations.py` | CLOSED |
+| update_checkpoint stale path | `checkpoint.py` | CLOSED |
 
-**Goal:** Fix fork/coalesce routing and node-state terminality.
-**Effort:** ~1 session. **Bugs closed:** 5-6
-**Depends on:** Nothing, but test carefully (engine is the riskiest subsystem)
+## Phase 7: Core Infrastructure — COMPLETE
 
-These bugs affect the DAG execution model and are interconnected. Fix them together and run the full integration + E2E suite after.
+**Commit:** `d7f9fd40`
+**Bugs closed:** 8
 
-| Bug | File | Issue |
-|-----|------|-------|
-| Fork-to-sink skips coalesce notify | `engine/processor.py` | Call `_notify_coalesce_of_lost_branch()` on gate sink routing |
-| DAGNavigator misroutes continuations | `engine/dag_navigator.py` | Fix `create_continuation_work_item` to not jump backward |
-| AggregationExecutor non-terminal | `engine/executors/aggregation.py` | Widen try/except to include post-process hash |
-| TransformExecutor terminality | `engine/executors/transform.py` | Same pattern as aggregation |
-| Reconstruct Optional[Decimal] | `engine/orchestrator/export.py` | Handle 3-branch anyOf in `_json_schema_to_python_type` |
+| Bug | File | Status |
+|-----|------|--------|
+| Checkpoint datetime collision | `core/checkpoint/serialization.py` | CLOSED |
+| Config drops unknown keys | `core/config.py` | CLOSED |
+| Landscape exporter missing table | `core/landscape/exporter.py` | CLOSED |
+| Run contract ignores hash column | `core/landscape/_run_recording.py` | CLOSED |
+| Record transform error crashes | `core/landscape/_error_recording.py` | CLOSED |
+| web.py DNS timeout | `core/security/web.py` | CLOSED |
+| web.py port parsing | `core/security/web.py` | CLOSED |
+| PayloadStore race | `core/payload_store.py` | CLOSED |
+| Lowercase schema keys | `core/config.py` | CLOSED |
 
-## Phase 6: Contracts Hardening
+## Phase 8: P2 Sweeps — PARTIAL
 
-**Goal:** Fix the 10 P1s in the contracts subsystem.
-**Effort:** ~1 session. **Bugs closed:** 10
-**Depends on:** Nothing
+**Sweep A:** Truthiness → `is not None` — COMPLETE (`a6df77a9`, 4 locations)
+**Sweep D:** Validation guards — COMPLETE (`96e34280`, 11 boundaries)
+**Sweeps B, C, E, F:** Not yet started
 
-All in `src/elspeth/contracts/`. Parallelizable per-file.
+Additional hardening commits outside the sweep structure:
+- `f0a897b4`: 11 core-landscape Tier 1 strictness fixes
+- `49336165`: 6-step plugin/executor enforcement centralization
+- `6eece8b5`: Telemetry test repair (on_error=None, missing protocol attrs)
+- `76c3894f`: Nullable field contract audit round-trip
+- `5f7b939d`: Unsupported types, nullable unions, SchemaConfig validation
+- `2f4d89de`: Deterministic ordering, type validation, orphan prevention
+- `16b57e94`: Terminal status invariants in landscape completion
 
-| Bug | File | Pattern |
-|-----|------|---------|
-| check_compatibility rejects float→Optional[float] | `schema_contract.py` | Fix compatibility check to handle nullable numeric widening |
-| ContractAuditRecord invalid enum | `audit.py` | Validate contract value against known enum members |
-| ContractBuilder crashes on dict/list | `builder.py` | Handle nested JSON in first-row processing |
-| create_contract_from_config inconsistent | `factory.py` | Reject FIXED mode with unlocked flag |
-| PipelineRow coerces non-dict | `pipeline_row.py` | Crash on non-dict input (Tier 1) |
-| propagate/narrow drops fields on TypeError | `schema_contract.py` | Re-raise TypeError instead of silently dropping |
-| SchemaConfig coerces non-bool required | `schema.py` | Use `type(v) is bool` instead of `bool(v)` |
-| TransformResult error invariants | `results.py` | Validate error+success_reason mutual exclusion |
-| TypeMismatchViolation serializes raw | `violations.py` | Sanitize offending values before serialization |
-| update_checkpoint stale path | `checkpoint.py` | Actually update the active checkpoint path |
+## Phase 9: P3 Backlog — MOSTLY COMPLETE
 
-## Phase 7: Core Infrastructure
+20 of 25 original P3s closed (absorbed as side effects of P1/P2 fixes).
+5 remaining — see Remaining Work.
 
-**Goal:** Fix remaining core P1s.
-**Effort:** ~1 session. **Bugs closed:** 6-8
-**Depends on:** Phase 1 (NaN fix) should land first to simplify canonical.py work
+## Emergent Bugs
 
-| Bug | File | Fix |
-|-----|------|-----|
-| Checkpoint datetime collision | `core/checkpoint/serialization.py` | Collision-safe envelope with escaping |
-| Config drops unknown keys | `core/config.py` | Replace allowlist with Dynaconf blocklist |
-| Landscape exporter missing table | `core/landscape/exporter.py` | Add `token_outcomes` to `_iter_records` |
-| Run contract ignores hash column | `core/landscape/_run_recording.py` | Cross-check `schema_contract_hash` DB column |
-| Record transform error crashes | `core/landscape/_error_recording.py` | Apply `repr_hash` fallback pattern from sibling method |
-| web.py DNS timeout | `core/security/web.py` | `shutdown(wait=False, cancel_futures=True)` |
-| web.py port parsing | `core/security/web.py` | try/except + `is not None` + port 0 rejection |
-| PayloadStore race | `core/payload_store.py` | Atomic write with temp file + rename |
-| Lowercase schema keys | `core/config.py` | Don't lowercase coalesce branch keys |
+Bugs discovered during execution that were NOT in the original 178-bug inventory:
 
-## Phase 8: P2 Sweeps
+| Commit | Bug | How found |
+|--------|-----|-----------|
+| `a15e1c24` | AzurePromptShield missing `super().on_start()` — lifecycle guard regression | Code review |
+| `ae38a115` | BatchReplicate `max_copies` not enforced on `default_copies` fallback | Code review |
+| `e7708954` | DNS resolver thread leak on validation timeout | Code review |
+| `e7708954` | Config validation regression from Phase 7 changes | Code review |
+| `e2a23cee` | state_id=None errors hang batch waiters instead of propagating | Phase 5 debugging |
+| `ea5445fc` | Pending batch state lost on post-submission failure | Phase 5 debugging |
+| `2b3dd92a` | Unbounded IN clause in checkpoint recovery buffered-token filter | Phase 5 debugging |
+| `d2932c84` | Field collision detection missing from TransformExecutor (defense-in-depth) | Phase 3 design |
+| `f207964a` | Env var config regression, resume DB validation gap | Integration testing |
+| `6eece8b5` | Pre-existing telemetry test failures (on_error=None) | Test suite repair |
+| `76c3894f` | Nullable field lost through contract audit round-trip | Phase 6 follow-up |
 
-**Goal:** Systematically clear P2 bugs using thematic sweeps.
-**Effort:** 2-3 sessions. **Bugs closed:** ~50
-**Depends on:** Phases 0-7 (P1s should be clear first)
+**Lesson:** ~15% of fixes came from bugs discovered during execution, not from the original inventory. Bug-hunting generates bugs.
 
-### Sweep A: Truthiness → `is not None` (~12 bugs)
-Pattern: `if x:` where `x` can be `0`, `0.0`, `""`, or `False` and those are valid values.
-Single `grep` + systematic replacement across all flagged locations.
+## Remaining Work — 77 Open Bugs
 
-### Sweep B: Resume/Run Parity (~4 bugs)
-Extract shared finalization path from `run()` and `resume()` in orchestrator/core.py.
-One refactoring commit that closes multiple bugs.
+### P1 (33 remaining) — by subsystem
 
-### Sweep C: Export Determinism (~3 bugs)
-Add `ORDER BY` to `get_artifacts`, `get_nodes`, and fix CSV flatten collision.
-Same signing pipeline, fix together.
+**Plugins — LLM (6):**
+- `base-llm-transform-output-schema-diverges-from-output-schema-config-guaranteed-fields`
+- `multi-query-cross-product-output-prefix-collisions-from-delimiter-ambiguity`
+- `openrouter-batch-http-clients-cached-by-state-id-never-evicted-per-batch`
+- `terminal-batch-failures-clear-checkpoint-without-per-row-llm-call-recording`
+- `azure-process-row-uses-mutable-ctx-state-id-in-cleanup-wrong-cache-eviction`
+- `np-datetime64-values-can-pass-schema-validation-but-crash-canonical-hashing`
 
-### Sweep D: Validation Guards (~15 bugs)
-Config validation gaps across plugins: empty lists, impossible enum combinations, type coercion.
-Embarrassingly parallel — each is one Pydantic validator or `__post_init__` check.
+**Plugins — Sinks (4):**
+- `azure-blob-sink-misses-required-field-validation`
+- `csvsink-write-can-partially-write-a-batch-before-raising-causing-sink-output-to`
+- `databasesink-silently-accepts-schema-invalid-rows-by-default-validate-input-fal`
+- `jsonsink-in-mode-append-can-append-to-an-existing-jsonl-file-without-validating`
 
-### Sweep E: Remaining Audit/Telemetry (~8 bugs)
-Mutable dict snapshots, wrong token_id in telemetry, missing DDL instrumentation.
-Independent per-file fixes.
+**Plugins — Transforms (3):**
+- `fieldmapper-allows-target-name-collisions-that-silently-overwrite-fields-and-co`
+- `jsonexplode-infers-output-field-type-from-only-the-first-exploded-row-so-hetero`
+- `batchreplicate-accepts-bool-in-copies-field-as-a-valid-integer-copy-count-silen`
 
-### Sweep F: Tier 1 Defense-in-Depth (~8 bugs)
-Landscape hardening: complete-batch/run status validation, schema cross-run FK, etc.
-Low urgency but clean fixes.
+**Plugins — Other (4):**
+- `callreplayer-replay-fabricates-empty-response-for-error-calls-missing-hash`
+- `pluginmanager-register-leaves-pluggy-polluted-on-duplicate-name`
+- `pooledexecutor-shutdown-race-leaves-reserved-buffer-slots-stranded`
+- `shutdown-batch-processing-can-silently-drop-in-flight-rows`
 
-## Phase 9: P3 Backlog
+**Plugins — Sources (2):**
+- `jsonsource-crashes-on-invalid-byte-sequences-in-json-array-mode-instead-of-quar`
+- `skip-rows-can-silently-drop-all-remaining-csv-data-without-any-quarantine-audi`
 
-**Goal:** Clear remaining P3 items as convenient.
-**Effort:** As available. **Bugs closed:** ~25
-**Depends on:** Nothing blocking
+**Engine (4):**
+- `check-aggregation-timeouts-flushes-batches-but-never-triggers-checkpoint-callba`
+- `coalesce-timeout-flush-silently-ignores-invalid-coalesceoutcome-states`
+- `release-loop-can-fail-to-propagate-real-error-with-stale-token-state-id`
+- `build-execution-graph-shares-mutable-schema-dicts-across-nodes`
 
-These are all real bugs with no practical impact today. Fix when touching adjacent code,
-or batch into a single cleanup session. Not worth dedicated scheduling.
+**Core/Landscape (4):**
+- `record-transform-error-can-write-under-a-run-id-that-does-not-own-the-token-id`
+- `schema-allows-cross-run-contamination-for-token-linked-audit-records`
+- `schema-type-any-is-mapped-to-sql-text-without-serialization-so-valid-any-values`
+- `token-lifecycle-methods-accept-caller-supplied-run-id-row-id-without-validating`
+
+**MCP (3):**
+- `call-tool-returns-success-for-invalid-args-or-unknown-tools`
+- `get-outcome-analysis-returns-is-terminal-as-db-integer-instead-of-bool`
+- `get-performance-report-truncates-node-id-into-a-non-canonical-display`
+
+**Other (3):**
+- `console-run-summary-formatter-crashes-on-legitimate`
+- `explain-field-can-return-the-wrong-field-when-lookup-key-matches`
+- `enable-content-recording-accepted-logged-but-never-applied-in-azure-monitor-setup`
+
+### P2 (39 remaining) — by theme
+
+**Contracts/Schema (10):** Schema validation, type misclassification, immutability violations
+**MCP/Analyzers (5):** Query ordering, null handling, tool schema gaps
+**Security (3):** SSRF redirect bypass, secret validation, webhook fingerprints
+**Engine (4):** Mutable flush results, branch-lost dedup, executor ctx gaps
+**Telemetry/Audit (5):** Mutable payloads, wrong token_id, missing instrumentation
+**Config/Checkpoint (3):** Stale examples, error wrapping, secret race
+**Plugins (9):** Response truncation, verifier false positives, Unicode, type normalization
+
+### P3 (5 remaining)
+
+- `eventbus-emit-iterates-live-subscriber-list`
+- `resolve-database-url-rejects-valid-prefixed-settings-path`
+- `skip-rows-accepts-negative-values`
+- `tokeninfos-pipelinerow-annotations-not-runtime-resolvable`
+- `validate-field-names-attributeerror-for-non-string-entries`
 
 ## Execution Model
 
@@ -234,42 +283,21 @@ Each phase should be executed as a single session with parallel subagents:
 4. Run the full suite
 5. Move bug file to closed
 
-### Parallelism map
-
-```
-Phase 0 (quick wins)          ─── can start immediately
-Phase 1 (NaN root cause)      ─── can start immediately
-Phase 2 (fail-open security)  ─── can start immediately
-Phase 3 (field collisions)    ─── can start immediately
-Phase 4 (Tier 3 boundaries)   ─── can start immediately
-Phase 5 (engine correctness)  ─── can start immediately (but test carefully)
-Phase 6 (contracts)           ─── can start immediately
-Phase 7 (core infrastructure) ─── after Phase 1 (NaN fix simplifies canonical.py work)
-Phase 8 (P2 sweeps)           ─── after Phases 0-7
-Phase 9 (P3 backlog)          ─── whenever convenient
-```
-
-Phases 0-6 are fully independent and can run in parallel across sessions.
-Phase 7 has a soft dependency on Phase 1.
-Phases 8-9 are mop-up.
-
 ## Metrics
 
-After each phase, update the counts:
-
-| Phase | Target | P1 closed | P2 closed | P3 closed |
-|-------|--------|-----------|-----------|-----------|
-| 0 | Quick wins | ~12 | — | — |
-| 1 | NaN root cause | 5 | 2 | — |
-| 2 | Fail-open security | 5 | — | — |
-| 3 | Field collisions | 6 | — | — |
-| 4 | Tier 3 boundaries | 7 | — | — |
-| 5 | Engine correctness | 5 | — | — |
-| 6 | Contracts | 10 | — | — |
-| 7 | Core infrastructure | 8 | — | — |
-| 8 | P2 sweeps | — | ~50 | — |
-| 9 | P3 backlog | — | — | ~25 |
-| **Total** | | **~58** | **~52** | **~25** |
-
-Remaining ~43 P2s from Phases 0-7 are absorbed into Phase 8 sweeps or closed as
-side effects of P1 fixes in the same file.
+| Phase | Target | Status | P1 closed | P2 closed | P3 closed |
+|-------|--------|--------|-----------|-----------|-----------|
+| 0 | Quick wins | COMPLETE | 12 | — | — |
+| 1 | NaN root cause | COMPLETE | 5 | 1 | — |
+| 2 | Fail-open security | COMPLETE | 5 | 1 | — |
+| 3 | Field collisions | COMPLETE | 6 | 1 | — |
+| 4 | Tier 3 boundaries | COMPLETE | 10 | — | — |
+| 5 | Engine correctness | COMPLETE | 12 | — | — |
+| 6 | Contracts | COMPLETE | 10 | — | — |
+| 7 | Core infrastructure | COMPLETE | 8 | 1 | — |
+| 8 | P2 sweeps | PARTIAL | — | 15 | — |
+| 9 | P3 backlog | MOSTLY DONE | — | — | 20 |
+| Emergent | Found during fixing | ONGOING | ~5 | ~5 | — |
+| Cross-phase | Landscape/telemetry | DONE | 15 | — | — |
+| **Actual total** | | | **~88** | **~24** | **~20** |
+| **Remaining** | | | **33** | **39** | **5** |
