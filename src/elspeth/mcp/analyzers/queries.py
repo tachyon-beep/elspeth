@@ -345,11 +345,11 @@ def explain_token(
     result_dict = cast(dict[str, Any], _dataclass_to_dict(result))
 
     # Annotate routing_events with flow_type convenience field
-    for event in result_dict.get("routing_events", []):
-        event["flow_type"] = "divert" if event.get("mode") == "divert" else "normal"
+    for event in result_dict["routing_events"]:
+        event["flow_type"] = "divert" if event["mode"] == "divert" else "normal"
 
     # Build divert_summary from routing events
-    divert_events = [e for e in result_dict.get("routing_events", []) if e.get("mode") == "divert"]
+    divert_events = [e for e in result_dict["routing_events"] if e["mode"] == "divert"]
 
     if divert_events:
         divert_event = divert_events[-1]  # Last divert event is the terminal one

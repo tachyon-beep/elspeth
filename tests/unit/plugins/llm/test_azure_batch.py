@@ -891,6 +891,7 @@ class TestAzureBatchLLMTransformTimeout:
                 "template_errors": [],
                 "submitted_at": "2020-01-01T10:00:00+00:00",  # Old timestamp
                 "row_count": 1,
+                "requests": {},
             }
         )
 

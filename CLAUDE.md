@@ -62,11 +62,13 @@ parsed = datetime.fromisoformat(row["date"])  # 💥 ValueError - wrap this!
 
 - Malformed CSV rows, NULLs everywhere, wrong types, unexpected JSON structures
 - **Validate at the boundary, coerce where possible, record what we got**
+- **Record what we didn't get** - if we expected data and the external system didn't provide it, that absence is a fact worth recording, not a gap to fill with fabricated defaults
 - Sources MAY coerce: `"42"` → `42`, `"true"` → `True` (normalizing external data)
+- **Coercion is meaning-preserving; fabrication is not.** `"42"` → `42` preserves the value (coercion). `None` → `0` changes the meaning from "unknown" to "zero" (fabrication). The test: can the downstream consumer distinguish real data from synthetic? If not, it's fabrication.
 - Quarantine rows that can't be coerced/validated
 - The audit trail records "row 42 was quarantined because field X was NULL" - that's a valid audit outcome
 
-**Why:** User data is a trust boundary. A CSV with garbage in row 500 shouldn't crash the entire pipeline - we record the problem, quarantine the row, and keep processing the other 10,000 rows.
+**Why:** User data is a trust boundary. A CSV with garbage in row 500 shouldn't crash the entire pipeline - we record the problem, quarantine the row, and keep processing the other 10,000 rows. We don't trust external systems, and we don't trust their silence either - an absent field is evidence, not an invitation to invent a default.
 
 ### The Trust Flow
 

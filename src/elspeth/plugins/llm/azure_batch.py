@@ -717,9 +717,9 @@ class AzureBatchLLMTransform(BaseTransform):
             terminal_status: The batch terminal status (failed, cancelled, expired, batch_timeout).
             error_detail: Optional extra error detail string.
         """
-        requests_data = checkpoint.get("requests")
-        row_mapping = checkpoint.get("row_mapping")
-        batch_id = checkpoint.get("batch_id", "unknown")
+        requests_data = checkpoint["requests"]
+        row_mapping = checkpoint["row_mapping"]
+        batch_id = checkpoint["batch_id"]
 
         if not requests_data or not row_mapping:
             return  # No requests were submitted (e.g., all templates failed)
@@ -813,17 +813,13 @@ class AzureBatchLLMTransform(BaseTransform):
 
         if batch.status == "completed":
             # Calculate latency from submission to completion
-            submitted_at_str = checkpoint.get("submitted_at")
-            if submitted_at_str:
-                submitted_at = datetime.fromisoformat(submitted_at_str)
-                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
-            else:
-                latency_ms = 0.0
+            submitted_at = datetime.fromisoformat(checkpoint["submitted_at"])
+            latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
 
             # Record to Langfuse (job-level tracing)
             self._record_langfuse_batch_job(
                 batch_id=batch_id,
-                row_count=checkpoint.get("row_count", len(rows)),
+                row_count=checkpoint["row_count"],
                 latency_ms=latency_ms,
                 status="completed",
             )
@@ -843,6 +839,10 @@ class AzureBatchLLMTransform(BaseTransform):
                 error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
                 error_message = "; ".join(e.message for e in batch.errors.data)
 
+            # Extract checkpoint values before clearing
+            submitted_at = datetime.fromisoformat(checkpoint["submitted_at"])
+            row_count = checkpoint["row_count"]
+
             # Record per-row LLM calls BEFORE clearing checkpoint for audit completeness
             self._record_per_row_failure_calls(
                 checkpoint,
@@ -853,17 +853,12 @@ class AzureBatchLLMTransform(BaseTransform):
             self._clear_checkpoint(ctx)
 
             # Calculate latency for failed batch
-            submitted_at_str = checkpoint.get("submitted_at")
-            if submitted_at_str:
-                submitted_at = datetime.fromisoformat(submitted_at_str)
-                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
-            else:
-                latency_ms = 0.0
+            latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
 
             # Record failure to Langfuse
             self._record_langfuse_batch_job(
                 batch_id=batch_id,
-                row_count=checkpoint.get("row_count", len(rows)),
+                row_count=row_count,
                 latency_ms=latency_ms,
                 status="failed",
                 error=error_message,
@@ -872,22 +867,21 @@ class AzureBatchLLMTransform(BaseTransform):
             return TransformResult.error(error_info)
 
         elif batch.status == "cancelled":
+            # Extract checkpoint values before clearing
+            submitted_at = datetime.fromisoformat(checkpoint["submitted_at"])
+            row_count = checkpoint["row_count"]
+
             # Batch was cancelled - record per-row calls, then clear checkpoint and return error
             self._record_per_row_failure_calls(checkpoint, ctx, terminal_status="cancelled")
             self._clear_checkpoint(ctx)
 
             # Calculate latency for cancelled batch
-            submitted_at_str = checkpoint.get("submitted_at")
-            if submitted_at_str:
-                submitted_at = datetime.fromisoformat(submitted_at_str)
-                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
-            else:
-                latency_ms = 0.0
+            latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
 
             # Record cancellation to Langfuse
             self._record_langfuse_batch_job(
                 batch_id=batch_id,
-                row_count=checkpoint.get("row_count", len(rows)),
+                row_count=row_count,
                 latency_ms=latency_ms,
                 status="cancelled",
             )

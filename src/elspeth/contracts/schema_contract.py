@@ -390,7 +390,7 @@ class SchemaContract:
                     python_type=CONTRACT_TYPE_MAP[f["python_type"]],
                     required=f["required"],
                     source=f["source"],
-                    nullable=f.get("nullable", False),  # Backward compat for old checkpoints
+                    nullable=f["nullable"],
                 )
                 for f in data["fields"]
             )

@@ -314,18 +314,12 @@ class TestFieldContractNullableCheckpoint:
         restored = SchemaContract.from_checkpoint(data)
         assert restored.fields[0].nullable is True
 
-    def test_backward_compat_missing_nullable(self) -> None:
-        """Old checkpoints without nullable field default to False."""
-        # Create expected contract with nullable=False to get hash
-        expected = SchemaContract(
-            mode="FIXED",
-            fields=(make_field("x", int, required=True, source="declared"),),
-            locked=True,
-        )
+    def test_missing_nullable_crashes(self) -> None:
+        """Checkpoint without 'nullable' key must crash — it's our data, not legacy compat."""
         data = {
             "mode": "FIXED",
             "locked": True,
-            "version_hash": expected.version_hash(),
+            "version_hash": "placeholder",
             "fields": [
                 {
                     "normalized_name": "x",
@@ -333,9 +327,8 @@ class TestFieldContractNullableCheckpoint:
                     "python_type": "int",
                     "required": True,
                     "source": "declared",
-                    # No "nullable" key
                 }
             ],
         }
-        restored = SchemaContract.from_checkpoint(data)
-        assert restored.fields[0].nullable is False
+        with pytest.raises(KeyError, match="nullable"):
+            SchemaContract.from_checkpoint(data)

@@ -234,13 +234,18 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
                 raise ValueError(f"Field spec at index {index}: 'name' must be a string, got {type(name).__name__}.")
             if not isinstance(type_spec, str):
                 raise ValueError(f"Field spec at index {index}: 'type' must be a string, got {type(type_spec).__name__}.")
-            if "required" in spec and type(spec["required"]) is not bool:
+            if "required" not in spec:
+                raise ValueError(
+                    f"Field spec at index {index}: 'required' key is missing. "
+                    f"Round-trip dict format requires 'name', 'type', and 'required' keys."
+                )
+            if type(spec["required"]) is not bool:
                 raise ValueError(
                     f"Field spec at index {index}: 'required' must be a bool, "
                     f"got {type(spec['required']).__name__} ({spec['required']!r}). "
                     f"Use true/false (YAML) or True/False (Python), not strings."
                 )
-            optional = "required" in spec and spec["required"] is False
+            optional = spec["required"] is False
             return f"{name}: {type_spec}{'?' if optional else ''}"
 
         # YAML `- id: int` parses as {"id": "int"}

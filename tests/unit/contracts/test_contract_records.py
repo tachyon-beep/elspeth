@@ -682,16 +682,11 @@ class TestNullableAuditRoundTrip:
         assert score_field.nullable is True
         assert name_field.nullable is False
 
-    def test_non_nullable_contract_backward_compat(self) -> None:
-        """Audit JSON without 'nullable' key must deserialize as nullable=False.
-
-        Pre-nullable audit records don't have the field. from_json() must
-        default to False for backward compatibility.
-        """
+    def test_missing_nullable_key_crashes(self) -> None:
+        """Audit JSON without 'nullable' key must crash — it's our data, not legacy compat."""
         from elspeth.contracts.contract_records import ContractAuditRecord
 
-        # Simulate pre-nullable audit JSON (no "nullable" key in fields)
-        pre_nullable_json = json.dumps(
+        missing_nullable_json = json.dumps(
             {
                 "mode": "FIXED",
                 "locked": True,
@@ -703,14 +698,13 @@ class TestNullableAuditRoundTrip:
                         "python_type": "float",
                         "required": True,
                         "source": "declared",
-                        # No "nullable" key — old format
                     }
                 ],
             }
         )
 
-        record = ContractAuditRecord.from_json(pre_nullable_json)
-        assert record.fields[0].nullable is False
+        with pytest.raises(KeyError, match="nullable"):
+            ContractAuditRecord.from_json(missing_nullable_json)
 
     def test_nullable_field_audit_record_to_dict(self) -> None:
         """FieldAuditRecord.to_dict() includes nullable in output."""

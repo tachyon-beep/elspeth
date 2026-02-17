@@ -191,7 +191,7 @@ class ContractAuditRecord:
                     python_type=python_type,
                     required=f["required"],
                     source=source,
-                    nullable=f.get("nullable", False),
+                    nullable=f["nullable"],
                 )
             )
 

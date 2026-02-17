@@ -218,8 +218,8 @@ def get_dag_structure(db: LandscapeDB, recorder: LandscapeRecorder, run_id: str)
         label = f"{n.plugin_name}[{n.node_type.value}]"
         lines.append(f'    {alias}["{label}"]')
     for e in edges:
-        from_alias = node_alias.get(e.from_node_id, e.from_node_id[:8])
-        to_alias = node_alias.get(e.to_node_id, e.to_node_id[:8])
+        from_alias = node_alias[e.from_node_id]
+        to_alias = node_alias[e.to_node_id]
         if e.default_mode == RoutingMode.DIVERT:
             arrow = f"-.->|{e.label}|"
         elif e.label == "continue":
@@ -588,13 +588,13 @@ def describe_schema(db: LandscapeDB, recorder: LandscapeRecorder) -> SchemaDescr
                 {
                     "name": col["name"],
                     "type": str(col["type"]),
-                    "nullable": col.get("nullable", True),
+                    "nullable": col["nullable"],
                 }
             )
 
         # Get primary key
         pk = inspector.get_pk_constraint(table_name)
-        pk_columns = pk.get("constrained_columns", []) if pk else []
+        pk_columns = pk["constrained_columns"] if pk else []
 
         # Get foreign keys
         fks = inspector.get_foreign_keys(table_name)
