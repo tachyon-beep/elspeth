@@ -119,10 +119,11 @@ def resolve_database_url(
 
     # Try explicit settings file
     if settings_path is not None:
-        if not settings_path.exists():
-            raise ValueError(f"Settings file not found: {settings_path}")
+        normalized_settings = settings_path.expanduser().resolve()
+        if not normalized_settings.exists():
+            raise ValueError(f"Settings file not found: {normalized_settings}")
         try:
-            config = load_settings(settings_path)
+            config = load_settings(normalized_settings)
             return config.landscape.url, config
         except Exception as e:
             raise ValueError(f"Error loading settings from {settings_path}: {e}") from e

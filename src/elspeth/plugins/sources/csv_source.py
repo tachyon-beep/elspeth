@@ -11,7 +11,7 @@ import csv
 from collections.abc import Iterator
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.contracts.contract_builder import ContractBuilder
@@ -33,7 +33,7 @@ class CSVSourceConfig(TabularSourceDataConfig):
 
     delimiter: str = ","
     encoding: str = "utf-8"
-    skip_rows: int = 0
+    skip_rows: int = Field(default=0, ge=0)
 
 
 class CSVSource(BaseSource):

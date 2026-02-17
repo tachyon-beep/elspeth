@@ -22,6 +22,8 @@ def validate_field_names(names: list[str], context: str) -> None:
     """
     seen: set[str] = set()
     for i, name in enumerate(names):
+        if type(name) is not str:
+            raise ValueError(f"{context}[{i}] must be a string, got {type(name).__name__}")
         if not name.isidentifier():
             raise ValueError(f"{context}[{i}] '{name}' is not a valid Python identifier")
         if keyword.iskeyword(name):

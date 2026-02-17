@@ -69,7 +69,7 @@ allow_hits:
   reason: Tier-3 boundary — float-specific finiteness check after type validation
   safety: Raises ValueError on NaN/Infinity — explicit failure, prevents infinite hang
   expires: '2026-05-14'
-- key: core/events.py:R1:EventBus:emit:fp=9291c1b6dd51107b
+- key: core/events.py:R1:EventBus:emit:fp=6f513a170f117689
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
