@@ -29,7 +29,7 @@ transforms:
     template: 'ECHO THESE VALUES EXACTLY:
 
 
-      ROW={{ row.row.user_id }}
+      ROW={{ row.source_row.user_id }}
 
       CASE={{ row.case_study.name }}
 

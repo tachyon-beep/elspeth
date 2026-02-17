@@ -103,7 +103,7 @@ class QuerySpec:
             row: Full row data (dict or PipelineRow)
 
         Returns:
-            Context dict with input_N, criterion, case_study, and row
+            Context dict with input_N, criterion, case_study, and source_row
         """
         context: dict[str, Any] = {}
 
@@ -120,8 +120,12 @@ class QuerySpec:
         # Inject case study data (name, context, metadata)
         context["case_study"] = self.case_study_data
 
-        # Include full row for row-based lookups
-        context["row"] = row
+        # Include full row for row-based lookups.
+        # Named "source_row" to avoid collision with PromptTemplate.render() which
+        # wraps the entire context under its own "row" key. Without this rename,
+        # templates saw row.row for the original data — a confusing double-nesting.
+        # Fix: elspeth-rapid-ishd
+        context["source_row"] = row
 
         return context
 

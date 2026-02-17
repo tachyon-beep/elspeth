@@ -57,7 +57,7 @@ class TestQuerySpec:
         assert context["criterion"]["code"] == "DIAG"
         assert context["case_study"]["name"] == "cs1"
         assert context["case_study"]["context"] == "Capability"
-        assert context["row"] == row  # Full row for row-based lookups
+        assert context["source_row"] == row  # Full row for row-based lookups
 
     def test_build_template_context_raises_on_missing_field(self) -> None:
         """Missing input field raises KeyError with informative message."""
@@ -78,7 +78,7 @@ class TestQuerySpec:
         assert "cs1_diagnosis" in str(exc_info.value)
 
     def test_build_template_context_empty_input_fields(self) -> None:
-        """Empty input_fields produces context with criterion, case_study, and row."""
+        """Empty input_fields produces context with criterion, case_study, and source_row."""
         spec = QuerySpec(
             case_study_name="cs1",
             criterion_name="diagnosis",
@@ -95,7 +95,7 @@ class TestQuerySpec:
         # But criterion, case_study, and row are present
         assert context["criterion"] == {"code": "DIAG"}
         assert context["case_study"] == {"name": "cs1", "context": "Capability"}
-        assert context["row"] == row
+        assert context["source_row"] == row
 
 
 class TestCaseStudyConfig:

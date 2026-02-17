@@ -195,12 +195,26 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
             CapacityError: On rate limit (429/503/529) for pooled retry
         """
         # 1. Build synthetic row for PromptTemplate
-        synthetic_row = spec.build_template_context(row)
+        # Row field access is Tier 2 (operations on row values) — wrap for graceful quarantine.
+        # Fix: elspeth-rapid-gcdc — was bare call; Azure version already had this handling.
+        try:
+            synthetic_row = spec.build_template_context(row)
+        except KeyError as e:
+            return TransformResult.error(
+                {
+                    "reason": "missing_field",
+                    "error": str(e),
+                    "query": spec.output_prefix,
+                }
+            )
 
         # 2. Render template (THEIR DATA - wrap in try/catch)
-        # BUG FIX (d9yk/fd40): Pass contract for dual-name template access
+        # NOTE: contract=None because synthetic_row has a different schema than the
+        # source contract. Wrapping it in PipelineRow(synthetic, source_contract) would
+        # cause FIXED-mode KeyError on synthetic keys like input_1, criterion, etc.
+        # Fix: elspeth-rapid-xzst
         try:
-            rendered = self._template.render_with_metadata(synthetic_row, contract=input_contract)
+            rendered = self._template.render_with_metadata(synthetic_row)
         except TemplateError as e:
             return TransformResult.error(
                 {

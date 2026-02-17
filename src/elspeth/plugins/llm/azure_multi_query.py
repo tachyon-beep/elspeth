@@ -198,8 +198,12 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             )
 
         # 2. Render template using PromptTemplate (preserves audit metadata)
+        # NOTE: contract=None because synthetic_row has a different schema than the
+        # source contract. Wrapping it in PipelineRow(synthetic, source_contract) would
+        # cause FIXED-mode KeyError on synthetic keys like input_1, criterion, etc.
+        # Fix: elspeth-rapid-xzst
         try:
-            rendered = self._template.render_with_metadata(synthetic_row, contract=input_contract)
+            rendered = self._template.render_with_metadata(synthetic_row)
         except TemplateError as e:
             return TransformResult.error(
                 {
