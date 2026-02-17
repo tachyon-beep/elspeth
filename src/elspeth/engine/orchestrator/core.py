@@ -1261,44 +1261,12 @@ class Orchestrator:
         start_time = time.perf_counter()
         last_progress_time = start_time
 
-        # Compute default last_node_id for end-of-source checkpointing
-        # (e.g., flush_pending when no rows were processed in the main loop)
-        # This mirrors the in-loop logic for consistency
-        default_last_node_id: str
-        if config.gates:
-            last_gate_name = config.gates[-1].name
-            default_last_node_id = config_gate_id_map[GateName(last_gate_name)]
-        elif config.transforms:
-            transform_node_id = config.transforms[-1].node_id
-            if transform_node_id is None:
-                raise OrchestrationInvariantError("Last transform in pipeline has no node_id")
-            default_last_node_id = transform_node_id
-        else:
-            default_last_node_id = source_id
-
-        # Build checkpoint callback for aggregation timeout flushes
-        # BUG FIX: P1-2026-02-14 — timeout flushes were missing checkpoint callbacks,
-        # so crash recovery could lose aggregation-boundary progress.
-        # Must be after default_last_node_id computation (closure captures it).
-        timeout_checkpoint_callback: Callable[[TokenInfo], None] | None = None
-        if self._checkpoint_config and self._checkpoint_config.enabled and self._checkpoint_manager:
-
-            def _make_timeout_checkpoint_callback() -> Callable[[TokenInfo], None]:
-                captured_run_id = run_id
-                captured_node_id = default_last_node_id
-
-                def callback(token: TokenInfo) -> None:
-                    agg_state = processor.get_aggregation_checkpoint_state()
-                    self._maybe_checkpoint(
-                        run_id=captured_run_id,
-                        token_id=token.token_id,
-                        node_id=captured_node_id,
-                        aggregation_state=agg_state,
-                    )
-
-                return callback
-
-            timeout_checkpoint_callback = _make_timeout_checkpoint_callback()
+        # NOTE: Aggregation-flushed tokens are NOT checkpointed at the
+        # aggregation boundary. They go into pending_tokens and are
+        # checkpointed only after SinkExecutor.write() achieves sink
+        # durability, via the checkpoint_after_sink callback.
+        # Fix: elspeth-rapid-xtmo — the previous checkpoint_callback
+        # created checkpoints before sink writes, causing data loss on crash.
 
         # SOURCE phase - initialize source and begin loading
         phase_start = time.perf_counter()
@@ -1594,7 +1562,6 @@ class Orchestrator:
                             ctx=ctx,
                             pending_tokens=pending_tokens,
                             agg_transform_lookup=agg_transform_lookup,
-                            checkpoint_callback=timeout_checkpoint_callback,
                         )
                         counters.accumulate_flush_result(timeout_result)
 
@@ -1673,27 +1640,12 @@ class Orchestrator:
                     # CRITICAL: Flush remaining aggregation buffers at end-of-source
                     # ─────────────────────────────────────────────────────────────────
                     if config.aggregation_settings:
-                        # Build checkpoint callback if checkpointing is enabled
-                        checkpoint_callback: Callable[[TokenInfo], None] | None = None
-                        if self._checkpoint_config and self._checkpoint_config.enabled and self._checkpoint_manager:
-
-                            def make_checkpoint_callback() -> Callable[[TokenInfo], None]:
-                                # Closure captures: run_id, default_last_node_id, processor, self
-                                captured_run_id = run_id
-                                captured_node_id = default_last_node_id
-
-                                def callback(token: TokenInfo) -> None:
-                                    agg_state = processor.get_aggregation_checkpoint_state()
-                                    self._maybe_checkpoint(
-                                        run_id=captured_run_id,
-                                        token_id=token.token_id,
-                                        node_id=captured_node_id,
-                                        aggregation_state=agg_state,
-                                    )
-
-                                return callback
-
-                            checkpoint_callback = make_checkpoint_callback()
+                        # NOTE: Aggregation-flushed tokens are NOT checkpointed here.
+                        # They go into pending_tokens and are checkpointed only after
+                        # SinkExecutor.write() achieves sink durability, via the
+                        # checkpoint_after_sink callback.
+                        # Fix: elspeth-rapid-xtmo — the previous checkpoint_callback
+                        # created checkpoints before sink writes, causing data loss on crash.
 
                         # Call module function directly (no wrapper method)
                         flush_result = flush_remaining_aggregation_buffers(
@@ -1701,7 +1653,6 @@ class Orchestrator:
                             processor=processor,
                             ctx=ctx,
                             pending_tokens=pending_tokens,
-                            checkpoint_callback=checkpoint_callback,
                         )
                         counters.accumulate_flush_result(flush_result)
 
@@ -1980,6 +1931,48 @@ class Orchestrator:
                     schema_contract=schema_contract,
                     shutdown_event=active_event,
                 )
+
+            # 6. Complete the run with reproducibility grade
+            # SUCCESS PATH: Must be inside try block so RunFinished is emitted
+            # BEFORE the finally block flushes telemetry to exporters.
+            # Fix: elspeth-rapid-sg0q — previously this was after the finally block,
+            # meaning RunFinished was emitted after telemetry flush (never exported).
+            recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
+            result.status = RunStatus.COMPLETED
+
+            # 7. Emit RunFinished telemetry
+            resume_duration_ms = (time.perf_counter() - resume_start_time) * 1000
+            self._emit_telemetry(
+                RunFinished(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    status=RunStatus.COMPLETED,
+                    row_count=result.rows_processed,
+                    duration_ms=resume_duration_ms,
+                )
+            )
+
+            # 8. Emit RunSummary event
+            total_duration = time.perf_counter() - resume_start_time
+            self._events.emit(
+                RunSummary(
+                    run_id=run_id,
+                    status=RunCompletionStatus.COMPLETED,
+                    total_rows=result.rows_processed,
+                    succeeded=result.rows_succeeded,
+                    failed=result.rows_failed,
+                    quarantined=result.rows_quarantined,
+                    duration_seconds=total_duration,
+                    exit_code=0,
+                    routed=result.rows_routed,
+                    routed_destinations=tuple(result.routed_destinations.items()),
+                )
+            )
+
+            # 9. Delete checkpoints on successful completion
+            self._delete_checkpoints(run_id)
+
+            return result
         except GracefulShutdownError as shutdown_exc:
             # Graceful shutdown: all in-flight work flushed, sinks written.
             # Mark run INTERRUPTED (resumable via `elspeth resume`).
@@ -2070,44 +2063,6 @@ class Orchestrator:
                 )
                 if pending_exc is None:
                     raise
-
-        # 6. Complete the run with reproducibility grade
-        recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
-        result.status = RunStatus.COMPLETED
-
-        # 7. Emit RunFinished telemetry (Bug fix #3: resume was missing this)
-        resume_duration_ms = (time.perf_counter() - resume_start_time) * 1000
-        self._emit_telemetry(
-            RunFinished(
-                timestamp=datetime.now(UTC),
-                run_id=run_id,
-                status=RunStatus.COMPLETED,
-                row_count=result.rows_processed,
-                duration_ms=resume_duration_ms,
-            )
-        )
-
-        # 8. Emit RunSummary event (Bug fix #4: resume was missing this)
-        total_duration = time.perf_counter() - resume_start_time
-        self._events.emit(
-            RunSummary(
-                run_id=run_id,
-                status=RunCompletionStatus.COMPLETED,
-                total_rows=result.rows_processed,
-                succeeded=result.rows_succeeded,
-                failed=result.rows_failed,
-                quarantined=result.rows_quarantined,
-                duration_seconds=total_duration,
-                exit_code=0,
-                routed=result.rows_routed,
-                routed_destinations=tuple(result.routed_destinations.items()),
-            )
-        )
-
-        # 9. Delete checkpoints on successful completion
-        self._delete_checkpoints(run_id)
-
-        return result
 
     def _process_resumed_rows(
         self,
@@ -2353,7 +2308,6 @@ class Orchestrator:
                     processor=processor,
                     ctx=ctx,
                     pending_tokens=pending_tokens,
-                    checkpoint_callback=None,
                 )
                 counters.accumulate_flush_result(flush_result)
 

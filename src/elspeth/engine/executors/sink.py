@@ -226,26 +226,43 @@ class SinkExecutor:
                 token_ids=sink_token_ids,
             ):
                 # Centralized input validation (before sink.write)
-                if sink.validate_input:
-                    from pydantic import ValidationError
+                # Wrapped in try/except to complete opened node states on failure.
+                # Without this, validation errors leave states OPEN permanently,
+                # violating the terminality invariant.
+                # Fix: elspeth-rapid-p161
+                try:
+                    if sink.validate_input:
+                        from pydantic import ValidationError
 
-                    for row in rows:
-                        try:
-                            sink.input_schema.model_validate(row)
-                        except ValidationError as e:
-                            raise PluginContractViolation(
-                                f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
-                            ) from e
+                        for row in rows:
+                            try:
+                                sink.input_schema.model_validate(row)
+                            except ValidationError as e:
+                                raise PluginContractViolation(
+                                    f"Sink '{sink.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                                ) from e
 
-                # Centralized required-field check (before sink.write)
-                if sink.declared_required_fields:
-                    for row_index, row in enumerate(rows):
-                        missing = sorted(f for f in sink.declared_required_fields if f not in row)
-                        if missing:
-                            raise PluginContractViolation(
-                                f"Sink '{sink.name}' row {row_index} is missing required fields "
-                                f"{missing}. This indicates an upstream transform/schema bug."
-                            )
+                    # Centralized required-field check (before sink.write)
+                    if sink.declared_required_fields:
+                        for row_index, row in enumerate(rows):
+                            missing = sorted(f for f in sink.declared_required_fields if f not in row)
+                            if missing:
+                                raise PluginContractViolation(
+                                    f"Sink '{sink.name}' row {row_index} is missing required fields "
+                                    f"{missing}. This indicates an upstream transform/schema bug."
+                                )
+                except Exception as e:
+                    validation_error: ExecutionError = {
+                        "exception": str(e),
+                        "type": type(e).__name__,
+                        "phase": "pre_write_validation",
+                    }
+                    self._complete_states_failed(
+                        states=states,
+                        duration_ms=0.0,
+                        error=validation_error,
+                    )
+                    raise
 
                 start = time.perf_counter()
                 try:

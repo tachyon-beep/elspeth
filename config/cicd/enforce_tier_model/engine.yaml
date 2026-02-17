@@ -216,12 +216,12 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=aee2e848a108a18d
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=72d9408dff8e0ceb
   owner: architecture
   reason: Tier 3 boundary - quarantine path handles non-dict source rows
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_execute_run:fp=c82f0977bb13f2ab
+- key: engine/orchestrator/core.py:R6:Orchestrator:_execute_run:fp=b24ff697f608c5fe
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash for telemetry content_hash; audit trail uses separate hashing path
@@ -231,7 +231,7 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
   safety: Crashes on type mismatch - no silent fallback
   expires: '2026-03-09'
-- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=3be2315780c311dd
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=b99e6bee5e64dbcf
   owner: architecture
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: Crashes on type mismatch - no silent fallback
