@@ -10,6 +10,7 @@ Datadog spans that are automatically batched and exported to the Datadog agent.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime
 from enum import Enum
@@ -70,7 +71,7 @@ class DatadogExporter:
         """Exporter name for configuration reference."""
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         """Configure the exporter with settings from pipeline configuration.
 
         Args:

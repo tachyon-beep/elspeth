@@ -254,7 +254,7 @@ class DatabaseSink(BaseSink):
 
         return OutputValidationResult.success(target_fields=existing)
 
-    def _ensure_table(self, row: dict[str, Any]) -> None:
+    def _ensure_table(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Create table, handling if_exists behavior.
 
         if_exists behavior (follows pandas to_sql semantics):
@@ -266,6 +266,10 @@ class DatabaseSink(BaseSink):
         (including optional ones) are present in the table.
 
         When schema is dynamic, columns are inferred from the first row's keys.
+
+        DDL operations (DROP TABLE, CREATE TABLE) are instrumented via
+        ctx.record_call for audit trail completeness.
+        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
         self._ensure_engine_and_metadata_initialized()
         if self._engine is None:
@@ -274,7 +278,7 @@ class DatabaseSink(BaseSink):
         if self._table is None:
             # Handle if_exists="replace": drop table on first write
             if self._if_exists == "replace" and not self._table_replaced:
-                self._drop_table_if_exists()
+                self._drop_table_if_exists(ctx)
                 self._table_replaced = True
 
             columns = self._create_columns_from_schema_or_row(row)
@@ -286,14 +290,49 @@ class DatabaseSink(BaseSink):
                 self._metadata,
                 *columns,
             )
-            self._metadata.create_all(self._engine, checkfirst=True)
 
-    def _drop_table_if_exists(self) -> None:
+            # Instrument CREATE TABLE DDL for audit trail
+            start_time = time.perf_counter()
+            try:
+                self._metadata.create_all(self._engine, checkfirst=True)
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "operation": "CREATE_TABLE",
+                        "table": self._table_name,
+                        "if_not_exists": True,
+                    },
+                    response_data={"table_created": self._table_name},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+            except Exception as e:
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "operation": "CREATE_TABLE",
+                        "table": self._table_name,
+                        "if_not_exists": True,
+                    },
+                    error={"type": type(e).__name__, "message": str(e)},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+                raise
+
+    def _drop_table_if_exists(self, ctx: PluginContext) -> None:
         """Drop the table if it exists (for replace mode).
 
         Uses SQLAlchemy's Table.drop() for portable, dialect-safe drops.
         This handles identifier quoting correctly across all databases
         (SQLite, PostgreSQL, MySQL, etc.).
+
+        DDL is instrumented via ctx.record_call for audit trail completeness.
+        See P2-2026-02-14-ddl-calls-bypass-ctx-record-call.
         """
         if self._engine is None:
             return
@@ -306,7 +345,38 @@ class DatabaseSink(BaseSink):
             # This generates correct identifier quoting for any database
             temp_metadata = MetaData()
             table = Table(self._table_name, temp_metadata)
-            table.drop(self._engine)
+
+            start_time = time.perf_counter()
+            try:
+                table.drop(self._engine)
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.SUCCESS,
+                    request_data={
+                        "operation": "DROP_TABLE",
+                        "table": self._table_name,
+                        "mode": self._if_exists,
+                    },
+                    response_data={"table_dropped": self._table_name},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+            except Exception as e:
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                ctx.record_call(
+                    call_type=CallType.SQL,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "operation": "DROP_TABLE",
+                        "table": self._table_name,
+                        "mode": self._if_exists,
+                    },
+                    error={"type": type(e).__name__, "message": str(e)},
+                    latency_ms=latency_ms,
+                    provider="sqlalchemy",
+                )
+                raise
 
     def _create_columns_from_schema_or_row(self, row: dict[str, Any]) -> list[Column[Any]]:
         """Create SQLAlchemy columns from schema or row keys.
@@ -381,7 +451,7 @@ class DatabaseSink(BaseSink):
             )
 
         # Ensure table exists (infer from first row)
-        self._ensure_table(rows[0])
+        self._ensure_table(rows[0], ctx)
 
         # Validate rows against table columns before INSERT.
         # SQLAlchemy silently drops keys not in the table schema, which

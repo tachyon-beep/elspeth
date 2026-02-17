@@ -186,7 +186,7 @@ def list_contract_violations(
             "error": row.error,
             "schema_mode": row.schema_mode,
             "destination": row.destination,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "created_at": row.created_at.isoformat(),
         }
         for row in rows
     ]

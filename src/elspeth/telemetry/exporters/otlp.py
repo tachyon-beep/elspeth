@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime
 from enum import Enum
@@ -104,7 +105,7 @@ class OTLPExporter:
         """Exporter name for configuration reference."""
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         """Configure the exporter with settings from pipeline configuration.
 
         Args:

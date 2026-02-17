@@ -994,6 +994,13 @@ class CoalesceExecutor:
                 f"a token cannot both arrive and be error-routed."
             )
 
+        # Validate branch hasn't already been marked lost (would be a processor bug)
+        if lost_branch in pending.lost_branches:
+            raise ValueError(
+                f"Branch '{lost_branch}' already marked lost at coalesce '{coalesce_name}'. "
+                f"Duplicate loss notification indicates a processor bug."
+            )
+
         # Record the loss and re-evaluate
         pending.lost_branches[lost_branch] = reason
         return self._evaluate_after_loss(settings, key, step)

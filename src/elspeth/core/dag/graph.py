@@ -1313,11 +1313,14 @@ class ExecutionGraph:
             return None
 
         # Parse the schema dict into SchemaConfig
-        # Handle raw dict form (schema_dict should always be a dict now)
-        if isinstance(schema_dict, dict):
-            return SchemaConfig.from_dict(schema_dict)
+        if not isinstance(schema_dict, dict):
+            raise GraphValidationError(
+                f"Node '{node_id}' has malformed schema config: "
+                f"expected dict, got {type(schema_dict).__name__}. "
+                f"This is a configuration or graph construction bug."
+            )
 
-        return None
+        return SchemaConfig.from_dict(schema_dict)
 
     def get_guaranteed_fields(self, node_id: str) -> frozenset[str]:
         """Get fields that a node guarantees in its output.

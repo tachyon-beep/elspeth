@@ -21,7 +21,9 @@ Keep types.py as pure data definitions with minimal dependencies.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -102,7 +104,12 @@ class AggregationFlushResult:
     rows_forked: int = 0
     rows_expanded: int = 0
     rows_buffered: int = 0
-    routed_destinations: dict[str, int] = field(default_factory=dict)
+    routed_destinations: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+
+    def __post_init__(self) -> None:
+        """Freeze routed_destinations if passed as mutable dict."""
+        if not isinstance(self.routed_destinations, MappingProxyType):
+            object.__setattr__(self, "routed_destinations", MappingProxyType(self.routed_destinations))
 
     def __add__(self, other: AggregationFlushResult) -> AggregationFlushResult:
         """Combine two results by summing all counters."""
@@ -117,7 +124,7 @@ class AggregationFlushResult:
             rows_forked=self.rows_forked + other.rows_forked,
             rows_expanded=self.rows_expanded + other.rows_expanded,
             rows_buffered=self.rows_buffered + other.rows_buffered,
-            routed_destinations=dict(combined_destinations),
+            routed_destinations=MappingProxyType(dict(combined_destinations)),
         )
 
 

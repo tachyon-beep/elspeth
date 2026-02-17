@@ -222,14 +222,14 @@ class TestSecretResolutions:
                 "secret_name": "api-key",
                 "timestamp": 1705320000.0,
                 "latency_ms": 150.0,
-                "fingerprint": "fp-hash-123",
+                "fingerprint": "a" * 64,
             },
         ]
         recorder.record_secret_resolutions("run-1", resolutions)
         results = recorder.get_secret_resolutions_for_run("run-1")
         assert len(results) == 1
         assert results[0].env_var_name == "API_KEY"
-        assert results[0].fingerprint == "fp-hash-123"
+        assert results[0].fingerprint == "a" * 64
         assert results[0].vault_url == "https://vault.example.com"
 
     def test_empty_resolutions(self) -> None:

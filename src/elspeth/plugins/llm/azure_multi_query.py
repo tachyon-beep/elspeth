@@ -275,9 +275,29 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             latency_ms=latency_ms,
         )
 
-        # 6. Check for response truncation BEFORE parsing
+        # 6. Check for response truncation BEFORE parsing.
+        # Use finish_reason as the authoritative signal when available;
+        # fall back to the token-count heuristic only when finish_reason
+        # is absent (e.g. provider omitted it or streaming mode).
+        finish_reason: str | None = None
+        if response.raw_response is not None:
+            choices = response.raw_response.get("choices")
+            if choices and isinstance(choices, list) and len(choices) > 0:
+                first_choice = choices[0]
+                if isinstance(first_choice, dict):
+                    finish_reason = first_choice.get("finish_reason")
+
         completion_tokens = response.usage.get("completion_tokens", 0)
-        if effective_max_tokens is not None and completion_tokens > 0 and completion_tokens >= effective_max_tokens:
+
+        is_truncated: bool
+        if finish_reason is not None:
+            # Authoritative: finish_reason == "length" means the model hit the token limit
+            is_truncated = finish_reason == "length"
+        else:
+            # Fallback heuristic: completion_tokens >= max_tokens suggests truncation
+            is_truncated = effective_max_tokens is not None and completion_tokens > 0 and completion_tokens >= effective_max_tokens
+
+        if is_truncated:
             truncation_error: TransformErrorReason = {
                 "reason": "response_truncated",
                 "error": (
@@ -289,6 +309,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                 "max_tokens": effective_max_tokens,
                 "completion_tokens": completion_tokens,
                 "prompt_tokens": response.usage.get("prompt_tokens", 0),
+                "finish_reason": finish_reason,
             }
             if response.content:
                 truncation_error["raw_response_preview"] = response.content[:500]

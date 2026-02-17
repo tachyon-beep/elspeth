@@ -18,7 +18,9 @@ See alignment.py for complete field mapping documentation.
 """
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
@@ -71,8 +73,10 @@ def _validate_int_field(field_name: str, value: Any) -> int:
     if isinstance(value, int) and not isinstance(value, bool):
         return value
 
-    # Float - convert to int
+    # Float - convert to int (reject non-finite values first)
     if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"Invalid retry policy: {field_name} must be finite, got {value}")
         return int(value)
 
     # String - attempt numeric coercion
@@ -292,7 +296,7 @@ class RuntimeRateLimitConfig:
     enabled: bool
     default_requests_per_minute: int
     persistence_path: str | None
-    services: dict[str, "ServiceRateLimit"]
+    services: Mapping[str, "ServiceRateLimit"]
 
     def get_service_config(self, service_name: str) -> "ServiceRateLimit":
         """Get rate limit config for a service, with fallback to defaults.
@@ -325,7 +329,7 @@ class RuntimeRateLimitConfig:
             enabled=False,
             default_requests_per_minute=60,
             persistence_path=None,
-            services={},
+            services=MappingProxyType({}),
         )
 
     @classmethod
@@ -348,7 +352,7 @@ class RuntimeRateLimitConfig:
             enabled=settings.enabled,
             default_requests_per_minute=settings.default_requests_per_minute,
             persistence_path=settings.persistence_path,
-            services=dict(settings.services),
+            services=MappingProxyType(dict(settings.services)),
         )
 
 
@@ -512,12 +516,15 @@ class ExporterConfig:
     """
 
     name: str
-    options: dict[str, Any]
+    options: Mapping[str, Any]
 
     def __post_init__(self) -> None:
         """Validate exporter configuration."""
         if not self.name:
             raise ValueError("exporter name cannot be empty")
+        # Freeze options if passed as mutable dict
+        if not isinstance(self.options, MappingProxyType):
+            object.__setattr__(self, "options", MappingProxyType(self.options))
 
 
 @dataclass(frozen=True, slots=True)
@@ -597,7 +604,7 @@ class RuntimeTelemetryConfig:
             raise NotImplementedError(f"backpressure_mode='{backpressure_mode.value}' is not yet implemented. Use one of: {implemented}")
 
         # Convert exporter list to tuple of ExporterConfig
-        exporter_configs = tuple(ExporterConfig(name=exp.name, options=dict(exp.options)) for exp in settings.exporters)
+        exporter_configs = tuple(ExporterConfig(name=exp.name, options=MappingProxyType(dict(exp.options))) for exp in settings.exporters)
 
         return cls(
             enabled=settings.enabled,

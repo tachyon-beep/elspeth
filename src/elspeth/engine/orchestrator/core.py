@@ -2046,6 +2046,30 @@ class Orchestrator:
             )
 
             raise
+        finally:
+            # CRITICAL: Telemetry flush on resume path — mirrors run() semantics.
+            # If _flush_telemetry() raises TelemetryExporterError (fail_on_total=True),
+            # we must preserve any pending exception.
+            # See P2-2026-02-14-resume-does-not-flush-telemetry.
+            import sys
+
+            import structlog
+
+            from elspeth.telemetry.errors import TelemetryExporterError
+
+            _logger = structlog.get_logger()
+            pending_exc = sys.exc_info()[0]
+
+            try:
+                self._flush_telemetry()
+            except TelemetryExporterError as e:
+                _logger.warning(
+                    "Telemetry flush failed on resume - will raise after cleanup if no other exception pending",
+                    exporter=e.exporter_name,
+                    error=e.message,
+                )
+                if pending_exc is None:
+                    raise
 
         # 6. Complete the run with reproducibility grade
         recorder.finalize_run(run_id, status=RunStatus.COMPLETED)

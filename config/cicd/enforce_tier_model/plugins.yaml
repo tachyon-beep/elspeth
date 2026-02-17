@@ -164,12 +164,12 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=f97a4254a3ac6975
+- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=887c8bfbb12a7a46
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=66b4ed77a37877c1
+- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=a8579c0e9209b145
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -296,13 +296,13 @@ allow_hits:
   reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
   safety: MalformedResponseError raised on wrong type
   expires: '2026-05-13'
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=3979cd7bedc550ef
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=9a594cf494f2c169
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
 # llm.py — telemetry emission in narrowed try/except
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=989e23991ba094b5
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=de389edf2981e1d2
   owner: architecture
   reason: Telemetry emission failure — must not crash main LLM call flow
   safety: Logged and continues — telemetry is non-critical to LLM processing
@@ -398,7 +398,7 @@ allow_hits:
   safety: Missing Location header breaks redirect loop naturally (no redirect target)
   expires: '2026-05-02'
 # http.py — redirect hop client.get() method call
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=b7098a23eee21356
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=f3d3aeca1cffaac3
   owner: architecture
   reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access

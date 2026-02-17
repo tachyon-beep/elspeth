@@ -29,6 +29,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
 
+from elspeth.contracts.enums import RunStatus
 from elspeth.mcp.analyzer import LandscapeAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -206,7 +207,7 @@ def create_server(database_url: str, *, passphrase: str | None = None) -> Server
                         "status": {
                             "type": "string",
                             "description": "Filter by status",
-                            "enum": ["running", "completed", "failed"],
+                            "enum": [s.value for s in RunStatus],
                         },
                     },
                 },

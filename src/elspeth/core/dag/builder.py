@@ -81,7 +81,10 @@ def _field_required(field_spec: Any) -> bool:
         return not field_spec.strip().endswith("?")
     if isinstance(field_spec, dict):
         if "required" in field_spec:
-            return bool(field_spec["required"])
+            value = field_spec["required"]
+            if type(value) is not bool:
+                raise GraphValidationError(f"Field spec 'required' must be exactly bool, got {type(value).__name__}: {value!r}")
+            return value
         if len(field_spec) == 1:
             ftype = str(next(iter(field_spec.values())))
             return not ftype.strip().endswith("?")

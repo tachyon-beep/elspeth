@@ -10,6 +10,7 @@ to Application Insights for distributed tracing, monitoring, and alerting.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
@@ -88,7 +89,7 @@ class AzureMonitorExporter:
         """Exporter name for configuration reference."""
         return self._name
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         """Configure the exporter with settings from pipeline configuration.
 
         Args:

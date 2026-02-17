@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import re
 import time
 from dataclasses import dataclass, field
@@ -340,6 +341,8 @@ class AuditedLLMClient(AuditedClientBase):
             )
 
             # Telemetry emitted AFTER successful Landscape recording (even for call errors)
+            # Snapshot request_data before async telemetry emission to prevent mutation drift
+            request_snapshot = copy.deepcopy(request_data)
             # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
             try:
                 self._telemetry_emit(
@@ -353,9 +356,9 @@ class AuditedLLMClient(AuditedClientBase):
                         state_id=self._state_id,  # Transform context
                         operation_id=None,  # Not in source/sink context
                         token_id=self._telemetry_token_id(),
-                        request_hash=stable_hash(request_data),
+                        request_hash=stable_hash(request_snapshot),
                         response_hash=None,  # No response on error
-                        request_payload=request_data,  # Full request for observability
+                        request_payload=request_snapshot,  # Snapshotted for observability
                         response_payload=None,  # No response on error
                         token_usage=None,
                     )
@@ -425,6 +428,10 @@ class AuditedLLMClient(AuditedClientBase):
         )
 
         # Telemetry emitted AFTER successful Landscape recording
+        # Snapshot before async telemetry emission to prevent mutation drift
+        request_snapshot = copy.deepcopy(request_data)
+        response_snapshot = copy.deepcopy(response_data)
+        usage_snapshot = copy.deepcopy(usage) if usage else None
         # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
         try:
             self._telemetry_emit(
@@ -438,11 +445,11 @@ class AuditedLLMClient(AuditedClientBase):
                     state_id=self._state_id,  # Transform context
                     operation_id=None,  # Not in source/sink context
                     token_id=self._telemetry_token_id(),
-                    request_hash=stable_hash(request_data),
-                    response_hash=stable_hash(response_data),
-                    request_payload=request_data,  # Full request for observability
-                    response_payload=response_data,  # Full response for observability
-                    token_usage=usage if usage else None,
+                    request_hash=stable_hash(request_snapshot),
+                    response_hash=stable_hash(response_snapshot),
+                    request_payload=request_snapshot,  # Snapshotted for observability
+                    response_payload=response_snapshot,  # Snapshotted for observability
+                    token_usage=usage_snapshot,
                 )
             )
         except Exception as tel_err:

@@ -484,7 +484,11 @@ def get_node_states(
                 raise ValueError(f"Invalid status '{status}'. Valid: {valid}") from None
             query = query.where(node_states_table.c.status == status)
 
-        query = query.order_by(node_states_table.c.step_index)
+        query = query.order_by(
+            node_states_table.c.step_index,
+            node_states_table.c.attempt,
+            node_states_table.c.token_id,
+        )
         rows = conn.execute(query).fetchall()
 
     return [

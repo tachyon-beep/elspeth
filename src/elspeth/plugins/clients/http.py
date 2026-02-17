@@ -897,6 +897,11 @@ class AuditedHTTPClient(AuditedClientBase):
             if redirect_request.scheme == "https":
                 extensions["sni_hostname"] = redirect_request.sni_hostname
 
+            # Acquire rate limit for each redirect hop — each hop is a separate
+            # outbound network request that must be throttled independently.
+            # See P2-2026-02-14-redirect-hops-bypass-rate-limiter.
+            self._acquire_rate_limit()
+
             hop_start = time.perf_counter()
 
             # Pre-allocate call index and request data BEFORE the hop so that

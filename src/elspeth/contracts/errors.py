@@ -141,11 +141,16 @@ class TemplateErrorEntry(TypedDict):
 
 
 class RowErrorEntry(TypedDict):
-    """Entry in row_errors list for batch processing failures."""
+    """Entry in row_errors list for batch processing failures.
+
+    The ``error`` field accepts both simple strings and structured dicts.
+    Batch plugins (e.g., azure_batch) may store structured error bodies
+    from external APIs, which are persisted as-is in the audit trail.
+    """
 
     row_index: int
     reason: str
-    error: NotRequired[str]
+    error: NotRequired[str | dict[str, Any]]
 
 
 class UsageStats(TypedDict, total=False):
@@ -366,6 +371,7 @@ class TransformErrorReason(TypedDict):
     max_tokens: NotRequired[int]
     completion_tokens: NotRequired[int]
     prompt_tokens: NotRequired[int]
+    finish_reason: NotRequired[str | None]  # LLM finish reason (e.g., "stop", "length")
     raw_response: NotRequired[str]  # LLM response text; absent = empty/unavailable
     raw_response_preview: NotRequired[str]  # Truncated preview; absent = empty/unavailable
     content_after_fence_strip: NotRequired[str]

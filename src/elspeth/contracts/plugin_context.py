@@ -327,6 +327,29 @@ class PluginContext:
             )
             parent_id = self.operation_id
 
+        # Resolve token_id from authoritative state_id lookup BEFORE telemetry.
+        # This is a data integrity check — FrameworkBugError must NOT be swallowed
+        # by the telemetry error handler below.
+        # See P2-2026-02-14-plugincontext-record-call-can-emit-the-wrong-token-id.
+        token_id = None
+        if has_state:
+            assert self.state_id is not None  # Guarded by has_state check above
+            node_state = self.landscape.get_node_state(self.state_id)
+            if node_state is None:
+                raise FrameworkBugError(
+                    f"record_call() has state_id={self.state_id} but get_node_state() "
+                    f"returned None. This is a framework bug — state_id should always "
+                    f"resolve to a valid node_state."
+                )
+            token_id = node_state.token_id
+            # Validate that ctx.token (if set) is consistent with the authoritative source
+            if self.token is not None and self.token.token_id != token_id:
+                raise FrameworkBugError(
+                    f"record_call() token mismatch: ctx.token.token_id={self.token.token_id} "
+                    f"but node_state.token_id={token_id} for state_id={self.state_id}. "
+                    f"This is a framework bug — ctx.token is out of sync with state_id."
+                )
+
         # Emit telemetry AFTER successful Landscape recording
         # Wrapped in try/except to prevent telemetry failures from affecting callers
         try:
@@ -344,15 +367,6 @@ class PluginContext:
                 usage = response_snapshot.get("usage")
                 if usage and isinstance(usage, dict):
                     token_usage = usage
-
-            token_id = None
-            if has_state:
-                if self.token is not None:
-                    token_id = self.token.token_id
-                elif self.state_id is not None:
-                    node_state = self.landscape.get_node_state(self.state_id)
-                    if node_state is not None:
-                        token_id = node_state.token_id
 
             self.telemetry_emit(
                 ExternalCallCompleted(

@@ -292,6 +292,7 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
                 (validation_errors_table.c.node_id == nodes_table.c.node_id) & (validation_errors_table.c.run_id == nodes_table.c.run_id),
             )
             .where(validation_errors_table.c.run_id == run_id)
+            .order_by(validation_errors_table.c.created_at.desc())
             .limit(limit)
         ).fetchall()
 
@@ -317,14 +318,23 @@ def get_failure_context(db: LandscapeDB, recorder: LandscapeRecorder, run_id: st
         for e in transform_errors
     ]
 
-    validation_error_list = [
-        {
-            "plugin": e.plugin_name,
-            "row_hash": e.row_hash[:12] + "..." if e.row_hash else None,
-            "sample_data": json.loads(e.row_data_json) if e.row_data_json else None,
-        }
-        for e in validation_errors
-    ]
+    validation_error_list = []
+    for e in validation_errors:
+        if e.node_id is not None and e.plugin_name is None:
+            # node_id is set but outerjoin found no matching node — Tier 1 corruption
+            msg = (
+                f"Tier-1 corruption: validation_errors row has node_id={e.node_id!r} "
+                f"but no matching node in nodes table for run_id={run_id!r}"
+            )
+            raise RuntimeError(msg)
+        plugin = e.plugin_name if e.plugin_name is not None else "unknown"
+        validation_error_list.append(
+            {
+                "plugin": plugin,
+                "row_hash": e.row_hash[:12] + "..." if e.row_hash else None,
+                "sample_data": json.loads(e.row_data_json) if e.row_data_json else None,
+            }
+        )
 
     # Identify patterns
     plugins_with_failures = list({s["plugin"] for s in failed_state_list if s["plugin"]})

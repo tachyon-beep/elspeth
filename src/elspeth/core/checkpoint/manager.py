@@ -157,18 +157,23 @@ class CheckpointManager:
         if result is None:
             return None
 
-        checkpoint = Checkpoint(
-            checkpoint_id=result.checkpoint_id,
-            run_id=result.run_id,
-            token_id=result.token_id,
-            node_id=result.node_id,
-            sequence_number=result.sequence_number,
-            created_at=result.created_at,
-            upstream_topology_hash=result.upstream_topology_hash,
-            checkpoint_node_config_hash=result.checkpoint_node_config_hash,
-            aggregation_state_json=result.aggregation_state_json,
-            format_version=result.format_version,  # None for legacy checkpoints
-        )
+        try:
+            checkpoint = Checkpoint(
+                checkpoint_id=result.checkpoint_id,
+                run_id=result.run_id,
+                token_id=result.token_id,
+                node_id=result.node_id,
+                sequence_number=result.sequence_number,
+                created_at=result.created_at,
+                upstream_topology_hash=result.upstream_topology_hash,
+                checkpoint_node_config_hash=result.checkpoint_node_config_hash,
+                aggregation_state_json=result.aggregation_state_json,
+                format_version=result.format_version,  # None for legacy checkpoints
+            )
+        except ValueError as e:
+            raise CheckpointCorruptionError(
+                f"Checkpoint corruption detected for run '{run_id}', checkpoint '{result.checkpoint_id}': {e}"
+            ) from e
 
         # Validate checkpoint compatibility before returning
         self._validate_checkpoint_compatibility(checkpoint)
@@ -189,21 +194,28 @@ class CheckpointManager:
                 select(checkpoints_table).where(checkpoints_table.c.run_id == run_id).order_by(asc(checkpoints_table.c.sequence_number))
             ).fetchall()
 
-        return [
-            Checkpoint(
-                checkpoint_id=r.checkpoint_id,
-                run_id=r.run_id,
-                token_id=r.token_id,
-                node_id=r.node_id,
-                sequence_number=r.sequence_number,
-                created_at=r.created_at,
-                upstream_topology_hash=r.upstream_topology_hash,
-                checkpoint_node_config_hash=r.checkpoint_node_config_hash,
-                aggregation_state_json=r.aggregation_state_json,
-                format_version=r.format_version,  # None for legacy checkpoints
-            )
-            for r in results
-        ]
+        checkpoints = []
+        for r in results:
+            try:
+                checkpoints.append(
+                    Checkpoint(
+                        checkpoint_id=r.checkpoint_id,
+                        run_id=r.run_id,
+                        token_id=r.token_id,
+                        node_id=r.node_id,
+                        sequence_number=r.sequence_number,
+                        created_at=r.created_at,
+                        upstream_topology_hash=r.upstream_topology_hash,
+                        checkpoint_node_config_hash=r.checkpoint_node_config_hash,
+                        aggregation_state_json=r.aggregation_state_json,
+                        format_version=r.format_version,  # None for legacy checkpoints
+                    )
+                )
+            except ValueError as e:
+                raise CheckpointCorruptionError(
+                    f"Checkpoint corruption detected for run '{run_id}', checkpoint '{r.checkpoint_id}': {e}"
+                ) from e
+        return checkpoints
 
     def delete_checkpoints(self, run_id: str) -> int:
         """Delete all checkpoints for a completed run.

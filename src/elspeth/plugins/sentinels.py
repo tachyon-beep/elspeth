@@ -25,17 +25,37 @@ Example usage:
         handle_null_value()
 """
 
-from typing import Final
+from __future__ import annotations
+
+from typing import Any, Final
 
 
 class MissingSentinel:
-    """Sentinel class to distinguish missing fields from None values.
+    """Singleton sentinel class to distinguish missing fields from None values.
 
     This is a singleton - use the MISSING instance, not the class directly.
     Comparison should always use `is` identity, never equality.
+
+    Singleton semantics are enforced: __new__ returns the cached instance,
+    and __copy__, __deepcopy__, and __reduce__ all preserve identity.
     """
 
     __slots__ = ()
+    _instance: MissingSentinel | None = None
+
+    def __new__(cls) -> MissingSentinel:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __copy__(self) -> MissingSentinel:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> MissingSentinel:
+        return self
+
+    def __reduce__(self) -> tuple[type[MissingSentinel], tuple[()]]:
+        return (MissingSentinel, ())
 
     def __repr__(self) -> str:
         return "<MISSING>"

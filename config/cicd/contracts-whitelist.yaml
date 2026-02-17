@@ -321,18 +321,12 @@ allowed_dict_patterns:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TELEMETRY EXPORTERS - External observability trust boundary
-  # Exporter config comes from YAML and is validated internally. The configure()
-  # method receives raw config before type validation.
+  # Exporter serialization returns dict[str, Any] by design for OTLP/JSON payloads.
   # ═══════════════════════════════════════════════════════════════════════════
-  - "src/elspeth/telemetry/protocols.py:ExporterProtocol.configure:config"
-  - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter.configure:config"
   - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter._serialize_event_attributes:return"
-  - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter.configure:config"
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter._serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:_SyntheticReadableSpan.__init__:attributes"
-  - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter.configure:config"
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"
-  - "src/elspeth/telemetry/exporters/datadog.py:DatadogExporter.configure:config"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # STRUCTLOG PROCESSORS - Framework boundary

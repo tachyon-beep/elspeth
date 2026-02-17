@@ -659,12 +659,18 @@ def explain(
     landscape_settings = config.landscape if config else None
     if landscape_settings is None and settings_path is not None and settings_path.exists():
         try:
-            from elspeth.core.config import load_settings
-
             settings_for_passphrase = load_settings(settings_path)
             landscape_settings = settings_for_passphrase.landscape
-        except Exception:
-            pass  # No settings available — passphrase will be None
+        except (FileNotFoundError, yaml.YAMLError, YamlParserError, YamlScannerError):
+            pass  # Settings file unreadable — passphrase will be None
+        except (ValidationError, SecretLoadError) as e:
+            # Settings loaded but failed validation or secret resolution.
+            # User explicitly provided --settings, so surface the error.
+            if json_output:
+                typer.echo(json_module.dumps({"error": f"Settings loading failed: {e}"}))
+            else:
+                typer.echo(f"Error loading settings: {e}", err=True)
+            raise typer.Exit(1) from None
 
     try:
         passphrase = resolve_audit_passphrase(landscape_settings)

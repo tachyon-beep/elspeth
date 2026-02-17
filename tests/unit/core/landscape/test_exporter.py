@@ -127,7 +127,7 @@ _SECRET = SecretResolution(
     timestamp=1705320000.0,
     env_var_name="API_KEY",
     source="keyvault",
-    fingerprint="fp-hash",
+    fingerprint="a" * 64,
     vault_url="https://vault.example.com",
     secret_name="api-key",
     resolution_latency_ms=150.0,
@@ -498,7 +498,7 @@ class TestSecretResolutionRecords:
         assert sec[0]["env_var_name"] == "API_KEY"
         assert sec[0]["source"] == "keyvault"
         assert sec[0]["vault_url"] == "https://vault.example.com"
-        assert sec[0]["fingerprint"] == "fp-hash"
+        assert sec[0]["fingerprint"] == "a" * 64
         assert sec[0]["resolution_latency_ms"] == 150.0
 
 

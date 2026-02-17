@@ -808,6 +808,11 @@ class TestRecordCallTelemetryTokenCorrelation:
 
         mock_landscape = MagicMock()
         mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+        # get_node_state must return an object with the authoritative token_id
+        # (record_call resolves token_id from state_id lookup, not ctx.token)
+        mock_node_state = MagicMock()
+        mock_node_state.token_id = "tok-001"
+        mock_landscape.get_node_state.return_value = mock_node_state
 
         contract = SchemaContract(
             mode="OBSERVED",

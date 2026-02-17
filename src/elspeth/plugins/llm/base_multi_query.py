@@ -125,14 +125,17 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
             required_fields=schema_config.required_fields,
         )
 
-        # Create schema from config
-        schema = create_schema_from_config(
+        # Create input schema from original config, output schema from enriched config
+        self.input_schema = create_schema_from_config(
             schema_config,
-            f"{self.name}Schema",
+            f"{self.name}InputSchema",
             allow_coercion=False,
         )
-        self.input_schema = schema
-        self.output_schema = schema
+        self.output_schema = create_schema_from_config(
+            self._output_schema_config,
+            f"{self.name}OutputSchema",
+            allow_coercion=False,
+        )
 
         # Pooled execution setup
         if cfg.pool_config is not None:

@@ -634,17 +634,17 @@ class AzureBlobSource(BaseSource):
         if data_key:
             if not isinstance(data, dict):
                 error_msg = f"Cannot extract data_key '{data_key}': expected JSON object, got {type(data).__name__}"
-                yield from _record_file_level_error(error_msg, "structure")
+                yield from _record_file_level_error(error_msg, "parse")
                 return
             if data_key not in data:
                 error_msg = f"data_key '{data_key}' not found in JSON object"
-                yield from _record_file_level_error(error_msg, "structure")
+                yield from _record_file_level_error(error_msg, "parse")
                 return
             data = data[data_key]
 
         if not isinstance(data, list):
             error_msg = f"Expected JSON array, got {type(data).__name__}"
-            yield from _record_file_level_error(error_msg, "structure")
+            yield from _record_file_level_error(error_msg, "parse")
             return
 
         # Log row count for operator visibility

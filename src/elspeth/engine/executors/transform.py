@@ -252,6 +252,12 @@ class TransformExecutor:
             # This allows transforms to access original header names via ctx.contract.resolve_name()
             ctx.contract = token.row_data.contract
 
+            # Set token on context for ALL transforms (not just batch-mixin).
+            # Regular transforms also need ctx.token for telemetry correlation
+            # when using audited clients (e.g., WebScrapeTransform uses ctx.token.token_id).
+            # See P2-2026-02-14-transformexecutor-only-sets-ctx-token-for-batch-mixin.
+            ctx.token = token
+
             # Execute with timing and span
             # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
             # P2-2026-01-21: Pass node_id for disambiguation when multiple plugin instances exist
@@ -273,9 +279,6 @@ class TransformExecutor:
                         # occurs and retry happens, the new attempt's waiter won't receive
                         # stale results from the previous attempt.
                         waiter = adapter.register(token.token_id, guard.state_id)
-
-                        # Set token on context for BatchTransformMixin
-                        ctx.token = token
 
                         # Submit work - this returns immediately
                         mixin.accept(token.row_data, ctx)

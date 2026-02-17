@@ -5,6 +5,7 @@ Exporters are responsible for shipping telemetry events to external
 observability platforms (OTLP, Azure Monitor, Datadog, etc.).
 """
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ class ExporterProtocol(Protocol):
         """
         ...
 
-    def configure(self, config: dict[str, Any]) -> None:
+    def configure(self, config: Mapping[str, Any]) -> None:
         """Configure the exporter with settings from pipeline configuration.
 
         Called once during TelemetryManager initialization, before any

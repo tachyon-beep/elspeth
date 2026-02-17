@@ -26,7 +26,7 @@ allow_hits:
   reason: TypeError from normalize_type_for_contract for unsupported types (dict, list, Decimal) — maps to object
   safety: Preserves field in contract as 'any' type; no data loss or silent skip
   expires: '2026-05-14'
-- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=d1d4c7a6b6f8a842
+- key: contracts/url.py:R6:SanitizedWebhookUrl:from_raw_url:fp=cf2c8467be680950
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -51,6 +51,21 @@ allow_hits:
   reason: Type annotation introspection - required to detect Union/Optional types
   safety: Code reviewed - same pattern as data.py:_is_union_type
   expires: '2026-05-02'
+- key: contracts/audit.py:R5:SecretResolution:__post_init__:fp=0cb7e8c1ad5f41e8
+  owner: architecture
+  reason: Tier 1 invariant enforcement — isinstance validates timestamp is numeric before math.isinf/isnan guard
+  safety: Raises immediately on wrong type — explicit crash, not masking
+  expires: null
+- key: contracts/events.py:R5:FieldResolutionApplied:__post_init__:fp=3f16d11e34359538
+  owner: architecture
+  reason: Frozen dataclass invariant — isinstance check to deep-freeze mutable mapping via MappingProxyType
+  safety: Converts mutable dict to frozen proxy — defensive construction, not runtime masking
+  expires: null
+- key: contracts/config/runtime.py:R5:ExporterConfig:__post_init__:fp=cc8aede1c956d0c4
+  owner: architecture
+  reason: Frozen dataclass invariant — isinstance check to deep-freeze mutable options dict via MappingProxyType
+  safety: Converts mutable dict to frozen proxy — defensive construction, not runtime masking
+  expires: null
 - key: contracts/audit.py:R5:_validate_enum:fp=f48a15b1272c5363
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -61,47 +76,47 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=6da358fbc674d735
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=dd423d2b04b4504e
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=88448fd740364e24
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=938da6715141d3e5
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=4134c33898370a29
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=52bab38da653cf0d
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_int_field:fp=0a516787233a14be
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=40863e768771f423
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=1e6dc332e2ef9699
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=0e857d596f53150b
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=ecfef5a461fab47d
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=8a7ada815bfab93b
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=efa2d1bce6b292b8
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=38fce4ee43bfdc0d
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=858ee1fdd29fc79a
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=608a648408504f81
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
-- key: contracts/config/runtime.py:R5:_validate_float_field:fp=7c53c74396aa56f7
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=45aa28db08eba5f3
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
@@ -139,13 +154,13 @@ allow_hits:
 - key: contracts/plugin_context.py:R5:PluginContext:get:fp=1ba9331f7213c9c0
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=03ac36437fc77924
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=d1df9562bdc41863
   owner: architecture
   reason: Optional field access at trust boundary
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=cf15783cae827033
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=9b6b150ac26a9282
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=eff3c261c6ecf430
+- key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=2066dd38dbe9c12e
   owner: architecture
   reason: Broad exception handling at external boundary with logging
 - key: contracts/plugin_context.py:R5:PluginContext:record_validation_error:fp=8a007856aa7c655f

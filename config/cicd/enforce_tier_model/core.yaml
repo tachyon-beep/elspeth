@@ -17,6 +17,11 @@ per_file_rules:
   reason: Security utilities access optional environment variables (Tier 3) - defensive access for missing keys
   expires: null
 allow_hits:
+- key: core/payload_store.py:R6:FilesystemPayloadStore:delete:fp=6467dcaaf8795f52
+  owner: architecture
+  reason: Idempotent delete — FileNotFoundError means content already deleted (retention purge or duplicate call)
+  safety: Returns False on missing file — caller informed, no silent data loss
+  expires: null
 - key: core/landscape/_node_state_recording.py:R5:NodeStateRecordingMixin:complete_node_state:fp=4f89cd9e4b00d867
   owner: architecture
   reason: Type narrowing after DB update - discriminated union requires isinstance to verify terminal state
@@ -204,12 +209,12 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/security/secret_loader.py:R6:CompositeSecretLoader:get_secret:fp=8846ddf2a85396bb
+- key: core/security/secret_loader.py:R6:CompositeSecretLoader:get_secret:fp=cb4d8fc57f9917d4
   owner: bugfix
   reason: Intentional fallback pattern - CompositeSecretLoader tries loaders in priority order
   safety: SecretNotFoundError from one loader triggers fallback to next; raises if all fail
   expires: null
-- key: core/security/secret_loader.py:R6:KeyVaultSecretLoader:get_secret:fp=0c397e0294f3db17
+- key: core/security/secret_loader.py:R6:KeyVaultSecretLoader:get_secret:fp=e77b2a357f43e9a2
   owner: bugfix
   reason: Sentinel class definition in except ImportError — not a runtime error handler
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
@@ -388,7 +393,7 @@ allow_hits:
   reason: Optional schema access for mixed node types (source/sink/gate/coalesce)
   safety: Crashes on malformed schema payloads; None is an intentional non-schema state
   expires: '2026-03-10'
-- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=e904c9147bcf1cba
+- key: core/dag/graph.py:R5:ExecutionGraph:get_schema_config_from_node:fp=3786462ebea162fb
   owner: architecture
   reason: Runtime shape check before coercing schema dict to SchemaConfig
   safety: Non-dict payloads are rejected and converted to explicit validation failures

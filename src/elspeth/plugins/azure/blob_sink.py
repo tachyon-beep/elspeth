@@ -590,13 +590,13 @@ class AzureBlobSink(BaseSink):
 
         # EXTERNAL SYSTEM: Azure Blob SDK calls - wrap with try/except
         # Record call for audit trail (ctx.operation_id is set by executor)
+        # Capture overwrite flag BEFORE the try block so it reflects the actual
+        # value used for the upload call, not the post-mutation state.
+        upload_overwrite = self._overwrite or self._has_uploaded
         start_time = time.perf_counter()
         try:
             container_client = self._get_container_client()
             blob_client = container_client.get_blob_client(rendered_path)
-            # Keep overwrite=False protection for first write against pre-existing
-            # blobs, then permit in-run rewrites to update cumulative content.
-            upload_overwrite = self._overwrite or self._has_uploaded
 
             # Upload with overwrite policy enforced atomically by Azure SDK.
             # When overwrite=False, upload_blob raises ResourceExistsError server-side,
@@ -646,7 +646,7 @@ class AzureBlobSink(BaseSink):
                     "operation": "upload_blob",
                     "container": self._container,
                     "blob_path": rendered_path,
-                    "overwrite": self._overwrite or self._has_uploaded,
+                    "overwrite": upload_overwrite,
                 },
                 error=error_data,
                 latency_ms=latency_ms,

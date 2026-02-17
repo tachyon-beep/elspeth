@@ -142,10 +142,10 @@ class FilesystemPayloadStore:
             IntegrityError: If content doesn't match expected hash
         """
         path = self._path_for_hash(content_hash)
-        if not path.exists():
-            raise KeyError(f"Payload not found: {content_hash}")
-
-        content = path.read_bytes()
+        try:
+            content = path.read_bytes()
+        except FileNotFoundError:
+            raise KeyError(f"Payload not found: {content_hash}") from None
         actual_hash = hashlib.sha256(content).hexdigest()
 
         # Use timing-safe comparison to prevent timing attacks that could
@@ -166,7 +166,8 @@ class FilesystemPayloadStore:
             True if content was deleted, False if not found
         """
         path = self._path_for_hash(content_hash)
-        if not path.exists():
+        try:
+            path.unlink()
+        except FileNotFoundError:
             return False
-        path.unlink()
         return True

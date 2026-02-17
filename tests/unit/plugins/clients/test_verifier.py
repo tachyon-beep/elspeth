@@ -639,11 +639,14 @@ class TestCallVerifier:
         assert report.mismatches == 1
         assert report.missing_payloads == 1
 
-    def test_verify_purged_without_hash_still_missing(self) -> None:
-        """When payload is purged and no response_hash exists, stays as missing.
+    def test_verify_success_with_no_response_payload_not_missing(self) -> None:
+        """SUCCESS calls with no response evidence should NOT be flagged as missing_payload.
 
-        Some SUCCESS calls may not have a response_hash (legacy data).
-        Without a hash, we can't verify — just mark as missing_payload.
+        Bug: P2-2026-02-14-callverifier-verify-misclassifies-legitimate-successful-calls
+
+        Some successful operations legitimately have no response body (e.g., DELETE,
+        204 No Content). When response_ref=None and response_hash=None, there is no
+        evidence a response was ever recorded, so this is not a missing payload.
         """
         recorder = self._create_mock_recorder()
         request_data = {"model": "gpt-4", "messages": []}
@@ -653,7 +656,7 @@ class TestCallVerifier:
             request_hash=request_hash,
             status=CallStatus.SUCCESS,
             response_ref=None,
-            response_hash=None,  # No hash available
+            response_hash=None,  # No response was ever recorded
         )
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = None
@@ -665,12 +668,13 @@ class TestCallVerifier:
             live_response={"content": "Hello"},
         )
 
-        # No hash — can't determine match, not a real "difference"
+        # No evidence of response ever existing — NOT payload_missing
+        assert result.payload_missing is False
+        assert result.recorded_call_missing is False
+        assert result.recorded_response is None
         assert result.is_match is False
-        assert result.payload_missing is True
-        assert result.has_differences is False
         report = verifier.get_report()
-        assert report.missing_payloads == 1
+        assert report.missing_payloads == 0
         assert report.matches == 0
         assert report.mismatches == 0
 

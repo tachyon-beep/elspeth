@@ -6,6 +6,11 @@ per_file_rules:
   reason: AST-based expression parser requires isinstance() for node type dispatch and try/except for unknown AST node types
   expires: null
 allow_hits:
+- key: engine/orchestrator/types.py:R5:AggregationFlushResult:__post_init__:fp=84d6c2fc1218a9d6
+  owner: architecture
+  reason: Frozen dataclass invariant — isinstance check to deep-freeze mutable routed_destinations dict via MappingProxyType
+  safety: Converts mutable dict to frozen proxy — defensive construction, not runtime masking
+  expires: null
 - key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=a183521ba11a8ee6
   owner: bugfix
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
@@ -51,7 +56,7 @@ allow_hits:
   reason: getattr() for lifecycle guard — graceful for non-BaseTransform protocol implementations
   safety: Default True skips check for third-party implementations; only enforces on BaseTransform subclasses
   expires: '2026-05-02'
-- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=dc682aca1ff5cdb9
+- key: engine/executors/transform.py:R5:TransformExecutor:execute_transform:fp=54664f4255eaeb4c
   owner: architecture
   reason: isinstance(e, TimeoutError) for retry timeout handling in batch transform path
   safety: Exception type discrimination for retry logic - required for correct timeout eviction

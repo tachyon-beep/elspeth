@@ -5,9 +5,12 @@ and completion status. Events are emitted by the orchestrator and consumed
 by CLI formatters for human-readable or structured output.
 """
 
+import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
 from elspeth.contracts.enums import (
@@ -269,7 +272,12 @@ class FieldResolutionApplied(TelemetryEvent):
     source_plugin: str
     field_count: int
     normalization_version: str | None
-    resolution_mapping: dict[str, str]
+    resolution_mapping: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        """Deep-freeze mutable mapping field."""
+        if not isinstance(self.resolution_mapping, MappingProxyType):
+            object.__setattr__(self, "resolution_mapping", MappingProxyType(self.resolution_mapping))
 
 
 # =============================================================================
@@ -340,7 +348,7 @@ class ExternalCallCompleted(TelemetryEvent):
     token_usage: dict[str, int] | None = None
 
     def __post_init__(self) -> None:
-        """Validate XOR constraint: exactly one of state_id or operation_id must be set."""
+        """Validate XOR constraint and deep-freeze mutable payload dicts."""
         has_state = self.state_id is not None
         has_operation = self.operation_id is not None
         if has_state == has_operation:  # Both True or both False
@@ -348,3 +356,10 @@ class ExternalCallCompleted(TelemetryEvent):
                 f"ExternalCallCompleted requires exactly one of state_id or operation_id. "
                 f"Got state_id={self.state_id!r}, operation_id={self.operation_id!r}"
             )
+        # Snapshot mutable payload dicts to prevent post-emission mutation drift
+        if self.request_payload is not None:
+            object.__setattr__(self, "request_payload", copy.deepcopy(self.request_payload))
+        if self.response_payload is not None:
+            object.__setattr__(self, "response_payload", copy.deepcopy(self.response_payload))
+        if self.token_usage is not None:
+            object.__setattr__(self, "token_usage", copy.deepcopy(self.token_usage))
