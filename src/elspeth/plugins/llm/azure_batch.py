@@ -20,6 +20,7 @@ import io
 import json
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
@@ -47,6 +48,21 @@ from elspeth.plugins.llm.tracing import (
     validate_tracing_config,
 )
 from elspeth.plugins.schema_factory import create_schema_from_config
+
+
+@dataclass(frozen=True, slots=True)
+class _RowMappingEntry:
+    """Checkpoint-serializable mapping from custom_id to row index + hash."""
+
+    index: int
+    variables_hash: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"index": self.index, "variables_hash": self.variables_hash}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> _RowMappingEntry:
+        return cls(index=data["index"], variables_hash=data["variables_hash"])
 
 
 class AzureBatchConfig(TransformDataConfig):
@@ -532,7 +548,7 @@ class AzureBatchLLMTransform(BaseTransform):
         """
         # 1. Render templates for all rows, track failures
         requests: list[dict[str, Any]] = []
-        row_mapping: dict[str, dict[str, Any]] = {}  # custom_id -> {index, variables_hash}
+        row_mapping: dict[str, _RowMappingEntry] = {}  # custom_id -> typed entry
         template_errors: list[tuple[int, str]] = []  # (index, error)
 
         for idx, row in enumerate(rows):
@@ -565,10 +581,10 @@ class AzureBatchLLMTransform(BaseTransform):
                 request["body"]["max_tokens"] = self._max_tokens
 
             requests.append(request)
-            row_mapping[custom_id] = {
-                "index": idx,
-                "variables_hash": rendered.variables_hash,
-            }
+            row_mapping[custom_id] = _RowMappingEntry(
+                index=idx,
+                variables_hash=rendered.variables_hash,
+            )
 
         # Build request lookup for audit recording (custom_id -> request body)
         # This allows the audit trail to record exactly what was sent to the LLM
@@ -679,7 +695,7 @@ class AzureBatchLLMTransform(BaseTransform):
         checkpoint_data = {
             "batch_id": batch.id,
             "input_file_id": batch_file.id,
-            "row_mapping": row_mapping,
+            "row_mapping": {k: v.to_dict() for k, v in row_mapping.items()},
             "template_errors": template_errors,
             "submitted_at": datetime.now(UTC).isoformat(),
             "row_count": len(rows),
@@ -719,14 +735,15 @@ class AzureBatchLLMTransform(BaseTransform):
             error_detail: Optional extra error detail string.
         """
         requests_data = checkpoint["requests"]
-        row_mapping = checkpoint["row_mapping"]
+        raw_mapping = checkpoint["row_mapping"]
+        row_mapping = {k: _RowMappingEntry.from_dict(v) for k, v in raw_mapping.items()}
         batch_id = checkpoint["batch_id"]
 
-        if not requests_data or not row_mapping:
+        if not requests_data and not row_mapping:
             return  # No requests were submitted (e.g., all templates failed)
 
         for custom_id, original_request in requests_data.items():
-            row_index = row_mapping[custom_id]["index"] if custom_id in row_mapping else None
+            row_index = row_mapping[custom_id].index
             error_info: dict[str, Any] = {
                 "reason": f"batch_{terminal_status}",
                 "batch_id": batch_id,
@@ -957,7 +974,7 @@ class AzureBatchLLMTransform(BaseTransform):
             raise RuntimeError("Checkpoint missing required 'row_mapping' for AzureBatchLLMTransform.")
         if "template_errors" not in checkpoint:
             raise RuntimeError("Checkpoint missing required 'template_errors' for AzureBatchLLMTransform.")
-        row_mapping: dict[str, dict[str, Any]] = checkpoint["row_mapping"]
+        row_mapping: dict[str, _RowMappingEntry] = {k: _RowMappingEntry.from_dict(v) for k, v in checkpoint["row_mapping"].items()}
         template_errors: list[tuple[int, str]] = checkpoint["template_errors"]
 
         # Download output file (with audit recording)
@@ -1170,7 +1187,7 @@ class AzureBatchLLMTransform(BaseTransform):
         template_error_indices = {idx for idx, _ in template_errors}
 
         # Build reverse mapping once (O(n) instead of O(n^2) lookup per row)
-        idx_to_custom_id: dict[int, str] = {info["index"]: cid for cid, info in row_mapping.items()}
+        idx_to_custom_id: dict[int, str] = {info.index: cid for cid, info in row_mapping.items()}
 
         for idx, row in enumerate(rows):
             if idx in template_error_indices:
@@ -1287,8 +1304,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 output_row[self._response_field] = content
 
                 # Retrieve variables_hash from checkpoint
-                row_info = row_mapping[custom_id]
-                variables_hash = row_info["variables_hash"]
+                variables_hash = row_mapping[custom_id].variables_hash
 
                 populate_llm_metadata_fields(
                     output_row,
@@ -1312,7 +1328,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         for custom_id, result in results_by_id.items():
             original_request = requests_data[custom_id]
-            row_index = row_mapping[custom_id]["index"]
+            row_index = row_mapping[custom_id].index
 
             # Determine call status from result (Tier 2 - validated at boundary)
             if "error" in result:

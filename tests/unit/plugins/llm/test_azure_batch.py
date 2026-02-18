@@ -12,7 +12,7 @@ import pytest
 from elspeth.contracts import BatchPendingError, Determinism
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.plugins.config_base import PluginConfigError
-from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
+from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform, _RowMappingEntry
 from elspeth.testing import make_pipeline_row
 
 # Common schema config for dynamic field handling
@@ -1682,3 +1682,34 @@ class TestBug4_2_NonDictResponseBody:
         assert result.reason["reason"] == "all_output_lines_malformed"
         # Error details should mention the non-dict body
         assert any("not a dict" in err for err in result.reason["errors"])
+
+
+# ---------------------------------------------------------------------------
+# _RowMappingEntry (module-private checkpoint dataclass)
+# ---------------------------------------------------------------------------
+
+
+class TestRowMappingEntry:
+    """Round-trip and crash-on-corruption tests for _RowMappingEntry."""
+
+    def test_round_trip(self) -> None:
+        entry = _RowMappingEntry(index=5, variables_hash="abc123")
+        assert _RowMappingEntry.from_dict(entry.to_dict()) == entry
+
+    def test_to_dict_shape(self) -> None:
+        entry = _RowMappingEntry(index=0, variables_hash="deadbeef")
+        d = entry.to_dict()
+        assert d == {"index": 0, "variables_hash": "deadbeef"}
+
+    def test_frozen(self) -> None:
+        entry = _RowMappingEntry(index=1, variables_hash="hash")
+        with pytest.raises(AttributeError):
+            entry.index = 99  # type: ignore[misc]
+
+    def test_from_dict_missing_index_crashes(self) -> None:
+        with pytest.raises(KeyError, match="index"):
+            _RowMappingEntry.from_dict({"variables_hash": "abc"})
+
+    def test_from_dict_missing_hash_crashes(self) -> None:
+        with pytest.raises(KeyError, match="variables_hash"):
+            _RowMappingEntry.from_dict({"index": 0})
