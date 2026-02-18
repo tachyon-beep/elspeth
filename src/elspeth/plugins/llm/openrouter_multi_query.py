@@ -21,6 +21,7 @@ import httpx
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.llm import populate_llm_metadata_fields
 from elspeth.plugins.llm.base_multi_query import BaseMultiQueryTransform
@@ -338,28 +339,13 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
             )
 
         # OpenRouter can return {"usage": null} or omit usage entirely.
-        # dict.get("usage", {}) only returns {} when key is MISSING, not when value is null.
-        # The `or {}` ensures we get an empty dict for both missing AND null cases.
-        usage = data.get("usage") or {}
-
-        # Tier 3 boundary: validate usage is dict
-        if not isinstance(usage, dict):
-            return TransformResult.error(
-                {
-                    "reason": "type_mismatch",
-                    "error": f"Expected usage to be dict, got {type(usage).__name__}",
-                    "query": spec.output_prefix,
-                },
-                retryable=False,
-            )
+        # Tier 3 boundary: coerce to TokenUsage immediately.
+        usage = TokenUsage.from_dict(data.get("usage") or {})
 
         # 8b. Check for response truncation BEFORE parsing
-        # usage is Tier 3 external data - use .get() for optional fields
-        completion_tokens = usage.get("completion_tokens", 0)
-        # Tier 3 boundary: validate completion_tokens is numeric
-        if not isinstance(completion_tokens, (int, float)):
-            completion_tokens = 0
-        if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
+        # If completion_tokens is None (provider didn't report), we can't detect truncation
+        completion_tokens = usage.completion_tokens
+        if effective_max_tokens is not None and completion_tokens is not None and completion_tokens >= effective_max_tokens:
             truncation_error: TransformErrorReason = {
                 "reason": "response_truncated",
                 "error": (
@@ -370,7 +356,7 @@ class OpenRouterMultiQueryLLMTransform(BaseMultiQueryTransform):
                 "query": spec.output_prefix,
                 "max_tokens": effective_max_tokens,
                 "completion_tokens": completion_tokens,
-                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "prompt_tokens": usage.prompt_tokens,
             }
             if content:
                 truncation_error["raw_response_preview"] = content[:500]

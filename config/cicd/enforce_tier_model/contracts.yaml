@@ -194,3 +194,28 @@ allow_hits:
   reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
   safety: Falls back to str(unwrapped) for display purposes only; used in error message, not logic
   expires: null
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=de20205d6c9550a0
+  owner: architecture
+  reason: Tier 3 boundary — from_dict() coerces external LLM API usage data; isinstance() validates int type
+  safety: Non-int values coerced to None (unknown); no fabrication, no crash
+  expires: null
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=cff8808ba4a4c7a5
+  owner: architecture
+  reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
+  safety: Missing keys produce None (unknown); no fabrication
+  expires: null
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=fd0551da29037697
+  owner: architecture
+  reason: Tier 3 boundary — from_dict() uses .get() for completion_tokens on external LLM API response dicts
+  safety: Missing keys produce None (unknown); no fabrication
+  expires: null
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=d8bdd5dc10e08d7b
+  owner: architecture
+  reason: Tier 3 boundary — from_dict() validates completion_tokens is int before accepting
+  safety: Non-int values coerced to None (unknown); no fabrication, no crash
+  expires: null
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=d410af00cfeb7aea
+  owner: architecture
+  reason: Tier 3 boundary — from_dict() validates input is dict before accessing keys
+  safety: Non-dict input returns TokenUsage.unknown(); no crash
+  expires: null

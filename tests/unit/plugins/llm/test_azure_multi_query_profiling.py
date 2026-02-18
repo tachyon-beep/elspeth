@@ -18,6 +18,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import TransformResult
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 from elspeth.testing import make_pipeline_row
@@ -308,7 +309,7 @@ class TestLoadScenarios:
                     raise RateLimitError("Rate limit exceeded")
                 return Mock(
                     content=json.dumps({"score": 85, "rationale": "OK"}),
-                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    usage=TokenUsage.known(10, 5),
                     model="gpt-4o",
                 )
 
@@ -438,7 +439,7 @@ class TestRowAtomicity:
                     raise RateLimitError("Rate limit exceeded")
                 return Mock(
                     content=json.dumps({"score": 85 + llm_call_count[0], "rationale": f"R{llm_call_count[0]}"}),
-                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    usage=TokenUsage.known(10, 5),
                     model="gpt-4o",
                 )
 
@@ -531,7 +532,7 @@ class TestRowAtomicity:
                     raise RateLimitError("Rate limit exceeded")
                 return Mock(
                     content=json.dumps({"score": 85, "rationale": "OK"}),
-                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    usage=TokenUsage.known(10, 5),
                     model="gpt-4o",
                 )
 
@@ -620,7 +621,7 @@ class TestRowAtomicity:
                     raise RateLimitError("Rate limit exceeded")
                 return Mock(
                     content=json.dumps({"score": 85, "rationale": "OK"}),
-                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    usage=TokenUsage.known(10, 5),
                     model="gpt-4o",
                 )
 

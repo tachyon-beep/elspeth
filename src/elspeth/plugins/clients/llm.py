@@ -14,6 +14,7 @@ import structlog
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.events import ExternalCallCompleted
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.core.canonical import stable_hash
 from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallback
 
@@ -44,14 +45,14 @@ class LLMResponse:
 
     content: str
     model: str
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: TokenUsage = field(default_factory=TokenUsage.unknown)
     latency_ms: float = 0.0
     raw_response: dict[str, Any] | None = None
 
     @property
-    def total_tokens(self) -> int:
-        """Total tokens used (prompt + completion)."""
-        return self.usage.get("prompt_tokens", 0) + self.usage.get("completion_tokens", 0)
+    def total_tokens(self) -> int | None:
+        """Total tokens used (prompt + completion), or None if unknown."""
+        return self.usage.total_tokens
 
 
 class LLMClientError(Exception):
@@ -396,12 +397,12 @@ class AuditedLLMClient(AuditedClientBase):
         content = response.choices[0].message.content or ""
         # Guard against providers that omit usage data (streaming, certain configs)
         if response.usage is not None:
-            usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-            }
+            usage = TokenUsage.known(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+            )
         else:
-            usage = {}
+            usage = TokenUsage.unknown()
 
         # Capture full raw response for audit completeness
         # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
@@ -412,7 +413,7 @@ class AuditedLLMClient(AuditedClientBase):
             # Summary fields for convenience
             "content": content,
             "model": response.model,
-            "usage": usage,
+            "usage": usage.to_dict(),
             # Full response for audit completeness (tool_calls, multiple choices, etc.)
             "raw_response": raw_response,
         }
@@ -431,7 +432,7 @@ class AuditedLLMClient(AuditedClientBase):
         # Snapshot before async telemetry emission to prevent mutation drift
         request_snapshot = copy.deepcopy(request_data)
         response_snapshot = copy.deepcopy(response_data)
-        usage_snapshot = copy.deepcopy(usage) if usage else None
+        usage_snapshot = usage.to_dict() if usage.is_known else None
         # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
         try:
             self._telemetry_emit(

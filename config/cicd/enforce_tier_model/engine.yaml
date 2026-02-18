@@ -101,12 +101,7 @@ allow_hits:
     yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:restore_from_checkpoint:fp=00fa3251cc588b79
-  owner: P2-2026-02-02
-  reason: Version check for checkpoint format - None from missing key triggers ValueError
-  safety: ValueError raised for missing or wrong version - explicit validation pattern
-  expires: null
-- key: engine/executors/aggregation.py:R5:AggregationExecutor:restore_from_checkpoint:fp=b01014406109b8ae
+- key: engine/executors/aggregation.py:R5:AggregationExecutor:restore_from_checkpoint:fp=9a2f62c1314741f1
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

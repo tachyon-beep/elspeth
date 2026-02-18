@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.llm.azure import AzureLLMTransform, AzureOpenAIConfig
 from elspeth.plugins.llm.tracing import AzureAITracingConfig
 from elspeth.testing import make_pipeline_row
@@ -249,7 +250,7 @@ class TestLangfuseSpanCreation:
             token_id="test-token",
             prompt="Hello world",
             response_content="Hi there!",
-            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            usage=TokenUsage.known(10, 5),
             latency_ms=150.0,
         )
 

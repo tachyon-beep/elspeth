@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
@@ -22,13 +23,13 @@ class TestLLMResponse:
         response = LLMResponse(
             content="Hello, world!",
             model="gpt-4",
-            usage={"prompt_tokens": 10, "completion_tokens": 5},
+            usage=TokenUsage.known(10, 5),
             latency_ms=150.0,
         )
 
         assert response.content == "Hello, world!"
         assert response.model == "gpt-4"
-        assert response.usage == {"prompt_tokens": 10, "completion_tokens": 5}
+        assert response.usage == TokenUsage.known(10, 5)
         assert response.latency_ms == 150.0
 
     def test_total_tokens_property(self) -> None:
@@ -36,26 +37,26 @@ class TestLLMResponse:
         response = LLMResponse(
             content="test",
             model="gpt-4",
-            usage={"prompt_tokens": 10, "completion_tokens": 5},
+            usage=TokenUsage.known(10, 5),
         )
 
         assert response.total_tokens == 15
 
-    def test_total_tokens_with_missing_fields(self) -> None:
-        """total_tokens handles missing usage fields."""
+    def test_total_tokens_with_unknown_usage(self) -> None:
+        """total_tokens returns None when usage is unknown."""
         response = LLMResponse(
             content="test",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
 
-        assert response.total_tokens == 0
+        assert response.total_tokens is None
 
     def test_default_values(self) -> None:
         """LLMResponse has sensible defaults."""
         response = LLMResponse(content="test", model="gpt-4")
 
-        assert response.usage == {}
+        assert response.usage == TokenUsage.unknown()
         assert response.latency_ms == 0.0
         assert response.raw_response is None
 
@@ -150,7 +151,7 @@ class TestAuditedLLMClient:
         # Verify response
         assert response.content == "Hello!"
         assert response.model == "gpt-4"
-        assert response.usage == {"prompt_tokens": 10, "completion_tokens": 5}
+        assert response.usage == TokenUsage.known(10, 5)
         assert response.latency_ms > 0
 
         # Verify audit record
@@ -732,7 +733,7 @@ class TestAuditedLLMClient:
         # Call should succeed (not crash)
         assert result.content == "Hello, I'm working!"
         assert result.model == "gpt-4"
-        assert result.usage == {}  # Empty dict, not crash
+        assert result.usage == TokenUsage.unknown()  # Unknown, not crash
 
         # Audit trail should record SUCCESS with empty usage
         recorder.record_call.assert_called_once()

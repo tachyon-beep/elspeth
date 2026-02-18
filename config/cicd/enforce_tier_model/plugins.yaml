@@ -164,16 +164,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=887c8bfbb12a7a46
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=a8579c0e9209b145
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R5:AzureContentSafety:_process_single_with_state:fp=8404ee8567c3b226
   owner: architecture
   reason: Tier 3 boundary — validates row field is str before sending to Azure API
@@ -296,16 +286,16 @@ allow_hits:
   reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
   safety: MalformedResponseError raised on wrong type
   expires: '2026-05-13'
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=9a594cf494f2c169
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=2b08d8dc531c8d1f
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-# llm.py — telemetry emission in narrowed try/except
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=de389edf2981e1d2
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=2ee448df78c87612
   owner: architecture
   reason: Telemetry emission failure — must not crash main LLM call flow
   safety: Logged and continues — telemetry is non-critical to LLM processing
+  expires: '2026-05-02'
 - key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=58b19b185d408859
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)

@@ -29,6 +29,7 @@ from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.llm import (
@@ -325,7 +326,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         prompt: str,
         response_content: str,
         model: str,
-        usage: dict[str, int] | None = None,
+        usage: TokenUsage | None = None,
         latency_ms: float | None = None,
         error: str | None = None,
     ) -> None:
@@ -339,7 +340,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             prompt: The prompt sent to the LLM
             response_content: The response received (empty if error)
             model: Model name
-            usage: Token usage dict with prompt_tokens/completion_tokens
+            usage: Token usage (``TokenUsage`` or ``None``)
             latency_ms: Call latency in milliseconds
             error: Error message if call failed
         """
@@ -368,15 +369,11 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                     "output": response_content if not error else None,
                 }
 
-                if usage:
-                    # Validate types at external boundary (Tier 3 data from LLM API)
-                    prompt_tokens = usage.get("prompt_tokens", 0)
-                    completion_tokens = usage.get("completion_tokens", 0)
-                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                        update_kwargs["usage_details"] = {
-                            "input": prompt_tokens,
-                            "output": completion_tokens,
-                        }
+                if usage is not None and usage.is_known:
+                    update_kwargs["usage_details"] = {
+                        "input": usage.prompt_tokens,
+                        "output": usage.completion_tokens,
+                    }
 
                 metadata: dict[str, Any] = {"row_index": idx}
                 if latency_ms is not None:
@@ -780,9 +777,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             )
 
         # Note: "usage" and "model" are optional in OpenAI/OpenRouter API responses
-        # (e.g., streaming responses may omit usage). The .get() here handles a valid
-        # API variation, not a bug — this is Tier 3 external data normalization.
-        usage = data.get("usage") or {}
+        # (e.g., streaming responses may omit usage). Tier 3 boundary: coerce to TokenUsage.
+        usage = TokenUsage.from_dict(data.get("usage") or {})
         response_model = data.get("model", self._model)
 
         # Record to Langfuse (per-call tracing — unlike Azure Batch, we control each call)

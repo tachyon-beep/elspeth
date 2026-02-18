@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from elspeth.contracts import Determinism
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
@@ -440,7 +441,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Analysis result",
             model="gpt-4",
-            usage={"prompt_tokens": 10, "completion_tokens": 20},
+            usage=TokenUsage.known(10, 20),
             latency_ms=150.0,
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
@@ -474,7 +475,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Result",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 
@@ -503,7 +504,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Response",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 
@@ -533,7 +534,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Response",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 
@@ -558,7 +559,7 @@ class TestBaseLLMTransformProcess:
         mock_client.chat_completion.return_value = LLMResponse(
             content="Response",
             model="gpt-4",
-            usage={},
+            usage=TokenUsage.unknown(),
         )
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 

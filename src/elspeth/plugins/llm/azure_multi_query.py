@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import TransformErrorCategory, TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
 from elspeth.plugins.llm import populate_llm_metadata_fields
 from elspeth.plugins.llm.base_multi_query import BaseMultiQueryTransform
@@ -291,7 +292,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                 if isinstance(first_choice, dict):
                     finish_reason = first_choice.get("finish_reason")
 
-        completion_tokens = response.usage.get("completion_tokens", 0)
+        completion_tokens = response.usage.completion_tokens
 
         is_truncated: bool
         if finish_reason is not None:
@@ -299,7 +300,13 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             is_truncated = finish_reason == "length"
         else:
             # Fallback heuristic: completion_tokens >= max_tokens suggests truncation
-            is_truncated = effective_max_tokens is not None and completion_tokens > 0 and completion_tokens >= effective_max_tokens
+            # If completion_tokens is None (provider didn't report), we can't detect truncation
+            is_truncated = (
+                effective_max_tokens is not None
+                and completion_tokens is not None
+                and completion_tokens > 0
+                and completion_tokens >= effective_max_tokens
+            )
 
         if is_truncated:
             truncation_error: TransformErrorReason = {
@@ -312,7 +319,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
                 "query": spec.output_prefix,
                 "max_tokens": effective_max_tokens,
                 "completion_tokens": completion_tokens,
-                "prompt_tokens": response.usage.get("prompt_tokens", 0),
+                "prompt_tokens": response.usage.prompt_tokens,
                 "finish_reason": finish_reason,
             }
             if response.content:
@@ -340,7 +347,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             if validation_result.detail:
                 error_info["error"] = validation_result.detail
                 error_info["content_after_fence_strip"] = content
-                error_info["usage"] = response.usage
+                error_info["usage"] = response.usage.to_dict()
             if validation_result.expected:
                 error_info["expected"] = validation_result.expected
             if validation_result.actual:
@@ -383,14 +390,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
         populate_llm_metadata_fields(
             output,
             spec.output_prefix,
-            usage=(
-                response.usage
-                if response.usage
-                else {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                }
-            ),
+            usage=response.usage,
             model=response.model,
             template_hash=rendered.template_hash,
             variables_hash=rendered.variables_hash,
@@ -526,7 +526,7 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
         query_prefix: str,
         prompt: str,
         response_content: str,
-        usage: dict[str, int] | None,
+        usage: TokenUsage | None,
         latency_ms: float | None,
     ) -> None:
         """Record LLM call to Langfuse using v3 nested context managers."""
@@ -551,14 +551,11 @@ class AzureMultiQueryLLMTransform(BaseMultiQueryTransform):
             ):
                 update_kwargs: dict[str, Any] = {"output": response_content}
 
-                if usage:
-                    prompt_tokens = usage.get("prompt_tokens", 0)
-                    completion_tokens = usage.get("completion_tokens", 0)
-                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                        update_kwargs["usage_details"] = {
-                            "input": prompt_tokens,
-                            "output": completion_tokens,
-                        }
+                if usage is not None and usage.is_known:
+                    update_kwargs["usage_details"] = {
+                        "input": usage.prompt_tokens,
+                        "output": usage.completion_tokens,
+                    }
 
                 if latency_ms is not None:
                     update_kwargs["metadata"] = {"latency_ms": latency_ms}

@@ -733,8 +733,15 @@ class AggregationExecutor:
         # v2.1: Contract version_hash width changed (16 -> 32 hex chars)
         # v3.0: Phase 2 traversal refactor checkpoint break (no backwards compatibility)
         checkpoint_version = AGGREGATION_CHECKPOINT_VERSION
-        version = state.get("_version")
 
+        if "_version" not in state:
+            raise ValueError(
+                "Corrupted checkpoint: missing '_version' key. "
+                f"Found keys: {sorted(state.keys())}. "
+                "This checkpoint is corrupt — use an older checkpoint or start fresh."
+            )
+
+        version = state["_version"]
         if version != checkpoint_version:
             # Log checkpoint rejection for observability
             slog.warning(

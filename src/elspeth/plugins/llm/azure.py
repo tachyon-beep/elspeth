@@ -18,6 +18,7 @@ from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
@@ -642,7 +643,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         token_id: str,
         prompt: str,
         response_content: str,
-        usage: dict[str, int] | None,
+        usage: TokenUsage | None,
         latency_ms: float | None,
     ) -> None:
         """Record LLM call to Langfuse using v3 nested context managers.
@@ -655,7 +656,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             token_id: Token ID for correlation
             prompt: The prompt sent to the LLM
             response_content: The response received
-            usage: Token usage dict with prompt_tokens/completion_tokens
+            usage: Token usage (``TokenUsage`` or ``None``)
             latency_ms: Call latency in milliseconds
         """
         if not self._tracing_active or self._langfuse_client is None:
@@ -679,15 +680,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             ):
                 update_kwargs: dict[str, Any] = {"output": response_content}
 
-                if usage:
-                    # Validate types at external boundary (Tier 3 data from LLM API)
-                    prompt_tokens = usage.get("prompt_tokens", 0)
-                    completion_tokens = usage.get("completion_tokens", 0)
-                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                        update_kwargs["usage_details"] = {
-                            "input": prompt_tokens,
-                            "output": completion_tokens,
-                        }
+                if usage is not None and usage.is_known:
+                    update_kwargs["usage_details"] = {
+                        "input": usage.prompt_tokens,
+                        "output": usage.completion_tokens,
+                    }
 
                 if latency_ms is not None:
                     update_kwargs["metadata"] = {"latency_ms": latency_ms}

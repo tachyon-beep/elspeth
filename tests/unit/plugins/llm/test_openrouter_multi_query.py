@@ -1339,8 +1339,13 @@ class TestBug4_3_Tier3BoundaryTypeChecks:
             assert result.reason is not None
             assert result.reason["reason"] == "type_mismatch"
 
-    def test_non_dict_usage_returns_error(self, chaosllm_server) -> None:
-        """LLM returning non-dict usage returns error instead of crashing."""
+    def test_non_dict_usage_continues_with_unknown_tokens(self, chaosllm_server) -> None:
+        """LLM returning non-dict usage produces unknown TokenUsage and continues.
+
+        TokenUsage.from_dict() gracefully handles non-dict input by returning
+        TokenUsage.unknown(), so the query succeeds with unknown usage rather
+        than returning an error.
+        """
         import json as json_mod
 
         # Build a raw httpx.Response with non-dict usage
@@ -1369,9 +1374,12 @@ class TestBug4_3_Tier3BoundaryTypeChecks:
             assert ctx.state_id is not None
             result = transform._process_single_query(row, spec, ctx.state_id, "test-token-id", None)
 
-            assert result.status == "error"
-            assert result.reason is not None
-            assert result.reason["reason"] == "type_mismatch"
+            # Non-dict usage is handled gracefully via TokenUsage.from_dict()
+            # which returns TokenUsage.unknown() — processing continues normally
+            assert result.status == "success"
+            assert result.row is not None
+            assert result.row["cs1_diagnosis_score"] == 5
+            assert result.row["cs1_diagnosis_rationale"] == "good"
 
     def test_non_numeric_completion_tokens_fallback_to_zero(self, chaosllm_server) -> None:
         """Non-numeric completion_tokens falls back to 0 instead of crashing."""

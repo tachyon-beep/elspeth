@@ -20,6 +20,7 @@ from elspeth.contracts.errors import QueryFailureDetail
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import LLMClientError
@@ -618,22 +619,23 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
 
                 if result.status == "success" and result.row is not None:
                     # Aggregate usage from result row if available
-                    total_usage: dict[str, int] = {}
+                    total_prompt = 0
+                    total_completion = 0
+                    any_known = False
                     for spec in self._query_specs:
-                        usage = result.row.get(f"{spec.output_prefix}_usage")
-                        if isinstance(usage, dict):
-                            for key in ("prompt_tokens", "completion_tokens"):
-                                val = usage.get(key, 0)
-                                if isinstance(val, int):
-                                    total_usage[key] = total_usage.get(key, 0) + val
-                    if total_usage:
-                        prompt_tokens = total_usage.get("prompt_tokens", 0)
-                        completion_tokens = total_usage.get("completion_tokens", 0)
-                        if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-                            update_kwargs["usage_details"] = {
-                                "input": prompt_tokens,
-                                "output": completion_tokens,
-                            }
+                        raw_usage = result.row.get(f"{spec.output_prefix}_usage")
+                        query_usage = TokenUsage.from_dict(raw_usage) if isinstance(raw_usage, dict) else TokenUsage.unknown()
+                        if query_usage.prompt_tokens is not None:
+                            total_prompt += query_usage.prompt_tokens
+                            any_known = True
+                        if query_usage.completion_tokens is not None:
+                            total_completion += query_usage.completion_tokens
+                            any_known = True
+                    if any_known:
+                        update_kwargs["usage_details"] = {
+                            "input": total_prompt,
+                            "output": total_completion,
+                        }
 
                 metadata: dict[str, Any] = {
                     "query_count": query_count,

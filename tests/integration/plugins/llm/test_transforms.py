@@ -973,7 +973,7 @@ class TestAuditedLLMClientIntegration:
         # Verify response
         assert response.content == "Test response"
         assert response.model == "gpt-4"
-        assert response.usage["prompt_tokens"] == 10
+        assert response.usage.prompt_tokens == 10
 
         # Verify audit trail
         calls = recorder.get_calls(state_id)

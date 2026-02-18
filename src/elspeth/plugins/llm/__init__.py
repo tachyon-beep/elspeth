@@ -39,6 +39,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from elspeth.contracts.token_usage import TokenUsage
+
 if TYPE_CHECKING:
     from elspeth.contracts import PluginSchema
     from elspeth.contracts.schema import SchemaConfig
@@ -155,7 +157,7 @@ def populate_llm_metadata_fields(
     output: dict[str, object],
     field_prefix: str,
     *,
-    usage: dict[str, int] | None,
+    usage: TokenUsage | None,
     model: str,
     template_hash: str,
     variables_hash: str,
@@ -174,7 +176,7 @@ def populate_llm_metadata_fields(
     Args:
         output: Mutable row dict to populate.
         field_prefix: Response field name (e.g., "llm_response").
-        usage: Token usage dict (prompt_tokens, completion_tokens).
+        usage: Token usage (``TokenUsage`` or ``None``).
         model: Model identifier that actually responded.
         template_hash: SHA-256 of prompt template.
         variables_hash: SHA-256 of rendered template variables.
@@ -184,7 +186,8 @@ def populate_llm_metadata_fields(
         system_prompt_source: Config file path of system prompt (None if inline).
     """
     # Guaranteed metadata (contract-stable)
-    output[f"{field_prefix}_usage"] = usage
+    # Serialize to dict for row storage — downstream readers still get plain dicts
+    output[f"{field_prefix}_usage"] = usage.to_dict() if usage is not None else None
     output[f"{field_prefix}_model"] = model
     # Audit metadata (provenance)
     output[f"{field_prefix}_template_hash"] = template_hash

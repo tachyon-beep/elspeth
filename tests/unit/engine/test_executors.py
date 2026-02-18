@@ -2189,10 +2189,10 @@ class TestAggregationCheckpointVersion:
         executor.restore_from_checkpoint(checkpoint)
 
     def test_missing_version_rejected(self) -> None:
-        """Checkpoint without _version key is rejected."""
+        """Checkpoint without _version key is rejected as corrupt."""
         executor, _recorder, _nid = TestAggregationExecutor._make_agg_executor(TestAggregationExecutor())
 
-        with pytest.raises(ValueError, match="Incompatible checkpoint version"):
+        with pytest.raises(ValueError, match="Corrupted checkpoint: missing '_version' key"):
             executor.restore_from_checkpoint({"agg_1": {"tokens": []}})
 
 

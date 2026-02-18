@@ -30,6 +30,7 @@ from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determini
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.llm import (
@@ -1277,7 +1278,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
                 # Boundary validation passed - now we trust these fields
                 content = message.get("content", "")  # content can be empty string, that's valid
-                usage = body.get("usage", {})  # usage is optional in Azure API
+                usage = TokenUsage.from_dict(body.get("usage", {}))  # usage is optional in Azure API
 
                 # Field collision check already done in _submit_batch() before
                 # submitting the batch — no need to re-check here.

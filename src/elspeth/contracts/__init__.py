@@ -204,6 +204,7 @@ from elspeth.contracts.schema_contract_factory import (
     map_schema_mode,
 )
 from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.contracts.transform_contract import (
     create_output_contract_from_schema,
     validate_output_against_contract,
@@ -383,6 +384,8 @@ __all__ = [  # Grouped by category for readability
     "SanitizedWebhookUrl",
     # sink
     "OutputValidationResult",
+    # token usage
+    "TokenUsage",
     # schema contracts (Phase 1: Core Contracts)
     "ContractBuilder",
     "create_contract_from_config",

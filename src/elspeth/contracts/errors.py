@@ -154,11 +154,15 @@ class RowErrorEntry(TypedDict):
 
 
 class UsageStats(TypedDict, total=False):
-    """LLM token usage statistics."""
+    """LLM token usage statistics.
 
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+    Values are ``int | None`` because providers may omit individual fields.
+    ``None`` means "provider did not report this value" — distinct from ``0``.
+    """
+
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
 
 
 class QueryFailureDetail(TypedDict):
@@ -369,8 +373,8 @@ class TransformErrorReason(TypedDict):
 
     # LLM response context
     max_tokens: NotRequired[int]
-    completion_tokens: NotRequired[int]
-    prompt_tokens: NotRequired[int]
+    completion_tokens: NotRequired[int | None]
+    prompt_tokens: NotRequired[int | None]
     finish_reason: NotRequired[str | None]  # LLM finish reason (e.g., "stop", "length")
     raw_response: NotRequired[str]  # LLM response text; absent = empty/unavailable
     raw_response_preview: NotRequired[str]  # Truncated preview; absent = empty/unavailable

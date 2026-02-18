@@ -131,9 +131,10 @@ class TestCheckpointVersionValidation:
         with pytest.raises(ValueError) as exc_info:
             executor.restore_from_checkpoint(old_format_state)
 
-        # Verify error mentions incompatible version (None != "1.0")
+        # Verify error mentions corruption (missing _version is Tier 1 corruption)
         error_msg = str(exc_info.value)
-        assert "Incompatible checkpoint version" in error_msg
+        assert "Corrupted checkpoint" in error_msg
+        assert "_version" in error_msg
 
     def test_restore_succeeds_with_valid_version(self) -> None:
         """Verify restore succeeds with matching checkpoint version.
