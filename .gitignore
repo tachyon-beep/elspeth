@@ -160,5 +160,8 @@ landscape.db-wal
 .pre-commit-cache/
 
 # Tool-specific local config and caches
-.keel/
 .codex/
+
+# Filigree issue tracker
+.filigree/
+.mcp.json

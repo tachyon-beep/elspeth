@@ -739,3 +739,61 @@ Defensive handling IS appropriate at trust boundaries (see Three-Tier Trust Mode
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
 
 If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
+
+<!-- filigree:instructions -->
+## Issue Tracking (Filigree)
+
+All issue tracking uses **Filigree** — a local SQLite-backed tracker with enforced state machines. Data lives in `.filigree/`. The MCP server (`filigree-mcp`) provides 43 native tools; the CLI is for quick operations and subagent use.
+
+### Issue Types
+
+Pick the right type — each has an enforced state flow that prevents skipping steps:
+
+| Type | Use When | Flow |
+| ---- | -------- | ---- |
+| `bug` | Defect in existing code | `triage → confirmed → fixing → verifying → closed` |
+| `task` | Bounded work item | `open → in_progress → closed` |
+| `feature` | New capability | `proposed → approved → building → reviewing → done` |
+| `epic` | Large cross-cutting effort | `open → in_progress → closed` |
+
+**Bugs MUST use the `bug` type**, not `task`. The triage→confirmed→fixing→verifying flow exists to prevent "fix it and forget it" — every bug fix requires verification before closing. Use `filigree transitions <id>` to see valid next states.
+
+### Priority Scale
+
+| Priority | Meaning | Guidance |
+| -------- | ------- | -------- |
+| P0 | Critical | Drop everything. Pipeline correctness, data loss, audit integrity |
+| P1 | High | Do next. Security issues, contract violations, crash bugs |
+| P2 | Medium | Default. Standard bugs and tasks |
+| P3 | Low | When convenient. Code quality, minor UX issues |
+| P4 | Backlog | Someday. Nice-to-haves, speculative improvements |
+
+### Essential Commands
+
+```bash
+filigree ready                                    # Starting point: unblocked work by priority
+filigree show <id>                                # Full details + dependencies + comments
+filigree create "Title" --type=bug --priority=1   # Create (always specify type + priority)
+filigree update <id> --status=in_progress         # Claim work
+filigree close <id> --reason="explanation"         # Close with context (reason is encouraged)
+filigree add-dep <issue> <depends-on>             # Track blockers
+filigree add-comment <id> "Decision rationale"    # Record decisions on the issue, not in chat
+```
+
+For the full command reference: `filigree --help` or `filigree <command> --help`.
+
+### Workflow
+
+1. **Start of session**: `filigree ready` — see what's available and unblocked
+2. **Pick work**: `filigree show <id>` — read the issue, comments, and dependencies
+3. **Claim it**: `filigree update <id> --status=in_progress` (or `filigree claim <id>` for atomic locking in multi-agent scenarios)
+4. **Work**: Fix the code, write tests, verify
+5. **Document**: `filigree add-comment <id> "what was done and why"` — comments are the audit trail for decisions
+6. **Close**: `filigree close <id> --reason="fixed in <commit>"` — link to the commit
+
+**Don't skip states.** A bug must be confirmed before fixing. A feature must be approved before building. The state machine is there for a reason.
+
+### Dependencies
+
+Use dependencies to track blockers explicitly. `filigree blocked` shows all blocked issues. `filigree add-dep <blocked> <blocker>` creates the relationship. An issue won't appear in `filigree ready` until its blockers are resolved.
+<!-- /filigree:instructions -->
