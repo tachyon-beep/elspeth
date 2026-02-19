@@ -151,12 +151,15 @@ class TestCoalesceOutcome:
         assert outcome.outcomes_recorded is False
 
     def test_custom_values(self):
+        from elspeth.contracts.coalesce_metadata import CoalesceMetadata
+
         token = _make_token()
+        metadata = CoalesceMetadata.for_late_arrival(policy="require_all", reason="test")
         outcome = CoalesceOutcome(
             held=False,
             merged_token=token,
             consumed_tokens=[token],
-            coalesce_metadata={"policy": "require_all"},
+            coalesce_metadata=metadata,
             failure_reason="late_arrival_after_merge",
             coalesce_name="merge",
             outcomes_recorded=True,
@@ -164,7 +167,7 @@ class TestCoalesceOutcome:
         assert outcome.held is False
         assert outcome.merged_token is token
         assert outcome.consumed_tokens == [token]
-        assert outcome.coalesce_metadata["policy"] == "require_all"
+        assert outcome.coalesce_metadata.policy == "require_all"
         assert outcome.failure_reason == "late_arrival_after_merge"
         assert outcome.coalesce_name == "merge"
         assert outcome.outcomes_recorded is True
@@ -302,10 +305,10 @@ class TestRequireAllPolicy:
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         md = o.coalesce_metadata
-        assert md["policy"] == "require_all"
-        assert md["merge_strategy"] == "union"
-        assert set(md["expected_branches"]) == {"a", "b"}
-        assert set(md["branches_arrived"]) == {"a", "b"}
+        assert md.policy == "require_all"
+        assert md.merge_strategy == "union"
+        assert set(md.expected_branches) == {"a", "b"}
+        assert set(md.branches_arrived) == {"a", "b"}
 
     def test_audit_begin_node_state_for_each_token(self):
         executor, recorder, _, _ = self._setup()
@@ -507,8 +510,8 @@ class TestLateArrival:
         executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         late = _make_token(branch_name="a", token_id="t_late", row_id="row_1")
         o = executor.accept(late, "merge")
-        assert o.coalesce_metadata["policy"] == "require_all"
-        assert "reason" in o.coalesce_metadata
+        assert o.coalesce_metadata.policy == "require_all"
+        assert o.coalesce_metadata.reason is not None
 
 
 # ===========================================================================
@@ -546,8 +549,8 @@ class TestUnionMerge:
         t2 = _make_token(branch_name="b", token_id="t2", data={"shared": "from_b"})
         executor.accept(t1, "merge")
         o = executor.accept(t2, "merge")
-        assert "union_field_collisions" in o.coalesce_metadata
-        assert "shared" in o.coalesce_metadata["union_field_collisions"]
+        assert o.coalesce_metadata.union_field_collisions is not None
+        assert "shared" in o.coalesce_metadata.union_field_collisions
 
     def test_no_collisions_no_collision_metadata(self):
         """When there are no field collisions, collision metadata should be absent."""
@@ -557,7 +560,7 @@ class TestUnionMerge:
         t2 = _make_token(branch_name="b", token_id="t2", data={"y": 2})
         executor.accept(t1, "merge")
         o = executor.accept(t2, "merge")
-        assert "union_field_collisions" not in o.coalesce_metadata
+        assert o.coalesce_metadata.union_field_collisions is None
 
     def test_collision_tracks_all_contributing_branches(self):
         """Collision metadata lists all branches that contributed the same field."""
@@ -570,7 +573,7 @@ class TestUnionMerge:
         executor.accept(t1, "merge")
         executor.accept(t2, "merge")
         o = executor.accept(t3, "merge")
-        collision_branches = o.coalesce_metadata["union_field_collisions"]["f"]
+        collision_branches = o.coalesce_metadata.union_field_collisions["f"]
         assert "a" in collision_branches
         assert "b" in collision_branches
         assert "c" in collision_branches
@@ -1247,12 +1250,12 @@ class TestAuditTrailDetails:
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(0.2)
         o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
-        arrival_order = o.coalesce_metadata["arrival_order"]
+        arrival_order = o.coalesce_metadata.arrival_order
         assert len(arrival_order) == 2
-        assert arrival_order[0]["branch"] == "a"
-        assert arrival_order[0]["arrival_offset_ms"] == pytest.approx(0.0)
-        assert arrival_order[1]["branch"] == "b"
-        assert arrival_order[1]["arrival_offset_ms"] == pytest.approx(200.0)
+        assert arrival_order[0].branch == "a"
+        assert arrival_order[0].arrival_offset_ms == pytest.approx(0.0)
+        assert arrival_order[1].branch == "b"
+        assert arrival_order[1].arrival_offset_ms == pytest.approx(200.0)
 
     def test_merge_metadata_wait_duration(self):
         """Coalesce metadata should include total wait_duration_ms."""
@@ -1261,15 +1264,15 @@ class TestAuditTrailDetails:
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(1.5)
         o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
-        assert o.coalesce_metadata["wait_duration_ms"] == pytest.approx(1500.0)
+        assert o.coalesce_metadata.wait_duration_ms == pytest.approx(1500.0)
 
     def test_merge_metadata_branches_lost_empty_when_none_lost(self):
-        """Branches_lost in metadata should be empty dict when all arrived."""
+        """Branches_lost in metadata should be empty MappingProxy when all arrived."""
         executor, _, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         o = executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
-        assert o.coalesce_metadata["branches_lost"] == {}
+        assert dict(o.coalesce_metadata.branches_lost) == {}
 
 
 # ===========================================================================
@@ -1367,8 +1370,8 @@ class TestFailPendingDetails:
         clock.advance(6.0)
         results = executor.check_timeouts("merge")
         md = results[0].coalesce_metadata
-        assert md["policy"] == "require_all"
-        assert set(md["expected_branches"]) == {"a", "b"}
+        assert md.policy == "require_all"
+        assert set(md.expected_branches) == {"a", "b"}
 
     def test_failure_removes_pending_entry(self):
         executor, _, _, clock = _make_executor()
@@ -1395,8 +1398,8 @@ class TestFailPendingDetails:
         executor.register_coalesce(s, "node_1")
         # Loss of b triggers require_all failure
         result = executor.notify_branch_lost("merge", "row_1", "b", "upstream_fail")
-        assert "branches_lost" in result.coalesce_metadata
-        assert "b" in result.coalesce_metadata["branches_lost"]
+        assert result.coalesce_metadata.branches_lost is not None
+        assert "b" in result.coalesce_metadata.branches_lost
 
     def test_failure_metadata_includes_quorum_required(self):
         executor, *_ = _make_executor()
@@ -1405,7 +1408,7 @@ class TestFailPendingDetails:
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         # Loss of b -> max_possible=2 < quorum=3 -> fail
         result = executor.notify_branch_lost("merge", "row_1", "b", "error")
-        assert result.coalesce_metadata["quorum_required"] == 3
+        assert result.coalesce_metadata.quorum_required == 3
 
     def test_require_all_timeout_metadata_has_timeout_seconds(self):
         executor, _, _, clock = _make_executor()
@@ -1414,7 +1417,7 @@ class TestFailPendingDetails:
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         clock.advance(9.0)
         results = executor.check_timeouts("merge")
-        assert results[0].coalesce_metadata["timeout_seconds"] == 8.0
+        assert results[0].coalesce_metadata.timeout_seconds == 8.0
 
     def test_failure_error_hash_is_deterministic(self):
         """The error_hash recorded for failed tokens should be consistent."""
@@ -1439,7 +1442,7 @@ class TestFailPendingDetails:
         executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         # require_all needs c, loss of c -> fail
         result = executor.notify_branch_lost("merge", "row_1", "c", "error")
-        assert set(result.coalesce_metadata["branches_arrived"]) == {"a", "b"}
+        assert set(result.coalesce_metadata.branches_arrived) == {"a", "b"}
 
 
 # ===========================================================================

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -46,7 +47,7 @@ class CoalesceOutcome:
     held: bool
     merged_token: TokenInfo | None = None
     consumed_tokens: list[TokenInfo] = field(default_factory=list)
-    coalesce_metadata: dict[str, Any] | None = None
+    coalesce_metadata: CoalesceMetadata | None = None
     failure_reason: str | None = None
     coalesce_name: str | None = None
     outcomes_recorded: bool = False
@@ -262,10 +263,10 @@ class CoalesceExecutor:
                 held=False,
                 failure_reason=failure_reason,
                 consumed_tokens=[token],
-                coalesce_metadata={
-                    "policy": settings.policy,
-                    "reason": "Siblings already merged/failed, this token arrived too late",
-                },
+                coalesce_metadata=CoalesceMetadata.for_late_arrival(
+                    policy=settings.policy,
+                    reason="Siblings already merged/failed, this token arrived too late",
+                ),
                 coalesce_name=coalesce_name,
                 outcomes_recorded=True,
             )
@@ -393,24 +394,18 @@ class CoalesceExecutor:
         del self._pending[key]
         self._mark_completed(key)
 
-        # Build metadata with policy-specific fields
-        metadata: dict[str, Any] = {
-            "policy": settings.policy,
-            "expected_branches": settings.branches,
-            "branches_arrived": list(pending.arrived.keys()),
-        }
-        if pending.lost_branches:
-            metadata["branches_lost"] = pending.lost_branches
-        if settings.quorum_count is not None:
-            metadata["quorum_required"] = settings.quorum_count
-        if settings.timeout_seconds is not None:
-            metadata["timeout_seconds"] = settings.timeout_seconds
-
         return CoalesceOutcome(
             held=False,
             failure_reason=failure_reason,
             consumed_tokens=consumed_tokens,
-            coalesce_metadata=metadata,
+            coalesce_metadata=CoalesceMetadata.for_failure(
+                policy=settings.policy,
+                expected_branches=list(settings.branches),
+                branches_arrived=list(pending.arrived.keys()),
+                branches_lost=pending.lost_branches if pending.lost_branches else None,
+                quorum_required=settings.quorum_count,
+                timeout_seconds=settings.timeout_seconds,
+            ),
             coalesce_name=coalesce_name,
             outcomes_recorded=True,
         )
@@ -473,12 +468,13 @@ class CoalesceExecutor:
                 held=False,
                 failure_reason="select_branch_not_arrived",
                 consumed_tokens=consumed_tokens,
-                coalesce_metadata={
-                    "policy": settings.policy,
-                    "merge_strategy": settings.merge,
-                    "select_branch": settings.select_branch,
-                    "branches_arrived": list(pending.arrived.keys()),
-                },
+                coalesce_metadata=CoalesceMetadata.for_select_not_arrived(
+                    policy=settings.policy,
+                    merge_strategy=settings.merge,
+                    # select_branch is validated non-None by CoalesceSettings for merge="select"
+                    select_branch=settings.select_branch,  # type: ignore[arg-type]
+                    branches_arrived=list(pending.arrived.keys()),
+                ),
                 coalesce_name=coalesce_name,
                 outcomes_recorded=True,  # Bug 9z8 fix: token outcomes already recorded above
             )
@@ -592,25 +588,25 @@ class CoalesceExecutor:
 
         # Build audit metadata BEFORE completing node states (Bug l4h fix)
         # This allows us to include it in context_after for each consumed token
-        coalesce_metadata: dict[str, Any] = {
-            "policy": settings.policy,
-            "merge_strategy": settings.merge,
-            "expected_branches": settings.branches,
-            "branches_arrived": list(pending.arrived.keys()),
-            "branches_lost": pending.lost_branches if pending.lost_branches else {},
-            "arrival_order": [
-                {
-                    "branch": branch,
-                    "arrival_offset_ms": (t - pending.first_arrival) * 1000,
-                }
+        coalesce_metadata = CoalesceMetadata.for_merge(
+            policy=settings.policy,
+            merge_strategy=settings.merge,
+            expected_branches=list(settings.branches),
+            branches_arrived=list(pending.arrived.keys()),
+            branches_lost=pending.lost_branches if pending.lost_branches else {},
+            arrival_order=[
+                ArrivalOrderEntry(
+                    branch=branch,
+                    arrival_offset_ms=(t - pending.first_arrival) * 1000,
+                )
                 for branch, t in sorted(pending.arrival_times.items(), key=lambda x: x[1])
             ],
-            "wait_duration_ms": (now - pending.first_arrival) * 1000,
-        }
+            wait_duration_ms=(now - pending.first_arrival) * 1000,
+        )
 
         # Include union merge collision info in audit trail if present
         if self._last_union_collisions:
-            coalesce_metadata["union_field_collisions"] = self._last_union_collisions
+            coalesce_metadata = CoalesceMetadata.with_collisions(coalesce_metadata, self._last_union_collisions)
             self._last_union_collisions = {}
 
         # Complete pending node states for consumed tokens
@@ -626,7 +622,7 @@ class CoalesceExecutor:
                 status=NodeStateStatus.COMPLETED,
                 output_data={"merged_into": merged_token.token_id},
                 duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
-                context_after={"coalesce_context": coalesce_metadata},
+                context_after={"coalesce_context": coalesce_metadata.to_dict()},
             )
 
             # Record terminal token outcome (COALESCED)

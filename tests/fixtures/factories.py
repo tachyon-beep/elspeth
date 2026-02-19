@@ -415,24 +415,26 @@ def make_coalesce_context(
     branches_arrived: list[str] | None = None,
     wait_duration_ms: float = 150.0,
 ) -> dict[str, Any]:
-    """Build a coalesce context_after dict.
+    """Build a coalesce context_after dict via CoalesceMetadata.
 
-    This dict has a well-defined 8-key schema in coalesce_executor.py:562-580
-    but no TypedDict enforcement.
+    Constructs a typed ``CoalesceMetadata`` and serializes it via
+    ``to_dict()`` so the output shape stays in sync with
+    ``coalesce_executor.py``.
     """
+    from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
+
     branches = expected_branches or ["a", "b"]
     arrived = branches_arrived or branches
-    return {
-        "coalesce_context": {
-            "policy": policy,
-            "merge_strategy": merge_strategy,
-            "expected_branches": branches,
-            "branches_arrived": arrived,
-            "branches_lost": {},
-            "arrival_order": [{"branch": b, "arrival_offset_ms": float(i * 50)} for i, b in enumerate(arrived)],
-            "wait_duration_ms": wait_duration_ms,
-        }
-    }
+    metadata = CoalesceMetadata.for_merge(
+        policy=policy,
+        merge_strategy=merge_strategy,
+        expected_branches=branches,
+        branches_arrived=arrived,
+        branches_lost={},
+        arrival_order=[ArrivalOrderEntry(branch=b, arrival_offset_ms=float(i * 50)) for i, b in enumerate(arrived)],
+        wait_duration_ms=wait_duration_ms,
+    )
+    return {"coalesce_context": metadata.to_dict()}
 
 
 def make_batch_checkpoint(

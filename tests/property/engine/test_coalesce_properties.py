@@ -716,10 +716,10 @@ class TestCoalesceMetadataProperties:
 
         metadata = outcome.coalesce_metadata
         assert metadata is not None
-        assert metadata["policy"] == "require_all"
-        assert metadata["merge_strategy"] == "nested"
-        assert set(metadata["expected_branches"]) == set(branches)
-        assert set(metadata["branches_arrived"]) == set(branches)
+        assert metadata.policy == "require_all"
+        assert metadata.merge_strategy == "nested"
+        assert set(metadata.expected_branches) == set(branches)
+        assert set(metadata.branches_arrived) == set(branches)
 
     @given(branches=branch_lists(min_size=2, max_size=3))
     @settings(max_examples=20)
@@ -744,10 +744,10 @@ class TestCoalesceMetadataProperties:
             outcome = executor.accept(token, "test_coalesce")
 
         assert outcome.coalesce_metadata is not None
-        arrival_order = outcome.coalesce_metadata["arrival_order"]
+        arrival_order = outcome.coalesce_metadata.arrival_order
 
         # Verify chronological order
-        offsets = [entry["arrival_offset_ms"] for entry in arrival_order]
+        offsets = [entry.arrival_offset_ms for entry in arrival_order]
         assert offsets == sorted(offsets), "arrival_order should be chronologically sorted"
 
         # Verify offsets are approximately correct (1000ms apart)

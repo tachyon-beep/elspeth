@@ -55,6 +55,7 @@ from elspeth.contracts.call_data import (
 )
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
+from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 
 # =============================================================================
 # Settings classes are NOT re-exported from contracts
@@ -327,6 +328,9 @@ __all__ = [  # Grouped by category for readability
     # checkpoint
     "ResumeCheck",
     "ResumePoint",
+    # coalesce metadata
+    "ArrivalOrderEntry",
+    "CoalesceMetadata",
     # types
     "AggregationName",
     "BranchName",
