@@ -20,7 +20,7 @@ ddtrace = pytest.importorskip(
     reason="ddtrace not installed",
 )
 
-from elspeth.contracts import TokenCompleted  # noqa: E402
+from elspeth.contracts import TokenCompleted, TokenUsage  # noqa: E402
 from elspeth.contracts.enums import RowOutcome, RunStatus  # noqa: E402
 from elspeth.contracts.events import RunFinished, RunStarted  # noqa: E402
 from elspeth.telemetry.exporters.datadog import DatadogExporter  # noqa: E402
@@ -307,7 +307,7 @@ class TestDatadogSpanFormat:
             provider="openai",
             status=CallStatus.SUCCESS,
             latency_ms=100.0,
-            token_usage={"prompt_tokens": 50, "completion_tokens": 25},
+            token_usage=TokenUsage(prompt_tokens=50, completion_tokens=25),
         )
         exporter.export(event)
 

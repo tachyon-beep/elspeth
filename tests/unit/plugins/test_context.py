@@ -784,7 +784,9 @@ class TestRecordCallTelemetryPayloadSnapshot:
         event = emitted_events[0]
         assert event.response_payload == expected_response
         assert event.response_hash == stable_hash(expected_response)
-        assert event.token_usage == expected_response["usage"]
+        from elspeth.contracts.token_usage import TokenUsage
+
+        assert event.token_usage == TokenUsage(prompt_tokens=1, completion_tokens=2)
 
 
 class TestRecordCallTelemetryTokenCorrelation:

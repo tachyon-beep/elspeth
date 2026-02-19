@@ -46,6 +46,7 @@ from elspeth.contracts.events import (
     TokenCompleted,
     TransformCompleted,
 )
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.telemetry.exporters.azure_monitor import AzureMonitorExporter
 from elspeth.telemetry.exporters.console import ConsoleExporter
 from elspeth.telemetry.exporters.datadog import DatadogExporter
@@ -157,7 +158,7 @@ def _create_sample_event(event_class: type[TelemetryEvent]) -> TelemetryEvent:
             latency_ms=250.0,
             request_hash="req123",
             response_hash="resp456",
-            token_usage={"prompt_tokens": 100, "completion_tokens": 50},
+            token_usage=TokenUsage(prompt_tokens=100, completion_tokens=50),
         )
     else:
         raise ValueError(f"Unknown event class: {event_class}")

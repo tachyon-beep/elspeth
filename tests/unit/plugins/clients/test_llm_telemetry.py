@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts import CallStatus, CallType, TokenUsage
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
@@ -114,7 +114,7 @@ class TestLLMClientTelemetry:
         assert event.response_payload is not None
         assert event.response_payload["content"] == "Hello!"
         assert event.response_payload["model"] == "gpt-4"
-        assert event.token_usage == {"prompt_tokens": 10, "completion_tokens": 5}
+        assert event.token_usage == TokenUsage(prompt_tokens=10, completion_tokens=5)
         assert isinstance(event.timestamp, datetime)
 
     def test_failed_call_emits_telemetry_with_error_status(self) -> None:

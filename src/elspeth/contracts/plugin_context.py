@@ -361,12 +361,17 @@ class PluginContext:
             request_snapshot = copy.deepcopy(request_data)
             response_snapshot = copy.deepcopy(response_data) if response_data is not None else None
 
-            # Extract token usage for LLM calls if available
+            # Extract token usage for LLM calls if available.
+            # response_snapshot is a serialized dict from LLMCallResponse.to_dict(),
+            # so "usage" is Tier 3 external data — coerce via TokenUsage.from_dict().
             token_usage = None
             if call_type == CallTypeEnum.LLM and response_snapshot is not None:
-                usage = response_snapshot.get("usage")
-                if usage and isinstance(usage, dict):
-                    token_usage = usage
+                from elspeth.contracts.token_usage import TokenUsage
+
+                raw_usage = response_snapshot.get("usage")
+                if isinstance(raw_usage, dict):
+                    tu = TokenUsage.from_dict(raw_usage)
+                    token_usage = tu if tu.is_known else None
 
             self.telemetry_emit(
                 ExternalCallCompleted(

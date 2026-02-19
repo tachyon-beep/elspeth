@@ -428,7 +428,7 @@ class AuditedLLMClient(AuditedClientBase):
         # Telemetry emitted AFTER successful Landscape recording
         # No deepcopy needed: record_call() consumed the dicts above, and
         # neither path mutates request_data/response_data after construction
-        usage_snapshot = usage.to_dict() if usage.is_known else None
+        usage_snapshot = usage if usage.is_known else None
         # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
         try:
             self._telemetry_emit(
