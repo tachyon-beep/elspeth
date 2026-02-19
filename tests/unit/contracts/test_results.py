@@ -143,34 +143,35 @@ class TestTransformResultContextAfter:
 
     def test_context_after_can_be_provided_to_success(self) -> None:
         """Success factory should accept context_after for audit metadata."""
-        pool_context = {
-            "pool_config": {"pool_size": 4},
-            "pool_stats": {"max_concurrent_reached": 4},
-        }
+        from tests.fixtures.factories import make_pool_execution_context
+
+        pool_context = make_pool_execution_context()
         result = TransformResult.success(
             make_pipeline_row({"x": 1}),
             success_reason={"action": "enriched"},
             context_after=pool_context,
         )
-        assert result.context_after == pool_context
+        assert result.context_after is pool_context
 
     def test_context_after_can_be_provided_to_error(self) -> None:
         """Error factory should accept context_after for partial execution metadata."""
-        pool_context = {
-            "pool_stats": {"capacity_retries": 5},
-        }
+        from tests.fixtures.factories import make_pool_execution_context
+
+        pool_context = make_pool_execution_context()
         result = TransformResult.error(
             {"reason": "retry_timeout"},
             context_after=pool_context,
         )
-        assert result.context_after == pool_context
+        assert result.context_after is pool_context
 
     def test_context_after_not_in_repr(self) -> None:
         """context_after should have repr=False for cleaner output."""
+        from tests.fixtures.factories import make_pool_execution_context
+
         result = TransformResult.success(
             make_pipeline_row({"x": 1}),
             success_reason={"action": "test"},
-            context_after={"pool_stats": {"large": "metadata"}},
+            context_after=make_pool_execution_context(),
         )
         repr_str = repr(result)
         assert "context_after" not in repr_str
@@ -325,9 +326,11 @@ class TestTransformResultErrorInvariants:
 
     def test_error_factory_with_context_after_passes_invariants(self) -> None:
         """TransformResult.error() with context_after passes invariants."""
+        from tests.fixtures.factories import make_pool_execution_context
+
         result = TransformResult.error(
             {"reason": "retry_timeout"},
-            context_after={"pool_stats": {"capacity_retries": 5}},
+            context_after=make_pool_execution_context(),
         )
         assert result.status == "error"
         assert result.context_after is not None

@@ -11,15 +11,21 @@ NodeStateGuard encodes the invariant structurally: any unhandled exception withi
 the ``with`` block automatically completes the state as FAILED before propagating.
 """
 
+from __future__ import annotations
+
 import logging
 import time
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ExecutionError, NodeStateOpen
 from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.core.landscape import LandscapeRecorder
+
+if TYPE_CHECKING:
+    from elspeth.contracts.errors import CoalesceFailureReason, TransformErrorReason, TransformSuccessReason
+    from elspeth.contracts.node_state_context import NodeStateContext
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +86,7 @@ class NodeStateGuard:
 
     # -- context manager protocol ------------------------------------------
 
-    def __enter__(self) -> "NodeStateGuard":
+    def __enter__(self) -> NodeStateGuard:
         self._enter_time = time.perf_counter()
         self._state = self._recorder.begin_node_state(
             token_id=self._token_id,
@@ -148,17 +154,24 @@ class NodeStateGuard:
         """Whether the caller has explicitly completed this state."""
         return self._completed
 
-    def complete(self, status: NodeStateStatus, **kwargs: Any) -> None:
-        """Complete the node state.  Guard will not intervene after this.
-
-        Passes through to ``recorder.complete_node_state()`` with the
-        guard's ``state_id`` prepended.  All keyword arguments are forwarded
-        verbatim (``duration_ms``, ``output_data``, ``error``,
-        ``success_reason``, ``context_after``).
-        """
-        self._recorder.complete_node_state(  # type: ignore[call-overload]
+    def complete(
+        self,
+        status: NodeStateStatus,
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
+        success_reason: TransformSuccessReason | None = None,
+        context_after: NodeStateContext | None = None,
+    ) -> None:
+        """Complete the node state.  Guard will not intervene after this."""
+        self._recorder.complete_node_state(  # type: ignore[call-overload,misc]  # generic NodeStateStatus vs Literal overloads
             state_id=self.state_id,
             status=status,
-            **kwargs,
+            output_data=output_data,
+            duration_ms=duration_ms,
+            error=error,
+            success_reason=success_reason,
+            context_after=context_after,
         )
         self._completed = True

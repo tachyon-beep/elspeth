@@ -616,13 +616,13 @@ class CoalesceExecutor:
             state_id = pending.pending_state_ids[branch_name]
 
             # Complete it now that merge is happening
-            # Bug l4h fix: include coalesce_context in context_after for audit trail
+            # Bug l4h fix: include coalesce metadata in context_after for audit trail
             self._recorder.complete_node_state(
                 state_id=state_id,
                 status=NodeStateStatus.COMPLETED,
                 output_data={"merged_into": merged_token.token_id},
                 duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
-                context_after={"coalesce_context": coalesce_metadata.to_dict()},
+                context_after=coalesce_metadata,
             )
 
             # Record terminal token outcome (COALESCED)

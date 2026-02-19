@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
 from elspeth.contracts.errors import QueryFailureDetail
+from elspeth.contracts.node_state_context import PoolExecutionContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
@@ -330,7 +331,7 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
             f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
         ]
 
-        pool_context: dict[str, Any] | None = None
+        pool_context: PoolExecutionContext | None = None
         if self._executor is not None:
             results, pool_context = self._execute_queries_parallel(row_for_queries, state_id, token_id, input_contract)
         else:
@@ -389,7 +390,7 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
         state_id: str,
         token_id: str,
         input_contract: SchemaContract | None,
-    ) -> tuple[list[TransformResult], dict[str, Any]]:
+    ) -> tuple[list[TransformResult], PoolExecutionContext]:
         """Execute queries in parallel via PooledExecutor with AIMD retry.
 
         Args:
@@ -426,20 +427,10 @@ class BaseMultiQueryTransform(BaseTransform, BatchTransformMixin, ABC):
             ),
         )
 
-        pool_stats = self._executor.get_stats()
-        query_ordering = [
-            {
-                "submit_index": entry.submit_index,
-                "complete_index": entry.complete_index,
-                "buffer_wait_ms": entry.buffer_wait_ms,
-            }
-            for entry in entries
-        ]
-        pool_context = {
-            "pool_config": pool_stats["pool_config"],
-            "pool_stats": pool_stats["pool_stats"],
-            "query_ordering": query_ordering,
-        }
+        pool_context = PoolExecutionContext.from_executor_stats(
+            stats=self._executor.get_stats(),
+            entries=entries,
+        )
 
         return [entry.result for entry in entries], pool_context
 

@@ -47,6 +47,7 @@ if TYPE_CHECKING:
         TokenCompleted,
         TransformCompleted,
     )
+    from elspeth.contracts.node_state_context import NodeStateContext
     from elspeth.contracts.plugin_context import (
         TransformErrorToken,
         ValidationErrorToken,
@@ -221,7 +222,7 @@ def make_success(
     data: dict[str, Any] | PipelineRow | None = None,
     *,
     reason: TransformSuccessReason | None = None,
-    context_after: dict[str, Any] | None = None,
+    context_after: NodeStateContext | None = None,
     **kwargs: Any,
 ) -> TransformResult:
     """Build a TransformResult.success().
@@ -230,7 +231,7 @@ def make_success(
         result = make_success({"id": 1, "score": 0.9})
         result = make_success({"id": 1}, reason={"action": "classified"})
         result = make_success(row)  # From existing PipelineRow
-        result = make_success({"id": 1}, context_after={"model": "gpt-4"})
+        result = make_success({"id": 1}, context_after=pool_ctx)
     """
     from elspeth.plugins.results import TransformResult
 

@@ -17,6 +17,14 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 from uuid import uuid4
 
+from elspeth.contracts.coalesce_metadata import CoalesceMetadata
+from elspeth.contracts.node_state_context import (
+    PoolConfigSnapshot,
+    PoolExecutionContext,
+    PoolStatsSnapshot,
+    QueryOrderEntry,
+)
+
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
     from elspeth.core.dag import ExecutionGraph, WiredTransform
@@ -407,25 +415,23 @@ def populate_run(
 # =============================================================================
 
 
-def make_coalesce_context(
+def make_coalesce_metadata(
     *,
     policy: str = "manual",
     merge_strategy: str = "union",
     expected_branches: list[str] | None = None,
     branches_arrived: list[str] | None = None,
     wait_duration_ms: float = 150.0,
-) -> dict[str, Any]:
-    """Build a coalesce context_after dict via CoalesceMetadata.
+) -> CoalesceMetadata:
+    """Build a CoalesceMetadata instance for test convenience.
 
-    Constructs a typed ``CoalesceMetadata`` and serializes it via
-    ``to_dict()`` so the output shape stays in sync with
-    ``coalesce_executor.py``.
+    Returns the typed dataclass directly (not a dict wrapper).
     """
-    from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
+    from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry
 
     branches = expected_branches or ["a", "b"]
     arrived = branches_arrived or branches
-    metadata = CoalesceMetadata.for_merge(
+    return CoalesceMetadata.for_merge(
         policy=policy,
         merge_strategy=merge_strategy,
         expected_branches=branches,
@@ -434,7 +440,37 @@ def make_coalesce_context(
         arrival_order=[ArrivalOrderEntry(branch=b, arrival_offset_ms=float(i * 50)) for i, b in enumerate(arrived)],
         wait_duration_ms=wait_duration_ms,
     )
-    return {"coalesce_context": metadata.to_dict()}
+
+
+def make_pool_execution_context(
+    *,
+    pool_size: int = 4,
+    num_queries: int = 2,
+) -> PoolExecutionContext:
+    """Build a PoolExecutionContext instance for test convenience."""
+    return PoolExecutionContext(
+        pool_config=PoolConfigSnapshot(
+            pool_size=pool_size,
+            max_capacity_retry_seconds=30.0,
+            dispatch_delay_at_completion_ms=10.0,
+        ),
+        pool_stats=PoolStatsSnapshot(
+            capacity_retries=0,
+            successes=num_queries,
+            peak_delay_ms=15.0,
+            current_delay_ms=10.0,
+            total_throttle_time_ms=0.0,
+            max_concurrent_reached=min(num_queries, pool_size),
+        ),
+        query_ordering=tuple(
+            QueryOrderEntry(
+                submit_index=i,
+                complete_index=i,
+                buffer_wait_ms=0.0,
+            )
+            for i in range(num_queries)
+        ),
+    )
 
 
 def make_batch_checkpoint(

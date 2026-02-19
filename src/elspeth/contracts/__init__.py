@@ -179,6 +179,13 @@ from elspeth.contracts.header_modes import (
     resolve_headers,
 )
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.node_state_context import (
+    NodeStateContext,
+    PoolConfigSnapshot,
+    PoolExecutionContext,
+    PoolStatsSnapshot,
+    QueryOrderEntry,
+)
 from elspeth.contracts.payload_store import IntegrityError, PayloadStore
 from elspeth.contracts.plugin_context import (
     PluginContext,
@@ -331,6 +338,12 @@ __all__ = [  # Grouped by category for readability
     # coalesce metadata
     "ArrivalOrderEntry",
     "CoalesceMetadata",
+    # node state context
+    "NodeStateContext",
+    "PoolConfigSnapshot",
+    "PoolExecutionContext",
+    "PoolStatsSnapshot",
+    "QueryOrderEntry",
     # types
     "AggregationName",
     "BranchName",

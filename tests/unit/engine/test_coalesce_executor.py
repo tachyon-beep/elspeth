@@ -1202,16 +1202,19 @@ class TestAuditTrailDetails:
         # At least one should have waited ~500ms
         assert any(d >= 400 for d in durations)
 
-    def test_complete_node_state_includes_coalesce_context(self):
-        """Completed node states should include coalesce_context in context_after."""
+    def test_complete_node_state_includes_coalesce_metadata(self):
+        """Completed node states should include CoalesceMetadata in context_after."""
+        from elspeth.contracts.coalesce_metadata import CoalesceMetadata
+
         executor, recorder, _, _ = _make_executor()
         executor.register_coalesce(_settings(), "node_1")
         executor.accept(_make_token(branch_name="a", token_id="t1"), "merge")
         executor.accept(_make_token(branch_name="b", token_id="t2"), "merge")
         for c in recorder.complete_node_state.call_args_list:
             if c.kwargs.get("status") == NodeStateStatus.COMPLETED:
-                ctx = c.kwargs.get("context_after", {})
-                assert "coalesce_context" in ctx
+                ctx = c.kwargs.get("context_after")
+                assert isinstance(ctx, CoalesceMetadata)
+                assert "policy" in ctx.to_dict()
 
     def test_complete_node_state_output_data_merged_into(self):
         """Completed node states have output_data with merged_into token ID."""

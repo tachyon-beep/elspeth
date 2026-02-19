@@ -284,47 +284,6 @@ class TestLandscapeRecorderNodeStates:
         assert completed.status == NodeStateStatus.FAILED
         assert completed.error_json == "{}"  # Empty dict serializes to "{}"
 
-    def test_begin_node_state_with_empty_context(self) -> None:
-        """Empty dict context_before is recorded, not dropped.
-
-        Bug: P1-2026-01-19-complete-node-state-empty-output-hash
-        """
-        from elspeth.contracts import NodeStateStatus
-        from elspeth.core.landscape.database import LandscapeDB
-        from elspeth.core.landscape.recorder import LandscapeRecorder
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=node.node_id,
-            row_index=0,
-            data={},
-        )
-        token = recorder.create_token(row_id=row.row_id)
-
-        # Empty context_before={} should be serialized, not dropped
-        state = recorder.begin_node_state(
-            token_id=token.token_id,
-            node_id=node.node_id,
-            run_id=run.run_id,
-            step_index=0,
-            input_data={},
-            context_before={},  # Empty dict context
-        )
-
-        assert state.status == NodeStateStatus.OPEN
-        assert state.context_before_json == "{}"  # Empty dict serializes to "{}"
-
     def test_retry_increments_attempt(self) -> None:
         from elspeth.contracts import NodeStateStatus
         from elspeth.core.landscape.database import LandscapeDB
@@ -619,3 +578,142 @@ class TestNodeStateOrderingWithRetries:
         assert states[0].state_id == state_0_attempt_0.state_id
         assert states[1].state_id == state_0_attempt_1.state_id
         assert states[2].state_id == state_1_attempt_0.state_id
+
+
+class TestContextAfterRoundTrip:
+    """DB round-trip tests for typed context_after metadata.
+
+    Verifies: construct → .to_dict() → canonical_json() → DB write → DB read → JSON parse
+    """
+
+    def test_coalesce_metadata_round_trip(self) -> None:
+        """CoalesceMetadata survives full DB round-trip."""
+        import json
+
+        from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        metadata = CoalesceMetadata.for_merge(
+            policy="require_all",
+            merge_strategy="union",
+            expected_branches=["a", "b"],
+            branches_arrived=["a", "b"],
+            branches_lost={},
+            arrival_order=[
+                ArrivalOrderEntry(branch="a", arrival_offset_ms=0.0),
+                ArrivalOrderEntry(branch="b", arrival_offset_ms=50.0),
+            ],
+            wait_duration_ms=50.0,
+        )
+
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={},
+        )
+        recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data={"merged": True},
+            duration_ms=50.0,
+            context_after=metadata,
+        )
+
+        fetched = recorder.get_node_state(state.state_id)
+        assert fetched is not None
+        assert fetched.context_after_json is not None
+        assert json.loads(fetched.context_after_json) == metadata.to_dict()
+
+    def test_pool_execution_context_round_trip(self) -> None:
+        """PoolExecutionContext survives full DB round-trip."""
+        import json
+
+        from elspeth.contracts.node_state_context import (
+            PoolConfigSnapshot,
+            PoolExecutionContext,
+            PoolStatsSnapshot,
+            QueryOrderEntry,
+        )
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        ctx = PoolExecutionContext(
+            pool_config=PoolConfigSnapshot(
+                pool_size=4,
+                max_capacity_retry_seconds=30.0,
+                dispatch_delay_at_completion_ms=10.0,
+            ),
+            pool_stats=PoolStatsSnapshot(
+                capacity_retries=1,
+                successes=3,
+                peak_delay_ms=20.0,
+                current_delay_ms=10.0,
+                total_throttle_time_ms=5.0,
+                max_concurrent_reached=3,
+            ),
+            query_ordering=(
+                QueryOrderEntry(submit_index=0, complete_index=1, buffer_wait_ms=2.0),
+                QueryOrderEntry(submit_index=1, complete_index=0, buffer_wait_ms=0.0),
+            ),
+        )
+
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={},
+        )
+        recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data={"result": "ok"},
+            duration_ms=100.0,
+            context_after=ctx,
+        )
+
+        fetched = recorder.get_node_state(state.state_id)
+        assert fetched is not None
+        assert fetched.context_after_json is not None
+        assert json.loads(fetched.context_after_json) == ctx.to_dict()
