@@ -104,16 +104,41 @@ class NodeStateGuard:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        if self._completed or exc_type is None:
-            # State was explicitly completed, or the block exited normally.
-            # In the normal-exit case the caller MUST have called complete();
-            # if they didn't, that's a programming error we don't mask.
+        if self._completed:
             return
+
+        duration_ms = (time.perf_counter() - self._enter_time) * 1000
+
+        if exc_type is None:
+            # Clean exit without calling complete() — programming error.
+            # Record FAILED first (preserve audit invariant), then crash.
+            error: ExecutionError = {
+                "exception": "NodeStateGuard exited normally without complete()",
+                "type": "OrchestrationInvariantError",
+                "phase": "executor_guard_missing_complete",
+            }
+            try:
+                self._recorder.complete_node_state(
+                    state_id=self.state_id,
+                    status=NodeStateStatus.FAILED,
+                    duration_ms=duration_ms,
+                    error=error,
+                )
+            except Exception:
+                logger.error(
+                    "NodeStateGuard: failed to record FAILED for state %s after missing complete()",
+                    self.state_id,
+                    exc_info=True,
+                )
+            raise OrchestrationInvariantError(
+                f"NodeStateGuard for state {self.state_id} exited without complete(). "
+                f"This is a bug in the calling executor — every code path must call "
+                f"guard.complete() before the with-block exits normally."
+            )
 
         # An exception occurred and the state was never completed.
         # Auto-complete as FAILED so the audit trail has a terminal record.
-        duration_ms = (time.perf_counter() - self._enter_time) * 1000
-        error: ExecutionError = {
+        exc_error: ExecutionError = {
             "exception": str(exc_val),
             "type": exc_type.__name__,
             "phase": "executor_post_process",
@@ -123,7 +148,7 @@ class NodeStateGuard:
                 state_id=self.state_id,
                 status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
-                error=error,
+                error=exc_error,
             )
         except Exception:
             # If we cannot record the failure (e.g. DB is down), log but don't

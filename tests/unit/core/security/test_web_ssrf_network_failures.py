@@ -49,7 +49,7 @@ class TestSSRFDnsFailureBranches:
 
 
 class TestDnsTimeoutEffectiveness:
-    """Bug 7.5: DNS resolution must use daemon threads to avoid resource leaks."""
+    """Bug 7.5: DNS resolution uses a bounded thread pool to avoid resource leaks."""
 
     def test_timeout_does_not_block_caller(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """After timeout, the caller must return promptly without blocking."""
@@ -78,6 +78,13 @@ class TestDnsTimeoutEffectiveness:
 
         with pytest.raises(SSRFBlockedError, match="blocked by test"):
             validate_url_for_ssrf("https://example.com")
+
+    def test_dns_pool_is_bounded(self) -> None:
+        """Thread pool must have a fixed upper bound on worker count."""
+        from elspeth.core.security.web import _DNS_POOL_SIZE, _dns_pool
+
+        assert _dns_pool._max_workers == _DNS_POOL_SIZE
+        assert _DNS_POOL_SIZE <= 16, "Pool size should be modest to prevent resource exhaustion"
 
 
 # ===========================================================================

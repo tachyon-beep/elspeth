@@ -23,8 +23,8 @@ from __future__ import annotations
 import ipaddress
 import queue
 import socket
-import threading
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 
@@ -59,6 +59,11 @@ BLOCKED_IP_RANGES = [
     ipaddress.ip_network("fe80::/10"),  # IPv6 link-local (RFC 4291) - can reach metadata
     ipaddress.ip_network("::ffff:0:0/96"),  # IPv4-mapped IPv6 - CRITICAL: bypass vector!
 ]
+
+# Bounded thread pool for DNS resolution.  Caps concurrent getaddrinfo threads
+# so repeated timeouts (e.g. blackholed resolver) cannot exhaust OS threads.
+_DNS_POOL_SIZE = 8
+_dns_pool = ThreadPoolExecutor(max_workers=_DNS_POOL_SIZE, thread_name_prefix="dns_resolve")
 
 
 def validate_url_scheme(url: str) -> None:
@@ -228,12 +233,12 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
     if parsed.fragment:
         path = f"{path}#{parsed.fragment}"
 
-    # Step 3: Resolve DNS with timeout
-    # Use a daemon thread instead of ThreadPoolExecutor. Daemon threads:
-    # 1. Don't prevent process shutdown (unlike ThreadPoolExecutor workers)
-    # 2. Are cleaned up automatically on process exit
-    # 3. Don't accumulate on repeated timeouts (the OS resolver will
-    #    eventually return and the daemon thread will exit naturally)
+    # Step 3: Resolve DNS with timeout via bounded thread pool.
+    # Using a shared ThreadPoolExecutor (max _DNS_POOL_SIZE workers) instead
+    # of spawning one daemon thread per call.  Under repeated timeouts (e.g.
+    # blackholed DNS resolver), at most _DNS_POOL_SIZE threads are blocked in
+    # getaddrinfo; additional requests queue and time out without creating new
+    # threads.
     result_queue: queue.Queue[tuple[str, list[str] | BaseException]] = queue.Queue()
 
     def _resolve_worker() -> None:
@@ -242,8 +247,7 @@ def validate_url_for_ssrf(url: str, timeout: float = 5.0) -> SSRFSafeRequest:
         except BaseException as exc:
             result_queue.put(("error", exc))
 
-    thread = threading.Thread(target=_resolve_worker, daemon=True, name="dns_resolve")
-    thread.start()
+    _dns_pool.submit(_resolve_worker)
 
     try:
         status, value = result_queue.get(timeout=timeout)

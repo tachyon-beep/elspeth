@@ -2212,13 +2212,15 @@ class TestNodeStateGuard:
     failures left node_states permanently OPEN in the audit trail.
     """
 
-    def test_normal_exit_without_complete_does_not_auto_fail(self) -> None:
-        """If __exit__ sees no exception, guard does NOT auto-complete.
+    def test_normal_exit_without_complete_crashes_and_records_failed(self) -> None:
+        """Clean exit without complete() records FAILED and raises.
 
-        The caller is responsible for calling complete() before the block
-        exits normally.  If they forget, that's a programming error that
-        the guard deliberately does NOT mask.
+        The guard structurally enforces that every code path calls complete().
+        If the block exits normally without calling it, the guard:
+        1. Completes the state as FAILED (preserves audit invariant)
+        2. Raises OrchestrationInvariantError (crash on our bug)
         """
+        from elspeth.contracts.errors import OrchestrationInvariantError
         from elspeth.engine.executors import NodeStateGuard
 
         recorder = _make_recorder()
@@ -2230,13 +2232,16 @@ class TestNodeStateGuard:
             step_index=1,
             input_data={"v": 1},
         )
-        with guard:
+        with pytest.raises(OrchestrationInvariantError, match="exited without complete"), guard:
             pass  # Don't call complete()
 
         # begin_node_state was called (in __enter__)
         recorder.begin_node_state.assert_called_once()
-        # complete_node_state was NOT called (no exception, caller didn't complete)
-        recorder.complete_node_state.assert_not_called()
+        # complete_node_state WAS called — state recorded as FAILED before crash
+        recorder.complete_node_state.assert_called_once()
+        kwargs = recorder.complete_node_state.call_args[1]
+        assert kwargs["status"] == NodeStateStatus.FAILED
+        assert kwargs["error"]["phase"] == "executor_guard_missing_complete"
 
     def test_exception_auto_completes_as_failed(self) -> None:
         """Unhandled exception triggers auto-complete as FAILED."""
@@ -2303,6 +2308,7 @@ class TestNodeStateGuard:
             assert guard.state_id == "state_001"
             assert guard.state.state_id == "state_001"
             assert guard.completed is False
+            guard.complete(NodeStateStatus.COMPLETED, output_data={"v": 1}, duration_ms=0.0)
 
     def test_state_id_before_enter_raises(self) -> None:
         """Accessing state_id before __enter__ raises OrchestrationInvariantError."""

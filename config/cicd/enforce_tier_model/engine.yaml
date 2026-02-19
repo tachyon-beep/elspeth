@@ -41,7 +41,12 @@ allow_hits:
   reason: isinstance(result, ExceptionResult) - discriminated union for worker exception propagation
   safety: Plugin bugs must crash; isinstance re-raises original exception from worker thread
   expires: '2026-05-02'
-- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=916b2eb4dfc029f0
+- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=d468bfb5ff5ba03d
+  owner: architecture
+  reason: Guard records FAILED when block exits without complete() — wraps recorder call to avoid masking the OrchestrationInvariantError raised afterward
+  safety: Logs failure but always raises OrchestrationInvariantError; audit state is preserved or crash occurs
+  expires: null
+- key: engine/executors/state_guard.py:R4:NodeStateGuard:__exit__:fp=7c0edec765252374
   owner: architecture
   reason: Guard auto-completes node_state as FAILED on unhandled exception — structural audit integrity guarantee
   safety: Wraps complete_node_state in try/except; logs failure but never masks original exception
