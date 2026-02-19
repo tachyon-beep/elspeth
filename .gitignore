@@ -159,9 +159,6 @@ landscape.db-wal
 # pre-commit cache
 .pre-commit-cache/
 
-# bv (beads viewer) local config and caches
-.bv/
-.perles/config.yaml
-.beads_tree/
+# Tool-specific local config and caches
 .keel/
 .codex/
