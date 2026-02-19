@@ -371,7 +371,7 @@ class PluginContext:
                 raw_usage = response_snapshot.get("usage")
                 if isinstance(raw_usage, dict):
                     tu = TokenUsage.from_dict(raw_usage)
-                    token_usage = tu if tu.is_known else None
+                    token_usage = tu if tu.has_data else None
 
             self.telemetry_emit(
                 ExternalCallCompleted(

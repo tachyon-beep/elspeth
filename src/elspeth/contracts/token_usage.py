@@ -52,6 +52,17 @@ class TokenUsage:
         """``True`` when both token counts were reported by the provider."""
         return self.prompt_tokens is not None and self.completion_tokens is not None
 
+    @property
+    def has_data(self) -> bool:
+        """``True`` when at least one token count was reported.
+
+        Unlike ``is_known`` (which requires *both* counters), this returns
+        ``True`` for partial provider responses that include only one counter.
+        Use this when deciding whether to emit usage to telemetry — partial
+        data is still valuable operational signal.
+        """
+        return self.prompt_tokens is not None or self.completion_tokens is not None
+
     # ------------------------------------------------------------------
     # Serialization
     # ------------------------------------------------------------------

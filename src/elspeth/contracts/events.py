@@ -6,6 +6,7 @@ by CLI formatters for human-readable or structured output.
 """
 
 import copy
+import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -161,6 +162,37 @@ class TelemetryEvent:
     timestamp: datetime
     run_id: str
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize event to a plain dict for telemetry export.
+
+        Replaces ``dataclasses.asdict()`` which cannot deep-copy
+        ``MappingProxyType`` fields (raises ``TypeError: cannot pickle
+        'mappingproxy' object``).  This method adds ``MappingProxyType``
+        to the recursive dispatch so frozen mapping fields serialize
+        correctly while remaining immutable at runtime.
+        """
+        # _event_field_to_serializable returns dict for dataclass inputs;
+        # the Any return type is for the recursive leaf cases.
+        result: dict[str, Any] = _event_field_to_serializable(self)
+        return result
+
+
+def _event_field_to_serializable(obj: Any) -> Any:
+    """Recursively convert a value to a plain-dict tree.
+
+    Handles the same cases as ``dataclasses.asdict()`` plus
+    ``MappingProxyType``.
+    """
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {f.name: _event_field_to_serializable(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+    if isinstance(obj, MappingProxyType):
+        return {k: _event_field_to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, dict):
+        return {_event_field_to_serializable(k): _event_field_to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_event_field_to_serializable(v) for v in obj)
+    return copy.deepcopy(obj)
+
 
 @dataclass(frozen=True, slots=True)
 class TransformCompleted(TelemetryEvent):
@@ -276,9 +308,8 @@ class FieldResolutionApplied(TelemetryEvent):
     resolution_mapping: Mapping[str, str]
 
     def __post_init__(self) -> None:
-        """Deep-freeze mutable mapping field."""
-        if not isinstance(self.resolution_mapping, MappingProxyType):
-            object.__setattr__(self, "resolution_mapping", MappingProxyType(self.resolution_mapping))
+        """Snapshot + freeze: always copy to decouple from caller's dict."""
+        object.__setattr__(self, "resolution_mapping", MappingProxyType(dict(self.resolution_mapping)))
 
 
 # =============================================================================

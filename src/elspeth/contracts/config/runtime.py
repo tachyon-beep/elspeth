@@ -522,9 +522,9 @@ class ExporterConfig:
         """Validate exporter configuration."""
         if not self.name:
             raise ValueError("exporter name cannot be empty")
-        # Freeze options if passed as mutable dict
-        if not isinstance(self.options, MappingProxyType):
-            object.__setattr__(self, "options", MappingProxyType(self.options))
+        # Snapshot + freeze: always copy to decouple from caller's state,
+        # even when input is already MappingProxyType (it may alias a mutable dict)
+        object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
 
 
 @dataclass(frozen=True, slots=True)

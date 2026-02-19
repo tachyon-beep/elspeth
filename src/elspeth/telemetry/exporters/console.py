@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Mapping
-from dataclasses import asdict, fields
+from dataclasses import fields
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, TextIO, TypeGuard
@@ -156,7 +156,7 @@ class ConsoleExporter:
         Returns:
             Dictionary suitable for JSON serialization
         """
-        data = asdict(event)
+        data = event.to_dict()
         data["event_type"] = type(event).__name__
 
         for key, value in data.items():

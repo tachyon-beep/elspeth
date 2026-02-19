@@ -56,15 +56,25 @@ allow_hits:
   reason: Tier 1 invariant enforcement — isinstance validates timestamp is numeric before math.isinf/isnan guard
   safety: Raises immediately on wrong type — explicit crash, not masking
   expires: null
-- key: contracts/events.py:R5:FieldResolutionApplied:__post_init__:fp=7a8ad1975bfc33c3
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=8a758f11d130d513
   owner: architecture
-  reason: Frozen dataclass invariant — isinstance check to deep-freeze mutable mapping via MappingProxyType
-  safety: Converts mutable dict to frozen proxy — defensive construction, not runtime masking
+  reason: Serialization dispatch — isinstance for dataclass detection before recursive field serialization
+  safety: Type dispatch for serialization, not masking bugs
   expires: null
-- key: contracts/config/runtime.py:R5:ExporterConfig:__post_init__:fp=cc8aede1c956d0c4
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=3e6525b649258024
   owner: architecture
-  reason: Frozen dataclass invariant — isinstance check to deep-freeze mutable options dict via MappingProxyType
-  safety: Converts mutable dict to frozen proxy — defensive construction, not runtime masking
+  reason: Serialization dispatch — isinstance for MappingProxyType to convert frozen mappings to serializable dicts
+  safety: Type dispatch for serialization, not masking bugs
+  expires: null
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=44b66874b216dbc4
+  owner: architecture
+  reason: Serialization dispatch — isinstance for dict to recursively serialize nested mappings
+  safety: Type dispatch for serialization, not masking bugs
+  expires: null
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=521175c01ed06e5a
+  owner: architecture
+  reason: Serialization dispatch — isinstance for list/tuple to recursively serialize sequences
+  safety: Type dispatch for serialization, not masking bugs
   expires: null
 - key: contracts/audit.py:R5:_validate_enum:fp=f48a15b1272c5363
   owner: architecture
@@ -194,28 +204,28 @@ allow_hits:
   reason: Type annotation objects (e.g. list[str]) may not have __name__ attribute - getattr is needed for safe error messages
   safety: Falls back to str(unwrapped) for display purposes only; used in error message, not logic
   expires: null
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=de20205d6c9550a0
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=deb0de716b9bcbbf
   owner: architecture
-  reason: Tier 3 boundary — from_dict() coerces external LLM API usage data; isinstance() validates int type
-  safety: Non-int values coerced to None (unknown); no fabrication, no crash
+  reason: Tier 3 boundary — from_dict() validates input is dict before accessing keys
+  safety: Non-dict input returns TokenUsage.unknown(); no crash
   expires: null
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=cff8808ba4a4c7a5
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=ce8e331b779c0ebe
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() on external LLM API response dicts where keys may be absent
   safety: Missing keys produce None (unknown); no fabrication
   expires: null
-- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=fd0551da29037697
+- key: contracts/token_usage.py:R1:TokenUsage:from_dict:fp=dda6babca3089a2b
   owner: architecture
   reason: Tier 3 boundary — from_dict() uses .get() for completion_tokens on external LLM API response dicts
   safety: Missing keys produce None (unknown); no fabrication
   expires: null
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=d8bdd5dc10e08d7b
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=9cb74e9ae324a42b
+  owner: architecture
+  reason: Tier 3 boundary — from_dict() coerces external LLM API usage data; isinstance() validates int type
+  safety: Non-int values coerced to None (unknown); no fabrication, no crash
+  expires: null
+- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=9cbee04cc3ccdcf1
   owner: architecture
   reason: Tier 3 boundary — from_dict() validates completion_tokens is int before accepting
   safety: Non-int values coerced to None (unknown); no fabrication, no crash
-  expires: null
-- key: contracts/token_usage.py:R5:TokenUsage:from_dict:fp=d410af00cfeb7aea
-  owner: architecture
-  reason: Tier 3 boundary — from_dict() validates input is dict before accessing keys
-  safety: Non-dict input returns TokenUsage.unknown(); no crash
   expires: null

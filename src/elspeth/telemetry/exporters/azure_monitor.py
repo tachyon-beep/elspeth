@@ -339,11 +339,10 @@ class AzureMonitorExporter:
             Dictionary of attribute key-value pairs
         """
         import json
-        from dataclasses import asdict
         from datetime import datetime
         from enum import Enum
 
-        data = asdict(event)
+        data = event.to_dict()
         data["event_type"] = type(event).__name__
 
         result: dict[str, Any] = {}
