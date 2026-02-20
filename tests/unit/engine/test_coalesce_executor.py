@@ -21,7 +21,7 @@ from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
-from elspeth.engine.coalesce_executor import CoalesceExecutor, CoalesceOutcome, _PendingCoalesce
+from elspeth.engine.coalesce_executor import CoalesceExecutor, CoalesceOutcome, _BranchEntry, _PendingCoalesce
 from elspeth.testing import make_field, make_row
 
 # ---------------------------------------------------------------------------
@@ -834,11 +834,10 @@ class TestFlushPending:
         # Normally impossible since first merges immediately.
         # Force a pending entry for the test.
         key = ("merge", "row_1")
+        token = _make_token(branch_name="a")
         executor._pending[key] = _PendingCoalesce(
-            arrived={"a": _make_token(branch_name="a")},
-            arrival_times={"a": 100.0},
+            branches={"a": _BranchEntry(token=token, arrival_time=100.0, state_id="state_fake")},
             first_arrival=100.0,
-            pending_state_ids={"a": "state_fake"},
         )
         with pytest.raises(RuntimeError, match="Invariant violation"):
             executor.flush_pending()
