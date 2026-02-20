@@ -20,6 +20,7 @@ from elspeth.contracts.enums import (
     TriggerType,
 )
 from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.node_state_context import AggregationFlushContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
@@ -461,11 +462,17 @@ class AggregationExecutor:
                             f"This is a plugin bug."
                         )
 
+                    flush_context = AggregationFlushContext(
+                        trigger_type=trigger_type.value,
+                        buffer_size=len(buffered_rows),
+                        batch_id=batch_id,
+                    )
                     guard.complete(
                         NodeStateStatus.COMPLETED,
                         output_data=output_data,
                         duration_ms=duration_ms,
                         success_reason=result.success_reason,
+                        context_after=flush_context,
                     )
 
                     # Transition batch to completed

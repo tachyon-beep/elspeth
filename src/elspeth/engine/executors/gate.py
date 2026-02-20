@@ -23,6 +23,7 @@ from elspeth.contracts.enums import (
     RoutingMode,
 )
 from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.node_state_context import GateEvaluationContext
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
@@ -343,11 +344,17 @@ class GateExecutor:
 
         # Complete node state - always "completed" for successful execution
         # Terminal state is DERIVED from routing_events, not stored here
+        gate_context = GateEvaluationContext(
+            condition=gate_config.condition,
+            result=str(eval_result),
+            route_label=route_label,
+        )
         self._recorder.complete_node_state(
             state_id=state.state_id,
             status=NodeStateStatus.COMPLETED,
             output_data=input_dict,  # Landscape stores dict, not PipelineRow
             duration_ms=duration_ms,
+            context_after=gate_context,
         )
 
         # Token row_data is unchanged (config gates don't modify data)

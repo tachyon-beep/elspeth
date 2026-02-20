@@ -1185,6 +1185,78 @@ class TestGateExecutor:
         last_call = recorder.complete_node_state.call_args_list[-1]
         assert last_call[1]["status"] == NodeStateStatus.FAILED
 
+    # --- context_after wiring ---
+
+    def test_config_gate_records_context_after(self) -> None:
+        """Gate evaluation metadata is passed as context_after for audit completeness."""
+        recorder = _make_recorder()
+        edge_map = {(NodeID("cg_1"), "true"): "edge_true"}
+        route_map = {(NodeID("cg_1"), "true"): RouteDestination.processing_node(NodeID("next_node"))}
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+            edge_map=edge_map,
+            route_resolution_map=route_map,
+        )
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="True",
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        executor.execute_config_gate(config, "cg_1", token, ctx)
+
+        # Find the COMPLETED call (not the begin_node_state call)
+        completed_call = None
+        for call in recorder.complete_node_state.call_args_list:
+            if call.kwargs.get("status") == NodeStateStatus.COMPLETED:
+                completed_call = call
+                break
+
+        assert completed_call is not None, "Expected a COMPLETED node state call"
+        context_after = completed_call.kwargs.get("context_after")
+        assert context_after is not None, "context_after should be set on success path"
+
+        # Verify it's the right DTO with correct values
+        from elspeth.contracts.node_state_context import GateEvaluationContext
+
+        assert isinstance(context_after, GateEvaluationContext)
+        assert context_after.condition == "True"
+        assert context_after.result == "True"  # str(True) = "True"
+        assert context_after.route_label == "true"  # bool True -> "true" label
+
+    def test_config_gate_failure_does_not_set_context_after(self) -> None:
+        """Failed gate evaluations should not set context_after."""
+        recorder = _make_recorder()
+        executor = GateExecutor(
+            recorder,
+            _make_span_factory(),
+            _make_step_resolver(),
+        )
+        config = GateSettings(
+            name="my_gate",
+            input="in_conn",
+            condition="True",
+            routes={"true": "next_conn", "false": "error_sink"},
+        )
+        contract = _make_contract()
+        token = _make_token(contract=contract)
+        ctx = _make_ctx()
+
+        # This will fail because no route_resolution_map for "true" label
+        with pytest.raises(MissingEdgeError):
+            executor.execute_config_gate(config, "cg_1", token, ctx)
+
+        # The FAILED call should not have context_after
+        failed_call = recorder.complete_node_state.call_args_list[-1]
+        assert failed_call.kwargs.get("status") == NodeStateStatus.FAILED
+        assert "context_after" not in failed_call.kwargs
+
 
 # =============================================================================
 # TestAggregationExecutor
@@ -1411,6 +1483,38 @@ class TestAggregationExecutor:
         # Verify batch completed
         complete_calls = [c for c in recorder.complete_batch.call_args_list if c[1].get("status") == BatchStatus.COMPLETED]
         assert len(complete_calls) == 1
+
+    def test_execute_flush_success_passes_aggregation_flush_context(self) -> None:
+        """Successful flush passes AggregationFlushContext as context_after."""
+        from elspeth.contracts.node_state_context import AggregationFlushContext
+
+        executor, recorder, nid = self._make_agg_executor(count=2)
+        contract = _make_contract()
+
+        # Buffer two rows
+        executor.buffer_row(nid, _make_token(data={"value": "a"}, token_id="t1", contract=contract))
+        executor.buffer_row(nid, _make_token(data={"value": "b"}, token_id="t2", contract=contract))
+
+        # Mock batch transform
+        transform = MagicMock()
+        transform.name = "agg_transform"
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "aggregated"}, contract=contract),
+            success_reason={"action": "aggregated"},
+        )
+        ctx = _make_ctx()
+
+        executor.execute_flush(nid, transform, ctx, TriggerType.COUNT)
+
+        # Find the COMPLETED call to complete_node_state (success path)
+        completed_calls = [c for c in recorder.complete_node_state.call_args_list if c[1].get("status") == NodeStateStatus.COMPLETED]
+        assert len(completed_calls) == 1
+
+        context_after = completed_calls[0][1]["context_after"]
+        assert isinstance(context_after, AggregationFlushContext)
+        assert context_after.trigger_type == "count"
+        assert context_after.buffer_size == 2
+        assert context_after.batch_id == "batch_001"
 
     def test_execute_flush_error_result_marks_batch_failed(self) -> None:
         """Error result from transform marks batch as FAILED."""
