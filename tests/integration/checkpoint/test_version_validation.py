@@ -145,7 +145,7 @@ class TestCheckpointVersionValidation:
         """
         span_factory = SpanFactory()
         # AggregationExecutor requires aggregation_settings for nodes that appear in checkpoint
-        # The restore_from_checkpoint method expects _trigger_evaluators to exist for each node
+        # The restore_from_checkpoint method expects _nodes entries to exist for each node
         node_id = NodeID("test_node")
         trigger = TriggerConfig(count=10)
         aggregation_settings = {node_id: AggregationSettings(name="test_agg", plugin="batch_stats", input="source_out", trigger=trigger)}

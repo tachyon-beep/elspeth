@@ -632,8 +632,9 @@ class TestAggregationRecoveryIntegration:
         assert executor.get_buffer_count(NodeID("sum_aggregator")) == 3
 
         # Get the restored evaluator
-        restored_evaluator = executor._trigger_evaluators.get(NodeID("sum_aggregator"))
-        assert restored_evaluator is not None
+        node_state = executor._nodes.get(NodeID("sum_aggregator"))
+        assert node_state is not None
+        restored_evaluator = node_state.trigger
 
         # Verify batch count was restored
         assert restored_evaluator.batch_count == 3

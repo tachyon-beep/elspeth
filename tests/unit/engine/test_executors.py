@@ -1621,7 +1621,7 @@ class TestAggregationExecutor:
         Regression: If BatchPendingError is caught (batch submitted to external
         service), guard transitions to PENDING, but update_batch_status() fails
         (e.g., DB write error). The exception falls to the outer except handler.
-        That handler must NOT reset _batch_ids/buffers — the external batch is
+        That handler must NOT reset node batch state/buffers — the external batch is
         already submitted and needs to be polled/reconciled on retry.
         """
         from elspeth.contracts.errors import BatchPendingError

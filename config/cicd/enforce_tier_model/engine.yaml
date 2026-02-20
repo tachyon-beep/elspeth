@@ -66,52 +66,22 @@ allow_hits:
   reason: isinstance(e, TimeoutError) for retry timeout handling in batch transform path
   safety: Exception type discrimination for retry logic - required for correct timeout eviction
   expires: '2026-05-02'
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_rows:fp=0ef515054716cc35
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffered_tokens:fp=abe8bf83c8764b66
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=5dfef3daab7390a9
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:_get_buffered_data:fp=1144d942663175d8
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no tokens buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:execute_flush:fp=164eec5db9e39592
-  owner: P2-2026-02-02
-  reason: Pattern is .get() followed by explicit None check raising RuntimeError
-  safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
-  expires: null
-- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=823ceca02e2f4c2c
+- key: engine/executors/aggregation.py:R4:AggregationExecutor:execute_flush:fp=4cce0f617a1b963c
   owner: bugfix
   reason: Outer exception handler ensures batch lifecycle cleanup; skips cleanup if batch already submitted (pending)
   safety: Pending batches preserve state for retry; non-pending batches marked FAILED with buffers cleared; exception re-raised
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_buffer_count:fp=40ae98c0d9e83cb1
-  owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case of valid node with no rows buffered
-    yet
-  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
-  expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_batch_id:fp=57b6e24ea7641b63
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_batch_id:fp=b0865bcd694cbe2b
   owner: P2-2026-02-02
   reason: Testing/inspection method that needs to work with partial setups; returns None if no batch exists
   safety: Documented as "primarily for testing" - production uses checkpoint state
   expires: null
-- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_restored_state:fp=0cb68fdcac372b54
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:restore_state:fp=ed36533ce9f4ccc7
+  owner: P2-2026-02-02
+  reason: Checkpoint recovery - node may not be configured if pipeline changed between runs
+  safety: Logs warning and returns early if node not found; no silent data loss
+  expires: null
+- key: engine/executors/aggregation.py:R1:AggregationExecutor:get_restored_state:fp=e38476f86c3c4c4b
   owner: P2-2026-02-02
   reason: Checkpoint recovery lookup - returns None if no state was restored for node
   safety: Designed API contract - None is valid return for nodes without restored state
