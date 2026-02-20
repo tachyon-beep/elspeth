@@ -123,3 +123,134 @@ def test_telemetry_events_inherit_from_contracts_base():
     assert issubclass(PhaseChanged, TelemetryEvent)
     assert issubclass(RowCreated, TelemetryEvent)
     assert issubclass(ExternalCallCompleted, TelemetryEvent)
+
+
+class TestExternalCallCompletedSerialization:
+    """Tests for ExternalCallCompleted.to_dict() with typed payloads.
+
+    Verifies that to_dict() delegates to DTO.to_dict() instead of relying
+    on generic dataclass field decomposition — which would produce wrong
+    shapes for DTOs that omit None fields or spread extra_kwargs.
+    """
+
+    def test_to_dict_with_llm_dto_payloads(self) -> None:
+        """LLM DTO payloads serialize correctly via to_dict()."""
+        from elspeth.contracts.call_data import LLMCallRequest, LLMCallResponse
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.events import ExternalCallCompleted
+        from elspeth.contracts.token_usage import TokenUsage
+
+        req = LLMCallRequest(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=0.0,
+            provider="azure",
+            max_tokens=100,
+            extra_kwargs={"top_p": 0.9},
+        )
+        resp = LLMCallResponse(
+            content="world",
+            model="gpt-4",
+            usage=TokenUsage(prompt_tokens=5, completion_tokens=3),
+            raw_response={"id": "resp-1"},
+        )
+
+        event = ExternalCallCompleted(
+            timestamp=datetime.now(UTC),
+            run_id="run-1",
+            call_type=CallType.LLM,
+            provider="azure",
+            status=CallStatus.SUCCESS,
+            latency_ms=50.0,
+            state_id="state-1",
+            request_payload=req,
+            response_payload=resp,
+        )
+
+        d = event.to_dict()
+
+        # LLMCallRequest.to_dict() spreads extra_kwargs at top level
+        assert d["request_payload"]["top_p"] == 0.9
+        assert "extra_kwargs" not in d["request_payload"]
+        assert d["request_payload"]["max_tokens"] == 100
+        assert d["request_payload"]["model"] == "gpt-4"
+
+        # LLMCallResponse.to_dict() serializes nested TokenUsage
+        assert d["response_payload"]["content"] == "world"
+        assert d["response_payload"]["usage"] == {"prompt_tokens": 5, "completion_tokens": 3}
+
+    def test_to_dict_with_raw_call_payloads(self) -> None:
+        """RawCallPayload.to_dict() returns the wrapped dict unchanged."""
+        from elspeth.contracts.call_data import RawCallPayload
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.events import ExternalCallCompleted
+
+        raw_req = RawCallPayload(data={"method": "GET", "url": "http://example.com"})
+        raw_resp = RawCallPayload(data={"status_code": 200, "body": "ok"})
+
+        event = ExternalCallCompleted(
+            timestamp=datetime.now(UTC),
+            run_id="run-1",
+            call_type=CallType.HTTP,
+            provider="example.com",
+            status=CallStatus.SUCCESS,
+            latency_ms=10.0,
+            state_id="state-1",
+            request_payload=raw_req,
+            response_payload=raw_resp,
+        )
+
+        d = event.to_dict()
+        assert d["request_payload"] == {"method": "GET", "url": "http://example.com"}
+        assert d["response_payload"] == {"status_code": 200, "body": "ok"}
+
+    def test_to_dict_with_none_payloads(self) -> None:
+        """None payloads remain None in to_dict() output."""
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.events import ExternalCallCompleted
+
+        event = ExternalCallCompleted(
+            timestamp=datetime.now(UTC),
+            run_id="run-1",
+            call_type=CallType.HTTP,
+            provider="example.com",
+            status=CallStatus.ERROR,
+            latency_ms=5.0,
+            state_id="state-1",
+            request_payload=None,
+            response_payload=None,
+        )
+
+        d = event.to_dict()
+        assert d["request_payload"] is None
+        assert d["response_payload"] is None
+
+    def test_to_dict_with_http_dto_omits_none_fields(self) -> None:
+        """HTTPCallRequest.to_dict() conditionally omits None fields."""
+        from elspeth.contracts.call_data import HTTPCallRequest
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.contracts.events import ExternalCallCompleted
+
+        req = HTTPCallRequest(
+            method="GET",
+            url="http://example.com",
+            headers={"Accept": "application/json"},
+            resolved_ip="93.184.216.34",
+        )
+
+        event = ExternalCallCompleted(
+            timestamp=datetime.now(UTC),
+            run_id="run-1",
+            call_type=CallType.HTTP,
+            provider="example.com",
+            status=CallStatus.SUCCESS,
+            latency_ms=10.0,
+            state_id="state-1",
+            request_payload=req,
+        )
+
+        d = event.to_dict()
+        # SSRF-safe path: resolved_ip present, no json/params
+        assert d["request_payload"]["resolved_ip"] == "93.184.216.34"
+        assert "json" not in d["request_payload"]
+        assert "params" not in d["request_payload"]

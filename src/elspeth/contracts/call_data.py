@@ -16,9 +16,40 @@ Trust-tier notes
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from elspeth.contracts.token_usage import TokenUsage
+
+# ---------------------------------------------------------------------------
+# Call payload protocol — satisfied by all 6 DTOs via structural subtyping
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class CallPayload(Protocol):
+    """Protocol for typed external call payload data.
+
+    All frozen call-data dataclasses (LLMCallRequest, HTTPCallResponse, etc.)
+    satisfy this protocol structurally — no explicit inheritance needed.
+    ``RawCallPayload`` wraps pre-serialized dicts from ``PluginContext``.
+    """
+
+    def to_dict(self) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RawCallPayload:
+    """Wrapper for pre-serialized call payload dicts from PluginContext.
+
+    Caller is responsible for providing an already-copied snapshot
+    (PluginContext.record_call deepcopies before wrapping).
+    """
+
+    data: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.data
+
 
 # ---------------------------------------------------------------------------
 # LLM call data

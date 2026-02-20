@@ -21,7 +21,7 @@ import httpx
 import structlog
 
 from elspeth.contracts import CallStatus, CallType
-from elspeth.contracts.call_data import HTTPCallError, HTTPCallRequest, HTTPCallResponse
+from elspeth.contracts.call_data import CallPayload, HTTPCallError, HTTPCallRequest, HTTPCallResponse
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.core.canonical import stable_hash
 from elspeth.core.security.web import (
@@ -364,11 +364,15 @@ class AuditedHTTPClient(AuditedClientBase):
         error_data: dict[str, Any] | None,
         latency_ms: float,
         call_status: CallStatus,
+        request_payload: CallPayload,
+        response_payload: CallPayload | None = None,
         token_id_override: str | None = None,
     ) -> None:
         """Record call to audit trail and emit telemetry event.
 
         Args:
+            request_payload: Typed DTO for telemetry (e.g., HTTPCallRequest).
+            response_payload: Typed DTO for telemetry (e.g., HTTPCallResponse).
             token_id_override: Per-call token_id for telemetry. When provided,
                 overrides the client-level token_id. Used by batch transforms
                 where a single client serves multiple tokens.
@@ -401,8 +405,8 @@ class AuditedHTTPClient(AuditedClientBase):
                     token_id=effective_token_id,
                     request_hash=stable_hash(request_data),
                     response_hash=stable_hash(response_data) if response_data else None,
-                    request_payload=request_data,
-                    response_payload=response_data,
+                    request_payload=request_payload,
+                    response_payload=response_payload,
                     token_usage=None,
                 )
             )
@@ -455,15 +459,17 @@ class AuditedHTTPClient(AuditedClientBase):
         merged_headers = {**self._default_headers, **(headers or {})}
         effective_timeout = timeout if timeout is not None else self._timeout
 
-        # Build request data for audit trail — dataclass handles method-specific
-        # field inclusion via to_dict() (POST includes json, GET includes params)
-        request_data = HTTPCallRequest(
+        # Build request DTO for audit trail — dataclass handles method-specific
+        # field inclusion via to_dict() (POST includes json, GET includes params).
+        # DTO stays alive for typed telemetry payload; dict form used for Landscape hashing.
+        request_dto = HTTPCallRequest(
             method=method,
             url=full_url,
             headers=self._filter_request_headers(merged_headers),
             json=json,
             params=params,
-        ).to_dict()
+        )
+        request_data = request_dto.to_dict()
 
         start = time.perf_counter()
 
@@ -492,12 +498,13 @@ class AuditedHTTPClient(AuditedClientBase):
             is_success = 200 <= response.status_code < 300
             call_status = CallStatus.SUCCESS if is_success else CallStatus.ERROR
 
-            response_data = HTTPCallResponse(
+            response_dto = HTTPCallResponse(
                 status_code=response.status_code,
                 headers=self._filter_response_headers(dict(response.headers)),
                 body_size=len(response.content),
                 body=response_body,
-            ).to_dict()
+            )
+            response_data = response_dto.to_dict()
 
             error_data: dict[str, Any] | None = None
             if not is_success:
@@ -516,6 +523,8 @@ class AuditedHTTPClient(AuditedClientBase):
                 error_data=error_data,
                 latency_ms=latency_ms,
                 call_status=call_status,
+                request_payload=request_dto,
+                response_payload=response_dto,
                 token_id_override=token_id,
             )
 
@@ -536,6 +545,8 @@ class AuditedHTTPClient(AuditedClientBase):
                 ).to_dict(),
                 latency_ms=latency_ms,
                 call_status=CallStatus.ERROR,
+                request_payload=request_dto,
+                response_payload=None,
                 token_id_override=token_id,
             )
 
@@ -654,13 +665,15 @@ class AuditedHTTPClient(AuditedClientBase):
         if request.scheme == "https":
             extensions["sni_hostname"] = request.sni_hostname
 
-        # Record original URL and resolved IP in audit trail
-        request_data = HTTPCallRequest(
+        # Record original URL and resolved IP in audit trail.
+        # DTO stays alive for typed telemetry payload; dict form used for Landscape hashing.
+        request_dto = HTTPCallRequest(
             method="GET",
             url=request.original_url,
             headers=self._filter_request_headers(merged_headers),
             resolved_ip=request.resolved_ip,
-        ).to_dict()
+        )
+        request_data = request_dto.to_dict()
 
         start = time.perf_counter()
 
@@ -725,13 +738,14 @@ class AuditedHTTPClient(AuditedClientBase):
             is_success = 200 <= response.status_code < 300
             call_status = CallStatus.SUCCESS if is_success else CallStatus.ERROR
 
-            response_data = HTTPCallResponse(
+            response_dto = HTTPCallResponse(
                 status_code=response.status_code,
                 headers=self._filter_response_headers(dict(response.headers)),
                 body_size=len(response.content),
                 body=response_body,
                 redirect_count=redirect_count,
-            ).to_dict()
+            )
+            response_data = response_dto.to_dict()
 
             error_data: dict[str, Any] | None = None
             if not is_success:
@@ -766,8 +780,8 @@ class AuditedHTTPClient(AuditedClientBase):
                         token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=stable_hash(response_data),
-                        request_payload=request_data,
-                        response_payload=response_data,
+                        request_payload=request_dto,
+                        response_payload=response_dto,
                         token_usage=None,
                     )
                 )
@@ -813,7 +827,7 @@ class AuditedHTTPClient(AuditedClientBase):
                         token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=None,
-                        request_payload=request_data,
+                        request_payload=request_dto,
                         response_payload=None,
                         token_usage=None,
                     )

@@ -292,16 +292,18 @@ class AuditedLLMClient(AuditedClientBase):
 
         call_index = self._next_call_index()
 
-        # Build request_data - frozen dataclass ensures construction-time type safety;
-        # to_dict() conditionally omits max_tokens when None (hash-stable)
-        request_data = LLMCallRequest(
+        # Build request DTO - frozen dataclass ensures construction-time type safety;
+        # to_dict() conditionally omits max_tokens when None (hash-stable).
+        # DTO stays alive for typed telemetry payload; dict form used for Landscape hashing.
+        request_dto = LLMCallRequest(
             model=model,
             messages=messages,
             temperature=temperature,
             provider=self._provider,
             max_tokens=max_tokens,
             extra_kwargs=kwargs,
-        ).to_dict()
+        )
+        request_data = request_dto.to_dict()
 
         # Build SDK call kwargs - omit max_tokens when None to avoid
         # serializing as JSON null (which can trigger provider validation errors)
@@ -341,8 +343,6 @@ class AuditedLLMClient(AuditedClientBase):
             )
 
             # Telemetry emitted AFTER successful Landscape recording (even for call errors)
-            # No deepcopy needed: record_call() consumed the dict above, and
-            # neither path mutates request_data after construction
             # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
             try:
                 self._telemetry_emit(
@@ -358,7 +358,7 @@ class AuditedLLMClient(AuditedClientBase):
                         token_id=self._telemetry_token_id(),
                         request_hash=stable_hash(request_data),
                         response_hash=None,  # No response on error
-                        request_payload=request_data,
+                        request_payload=request_dto,  # Typed DTO, not dict
                         response_payload=None,  # No response on error
                         token_usage=None,
                     )
@@ -408,12 +408,13 @@ class AuditedLLMClient(AuditedClientBase):
         # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
         raw_response = response.model_dump()
 
-        response_data = LLMCallResponse(
+        response_dto = LLMCallResponse(
             content=content,
             model=response.model,
             usage=usage,
             raw_response=raw_response,
-        ).to_dict()
+        )
+        response_data = response_dto.to_dict()
 
         self._recorder.record_call(
             state_id=self._state_id,
@@ -426,8 +427,6 @@ class AuditedLLMClient(AuditedClientBase):
         )
 
         # Telemetry emitted AFTER successful Landscape recording
-        # No deepcopy needed: record_call() consumed the dicts above, and
-        # neither path mutates request_data/response_data after construction
         usage_snapshot = usage if usage.has_data else None
         # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
         try:
@@ -444,8 +443,8 @@ class AuditedLLMClient(AuditedClientBase):
                     token_id=self._telemetry_token_id(),
                     request_hash=stable_hash(request_data),
                     response_hash=stable_hash(response_data),
-                    request_payload=request_data,
-                    response_payload=response_data,
+                    request_payload=request_dto,  # Typed DTO, not dict
+                    response_payload=response_dto,  # Typed DTO, not dict
                     token_usage=usage_snapshot,
                 )
             )

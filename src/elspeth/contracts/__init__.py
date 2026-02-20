@@ -46,12 +46,14 @@ from elspeth.contracts.audit import (
     ValidationErrorRecord,
 )
 from elspeth.contracts.call_data import (
+    CallPayload,
     HTTPCallError,
     HTTPCallRequest,
     HTTPCallResponse,
     LLMCallError,
     LLMCallRequest,
     LLMCallResponse,
+    RawCallPayload,
 )
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
@@ -412,12 +414,14 @@ __all__ = [  # Grouped by category for readability
     # token usage
     "TokenUsage",
     # call data (LLM + HTTP audit records)
+    "CallPayload",
     "HTTPCallError",
     "HTTPCallRequest",
     "HTTPCallResponse",
     "LLMCallError",
     "LLMCallRequest",
     "LLMCallResponse",
+    "RawCallPayload",
     # schema contracts (Phase 1: Core Contracts)
     "ContractBuilder",
     "create_contract_from_config",

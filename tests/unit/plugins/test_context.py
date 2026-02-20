@@ -701,6 +701,7 @@ class TestRecordCallTelemetryPayloadSnapshot:
         from typing import Any
         from unittest.mock import MagicMock
 
+        from elspeth.contracts.call_data import RawCallPayload
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.canonical import stable_hash
@@ -738,7 +739,8 @@ class TestRecordCallTelemetryPayloadSnapshot:
 
         assert len(emitted_events) == 1
         event = emitted_events[0]
-        assert event.request_payload == expected_request
+        assert isinstance(event.request_payload, RawCallPayload)
+        assert event.request_payload.to_dict() == expected_request
         assert event.request_hash == stable_hash(expected_request)
 
     def test_response_payload_snapshot_is_immutable_after_call(self) -> None:
@@ -746,6 +748,7 @@ class TestRecordCallTelemetryPayloadSnapshot:
         from typing import Any
         from unittest.mock import MagicMock
 
+        from elspeth.contracts.call_data import RawCallPayload
         from elspeth.contracts.enums import CallStatus, CallType
         from elspeth.contracts.plugin_context import PluginContext
         from elspeth.core.canonical import stable_hash
@@ -782,7 +785,8 @@ class TestRecordCallTelemetryPayloadSnapshot:
 
         assert len(emitted_events) == 1
         event = emitted_events[0]
-        assert event.response_payload == expected_response
+        assert isinstance(event.response_payload, RawCallPayload)
+        assert event.response_payload.to_dict() == expected_response
         assert event.response_hash == stable_hash(expected_response)
         from elspeth.contracts.token_usage import TokenUsage
 

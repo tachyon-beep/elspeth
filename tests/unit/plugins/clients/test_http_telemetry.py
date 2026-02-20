@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts.call_data import HTTPCallRequest, HTTPCallResponse
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.plugins.clients.http import AuditedHTTPClient
 
@@ -81,13 +82,15 @@ class TestHTTPClientTelemetry:
         assert len(event.request_hash) == 64  # SHA-256 hex digest
         assert event.response_hash is not None
         assert len(event.response_hash) == 64  # SHA-256 hex digest
-        # Full payloads are included for observability
+        # Typed DTO payloads are included for observability
         assert event.request_payload is not None
-        assert event.request_payload["method"] == "POST"
-        assert event.request_payload["json"] == {"input": "test"}
+        assert isinstance(event.request_payload, HTTPCallRequest)
+        assert event.request_payload.method == "POST"
+        assert event.request_payload.json == {"input": "test"}
         assert event.response_payload is not None
-        assert event.response_payload["status_code"] == 200
-        assert event.response_payload["body"] == {"result": "success"}
+        assert isinstance(event.response_payload, HTTPCallResponse)
+        assert event.response_payload.status_code == 200
+        assert event.response_payload.body == {"result": "success"}
         assert event.token_usage is None  # Not applicable for HTTP
         assert isinstance(event.timestamp, datetime)
 
@@ -124,9 +127,10 @@ class TestHTTPClientTelemetry:
         assert event.status == CallStatus.ERROR
         assert event.latency_ms >= 0
         assert event.response_hash is None  # No response on error
-        # Request payload is still included on error for debugging
+        # Typed request DTO is still included on error for debugging
         assert event.request_payload is not None
-        assert event.request_payload["method"] == "POST"
+        assert isinstance(event.request_payload, HTTPCallRequest)
+        assert event.request_payload.method == "POST"
         assert event.response_payload is None  # No response on error
 
     def test_noop_callback_works(self) -> None:

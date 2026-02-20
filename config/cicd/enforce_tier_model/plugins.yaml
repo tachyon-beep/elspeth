@@ -276,12 +276,12 @@ allow_hits:
   reason: Tier 3 boundary — validates document attackDetected is bool from Azure response
   safety: MalformedResponseError raised on wrong type
   expires: '2026-05-13'
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=9bda63fc0c56d4b7
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=fd9c6003d4bbf429
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
   expires: '2026-05-02'
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=bc765bcee6e10467
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=7118dea7e5b614a4
   owner: architecture
   reason: Telemetry emission failure — must not crash main LLM call flow
   safety: Logged and continues — telemetry is non-critical to LLM processing
@@ -357,27 +357,27 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=0a7e8ebab1148b17
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=46f23020fa886ed5
   owner: architecture
   reason: httpx Client.get() method call - dispatched based on HTTP method
   safety: This is the actual external HTTP call, not a defensive dict access
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=a58b656ccb756b1f
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=3fc1325dc2cf23cf
   owner: architecture
   reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
   safety: This is the actual external HTTP call with IP pinning
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=efc1bd073e5c28a0
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=a7a5cc981783d794
   owner: architecture
   reason: HTTP response content-type header - external system boundary, header may be missing
   safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=17da995e9d03db2b
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=a8a0b11177ad4077
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-02'
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=2a63343ea809881b
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=c04b3947d563909c
   owner: architecture
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing

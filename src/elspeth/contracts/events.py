@@ -14,6 +14,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from elspeth.contracts.call_data import CallPayload
 from elspeth.contracts.enums import (
     CallStatus,
     CallType,
@@ -375,12 +376,16 @@ class ExternalCallCompleted(TelemetryEvent):
     token_id: str | None = None
     request_hash: str | None = None
     response_hash: str | None = None
-    request_payload: dict[str, Any] | None = None
-    response_payload: dict[str, Any] | None = None
+    request_payload: CallPayload | None = None
+    response_payload: CallPayload | None = None
     token_usage: TokenUsage | None = None
 
     def __post_init__(self) -> None:
-        """Validate XOR constraint and deep-freeze mutable payload dicts."""
+        """Validate XOR constraint.
+
+        No deep-copy needed: frozen DTOs are immutable, and RawCallPayload
+        receives pre-copied data from PluginContext.record_call().
+        """
         has_state = self.state_id is not None
         has_operation = self.operation_id is not None
         if has_state == has_operation:  # Both True or both False
@@ -388,9 +393,22 @@ class ExternalCallCompleted(TelemetryEvent):
                 f"ExternalCallCompleted requires exactly one of state_id or operation_id. "
                 f"Got state_id={self.state_id!r}, operation_id={self.operation_id!r}"
             )
-        # Snapshot mutable payload dicts to prevent post-emission mutation drift
-        # (token_usage is a frozen dataclass — no deep-copy needed)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize event, using DTO-aware serialization for payloads.
+
+        Overrides base to_dict() because the generic _event_field_to_serializable
+        would decompose DTOs by dataclass fields (producing wrong shapes for DTOs
+        that omit None fields or spread extra_kwargs). Calling .to_dict() on each
+        payload produces the correct audit-stable dict representation.
+
+        Note: calls _event_field_to_serializable directly instead of super().to_dict()
+        because super() fails with slots=True dataclass inheritance (CPython bug —
+        __class__ cell not set correctly for dynamically created slot classes).
+        """
+        d: dict[str, Any] = _event_field_to_serializable(self)
         if self.request_payload is not None:
-            object.__setattr__(self, "request_payload", copy.deepcopy(self.request_payload))
+            d["request_payload"] = self.request_payload.to_dict()
         if self.response_payload is not None:
-            object.__setattr__(self, "response_payload", copy.deepcopy(self.response_payload))
+            d["response_payload"] = self.response_payload.to_dict()
+        return d

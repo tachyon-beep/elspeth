@@ -56,22 +56,22 @@ allow_hits:
   reason: Tier 1 invariant enforcement — isinstance validates timestamp is numeric before math.isinf/isnan guard
   safety: Raises immediately on wrong type — explicit crash, not masking
   expires: null
-- key: contracts/events.py:R5:_event_field_to_serializable:fp=8a758f11d130d513
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=50661bf972278f23
   owner: architecture
   reason: Serialization dispatch — isinstance for dataclass detection before recursive field serialization
   safety: Type dispatch for serialization, not masking bugs
   expires: null
-- key: contracts/events.py:R5:_event_field_to_serializable:fp=3e6525b649258024
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=0aebf544b5c50354
   owner: architecture
   reason: Serialization dispatch — isinstance for MappingProxyType to convert frozen mappings to serializable dicts
   safety: Type dispatch for serialization, not masking bugs
   expires: null
-- key: contracts/events.py:R5:_event_field_to_serializable:fp=44b66874b216dbc4
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=8a52e7950cca8412
   owner: architecture
   reason: Serialization dispatch — isinstance for dict to recursively serialize nested mappings
   safety: Type dispatch for serialization, not masking bugs
   expires: null
-- key: contracts/events.py:R5:_event_field_to_serializable:fp=521175c01ed06e5a
+- key: contracts/events.py:R5:_event_field_to_serializable:fp=0769227222310cc7
   owner: architecture
   reason: Serialization dispatch — isinstance for list/tuple to recursively serialize sequences
   safety: Type dispatch for serialization, not masking bugs
@@ -164,10 +164,10 @@ allow_hits:
 - key: contracts/plugin_context.py:R5:PluginContext:get:fp=1ba9331f7213c9c0
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=2afe805d5419df1f
+- key: contracts/plugin_context.py:R1:PluginContext:record_call:fp=80f01dac69c67313
   owner: architecture
   reason: Tier 3 boundary — .get() on serialized LLM response dict to extract optional usage data
-- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=4cc949fb9df1fba5
+- key: contracts/plugin_context.py:R5:PluginContext:record_call:fp=f9288bd1a6081f29
   owner: architecture
   reason: Tier 3 boundary — isinstance() validates usage is dict before TokenUsage.from_dict() coercion
 - key: contracts/plugin_context.py:R4:PluginContext:record_call:fp=2066dd38dbe9c12e

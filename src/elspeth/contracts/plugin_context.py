@@ -353,6 +353,7 @@ class PluginContext:
         # Emit telemetry AFTER successful Landscape recording
         # Wrapped in try/except to prevent telemetry failures from affecting callers
         try:
+            from elspeth.contracts.call_data import RawCallPayload
             from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.contracts.events import ExternalCallCompleted
             from elspeth.core.canonical import stable_hash
@@ -373,6 +374,11 @@ class PluginContext:
                     tu = TokenUsage.from_dict(raw_usage)
                     token_usage = tu if tu.has_data else None
 
+            # Wrap snapshots in RawCallPayload for typed telemetry payload.
+            # Snapshots are already deepcopied above — RawCallPayload doesn't copy again.
+            request_payload = RawCallPayload(request_snapshot)
+            response_payload = RawCallPayload(response_snapshot) if response_snapshot is not None else None
+
             self.telemetry_emit(
                 ExternalCallCompleted(
                     timestamp=datetime.now(UTC),
@@ -387,8 +393,8 @@ class PluginContext:
                     latency_ms=latency_ms or 0.0,
                     request_hash=stable_hash(request_snapshot),
                     response_hash=stable_hash(response_snapshot) if response_snapshot is not None else None,
-                    request_payload=request_snapshot,  # Full request snapshot for observability
-                    response_payload=response_snapshot,  # Full response snapshot for observability
+                    request_payload=request_payload,
+                    response_payload=response_payload,
                     token_usage=token_usage,
                 )
             )
