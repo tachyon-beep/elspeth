@@ -182,6 +182,8 @@ from elspeth.contracts.header_modes import (
 )
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.node_state_context import (
+    AggregationFlushContext,
+    GateEvaluationContext,
     NodeStateContext,
     PoolConfigSnapshot,
     PoolExecutionContext,
@@ -341,6 +343,8 @@ __all__ = [  # Grouped by category for readability
     "ArrivalOrderEntry",
     "CoalesceMetadata",
     # node state context
+    "AggregationFlushContext",
+    "GateEvaluationContext",
     "NodeStateContext",
     "PoolConfigSnapshot",
     "PoolExecutionContext",

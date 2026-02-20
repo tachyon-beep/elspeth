@@ -2,9 +2,12 @@
 
 Verifies:
 - Dataclass construction and immutability
-- to_dict() correctness for all types
+- to_dict() correctness for all types (PoolConfigSnapshot,
+  PoolStatsSnapshot, QueryOrderEntry, PoolExecutionContext,
+  GateEvaluationContext, AggregationFlushContext)
 - from_executor_stats() factory (happy + malformed)
-- Protocol conformance (CoalesceMetadata + PoolExecutionContext)
+- Protocol conformance (CoalesceMetadata, PoolExecutionContext,
+  GateEvaluationContext, AggregationFlushContext)
 - canonical_json integration
 """
 
@@ -17,6 +20,8 @@ import pytest
 
 from elspeth.contracts.coalesce_metadata import ArrivalOrderEntry, CoalesceMetadata
 from elspeth.contracts.node_state_context import (
+    AggregationFlushContext,
+    GateEvaluationContext,
     PoolConfigSnapshot,
     PoolExecutionContext,
     PoolStatsSnapshot,
@@ -139,6 +144,62 @@ class TestPoolExecutionContext:
         assert json1 == json2
 
 
+class TestGateEvaluationContext:
+    def test_to_dict(self) -> None:
+        ctx = GateEvaluationContext(condition="amount > 1000", result="True", route_label="high_value")
+        d = ctx.to_dict()
+        assert d == {
+            "condition": "amount > 1000",
+            "result": "True",
+            "route_label": "high_value",
+        }
+
+    def test_frozen(self) -> None:
+        ctx = GateEvaluationContext(condition="x > 0", result="True", route_label="positive")
+        with pytest.raises(FrozenInstanceError):
+            ctx.condition = "x < 0"  # type: ignore[misc]
+
+    def test_canonical_json_produces_valid_json(self) -> None:
+        ctx = GateEvaluationContext(condition="status == 'active'", result="True", route_label="active")
+        json_str = canonical_json(ctx.to_dict())
+        parsed = json.loads(json_str)
+        assert parsed == ctx.to_dict()
+
+    def test_canonical_json_deterministic(self) -> None:
+        ctx = GateEvaluationContext(condition="score >= 0.5", result="False", route_label="low_score")
+        json1 = canonical_json(ctx.to_dict())
+        json2 = canonical_json(ctx.to_dict())
+        assert json1 == json2
+
+
+class TestAggregationFlushContext:
+    def test_to_dict(self) -> None:
+        ctx = AggregationFlushContext(trigger_type="COUNT", buffer_size=100, batch_id="batch-001")
+        d = ctx.to_dict()
+        assert d == {
+            "trigger_type": "COUNT",
+            "buffer_size": 100,
+            "batch_id": "batch-001",
+        }
+
+    def test_frozen(self) -> None:
+        ctx = AggregationFlushContext(trigger_type="TIMEOUT", buffer_size=50, batch_id="batch-002")
+        with pytest.raises(FrozenInstanceError):
+            ctx.buffer_size = 200  # type: ignore[misc]
+
+    def test_canonical_json_produces_valid_json(self) -> None:
+        ctx = AggregationFlushContext(trigger_type="END_OF_SOURCE", buffer_size=37, batch_id="batch-final")
+        json_str = canonical_json(ctx.to_dict())
+        parsed = json.loads(json_str)
+        assert parsed == ctx.to_dict()
+
+    def test_canonical_json_deterministic(self) -> None:
+        ctx = AggregationFlushContext(trigger_type="COUNT", buffer_size=10, batch_id="batch-xyz")
+        json1 = canonical_json(ctx.to_dict())
+        json2 = canonical_json(ctx.to_dict())
+        assert json1 == json2
+
+
 class TestFromExecutorStats:
     """Tests for PoolExecutionContext.from_executor_stats() factory."""
 
@@ -228,6 +289,20 @@ class TestProtocolConformance:
         d = ctx.to_dict()
         assert isinstance(d, dict)
         assert "pool_config" in d
+
+    def test_gate_evaluation_context_has_to_dict(self) -> None:
+        """GateEvaluationContext satisfies NodeStateContext protocol."""
+        ctx = GateEvaluationContext(condition="x > 0", result="True", route_label="positive")
+        d = ctx.to_dict()
+        assert isinstance(d, dict)
+        assert "condition" in d
+
+    def test_aggregation_flush_context_has_to_dict(self) -> None:
+        """AggregationFlushContext satisfies NodeStateContext protocol."""
+        ctx = AggregationFlushContext(trigger_type="COUNT", buffer_size=10, batch_id="b1")
+        d = ctx.to_dict()
+        assert isinstance(d, dict)
+        assert "trigger_type" in d
 
     def test_coalesce_metadata_canonical_json(self) -> None:
         meta = CoalesceMetadata.for_merge(

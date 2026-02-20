@@ -146,3 +146,57 @@ class PoolExecutionContext:
             pool_stats=pool_stats,
             query_ordering=ordering,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class GateEvaluationContext:
+    """Typed gate evaluation metadata for the audit trail.
+
+    Replaces the untyped ``dict[str, Any]`` constructed in gate
+    executor code.  Follows the same pattern as ``PoolExecutionContext``
+    (this module) and ``CoalesceMetadata`` (commit 4f7e43be).
+
+    Fields
+    ------
+    condition : str
+        The gate's expression string (e.g. ``"amount > 1000"``).
+    result : str
+        The raw stringified evaluation result (e.g. ``"True"``).
+    route_label : str
+        The normalized routing key derived from the result
+        (e.g. ``"true"``).  For boolean expressions the result and
+        route_label differ only in casing; for multi-valued expressions
+        the route_label is the resolved destination key.
+    """
+
+    condition: str
+    result: str
+    route_label: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "condition": self.condition,
+            "result": self.result,
+            "route_label": self.route_label,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AggregationFlushContext:
+    """Typed aggregation flush metadata for the audit trail.
+
+    Replaces the untyped ``dict[str, Any]`` constructed in aggregation
+    executor code.  Follows the same pattern as ``PoolExecutionContext``
+    (this module) and ``CoalesceMetadata`` (commit 4f7e43be).
+    """
+
+    trigger_type: str
+    buffer_size: int
+    batch_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trigger_type": self.trigger_type,
+            "buffer_size": self.buffer_size,
+            "batch_id": self.batch_id,
+        }
